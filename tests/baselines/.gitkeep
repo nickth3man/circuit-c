@@ -1,0 +1,5 @@
+Committed CSV baselines live here.
+
+Nothing is committed yet: Phase 0 contains no physics, so the telemetry it produces has no
+regression value and is deliberately not checked in as a baseline. Baselines start with the
+physics scenarios in Phase 1 and are re-recorded whenever handling is intentionally changed.
