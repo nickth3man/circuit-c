@@ -1,5 +1,5 @@
 /*
- * config.h — Phase 0 tunables and numerical infrastructure constants.
+ * config.h — simulation, numerical infrastructure, and presentation constants.
  *
  * Rules enforced by this file (docs/SPEC.md, "Units, Coordinate System, and Conventions"):
  *
@@ -9,9 +9,9 @@
  *     rendering code. No simulation quantity may be derived from it. This is a regression
  *     test (tests/physics_tests.c, scenario "renderscale").
  *
- * Phase 0 deliberately does NOT define the vehicle, tire, drivetrain, brake, scoring, or
- * particle tunables listed in docs/SPEC.md "Baseline Vehicle Parameters". Those arrive with
- * the code that consumes them, starting in Phase 1.
+ * Phase 1 adds only the rigid-body vehicle and temporary linear-tire/longitudinal constants.
+ * Nonlinear tires, drivetrain, wheel rotation, physical brakes, and load transfer remain
+ * intentionally absent until their owning phases.
  */
 #ifndef DRIFTY_CONFIG_H
 #define DRIFTY_CONFIG_H
@@ -46,16 +46,65 @@
 #define REPLAY_CAPACITY_TICKS   7200
 
 /* -------------------------------------------------------------------------------------
- * Phase 0 placeholder marker transform
- *
- * These drive the deterministic non-vehicle test transform that game.c integrates until
- * physics.c takes ownership of the fixed update order in Phase 1. They are NOT a vehicle
- * model and carry no physical meaning beyond their stated units.
+ * Phase 1 rigid-body vehicle (SI units)
  * ------------------------------------------------------------------------------------- */
 
-#define MARKER_TURN_RATE_RAD_S  2.0f    /* radians/second of marker heading per unit steer */
-#define MARKER_SPEED_MPS        6.0f    /* meters/second of marker travel at full throttle */
-#define MARKER_HANDBRAKE_SCALE  0.25f   /* dimensionless speed scale at full handbrake */
+#define GRAVITY_MPS2            9.80665f
+
+#define VEH_MASS_KG             1200.0f
+#define VEH_YAW_INERTIA_KGM2    1800.0f
+#define VEH_CG_TO_FRONT_M       1.15f
+#define VEH_CG_TO_REAR_M        1.40f
+#define VEH_CG_HEIGHT_M         0.50f
+#define VEH_TRACK_FRONT_M       1.48f
+#define VEH_TRACK_REAR_M        1.46f
+
+#define WHEEL_RADIUS_M          0.31f
+#define WHEEL_INERTIA_KGM2      1.20f
+
+#define STEER_MAX_RAD           0.70f
+#define STEER_RATE_RAD_S        5.0f
+#define STEER_RETURN_RATE_RAD_S 7.0f
+
+#define DRAG_COEFFICIENT        0.32f
+#define FRONTAL_AREA_M2         1.90f
+#define ROLLING_RESISTANCE_COEF 0.015f
+
+/* Canonical later-phase fields are initialized with the specification's neutral baseline,
+ * but Phase 1 does not evaluate either nonlinear tire curve. */
+#define TIRE_B_LAT_FRONT        10.0f
+#define TIRE_C_LAT_FRONT        1.45f
+#define TIRE_MU_LAT_FRONT       1.30f
+#define TIRE_B_LAT_REAR         10.0f
+#define TIRE_C_LAT_REAR         1.45f
+#define TIRE_MU_LAT_REAR        1.20f
+#define TIRE_B_LONG             12.0f
+#define TIRE_C_LONG             1.55f
+#define TIRE_MU_LONG_SCALE      1.00f
+
+#define MAX_GEARS               8
+#define ENGINE_CURVE_POINTS     7
+
+/* Temporary Phase 1 linear lateral model. Removed when Phase 2 supplies nonlinear tires. */
+#define TIRE_CORNERING_STIFFNESS_FRONT_N_PER_RAD 80000.0f
+#define TIRE_CORNERING_STIFFNESS_REAR_N_PER_RAD  85000.0f
+#define TIRE_MU_LINEAR_FRONT    1.30f
+#define TIRE_MU_LINEAR_REAR     1.20f
+
+/* Temporary body-level longitudinal command. This is explicitly not a drivetrain or a
+ * longitudinal tire model. selectedGear chooses forward (+1) or reverse (-1) direction. */
+#define PHASE1_MAX_DRIVE_FORCE_N         4500.0f
+#define PHASE1_MAX_REVERSE_FORCE_N       3000.0f
+#define PHASE1_MAX_BRAKE_FORCE_N         8000.0f
+#define PHASE1_LINEAR_DRAG_N_PER_MPS      120.0f
+#define PHASE1_KINEMATIC_RESPONSE_RATE_HZ  10.0f
+
+#define LOW_SPEED_EPSILON_MPS   0.50f
+#define LOW_SPEED_BEGIN_MPS     1.50f
+#define LOW_SPEED_END_MPS       3.00f
+#define MIN_NORMAL_LOAD_N       50.0f
+#define MAX_SAFE_SPEED_MPS      120.0f
+#define MAX_SAFE_YAW_RATE_RADS  20.0f
 
 /* -------------------------------------------------------------------------------------
  * Window and presentation (no effect on the simulation layer)

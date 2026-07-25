@@ -14,8 +14,12 @@
 #endif
 
 #define TELEMETRY_HEADER \
-    "tick,time_s,held_steer,held_throttle,pause_pressed,reset_pressed," \
-    "substep_count,backlog_drops,state_checksum"
+    "tick,time_s,position_x_m,position_y_m,heading_rad," \
+    "velocity_longitudinal_mps,velocity_lateral_mps,speed_mps,yaw_rate_rad_s," \
+    "steering_angle_rad,front_slip_angle_rad,rear_slip_angle_rad," \
+    "front_normal_load_n,rear_normal_load_n,front_lateral_force_n," \
+    "rear_lateral_force_n,total_force_x_n,total_force_y_n,yaw_torque_nm," \
+    "body_sideslip_rad,low_speed_blend,substep_count,backlog_drops,state_checksum"
 
 const char *telemetry_header(void)
 {
@@ -70,17 +74,24 @@ bool telemetry_write_row(TelemetryWriter *writer, const TelemetryRow *row)
 {
     if (writer == NULL || writer->file == NULL || writer->failed || row == NULL) return false;
 
-    const int written = fprintf(writer->file,
-                                "%" PRIu64 ",%.6f,%.6f,%.6f,%d,%d,%d,%d,%" PRIu32 "\n",
-                                row->tick,
-                                row->timeS,
-                                (double)row->heldSteer,
-                                (double)row->heldThrottle,
-                                row->pausePressed ? 1 : 0,
-                                row->resetPressed ? 1 : 0,
-                                row->substepCount,
-                                row->backlogDrops,
-                                row->stateChecksum);
+    const int written = fprintf(
+        writer->file,
+        "%" PRIu64 ",%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,"
+        "%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,"
+        "%.6f,%.6f,%d,%d,%" PRIu32 "\n",
+        row->tick, row->timeS,
+        (double)row->positionXM, (double)row->positionYM,
+        (double)row->headingRad,
+        (double)row->velocityLongitudinalMps,
+        (double)row->velocityLateralMps, (double)row->speedMps,
+        (double)row->yawRateRadS, (double)row->steeringAngleRad,
+        (double)row->frontSlipAngleRad, (double)row->rearSlipAngleRad,
+        (double)row->frontNormalLoadN, (double)row->rearNormalLoadN,
+        (double)row->frontLateralForceN, (double)row->rearLateralForceN,
+        (double)row->totalForceXN, (double)row->totalForceYN,
+        (double)row->yawTorqueNm, (double)row->bodySideslipRad,
+        (double)row->lowSpeedBlend, row->substepCount, row->backlogDrops,
+        row->stateChecksum);
     if (written < 0) {
         fprintf(stderr, "TELEMETRY: write failed after %ld rows\n", writer->rowCount);
         writer->failed = true;

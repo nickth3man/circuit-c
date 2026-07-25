@@ -1,5 +1,5 @@
 /*
- * game.h — the persistent Game block and the Phase 0 state it holds.
+ * game.h — the platform-owned persistent Game block.
  *
  * OWNERSHIP. A single Game structure, allocated once by the platform layer (main.c) with
  * calloc and passed to the game module by pointer on every entry point. It is deliberately
@@ -11,11 +11,8 @@
  * in hotreload.h. Everything below is plain value data, which is what lets the block
  * survive a module swap unchanged.
  *
- * PHASE 0 SCOPE. This is the minimum state the Phase 0 systems need. VehicleSpec,
- * VehicleState, VehicleDerived, VehicleRenderState, Track, ParticlePool, Camera2D, and the
- * scoring fields are defined in docs/SPEC.md "Canonical Data Structures" and are added by
- * the phases that own them. Adding them changes this struct's layout, which requires
- * restarting drifty.exe — expected, and documented in README.md.
+ * Phase 1 adds the canonical vehicle structures by value. This layout change requires one
+ * platform restart; subsequent game-module-only edits preserve the block normally.
  */
 #ifndef DRIFTY_GAME_H
 #define DRIFTY_GAME_H
@@ -29,6 +26,7 @@
 #include "hotreload.h"
 #include "input.h"
 #include "replay.h"
+#include "vehicle.h"
 
 typedef enum {
     STATE_MENU = 0,
@@ -38,22 +36,8 @@ typedef enum {
     STATE_COUNT
 } GameStateId;
 
-/*
- * Phase 0 deterministic placeholder transform.
- *
- * This is NOT a vehicle model and contains no physics: heading integrates the steer axis at
- * a constant rate and position integrates a constant speed along that heading. Its only
- * jobs are to give the fixed-timestep loop something observable to advance, to give the
- * renderer something to interpolate, and to give the replay harness something to checksum.
- * physics.c replaces it wholesale in Phase 1 and owns the fixed update order from then on.
- */
 typedef struct {
-    uint64_t tick;                  /* fixed updates executed since init */
-    Vector2  markerPositionM;       /* world meters */
-    float    markerHeadingRad;      /* radians, counterclockwise positive, wrapped */
-
-    /* One-shot command counters. Each increments by exactly one per press, no matter how
-     * many substeps run in the frame that observed it. Surfaced in the debug HUD. */
+    uint64_t tick;
     uint32_t resetCount;
     uint32_t pauseToggleCount;
     uint32_t debugToggleCount;
@@ -61,19 +45,15 @@ typedef struct {
     uint32_t shiftDownCount;
 } SimState;
 
-/* prev* is copied from curr* at the start of every fixed update, before integration. */
-typedef struct {
-    Vector2 prevPositionM;
-    float   prevHeadingRad;
-    Vector2 currPositionM;
-    float   currHeadingRad;
-} SimRenderState;
-
 struct Game {
     GameStateId    state;
     Input          input;
     SimState       sim;
-    SimRenderState renderState;
+    VehicleSpec        spec;
+    VehicleState       vehicle;
+    VehicleDerived     derived;
+    VehicleRenderState renderState;
+    Camera2D            camera;
 
     /* Fixed-timestep bookkeeping, written by the platform loop via timestep_advance(). */
     float accumulatorS;
@@ -111,8 +91,7 @@ struct Game {
  * field, so the checksum depends on the input timeline and nothing else. */
 GAME_API uint32_t game_state_checksum(const Game *game);
 
-/* Return the placeholder transform to the origin and resynchronise the render history so
- * the reset does not smear across one interpolated frame. Counters are preserved. */
+/* Reset the vehicle and resynchronise render history. Counters and tick are preserved. */
 GAME_API void game_reset_sim(Game *game);
 
 #endif /* DRIFTY_GAME_H */

@@ -5,14 +5,16 @@ physically coherent vehicle simulation underneath an arcade presentation layer: 
 initiates, holds, transitions, and recovers a drift because of tire, drivetrain, and
 load-transfer behaviour, not because a state machine reaches in and changes forces.
 
+**Windows only.** The supported development environment is **MSYS2 UCRT64**.
+
 - Full specification: [docs/SPEC.md](docs/SPEC.md)
 - Reference index: [docs/SOURCES.md](docs/SOURCES.md)
 - Agent-facing workflow rules: [AGENTS.md](AGENTS.md)
 
-## Current phase: Phase 0 — Foundations and Test Harness
+## Current phase: Phase 1 — Rigid-Body Vehicle
 
-**No vehicle physics is implemented yet.** Phase 0 builds the foundation the later phases
-sit on, and nothing else. What exists today:
+Phase 0 and Phase 1 are complete. The running game now uses a deterministic planar
+rigid-body vehicle in SI units:
 
 | System | State |
 |--------|-------|
@@ -22,107 +24,143 @@ sit on, and nothing else. What exists today:
 | Held controls vs one-shot commands, consumed exactly once | `src/input.h/.c` |
 | Deterministic fixed-tick input recording and playback | `src/replay.h/.c` |
 | CSV telemetry writer | `src/telemetry.h/.c` |
-| Platform-owned `Game` block, hot-reloadable game module | `src/main.c`, `src/hotreload*.{h,c}`, `src/game.h/.c` |
+| Platform-owned `Game` block, hot-reloadable game module | `src/main.c`, `src/hotreload_windows.c`, `src/game.h/.c` |
 | Headless test executable | `tests/physics_tests.c` |
+| Windowless hot-reload harness | `tests/hotreload_harness.c` |
+| Bounded visual smoke test | `drifty.exe --smoke-test` |
+| Canonical vehicle specification/state/diagnostics | `src/vehicle.h/.c` |
+| Steering, contact kinematics, tire forces, body integration | `src/physics.h/.c` |
+| Interpolated body, four wheels, HUD, debug vectors | `src/render.h/.c` |
 
-What the running window shows is a **deterministic placeholder marker**, not a car: its
-heading integrates the steer axis at a constant rate and its position integrates a constant
-speed. It exists so the loop, the interpolation, the debug HUD, and the replay checksum have
-something to act on. `src/physics.c` replaces it in Phase 1 and owns the fixed update order
-from that point onward.
+Phase 1 uses distinct front/rear slip angles, static axle loads, and
+`Fy = -C_alpha * alpha` saturated at `mu * Fz`. Front force rotates through the road-wheel
+angle, and yaw comes only from tire-force torque. A kinematic derivative model blends into
+the dynamic model from 1.5 to 3.0 m/s before semi-implicit Euler integration.
 
-Phase 1 begins with `vehicle.h/.c` and `physics.h/.c`: the canonical `VehicleSpec`,
-`VehicleState`, `VehicleDerived`, `VehicleRenderState`, and `WheelState[WHEEL_COUNT]`
-structures from docs/SPEC.md, per-axle slip angles, and semi-implicit Euler integration.
+The temporary longitudinal command applies a body-level force in newtons. Q selects reverse,
+E selects forward, throttle applies force in that direction, and brake opposes current
+travel without pushing through zero. It is isolated in `physics.c` and is not an engine,
+drivetrain, longitudinal tire, or physical brake model.
 
-## Prerequisites
+The test runner covers 16 scenarios and 217 checks. The reviewed launch/stop telemetry
+baseline is `tests/baselines/phase1_launch_stop.csv`; generated CSV and the bounded
+smoke-test screenshot are written under `telemetry/`.
 
-- A C11 compiler. MinGW-w64 GCC is the primary target on Windows; Clang and GCC work
-  elsewhere.
-- **raylib 6.0, linked as a shared library.** See [raylib linkage](#raylib-linkage) below —
-  this is a hard requirement for the hot-reload configuration, not a preference.
-- GNU Make, if you use the `Makefile` rather than `build.sh`. `build.sh` and `build.bat`
-  need no make at all.
+Phase 2 is next: nonlinear lateral tires, rear-wheel drivetrain torque, wheel angular
+velocity and longitudinal slip, physical braking/handbrake torque, and combined grip.
 
-### MSYS2 (the documented Windows setup)
+## Prerequisites (Windows / MSYS2 UCRT64)
 
-```bash
-pacman -S mingw-w64-ucrt-x86_64-toolchain mingw-w64-ucrt-x86_64-raylib mingw-w64-ucrt-x86_64-pkg-config make
+1. Install MSYS2 (default root `C:\msys64`):
+
+```bat
+winget install -e --id MSYS2.MSYS2 --accept-package-agreements --accept-source-agreements
 ```
 
-With that in place, `pkg-config raylib` resolves and both the Makefile and `build.sh` use it
-automatically. Nothing further is needed.
+2. Install the project toolchain and raylib 6.0 from the MSYS2 package manager:
 
-### Windows without MSYS2 (the documented fallback)
-
-When `pkg-config` cannot find raylib, the build falls back to `$RAYLIB_DIR`, default
-`vendor/raylib`, laid out as:
-
-```
-vendor/raylib/
-├── include/   raylib.h, raymath.h, rlgl.h, rcamera.h, rgestures.h
-├── lib/       libraylib.dll.a   (the DLL import library, NOT the static libraylib.a)
-└── bin/       raylib.dll
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\setup_windows.ps1
 ```
 
-To produce it from the raylib 6.0 sources with a MinGW-w64 toolchain:
+That script is idempotent. It installs (when missing):
 
-```bash
-make -C /path/to/raylib/src PLATFORM=PLATFORM_DESKTOP RAYLIB_LIBTYPE=SHARED RAYLIB_RELEASE_PATH=.
-```
+- `mingw-w64-ucrt-x86_64-gcc`
+- `mingw-w64-ucrt-x86_64-raylib`
+- `mingw-w64-ucrt-x86_64-pkgconf`
+- `mingw-w64-ucrt-x86_64-binutils`
+- `make`
 
-That emits `raylib.dll` and `libraylibdll.a`. Copy the headers into
-`vendor/raylib/include/`, `raylib.dll` into `vendor/raylib/bin/`, and `libraylibdll.a` into
-`vendor/raylib/lib/` **renamed to `libraylib.dll.a`** — MinGW's linker searches
-`libraylib.dll.a` before `libraylib.a`, so that name is what makes `-lraylib` resolve to the
-import library rather than a static archive.
-
-Point the build somewhere else with `RAYLIB_DIR=/some/path ./build.sh` if you prefer.
-
-`vendor/` is gitignored: it is a local build artifact, not source.
-
-The build scripts also probe common MinGW-w64 install locations if `gcc` is not on `PATH`
-(chocolatey's `mingw`, `C:\msys64\ucrt64`, `C:\msys64\mingw64`, `C:\mingw64`), so a
-toolchain that was installed without a `PATH` entry still works.
+There is **no** Chocolatey GCC path, **no** vendored `vendor/raylib` build, and **no**
+manual raylib source compile. raylib comes only from the MSYS2 package.
 
 ## Building
 
-`build.sh` (POSIX shell, including Git Bash) and `build.bat` (cmd.exe) are equivalent. The
-`Makefile` exposes the same configurations as named targets.
+`build.bat` is the Windows entry point: it enters MSYS2 UCRT64 and runs `build.sh`.
+`build.sh` is the canonical implementation and refuses to run outside UCRT64.
+The `Makefile` exposes the same configurations and the same flags.
+
+```bat
+build.bat                 rem hot-reload development build
+build.bat --release       rem single executable, static raylib, no game.dll
+build.bat --tests         rem headless test executable
+build.bat --hotreload-harness
+build.bat --smoke-test    rem build, then bounded visual smoke test (exits alone)
+build.bat --clean
+```
+
+Equivalent inside an MSYS2 UCRT64 shell:
 
 ```bash
-./build.sh              # hot-reload development build
-./build.sh --release    # single executable, no hot reload
-./build.sh --tests      # headless test executable
+./build.sh
+./build.sh --release
+./build.sh --tests
+./build.sh --hotreload-harness
+./build.sh --smoke-test
 ./build.sh --clean
 ```
 
 ```bash
-make debug              # build/game.dll + drifty.exe
-make release            # drifty_release.exe, DRIFTY_HOT_RELOAD undefined, no game module
-make tests              # drifty_tests.exe
-make run-tests          # build and run them
+make debug
+make release
+make tests
+make hotreload-harness
+make run-tests
+make smoke-test
 make clean
-make info               # print the resolved compiler and raylib linkage
+make info
 ```
 
-Every one of these terminates immediately. Nothing in this repository starts a watcher, a
-daemon, or a long-lived process.
+Every normal build command terminates immediately. Nothing starts a watcher or leaves a
+persistent game process running. `--smoke-test` launches the real window, runs a fixed
+frame budget, writes a screenshot, and exits.
 
 ### Running
 
-```bash
-./drifty.exe            # development build; start it once and leave it running
-./drifty_release.exe    # release build
-./drifty_tests          # headless tests; run from the repository root
+```bat
+drifty.exe                 rem development build; start once and leave it running
+drifty.exe --smoke-test    rem bounded visual verification; exits on its own
+drifty_release.exe         rem release build
+drifty_tests.exe           rem headless tests; run from the repository root
+drifty_hotreload_harness.exe
 ```
 
-`drifty_tests` writes CSV telemetry to `telemetry/` relative to the working directory, so
-run it from the repository root. It accepts `--list`, `--scenario NAME`, and `-v`.
+`drifty_tests.exe` writes CSV telemetry to `telemetry/` relative to the working directory,
+so run it from the repository root. It accepts `--list`, `--scenario NAME`, and `-v`.
 
-The release build produces a single executable with no `game.dll`. It still links raylib,
-which with the vendored fallback means `raylib.dll` must sit next to the executable; the
-build scripts copy it there for you.
+## Linkage
+
+### Development (hot reload)
+
+`drifty.exe` and `build/game.dll` both link the MSYS2 **shared** raylib import library and
+therefore both import `libraylib.dll` (MSYS2's DLL name). The build copies:
+
+- `libraylib.dll`
+- `glfw3.dll` (required by `libraylib.dll`)
+
+next to the executables so launching from Explorer or a normal terminal does not depend on
+a hand-edited `PATH`. Those DLLs are generated and gitignored.
+
+Never compile raylib sources into `game.dll`.
+
+### Release
+
+`drifty_release.exe` compiles platform + game into one executable with `DRIFTY_HOT_RELOAD`
+undefined. It links `libraylib.a` statically and does **not** import `libraylib.dll` or
+`game.dll`. With the current MSYS2 raylib package, the static archive still references
+shared GLFW, so `glfw3.dll` is copied next to the release executable. That is a package
+limitation, not a project DLL.
+
+### Verify imports
+
+```bash
+objdump -p drifty.exe | grep -i "DLL Name"
+objdump -p build/game.dll | grep -i "DLL Name"
+objdump -p drifty_tests.exe | grep -i "DLL Name"
+objdump -p drifty_release.exe | grep -i "DLL Name"
+```
+
+Expected: development artifacts import `libraylib.dll`; tests and release do not.
 
 ## Hot-reload workflow
 
@@ -130,102 +168,82 @@ The game is a thin platform layer (`drifty.exe`) plus a hot-reloadable game modu
 (`build/game.dll`). The platform layer owns the window, the raylib context, the `Game`
 allocation, and the fixed-timestep loop. Everything else lives in the module.
 
-1. Run `./drifty.exe` once and leave it open.
+1. Run `drifty.exe` once and leave it open.
 2. Edit game code.
-3. Run `./build.sh`. It rebuilds the module always, rebuilds the executable only when it is
-   not already running, and returns in well under a second.
+3. Run `build.bat` (or `./build.sh` in UCRT64). It rebuilds the module always, rebuilds the
+   executable only when it is not already running, and returns in well under a second.
 4. The running game notices the new module and swaps it in, keeping its position, counters,
    and checksum.
 
-The loader never unloads a working module until a replacement has been proven good: it
-copies the new module to a uniquely named load target, loads it, resolves every entry point
-into a temporary table, and only then calls the old module's `game_pre_reload`, publishes
-the new table, and calls `game_post_reload`. **A compile error cannot close the running
-game** — the build script links to a temporary filename and only renames it into place on
-success, so a failed build leaves the previous module untouched, and a module that fails to
-load or is missing a symbol is rejected with the previous one still active.
+The loader never unloads a working module until a replacement has been proven good. A
+compile error cannot close the running game.
+
+Automated validation without leaving `drifty.exe` running:
+
+```bat
+build.bat --hotreload-harness
+drifty_hotreload_harness.exe
+```
+
+Or the fuller script (harness + failed-compile preservation):
+
+```bash
+# inside MSYS2 UCRT64, from the repo root
+./scripts/validate_hotreload.sh
+```
 
 ### When a restart is required
 
 Hot reload cannot handle these. Restart `drifty.exe` after:
 
-- A change to the layout of `Game` or anything it contains. The existing memory block
-  becomes invalid and the reloaded module reads garbage.
-- A change to `src/main.c`, `src/timestep.c`, or the `hotreload_*` files — the platform
-  layer is not reloadable.
+- A change to the layout of `Game` or anything it contains.
+- A change to `src/main.c`, `src/timestep.c`, or `src/hotreload_windows.c`.
 - A change to `GAME_ENTRY_POINTS`.
-
-The deterministic input recording exists partly to make restarts cheap: the ring buffer in
-`Game` holds the last 60 seconds of input at 120 Hz and can be replayed to return to the
-moment of interest.
 
 ### Reload-safety rules for game code
 
-These are correctness requirements, not style. Violating them produces crashes that only
-appear after a reload.
-
 - No pointer stored in `Game`, or reachable from it, may point into the module's code or
-  static data. Module-static tables are referenced by id and resolved through an accessor at
-  point of use, never cached as a pointer.
-- No function pointers in persistent state. Rebuild any needed table in `game_post_reload`.
+  static data.
+- No function pointers in persistent state.
 - The `Game` block is allocated and owned by the platform layer. Never declare
   `static Game game;` inside the module.
-- Anything raylib tracks — textures, sounds, audio stream callbacks — is released in
-  `game_pre_reload` and re-acquired in `game_post_reload`.
-
-## raylib linkage
-
-raylib keeps its state in **global variables**. If `game.dll` links raylib statically, the
-module owns that state and reloading the module destroys it; the next raylib call crashes.
-The hot-reload configuration therefore requires a shared raylib, and the MSYS2 package ships
-both a static `libraylib.a` and a DLL import library, so which one `-lraylib` resolved to is
-worth checking rather than assuming:
-
-```bash
-objdump -p build/game.dll | grep -i "DLL Name"
-```
-
-`raylib.dll` must appear in that list. If it does not, `-lraylib` found the static archive
-and hot reload will crash on the first raylib call after a swap. The same check on
-`drifty_tests` must show **no** raylib entry at all: the headless harness reaches raylib.h
-for the `Vector2` type and links none of the library.
-
-Release builds are unaffected by this and may link raylib statically.
+- Anything raylib tracks is released in `game_pre_reload` and re-acquired in
+  `game_post_reload`.
 
 ## Known limitations
 
-- **The POSIX loader (`src/hotreload_posix.c`) is compile-ready but unverified.** Development
-  happens on Windows. It mirrors the Windows loader exactly, but the first Linux or macOS run
-  should be treated as a bring-up task rather than a regression.
-- **Changing the `Game` struct layout requires a restart.** This is inherent to the
-  technique, not a defect.
-- **`drifty_tests` validates infrastructure only.** No tire, vehicle, drivetrain, or
-  load-transfer behaviour is asserted, because none exists yet. The twelve physics scenarios
-  in docs/SPEC.md arrive with the code they exercise, from Phase 1 onward.
-- **`tests/baselines/` is intentionally empty.** Phase 0 telemetry has no regression value,
-  so it is not committed as a baseline.
-- The `Makefile` is exercised with GNU Make 3.76 and 4.4.1. Very old releases print harmless
-  `$(shell)` noise on stderr.
+- **Changing the `Game` struct layout requires a restart.** Inherent to the technique.
+- **Restart `drifty.exe` once for the Phase 1 layout.** `Game` now embeds the canonical
+  vehicle structures; normal code-only hot reload works after that restart.
+- **Phase 1 longitudinal force is intentionally temporary.** It provides launch, stopping,
+  and explicit reverse without pretending the Phase 2 drivetrain exists.
+- **Release still needs `glfw3.dll`.** The MSYS2 `libraylib.a` was built against shared
+  GLFW (`__imp_glfw*`), so a fully static single-file release without any third-party DLL
+  is blocked by that package layout. `libraylib.dll` and `game.dll` are not required.
 
 ## Layout
 
 ```
 Makefile, build.sh, build.bat   build entry points; all terminate immediately
+scripts/setup_windows.ps1       idempotent MSYS2 UCRT64 bootstrap
+scripts/validate_hotreload.sh   harness + failed-compile preservation
 docs/SPEC.md, docs/SOURCES.md   specification and reference index
 src/main.c                      platform layer: window, Game allocation, fixed-timestep loop
 src/timestep.h/.c               the accumulator, isolated so the harness can assert it
 src/hotreload.h                 GAME_ENTRY_POINTS, the one authoritative entry-point list
-src/hotreload_windows.c         LoadLibrary / GetProcAddress loader (primary target)
-src/hotreload_posix.c           dlopen / dlsym loader (unverified)
+src/hotreload_windows.c         LoadLibrary / GetProcAddress loader
 src/game.h/.c                   the Game block and the reloadable entry points
-src/config.h                    Phase 0 constants, every one unit-bearing
+src/config.h                    Phase 0/1 constants, every physical value unit-bearing
 src/units.h                     world<->render conversion and the coordinate convention
 src/math_utils.h/.c             scalar helpers raymath.h does not provide
 src/input.h/.c                  held controls and one-shot commands
 src/replay.h/.c                 deterministic fixed-tick input timeline
 src/telemetry.h/.c              CSV row writer, no raylib dependency
+src/vehicle.h/.c                canonical vehicle data and initialization
+src/physics.h/.c                pure Phase 1 physics and fixed-update owner
+src/render.h/.c                 interpolation, vehicle rendering, HUD, debug vectors
 tests/physics_tests.c           headless scenario runner
-tests/baselines/                committed CSV baselines (empty until Phase 1)
-telemetry/                      generated CSV output (gitignored)
-vendor/                         locally built raylib (gitignored)
+tests/hotreload_harness.c       windowless hot-reload validation
+tests/baselines/                reviewed deterministic scenario CSV baselines
+telemetry/                      generated CSV / smoke screenshot (gitignored)
 ```

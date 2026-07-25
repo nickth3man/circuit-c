@@ -13,6 +13,8 @@
 /drifty_release.exe
 /drifty_tests
 /drifty_tests.exe
+/drifty_hotreload_harness
+/drifty_hotreload_harness.exe
 *.dll
 *.so
 *.dylib
@@ -24,10 +26,8 @@
 *.idb
 *.map
 
-# Vendored raylib, built locally. See README.md "Prerequisites".
-/vendor/
-
 # Generated telemetry. tests/baselines/ is committed; telemetry/ output is not.
+# Includes generated CSV rows and bounded visual smoke-test screenshots.
 /telemetry/*
 !/telemetry/.gitkeep
 
@@ -41,5 +41,3 @@ Thumbs.db
 # BEGIN oh-my-opencode-slim clonedeps
 .slim/*
 # END oh-my-opencode-slim clonedeps
-/docs/SOURCES.md
-/docs/SPEC.md

@@ -1,13 +1,8 @@
 /*
  * physics_tests.c — headless scenario runner.
  *
- * SCOPE, PHASE 0. This executable validates INFRASTRUCTURE only: math helpers, the
- * world/render unit boundary, the fixed-timestep accumulator, one-shot input consumption,
- * deterministic input replay, render-scale independence, and the CSV telemetry writer.
- *
- * It validates NO tire, vehicle, drivetrain, or load-transfer behaviour, because none has
- * been written yet. The twelve physics scenarios in docs/SPEC.md ("Physics Validation and
- * Regression Testing") land with the code they exercise, starting in Phase 1.
+ * Preserves the Phase 0 infrastructure checks and adds Phase 1 rigid-body vehicle unit and
+ * scenario coverage. Phase 2 tire/drivetrain behavior is intentionally absent.
  *
  * It opens no window, initialises no audio, requires no display, and calls no raylib
  * function. raylib.h is reached only for the Vector2 type.
@@ -32,6 +27,8 @@
 #include "game.h"
 #include "input.h"
 #include "math_utils.h"
+#include "physics.h"
+#include "render.h"
 #include "replay.h"
 #include "telemetry.h"
 #include "timestep.h"
@@ -155,6 +152,37 @@ static void apply_live_input(Game *game, const ScriptFrame *f)
     if (f->shiftDown) game->input.shiftDownPressed = true;
 }
 
+static TelemetryRow telemetry_row_from_game(const Game *game, int substepCount)
+{
+    TelemetryRow row;
+    memset(&row, 0, sizeof(row));
+    row.tick = game->sim.tick;
+    row.timeS = (double)game->sim.tick * (double)FIXED_DT_S;
+    row.positionXM = game->vehicle.positionM.x;
+    row.positionYM = game->vehicle.positionM.y;
+    row.headingRad = game->vehicle.headingRad;
+    row.velocityLongitudinalMps = game->vehicle.velocityLongitudinalMps;
+    row.velocityLateralMps = game->vehicle.velocityLateralMps;
+    row.speedMps = game->derived.speedMps;
+    row.yawRateRadS = game->vehicle.yawRateRadS;
+    row.steeringAngleRad = game->vehicle.frontRoadWheelAngleRad;
+    row.frontSlipAngleRad = game->derived.frontSlipAngleRad;
+    row.rearSlipAngleRad = game->derived.rearSlipAngleRad;
+    row.frontNormalLoadN = game->derived.normalLoadFrontN;
+    row.rearNormalLoadN = game->derived.normalLoadRearN;
+    row.frontLateralForceN = game->derived.frontLateralForceN;
+    row.rearLateralForceN = game->derived.rearLateralForceN;
+    row.totalForceXN = game->derived.totalBodyForceN.x;
+    row.totalForceYN = game->derived.totalBodyForceN.y;
+    row.yawTorqueNm = game->derived.totalYawTorqueNm;
+    row.bodySideslipRad = game->derived.bodySideslipRad;
+    row.lowSpeedBlend = game->derived.lowSpeedBlend;
+    row.substepCount = substepCount;
+    row.backlogDrops = game->physicsBacklogDrops;
+    row.stateChecksum = game->stateChecksum;
+    return row;
+}
+
 /* Drive the script with live input while the game module records it. */
 static uint32_t run_recording(Game *game, const ScriptFrame *frames, int count,
                               float pixelsPerMeter, TelemetryWriter *writer)
@@ -173,16 +201,7 @@ static uint32_t run_recording(Game *game, const ScriptFrame *frames, int count,
         game->lastSubstepCount = step.substeps;
 
         if (writer != NULL) {
-            TelemetryRow row;
-            row.tick          = game->sim.tick;
-            row.timeS         = (double)game->sim.tick * (double)FIXED_DT_S;
-            row.heldSteer     = frames[i].steer;
-            row.heldThrottle  = frames[i].throttle;
-            row.pausePressed  = frames[i].pause;
-            row.resetPressed  = frames[i].reset;
-            row.substepCount  = step.substeps;
-            row.backlogDrops  = game->physicsBacklogDrops;
-            row.stateChecksum = game->stateChecksum;
+            const TelemetryRow row = telemetry_row_from_game(game, step.substeps);
             telemetry_write_row(writer, &row);
         }
     }
@@ -537,9 +556,9 @@ static void scenario_oneshot(void)
 
     /* Held controls stayed valid for every substep. The reset lands on substep 1 before
      * that substep integrates, so all MAX_PHYSICS_STEPS ticks of travel survive it. */
-    check_near((double)game->sim.markerPositionM.x,
-               (double)(MARKER_SPEED_MPS * FIXED_DT_S * (float)MAX_PHYSICS_STEPS),
-               1e-4, "held controls applied to every substep of the frame");
+    check(game->vehicle.positionM.x > 0.0f,
+          "held throttle applies through every substep after reset (x %.6f m)",
+          (double)game->vehicle.positionM.x);
 
     /* A second frame with nothing pressed must not repeat any command. */
     r = timestep_advance(&game->accumulatorS, &game->physicsBacklogDrops,
@@ -619,8 +638,9 @@ static void scenario_replay(void)
           first->sim.pauseToggleCount == recorder->sim.pauseToggleCount &&
           first->sim.shiftUpCount == recorder->sim.shiftUpCount,
           "one-shot commands are reproduced exactly by the timeline");
-    check(memcmp(&first->sim, &second->sim, sizeof(SimState)) == 0,
-          "the full placeholder simulation state matches between the two replays");
+    check(memcmp(&first->sim, &second->sim, sizeof(SimState)) == 0 &&
+          memcmp(&first->vehicle, &second->vehicle, sizeof(VehicleState)) == 0,
+          "the full vehicle simulation state matches between the two replays");
 
     printf("    checksum: recorded %08x  replay#1 %08x  replay#2 %08x\n",
            recordedChecksum, firstChecksum, secondChecksum);
@@ -704,7 +724,8 @@ static void scenario_renderscale(void)
     check(baselineChecksum == doubledChecksum,
           "doubling the render scale leaves the simulation checksum identical (%08x vs %08x)",
           baselineChecksum, doubledChecksum);
-    check(memcmp(&baseline->sim, &doubled->sim, sizeof(SimState)) == 0,
+    check(memcmp(&baseline->sim, &doubled->sim, sizeof(SimState)) == 0 &&
+          memcmp(&baseline->vehicle, &doubled->vehicle, sizeof(VehicleState)) == 0,
           "every simulation field is bit-identical at both render scales");
     check(baseline->renderPixelsPerMeter * 2.0f == doubled->renderPixelsPerMeter,
           "the two runs really did use different render scales (%.1f vs %.1f px/m)",
@@ -713,12 +734,12 @@ static void scenario_renderscale(void)
     /* The scale must still change what the renderer would draw, otherwise the check above
      * would pass for the trivial reason that the scale is ignored everywhere. */
     {
-        const Vector2 a = units_world_to_render_px(baseline->sim.markerPositionM,
+        const Vector2 a = units_world_to_render_px(baseline->vehicle.positionM,
                                                    baseline->renderPixelsPerMeter);
-        const Vector2 b = units_world_to_render_px(doubled->sim.markerPositionM,
+        const Vector2 b = units_world_to_render_px(doubled->vehicle.positionM,
                                                    doubled->renderPixelsPerMeter);
         check(fabsf(a.x) > 1e-4f || fabsf(a.y) > 1e-4f,
-              "the marker ended away from the origin, so the pixel comparison is meaningful");
+              "the vehicle ended away from the origin, so the pixel comparison is meaningful");
         check(fabsf(b.x - a.x) > 1e-5f || fabsf(b.y - a.y) > 1e-5f,
               "render pixel output does change with the scale");
     }
@@ -733,7 +754,34 @@ static void scenario_renderscale(void)
 /* ------------------------------------------------------------------------------------- */
 
 #define TELEMETRY_DIR  "telemetry"
-#define TELEMETRY_PATH TELEMETRY_DIR "/phase0_infrastructure.csv"
+#define TELEMETRY_PATH TELEMETRY_DIR "/phase1_determinism.csv"
+#define TELEMETRY_PATH_REPEAT TELEMETRY_DIR "/phase1_determinism_repeat.csv"
+#define PHASE1_LAUNCH_TELEMETRY TELEMETRY_DIR "/phase1_launch_stop.csv"
+#define PHASE1_LAUNCH_BASELINE "tests/baselines/phase1_launch_stop.csv"
+
+static bool files_equal(const char *pathA, const char *pathB)
+{
+    FILE *a = fopen(pathA, "rb");
+    FILE *b = fopen(pathB, "rb");
+    if (a == NULL || b == NULL) {
+        if (a != NULL) fclose(a);
+        if (b != NULL) fclose(b);
+        return false;
+    }
+    bool equal = true;
+    for (;;) {
+        const int ca = fgetc(a);
+        const int cb = fgetc(b);
+        if (ca != cb) {
+            equal = false;
+            break;
+        }
+        if (ca == EOF) break;
+    }
+    fclose(a);
+    fclose(b);
+    return equal;
+}
 
 static void scenario_telemetry(void)
 {
@@ -758,14 +806,25 @@ static void scenario_telemetry(void)
           "one row was written per render frame (%ld of %d)", writer.rowCount, SCRIPT_FRAMES);
     check(telemetry_close(&writer), "telemetry_close reported success");
 
+    TelemetryWriter repeatWriter;
+    const bool repeatOpened = telemetry_open(&repeatWriter, TELEMETRY_PATH_REPEAT);
+    Game *repeatGame = alloc_game();
+    const uint32_t repeatChecksum = run_recording(
+        repeatGame, frames, SCRIPT_FRAMES, PIXELS_PER_METER,
+        repeatOpened ? &repeatWriter : NULL);
+    check(repeatOpened && telemetry_close(&repeatWriter),
+          "the repeated telemetry run writes and closes successfully");
+    check(repeatChecksum == checksum && files_equal(TELEMETRY_PATH, TELEMETRY_PATH_REPEAT),
+          "identical runs produce byte-identical telemetry and checksum");
+
     /* Read it back: stable header, expected row count, final checksum present. */
     {
         FILE *file = fopen(TELEMETRY_PATH, "rb");
         check(file != NULL, "the telemetry file can be reopened");
         if (file != NULL) {
-            char line[512];
+            char line[2048];
             long dataRows = 0;
-            char lastLine[512];
+            char lastLine[2048];
             lastLine[0] = '\0';
 
             if (fgets(line, sizeof(line), file) != NULL) {
@@ -811,7 +870,447 @@ static void scenario_telemetry(void)
     }
 
     free(game);
+    free(repeatGame);
     free(frames);
+}
+
+/* ------------------------------------------------------------------------------------- */
+/* Phase 1 focused unit checks                                                            */
+/* ------------------------------------------------------------------------------------- */
+
+static void phase1_fixture(VehicleSpec *spec, VehicleState *state,
+                           VehicleDerived *derived, VehicleRenderState *renderState)
+{
+    vehicle_spec_set_default(spec);
+    vehicle_state_reset(spec, state, derived, renderState);
+}
+
+static void scenario_vehicle_units(void)
+{
+    VehicleSpec spec;
+    VehicleState state;
+    VehicleDerived derived;
+    VehicleRenderState renderState;
+    phase1_fixture(&spec, &state, &derived, &renderState);
+
+    check(vehicle_spec_is_valid(&spec), "the default vehicle specification is valid");
+    check_near(spec.wheelbaseM, spec.cgToFrontM + spec.cgToRearM, 1e-7,
+               "wheelbase equals the two CG lever arms");
+    check(spec.gearCount <= MAX_GEARS, "canonical gear storage capacity is respected");
+
+    VehicleSpec invalid = spec;
+    invalid.massKg = 0.0f;
+    check(!vehicle_spec_is_valid(&invalid), "zero mass is rejected");
+    invalid = spec;
+    invalid.wheelbaseM += 0.1f;
+    check(!vehicle_spec_is_valid(&invalid), "an inconsistent wheelbase is rejected");
+
+    check_near(state.wheels[WHEEL_FRONT_LEFT].localPositionM.x, spec.cgToFrontM, 0.0,
+               "front-left contact X uses +cgToFront");
+    check_near(state.wheels[WHEEL_REAR_RIGHT].localPositionM.x, -spec.cgToRearM, 0.0,
+               "rear-right contact X uses -cgToRear");
+    check(state.wheels[WHEEL_FRONT_LEFT].localPositionM.y > 0.0f &&
+          state.wheels[WHEEL_REAR_LEFT].localPositionM.y > 0.0f,
+          "left wheel contacts use positive body Y");
+    check(state.wheels[WHEEL_FRONT_RIGHT].localPositionM.y < 0.0f &&
+          state.wheels[WHEEL_REAR_RIGHT].localPositionM.y < 0.0f,
+          "right wheel contacts use negative body Y");
+
+    float frontLoadN;
+    float rearLoadN;
+    physics_static_axle_loads(&spec, &frontLoadN, &rearLoadN);
+    check_near(frontLoadN + rearLoadN, spec.massKg * GRAVITY_MPS2, 0.01,
+               "static axle loads sum to mass times gravity");
+    check_near(state.wheels[WHEEL_FRONT_LEFT].normalLoadN, frontLoadN * 0.5f, 0.01,
+               "front axle load is split evenly");
+    check_near(state.wheels[WHEEL_REAR_RIGHT].normalLoadN, rearLoadN * 0.5f, 0.01,
+               "rear axle load is split evenly");
+    VehicleSpec rearwardCg = spec;
+    rearwardCg.cgToFrontM = 1.40f;
+    rearwardCg.cgToRearM = 1.15f;
+    rearwardCg.wheelbaseM = 2.55f;
+    float movedFrontLoadN;
+    float movedRearLoadN;
+    physics_static_axle_loads(&rearwardCg, &movedFrontLoadN, &movedRearLoadN);
+    check(movedFrontLoadN < frontLoadN && movedRearLoadN > rearLoadN,
+          "moving the CG rearward moves static load rearward");
+
+    physics_update_steering(&spec, &state, 1.0f, 0.05f);
+    check_near(state.frontRoadWheelAngleRad, spec.maxSteerRateRadS * 0.05f, 1e-7,
+               "left steering maps positive and obeys the steering rate");
+    check_near(state.wheels[WHEEL_FRONT_LEFT].steerAngleRad,
+               state.wheels[WHEEL_FRONT_RIGHT].steerAngleRad, 0.0,
+               "both front wheels receive the same Phase 1 angle");
+    check_near(state.wheels[WHEEL_REAR_LEFT].steerAngleRad, 0.0, 0.0,
+               "the rear-left wheel never steers");
+    check_near(state.wheels[WHEEL_REAR_RIGHT].steerAngleRad, 0.0, 0.0,
+               "the rear-right wheel never steers");
+    const float beforeReturn = state.frontRoadWheelAngleRad;
+    physics_update_steering(&spec, &state, 0.0f, 0.01f);
+    check_near(beforeReturn - state.frontRoadWheelAngleRad,
+               spec.steerReturnRateRadS * 0.01f, 1e-6,
+               "return-to-center uses its configured rate");
+    for (int i = 0; i < 100; i++) physics_update_steering(&spec, &state, 1.0f, FIXED_DT_S);
+    check_near(state.frontRoadWheelAngleRad, spec.maxRoadWheelAngleRad, 1e-6,
+               "steering clamps at the maximum road-wheel angle");
+
+    state.velocityLongitudinalMps = 10.0f;
+    state.velocityLateralMps = 2.0f;
+    state.yawRateRadS = 1.0f;
+    const Vector2 flVelocity = physics_contact_point_velocity_body(
+        &state, state.wheels[WHEEL_FRONT_LEFT].localPositionM);
+    const Vector2 frVelocity = physics_contact_point_velocity_body(
+        &state, state.wheels[WHEEL_FRONT_RIGHT].localPositionM);
+    check(flVelocity.x < frVelocity.x,
+          "yaw makes left/right longitudinal contact velocities distinct");
+    check_near(flVelocity.y, 2.0 + spec.cgToFrontM, 1e-6,
+               "front lateral contact velocity includes +lf*r");
+    const Vector2 rearCenterVelocity = physics_contact_point_velocity_body(
+        &state, (Vector2){ -spec.cgToRearM, 0.0f });
+    check_near(rearCenterVelocity.y, 2.0 - spec.cgToRearM, 1e-6,
+               "rear lateral contact velocity includes -lr*r");
+    state.yawRateRadS = 0.0f;
+    const Vector2 noYawVelocity = physics_contact_point_velocity_body(
+        &state, state.wheels[WHEEL_FRONT_LEFT].localPositionM);
+    check_near(noYawVelocity.x, state.velocityLongitudinalMps, 0.0,
+               "zero yaw reduces contact longitudinal velocity to body velocity");
+    check_near(noYawVelocity.y, state.velocityLateralMps, 0.0,
+               "zero yaw reduces contact lateral velocity to body velocity");
+
+    state.frontRoadWheelAngleRad = 0.0f;
+    state.velocityLongitudinalMps = 10.0f;
+    state.velocityLateralMps = 0.0f;
+    float frontSlip;
+    float rearSlip;
+    physics_axle_slip_angles(&spec, &state, &frontSlip, &rearSlip);
+    check_near(frontSlip, 0.0, 0.0, "straight travel has zero front slip");
+    check_near(rearSlip, 0.0, 0.0, "straight travel has zero rear slip");
+    state.velocityLateralMps = 1.0f;
+    physics_axle_slip_angles(&spec, &state, &frontSlip, &rearSlip);
+    check(frontSlip > 0.0f && rearSlip > 0.0f,
+          "positive lateral velocity produces positive slip angles");
+    state.velocityLateralMps = 0.0f;
+    state.yawRateRadS = 0.5f;
+    physics_axle_slip_angles(&spec, &state, &frontSlip, &rearSlip);
+    check(frontSlip > 0.0f && rearSlip < 0.0f,
+          "positive yaw separates front and rear slip signs");
+    const float originalFrontSlip = frontSlip;
+    VehicleSpec longerFront = spec;
+    longerFront.cgToFrontM += 0.3f;
+    longerFront.wheelbaseM = longerFront.cgToFrontM + longerFront.cgToRearM;
+    physics_axle_slip_angles(&longerFront, &state, &frontSlip, &rearSlip);
+    check(frontSlip > originalFrontSlip,
+          "changing cgToFront changes the front axle slip response");
+    state.velocityLongitudinalMps = -2.0f;
+    physics_axle_slip_angles(&spec, &state, &frontSlip, &rearSlip);
+    check(isfinite(frontSlip) && isfinite(rearSlip),
+          "the documented reverse convention remains finite");
+
+    check_near(physics_linear_lateral_force(0.0f, 1000.0f, 1.0f, 500.0f),
+               0.0, 0.0, "linear tire force is zero at zero slip");
+    check_near(physics_linear_lateral_force(0.1f, 1000.0f, 1.0f, 500.0f),
+               -100.0, 1e-5, "linear tire force has slope -cornering stiffness");
+    check_near(physics_linear_lateral_force(2.0f, 1000.0f, 1.2f, 500.0f),
+               -600.0, 1e-5, "positive slip saturates at -mu*Fz");
+    check_near(physics_linear_lateral_force(-2.0f, 1000.0f, 1.2f, 500.0f),
+               600.0, 1e-5, "negative slip saturates at +mu*Fz");
+
+    const Vector2 unrotated = physics_rotate_wheel_force_to_body(
+        (Vector2){ 12.0f, -34.0f }, 0.0f);
+    check(unrotated.x == 12.0f && unrotated.y == -34.0f,
+          "zero steering leaves the wheel-frame force unchanged");
+    const Vector2 rotated = physics_rotate_wheel_force_to_body(
+        (Vector2){ 0.0f, 100.0f }, DRIFTY_PI * 0.5f);
+    check_near(rotated.x, -100.0, 1e-4, "positive steering rotates lateral force toward -body X");
+    check_near(rotated.y, 0.0, 1e-4, "a ninety-degree force rotation has zero body Y");
+    check_near(sqrtf(rotated.x * rotated.x + rotated.y * rotated.y), 100.0, 1e-4,
+               "force rotation preserves magnitude");
+    const Vector2 rotatedNegative = physics_rotate_wheel_force_to_body(
+        (Vector2){ 0.0f, 100.0f }, -0.25f);
+    check(rotatedNegative.x > 0.0f && rotatedNegative.y > 0.0f,
+          "negative steering rotates positive lateral force toward +body X");
+    check(physics_linear_lateral_force(0.1f, 2000.0f, 1.0f, 1000.0f) <
+          physics_linear_lateral_force(0.1f, 1000.0f, 1.0f, 1000.0f),
+          "front/rear cornering stiffness parameters can act independently");
+    check(fabsf(physics_linear_lateral_force(2.0f, 1000.0f, 0.8f, 500.0f)) <
+          fabsf(physics_linear_lateral_force(2.0f, 1000.0f, 1.2f, 500.0f)),
+          "front/rear friction parameters set independent saturation limits");
+
+    check_near(physics_low_speed_blend(LOW_SPEED_BEGIN_MPS - 0.001f), 0.0, 0.0,
+               "low-speed blend is kinematic below its lower endpoint");
+    check(physics_low_speed_blend(2.25f) > 0.0f &&
+          physics_low_speed_blend(2.25f) < 1.0f,
+          "low-speed blend is continuous inside the transition");
+    check_near(physics_low_speed_blend(LOW_SPEED_END_MPS + 0.001f), 1.0, 0.0,
+               "low-speed blend is dynamic above its upper endpoint");
+
+    VehicleRenderState wrapState;
+    memset(&wrapState, 0, sizeof(wrapState));
+    wrapState.prevHeadingRad = DRIFTY_PI - 0.1f;
+    wrapState.currHeadingRad = -DRIFTY_PI + 0.1f;
+    wrapState.prevWheelAngleRad[0] = DRIFTY_PI - 0.2f;
+    wrapState.currWheelAngleRad[0] = -DRIFTY_PI + 0.2f;
+    const VehicleDrawState draw = render_interpolate_vehicle(&wrapState, 0.5f);
+    check(fabsf(fabsf(draw.headingRad) - DRIFTY_PI) < 1e-4f,
+          "render heading interpolation takes the shortest path across angle wrap");
+    check(fabsf(fabsf(draw.wheelAngleRad[0]) - DRIFTY_PI) < 1e-4f,
+          "wheel interpolation also takes the shortest wrapped path");
+}
+
+static void scenario_rest(void)
+{
+    Game *game = alloc_game();
+    game_init(game);
+    input_zero(&game->input);
+    for (int i = 0; i < 1200; i++) game_fixed_update(game, FIXED_DT_S);
+    check_near(game->vehicle.positionM.x, 0.0, 1e-7, "rest position X remains fixed");
+    check_near(game->vehicle.positionM.y, 0.0, 1e-7, "rest position Y remains fixed");
+    check_near(game->derived.speedMps, 0.0, 1e-7, "rest speed remains zero");
+    check_near(game->vehicle.yawRateRadS, 0.0, 1e-7, "rest yaw rate remains zero");
+    check_near(game->derived.totalBodyForceN.x, 0.0, 1e-7, "rest longitudinal force remains zero");
+    check_near(game->derived.totalBodyForceN.y, 0.0, 1e-7, "rest lateral force remains zero");
+    check(physics_state_is_valid(&game->spec, &game->vehicle, &game->derived),
+          "rest state remains finite and inside safety bounds");
+
+    game->input.steer = 1.0f;
+    for (int i = 0; i < 120; i++) game_fixed_update(game, FIXED_DT_S);
+    check_near(game->derived.speedMps, 0.0, 1e-7,
+               "steering while stationary creates no vehicle motion");
+    check_near(game->vehicle.yawRateRadS, 0.0, 1e-7,
+               "steering while stationary creates no yaw");
+    check_near(game->derived.lateralAccelerationMps2, 0.0, 1e-7,
+               "steering while stationary creates no lateral acceleration");
+    free(game);
+}
+
+static void scenario_launch_stop(void)
+{
+    Game *game = alloc_game();
+    game_init(game);
+    TelemetryWriter writer;
+    const bool telemetryOpened = telemetry_open(&writer, PHASE1_LAUNCH_TELEMETRY);
+    game->input.throttle = 1.0f;
+    for (int i = 0; i < 600; i++) {
+        game_fixed_update(game, FIXED_DT_S);
+        if (telemetryOpened && (i + 1) % 120 == 0) {
+            const TelemetryRow row = telemetry_row_from_game(game, 1);
+            (void)telemetry_write_row(&writer, &row);
+        }
+    }
+    const float launchSpeed = game->vehicle.velocityLongitudinalMps;
+    check(launchSpeed > 10.0f, "straight launch builds forward speed (%.3f m/s)",
+          (double)launchSpeed);
+    check(fabsf(game->vehicle.velocityLateralMps) < 1e-5f,
+          "straight launch keeps lateral velocity near zero");
+    check(fabsf(game->vehicle.yawRateRadS) < 1e-5f,
+          "straight launch keeps yaw rate near zero");
+    check(game->vehicle.positionM.x > 20.0f && fabsf(game->vehicle.positionM.y) < 1e-5f,
+          "straight launch advances along world +X only");
+
+    game->input.throttle = 0.0f;
+    game->input.brake = 1.0f;
+    float previousAbsSpeed = fabsf(game->vehicle.velocityLongitudinalMps);
+    bool monotonic = true;
+    for (int i = 0; i < 600; i++) {
+        game_fixed_update(game, FIXED_DT_S);
+        const float absSpeed = fabsf(game->vehicle.velocityLongitudinalMps);
+        if (absSpeed > previousAbsSpeed + 1e-5f) monotonic = false;
+        previousAbsSpeed = absSpeed;
+        if (telemetryOpened && (i + 1) % 120 == 0) {
+            const TelemetryRow row = telemetry_row_from_game(game, 1);
+            (void)telemetry_write_row(&writer, &row);
+        }
+    }
+    check(monotonic, "service braking reduces speed without an impulse reversal");
+    check(game->vehicle.velocityLongitudinalMps >= -1e-6f,
+          "ordinary braking does not accelerate the vehicle backward");
+    check(fabsf(game->vehicle.velocityLongitudinalMps) < 1e-5f,
+          "braking settles at zero speed");
+    check(physics_state_is_valid(&game->spec, &game->vehicle, &game->derived),
+          "launch and stopping remain finite");
+    check(telemetryOpened && telemetry_close(&writer),
+          "launch/stop telemetry writes successfully");
+    check(files_equal(PHASE1_LAUNCH_TELEMETRY, PHASE1_LAUNCH_BASELINE),
+          "launch/stop telemetry matches the reviewed Phase 1 baseline");
+    free(game);
+}
+
+static void scenario_low_speed(void)
+{
+    Game *game = alloc_game();
+    game_init(game);
+    game->input.throttle = 0.35f;
+    game->input.steer = 0.35f;
+    float previousYaw = 0.0f;
+    float maxYawJump = 0.0f;
+    bool finite = true;
+    bool crossedBlend = false;
+    for (int i = 0; i < 480; i++) {
+        game_fixed_update(game, FIXED_DT_S);
+        const float jump = fabsf(game->vehicle.yawRateRadS - previousYaw);
+        if (jump > maxYawJump) maxYawJump = jump;
+        previousYaw = game->vehicle.yawRateRadS;
+        if (game->derived.lowSpeedBlend > 0.0f && game->derived.lowSpeedBlend < 1.0f) {
+            crossedBlend = true;
+        }
+        if (!physics_state_is_valid(&game->spec, &game->vehicle, &game->derived)) finite = false;
+    }
+    check(crossedBlend, "slow launch traverses the kinematic/dynamic blend");
+    check(maxYawJump < 0.1f, "yaw response stays continuous through blend thresholds (jump %.4f)",
+          (double)maxYawJump);
+    check(game->vehicle.yawRateRadS > 0.0f,
+          "left steering grows positive yaw as speed increases");
+    check(finite, "every sampled low-speed state remains finite");
+    free(game);
+}
+
+static void scenario_reverse(void)
+{
+    Game *game = alloc_game();
+    game_init(game);
+    game->vehicle.selectedGear = -1;
+    game->input.throttle = 0.3f;
+    game->input.steer = 0.25f;
+    bool finite = true;
+    for (int i = 0; i < 180; i++) {
+        game_fixed_update(game, FIXED_DT_S);
+        if (!physics_state_is_valid(&game->spec, &game->vehicle, &game->derived)) finite = false;
+    }
+    check(game->vehicle.velocityLongitudinalMps < -0.5f,
+          "explicit reverse direction launches backward");
+    check(game->vehicle.positionM.x < 0.0f, "reverse launch moves toward world -X");
+    check(game->vehicle.yawRateRadS < 0.0f,
+          "left steering while reversing produces the documented opposite yaw direction");
+    check(isfinite(game->derived.frontSlipAngleRad) && isfinite(game->derived.rearSlipAngleRad),
+          "reverse slip angles have no singularity");
+    check(finite, "slow reverse remains finite and stable");
+
+    game->input.throttle = 0.0f;
+    game->input.steer = 0.0f;
+    game->input.brake = 1.0f;
+    for (int i = 0; i < 360; i++) game_fixed_update(game, FIXED_DT_S);
+    check(game->vehicle.velocityLongitudinalMps <= 1e-6f,
+          "braking from reverse does not launch forward");
+    check(fabsf(game->vehicle.velocityLongitudinalMps) < 1e-5f,
+          "reverse braking settles at zero");
+    free(game);
+}
+
+static void scenario_steering_sign(void)
+{
+    VehicleSpec spec;
+    VehicleState state;
+    VehicleDerived derived;
+    VehicleRenderState renderState;
+    phase1_fixture(&spec, &state, &derived, &renderState);
+    state.velocityLongitudinalMps = 8.0f;
+    Input input;
+    input_zero(&input);
+    input.steer = 0.5f;
+    for (int i = 0; i < 30; i++) {
+        physics_fixed_update(&spec, &state, &derived, &renderState, &input, FIXED_DT_S);
+    }
+    check(state.frontRoadWheelAngleRad > 0.0f, "left input produces positive road-wheel angle");
+    check(derived.frontLateralForceN > 0.0f,
+          "left steering initially produces a leftward front tire force");
+    check(derived.totalYawTorqueNm > 0.0f, "left steering produces positive yaw torque");
+    check(state.yawRateRadS > 0.0f, "left steering from forward travel produces positive yaw");
+    check(state.headingRad > 0.0f, "heading changes only after positive yaw rate integrates");
+    check_near(state.wheels[WHEEL_FRONT_LEFT].forceLateralN +
+               state.wheels[WHEEL_FRONT_RIGHT].forceLateralN,
+               derived.frontLateralForceN, 0.0,
+               "the split front wheel diagnostics sum exactly to the axle force");
+}
+
+static void scenario_lever_arm(void)
+{
+    VehicleSpec a;
+    VehicleSpec b;
+    VehicleState sa;
+    VehicleState sb;
+    VehicleDerived da;
+    VehicleDerived db;
+    VehicleRenderState ra;
+    VehicleRenderState rb;
+    phase1_fixture(&a, &sa, &da, &ra);
+    b = a;
+    b.cgToFrontM += 0.35f;
+    b.cgToRearM -= 0.20f;
+    b.wheelbaseM = b.cgToFrontM + b.cgToRearM;
+    vehicle_state_reset(&b, &sb, &db, &rb);
+    sa.velocityLongitudinalMps = sb.velocityLongitudinalMps = 9.0f;
+    sa.yawRateRadS = sb.yawRateRadS = 0.4f;
+    float af;
+    float ar;
+    float bf;
+    float br;
+    physics_axle_slip_angles(&a, &sa, &af, &ar);
+    physics_axle_slip_angles(&b, &sb, &bf, &br);
+    check(fabsf(af - bf) > 1e-4f, "front lever-arm change alters front slip");
+    check(fabsf(ar - br) > 1e-4f, "rear lever-arm change alters rear slip");
+    Input input;
+    input_zero(&input);
+    input.steer = 0.3f;
+    physics_fixed_update(&a, &sa, &da, &ra, &input, FIXED_DT_S);
+    physics_fixed_update(&b, &sb, &db, &rb, &input, FIXED_DT_S);
+    check(fabsf(da.totalYawTorqueNm - db.totalYawTorqueNm) > 1.0f,
+          "lever-arm changes measurably alter yaw torque");
+    check(fabsf(sa.yawRateRadS - sb.yawRateRadS) > 1e-6f,
+          "lever-arm changes alter integrated yaw response");
+}
+
+static void scenario_integration(void)
+{
+    VehicleSpec spec;
+    VehicleState state;
+    VehicleDerived derived;
+    VehicleRenderState renderState;
+    phase1_fixture(&spec, &state, &derived, &renderState);
+    Input input;
+    input_zero(&input);
+    input.throttle = 1.0f;
+    physics_fixed_update(&spec, &state, &derived, &renderState, &input, FIXED_DT_S);
+    const float expectedVelocity = PHASE1_MAX_DRIVE_FORCE_N / spec.massKg * FIXED_DT_S;
+    check_near(state.velocityLongitudinalMps, expectedVelocity, 1e-7,
+               "velocity integrates force before position");
+    check_near(state.positionM.x, expectedVelocity * FIXED_DT_S, 1e-7,
+               "position uses the updated semi-implicit velocity");
+
+    state.headingRad = DRIFTY_PI - 0.001f;
+    state.yawRateRadS = 1.0f;
+    state.velocityLongitudinalMps = 0.0f;
+    input.throttle = 0.0f;
+    physics_fixed_update(&spec, &state, &derived, &renderState, &input, FIXED_DT_S);
+    check(state.headingRad >= -DRIFTY_PI && state.headingRad < DRIFTY_PI,
+          "integrated heading remains wrapped");
+}
+
+static void scenario_fixed_rate(void)
+{
+    Game *direct = alloc_game();
+    Game *accumulated = alloc_game();
+    game_init(direct);
+    game_init(accumulated);
+    direct->input.throttle = accumulated->input.throttle = 0.7f;
+    direct->input.steer = accumulated->input.steer = 0.15f;
+    for (int i = 0; i < 600; i++) game_fixed_update(direct, FIXED_DT_S);
+    for (int i = 0; i < 300; i++) {
+        const TimestepResult step = timestep_advance(
+            &accumulated->accumulatorS, &accumulated->physicsBacklogDrops,
+            FIXED_DT_S * 2.0f, fixed_update_adapter, accumulated);
+        accumulated->lastSubstepCount = step.substeps;
+    }
+    check(accumulated->physicsBacklogDrops == 0,
+          "fixed-rate consistency run drops no backlog");
+    check(direct->sim.tick == accumulated->sim.tick,
+          "direct and accumulator stepping execute the same tick count");
+    check(direct->stateChecksum == accumulated->stateChecksum,
+          "direct and accumulator stepping produce identical checksums (%08x)",
+          direct->stateChecksum);
+    check(memcmp(&direct->vehicle, &accumulated->vehicle, sizeof(VehicleState)) == 0,
+          "direct and accumulator vehicle states are bit-identical");
+    free(accumulated);
+    free(direct);
 }
 
 /* ------------------------------------------------------------------------------------- */
@@ -834,6 +1333,15 @@ static const Scenario g_scenarios[] = {
     { "replay",      "deterministic recording, repeatable playback, ring overflow",  scenario_replay },
     { "renderscale", "simulation state is independent of PIXELS_PER_METER",          scenario_renderscale },
     { "telemetry",   "CSV writer: stable header, row count, failure handling",       scenario_telemetry },
+    { "vehicle",     "Phase 1 structures, steering, contact velocity, tires, render", scenario_vehicle_units },
+    { "rest",        "rest stability and stationary steering",                       scenario_rest },
+    { "launch-stop", "straight launch, braking, and zero-speed stability",            scenario_launch_stop },
+    { "low-speed",   "kinematic/dynamic blend continuity",                            scenario_low_speed },
+    { "reverse",     "explicit reverse launch and stopping",                          scenario_reverse },
+    { "steer-sign",  "left-positive force, torque, yaw, and heading",                 scenario_steering_sign },
+    { "lever-arm",   "front/rear slip and yaw depend on distinct lever arms",         scenario_lever_arm },
+    { "integration", "semi-implicit order and heading wrap",                          scenario_integration },
+    { "fixed-rate",  "direct stepping matches accumulator stepping",                 scenario_fixed_rate },
 };
 
 #define SCENARIO_COUNT ((int)(sizeof(g_scenarios) / sizeof(g_scenarios[0])))
@@ -876,8 +1384,8 @@ int main(int argc, char **argv)
         return 2;
     }
 
-    printf("drifty_tests - Phase 0 infrastructure harness\n");
-    printf("no window, no audio, no display, no raylib call; NO vehicle physics is validated\n\n");
+    printf("drifty_tests - Phase 0 infrastructure + Phase 1 rigid-body vehicle\n");
+    printf("headless: no window, audio, display, or raylib function call\n\n");
 
     int ran = 0;
     for (int s = 0; s < SCENARIO_COUNT; s++) {

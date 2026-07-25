@@ -9,8 +9,8 @@ actually stands* and is updated as phases close.
 | Phase | Scope | Status |
 |-------|-------|--------|
 | [0](#phase-0--foundations-and-test-harness) | Foundations and test harness | ✅ **Complete** |
-| [1](#phase-1--rigid-body-vehicle) | Rigid-body vehicle | ⬜ Not started — **next** |
-| [2](#phase-2--tire-drivetrain-braking-and-combined-slip) | Tire, drivetrain, braking, combined slip | ⬜ Not started |
+| [1](#phase-1--rigid-body-vehicle) | Rigid-body vehicle | ✅ **Complete** |
+| [2](#phase-2--tire-drivetrain-braking-and-combined-slip) | Tire, drivetrain, braking, combined slip | ⬜ Not started — **next** |
 | [3](#phase-3--load-transfer-and-handling-validation) | Load transfer and handling validation | ⬜ Not started |
 | [4](#phase-4--four-wheel-fidelity) | Four-wheel fidelity | ⬜ Optional upgrade |
 | [5](#phase-5--track-surfaces-and-collision) | Track, surfaces, collision | ⬜ Not started |
@@ -25,8 +25,8 @@ prerequisite: the corrected bicycle model of Phases 1–3 is a valid shipping co
 
 **Status: complete.** Files: `config.h`, `units.h`, `math_utils.h/.c`, `input.h/.c`,
 `replay.h/.c`, `telemetry.h/.c`, `timestep.h/.c`, `game.h/.c`, `main.c`, `hotreload.h`,
-`hotreload_windows.c`, `hotreload_posix.c`, `Makefile`, `build.sh`, `build.bat`,
-`tests/physics_tests.c`.
+`hotreload_windows.c`, `Makefile`, `build.sh`, `build.bat`, `scripts/setup_windows.ps1`,
+`tests/physics_tests.c`, `tests/hotreload_harness.c`.
 
 - [x] `drifty_tests` builds and runs with no display.
 - [x] A one-frame reset press resets exactly once even when eight substeps run.
@@ -37,20 +37,21 @@ prerequisite: the corrected bicycle model of Phases 1–3 is a valid shipping co
 - [x] A deliberate compile error leaves the running game alive on the previous module.
 - [x] The build script exits in under a second in both the running and not-running cases.
 - [x] A release build with `DRIFTY_HOT_RELOAD` undefined produces a single executable with
-      no DLL and identical behaviour.
+      no `game.dll` and identical behaviour.
 
 Verification notes, so later phases know what was actually exercised:
 
-- 121 headless checks pass across 7 infrastructure scenarios; replay checksum `7cc8e6ee`
+- Headless infrastructure checks pass across 7 scenarios; replay checksum `7cc8e6ee`
   reproduces across runs and across separate processes.
-- Shared-raylib linkage confirmed with `objdump -p`: `build/game.dll` imports `raylib.dll`;
-  `drifty_tests` imports no raylib at all.
+- Shared-raylib linkage confirmed with `objdump -p`: `build/game.dll` imports
+  `libraylib.dll`; `drifty_tests` imports no raylib at all; release does not import
+  `libraylib.dll`.
 - The safe-swap sequence — reject a bad candidate, keep the old module live, then swap a
-  genuinely rebuilt module while preserving state — was exercised through a windowless
-  harness driving `hotreload_windows.c` directly.
-- **Not verified by an agent:** the visual behaviour of `drifty.exe` itself (HUD legibility,
-  60 Hz smoothness). The developer owns that process.
-- **Not verified at all:** `hotreload_posix.c`. Compile-ready, never run.
+  valid module while preserving state — is exercised by `tests/hotreload_harness.c` /
+  `scripts/validate_hotreload.sh` without requiring a live interactive `drifty.exe`.
+- Bounded visual smoke test: `drifty.exe --smoke-test` (window + HUD + screenshot).
+- `tests/baselines/` is intentionally empty in Phase 0 (infrastructure telemetry only;
+  handling CSV baselines begin in Phase 1).
 
 ### Deliberate Phase 0 non-goals
 
@@ -62,22 +63,22 @@ axis at a constant rate — it is not a car and implies no physics.
 
 ## Phase 1 — Rigid-Body Vehicle
 
-**Next.** Files: `vehicle.h/.c`, `physics.h/.c`, `render.h/.c`.
+**Status: complete.** Files: `vehicle.h/.c`, `physics.h/.c`, `render.h/.c`, plus integration
+updates to game, telemetry, tests, and build source lists.
 
-Starting point: define the canonical `VehicleSpec`, `VehicleState`, `VehicleDerived`,
-`VehicleRenderState`, and `WheelState[WHEEL_COUNT]` exactly as docs/SPEC.md specifies, add
-them to `Game`, and give `physics.c` ownership of the documented 20-step fixed update order.
-`game.c`'s placeholder marker is deleted at that point.
+The canonical `VehicleSpec`, `VehicleState`, `VehicleDerived`, `VehicleRenderState`, and
+`WheelState[WHEEL_COUNT]` are embedded in the platform-owned `Game`. `physics.c` owns the
+fixed vehicle update and the Phase 0 marker path has been removed.
 
-- [ ] Contact-point velocities per wheel from body velocity and yaw rate.
-- [ ] Per-axle slip angles with distinct `l_f` / `l_r` lever arms.
-- [ ] Linear tire model `Fy = -C_alpha * alpha`, saturated at `mu * Fz`.
-- [ ] Front forces rotated through `delta` into the body frame.
-- [ ] Body dynamics and semi-implicit Euler in the documented order.
-- [ ] Low-speed kinematic blend, 1.5 → 3.0 m/s.
-- [ ] Steering rate limit on `frontRoadWheelAngleRad`.
-- [ ] Interpolated renderer; front wheels steer, rear wheels do not.
-- [ ] Debug overlay: axle velocity vectors, wheel heading vectors, slip angles, yaw rate.
+- [x] Contact-point velocities per wheel from body velocity and yaw rate.
+- [x] Per-axle slip angles with distinct `l_f` / `l_r` lever arms.
+- [x] Linear tire model `Fy = -C_alpha * alpha`, saturated at `mu * Fz`.
+- [x] Front forces rotated through `delta` into the body frame.
+- [x] Body dynamics and semi-implicit Euler in the documented order.
+- [x] Low-speed kinematic blend, 1.5 → 3.0 m/s.
+- [x] Steering rate limit on `frontRoadWheelAngleRad`.
+- [x] Interpolated renderer; front wheels steer, rear wheels do not.
+- [x] Debug overlay: axle velocity vectors, wheel heading vectors, slip angles, yaw rate.
 
 **Complete when:** the car rotates from yaw torque and never from a direct `heading += steer`
 term; front and rear slip angles respond differently to yaw rate; left steering from straight
@@ -87,6 +88,11 @@ but visual size.
 
 Adding these structures changes the layout of `Game`, so `drifty.exe` must be restarted once
 when they land. That is expected.
+
+Verification: 16 scenarios / 217 checks, deterministic replay checksum `6456603e` in both
+`-O0` and `-O2`, byte-identical repeated telemetry, reviewed launch/stop CSV baseline,
+render-scale independence, clean debug/release builds, bounded visual smoke screenshot,
+and safe-swap/corrupt-candidate/failed-compile hot-reload validation.
 
 ---
 

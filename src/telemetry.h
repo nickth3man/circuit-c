@@ -4,10 +4,9 @@
  * Deliberately independent of raylib and of any window: it is plain <stdio.h>, so the
  * headless test executable and (later) the game module can both emit telemetry.
  *
- * The Phase 0 row is the infrastructure subset. Phase 1 onward extends TelemetryRow with
- * the full physics schema from docs/SPEC.md ("Physics Validation and Regression Testing").
- * The header string is generated from the same field list that the row writer formats, so
- * columns and values cannot drift apart.
+ * TelemetryRow carries the stable Phase 1 physics schema from docs/SPEC.md. The header
+ * string is generated from the same field list that the row writer formats, so columns and
+ * values cannot drift apart.
  *
  * Formatting is fixed-precision (%.6f) rather than %g so that byte-for-byte diffs against a
  * committed baseline are meaningful.
@@ -19,14 +18,29 @@
 #include <stdint.h>
 #include <stdio.h>
 
-/* Phase 0 telemetry schema. */
+/* Stable Phase 1 telemetry schema. */
 typedef struct {
     uint64_t tick;
     double   timeS;
-    float    heldSteer;
-    float    heldThrottle;
-    bool     pausePressed;
-    bool     resetPressed;
+    float positionXM;
+    float positionYM;
+    float headingRad;
+    float velocityLongitudinalMps;
+    float velocityLateralMps;
+    float speedMps;
+    float yawRateRadS;
+    float steeringAngleRad;
+    float frontSlipAngleRad;
+    float rearSlipAngleRad;
+    float frontNormalLoadN;
+    float rearNormalLoadN;
+    float frontLateralForceN;
+    float rearLateralForceN;
+    float totalForceXN;
+    float totalForceYN;
+    float yawTorqueNm;
+    float bodySideslipRad;
+    float lowSpeedBlend;
     int      substepCount;
     int      backlogDrops;
     uint32_t stateChecksum;

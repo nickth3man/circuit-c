@@ -2,6 +2,8 @@
 
 Top-down 2D drift driving simulator written in C with raylib 6.0.
 
+**Windows only. MSYS2 UCRT64 is the only supported build environment.**
+
 ## Project Structure
 
 See `docs/SPEC.md` for the full specification, physics model, data structures, and
@@ -9,25 +11,30 @@ incremental build plan. See `docs/SOURCES.md` for the technical references it ci
 
 ## Current phase
 
-**Phase 0 — Foundations and Test Harness is complete. Phase 1 has not started.** There is no
-vehicle, tire, drivetrain, load-transfer, track, particle, or scoring code yet, and none
-should be added outside a deliberate Phase 1 task. What the window draws is a labelled
-deterministic placeholder marker, not a car. `README.md` lists exactly what exists.
+**Phase 0 and Phase 1 are complete. Phase 2 has not started.** The game has a planar
+rigid-body vehicle, a temporary saturated linear lateral tire model, an isolated temporary
+body-level longitudinal command, interpolation, diagnostics, and headless coverage.
+
+Do **not** begin nonlinear tires, drivetrain, wheel rotation/slip ratio, physical braking or
+handbrake torque, combined slip, or load transfer outside a deliberate Phase 2/3 task.
 
 ## Toolchain
 
-raylib must be linked as a **shared** library for hot reload to work. If `pkg-config` cannot
-find raylib, the build falls back to `$RAYLIB_DIR` (default `vendor/raylib`, gitignored);
-`README.md` documents how to populate it. `build.sh` and `build.bat` also probe the usual
-MinGW-w64 install locations when `gcc` is not on `PATH`.
+- Install / refresh with `powershell -ExecutionPolicy Bypass -File scripts\setup_windows.ps1`
+- Build from cmd.exe with `build.bat`, or from an MSYS2 UCRT64 shell with `./build.sh`
+- `build.sh` refuses non-UCRT64 environments. Do not probe Chocolatey GCC or `vendor/raylib`
+- raylib 6.0 comes from the MSYS2 package `mingw-w64-ucrt-x86_64-raylib` only
+- Do not build raylib from source for this project
 
-Verify the linkage rather than assuming it:
+Development links shared raylib (`libraylib.dll`). Release links `libraylib.a` statically
+(still needs `glfw3.dll` with the current MSYS2 package). Verify rather than assuming:
 
 ```bash
 objdump -p build/game.dll | grep -i "DLL Name"
 ```
 
-`raylib.dll` must appear. The same check on `drifty_tests` must show no raylib entry at all.
+`libraylib.dll` must appear for development artifacts. The same check on `drifty_tests.exe`
+and `drifty_release.exe` must show no `libraylib.dll` entry.
 
 ## Development Workflow — Hot Reload
 
@@ -35,10 +42,10 @@ The game runs as a thin platform layer (`drifty.exe`) plus a hot-reloadable game
 (`build/game.dll`). The developer starts the executable once and leaves it running; agents
 rebuild the module, and the running game swaps it in without losing state.
 
-**The only build command you need:**
+**The only build command you need for game edits:**
 
-```bash
-./build.sh
+```bat
+build.bat
 ```
 
 It rebuilds `build/game.dll` always, and rebuilds `drifty.exe` only when the executable is
@@ -46,30 +53,33 @@ not already running. **It always terminates in under a second.**
 
 ### Rules
 
-- **Never start, launch, or supervise `drifty.exe` yourself.** The developer owns the
-  running process. Launching it would block indefinitely and produce no useful output.
+- **Never start, launch, or supervise `drifty.exe` yourself** for interactive sessions. The
+  developer owns that process. Launching it would block indefinitely.
+- **Exception:** the bounded `build.bat --smoke-test` / `drifty.exe --smoke-test` path is
+  allowed because it exits on its own after a fixed frame budget.
 - **Never run a file watcher** (`watchexec`, `nodemon`, `--watch` flags) or any command that
   does not return on its own.
-- After editing game code, run `./build.sh` and report the compiler result. The visual
+- After editing game code, run `build.bat` and report the compiler result. The visual
   outcome appears in the window the developer already has open — ask them what they see
   rather than trying to observe it yourself.
 - A failed build leaves the running game alive on the previous module, so a compile error is
   safe. Report it and fix it.
+- There is no POSIX hot-reload path and no expectation of Linux/macOS validation.
 
 ### For physics work, prefer the headless loop
 
 ```bash
-./build.sh --tests && ./drifty_tests
+./build.sh --tests && ./drifty_tests.exe
 ```
 
 This terminates, writes CSV telemetry to `telemetry/`, and needs no window. It is the better
 feedback loop for equations and tuning; use hot reload for feel, camera, and presentation
 work. Run it from the repository root — the telemetry path is relative.
 
-`./drifty_tests --list` prints the scenarios. In Phase 0 they are infrastructure only
-(`math`, `units`, `timestep`, `oneshot`, `replay`, `renderscale`, `telemetry`); the physics
-scenarios named in `docs/SPEC.md` — `skidpad` and the rest — arrive with the code they
-exercise, from Phase 1 onward, together with the committed baselines in `tests/baselines/`.
+`./drifty_tests.exe --list` prints 16 scenarios: the seven Phase 0 infrastructure scenarios
+plus `vehicle`, `rest`, `launch-stop`, `low-speed`, `reverse`, `steer-sign`, `lever-arm`,
+`integration`, and `fixed-rate`. The suite currently has 217 passing checks. Stable Phase 1
+telemetry is compared with `tests/baselines/phase1_launch_stop.csv`.
 
 ### When a restart is required
 
@@ -78,7 +88,7 @@ them:
 
 - A change to the layout of `Game` or anything it contains (the existing memory block
   becomes invalid).
-- A change to `main.c` or the `hotreload_*` files (the platform layer is not reloadable).
+- A change to `main.c` or `hotreload_windows.c` (the platform layer is not reloadable).
 - A change to `GAME_ENTRY_POINTS`.
 
 ### Reload-safety constraints on game code
@@ -94,6 +104,19 @@ only appear after a reload:
   `static Game game;` inside the game module.
 - Anything raylib tracks (textures, sounds, audio stream callbacks) is released in
   `game_pre_reload` and re-acquired in `game_post_reload`.
+
+## Validation after build-system edits
+
+After changing build scripts, wrappers, or linkage:
+
+1. `build.bat --clean`
+2. `build.bat --tests` && `drifty_tests.exe`
+3. `build.bat`
+4. `build.bat --release`
+5. Import inspection with `objdump -p` on `drifty.exe`, `build/game.dll`,
+   `drifty_tests.exe`, `drifty_release.exe`
+6. `./scripts/validate_hotreload.sh` (UCRT64)
+7. `build.bat --smoke-test`
 
 ## Physics Conventions
 

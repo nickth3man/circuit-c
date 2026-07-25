@@ -32,6 +32,10 @@
 #ifndef DRIFTY_HOTRELOAD_H
 #define DRIFTY_HOTRELOAD_H
 
+#ifndef _WIN32
+#error Drifty currently supports Windows only.
+#endif
+
 #include <stdbool.h>
 
 /* Incomplete type: the entry-point signatures only need Game *. game.h completes it. */
@@ -54,13 +58,7 @@ typedef struct Game Game;
 
 /* Path the platform layer watches and loads. Overridable at build time. */
 #ifndef GAME_MODULE_NAME
-    #if defined(_WIN32)
-        #define GAME_MODULE_NAME "build/game.dll"
-    #elif defined(__APPLE__)
-        #define GAME_MODULE_NAME "build/libgame.dylib"
-    #else
-        #define GAME_MODULE_NAME "build/libgame.so"
-    #endif
+    #define GAME_MODULE_NAME "build/game.dll"
 #endif
 
 /* ------------------------------------------------------------------------------------- */
