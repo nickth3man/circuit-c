@@ -1,0 +1,90 @@
+name: Bug report
+description: Something behaves incorrectly, crashes, or fails a check
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The fields below exist to turn "drifting feels wrong" into something reproducible.
+        If you have a failure bundle (`artifacts/failure-<scenario>-<timestamp>/`), attach it
+        and most of this is answered already.
+
+  - type: input
+    id: commit
+    attributes:
+      label: Commit SHA
+      description: "`git rev-parse --short=12 HEAD`, or the `commit:` line from git_info.txt"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: build
+    attributes:
+      label: Build
+      options:
+        - development (hot reload, build.bat)
+        - release (build.bat --release)
+        - headless tests (build.bat --tests)
+        - sanitizer build
+    validations:
+      required: true
+
+  - type: input
+    id: toolchain
+    attributes:
+      label: OS, compiler, and version
+      description: "e.g. Windows 11, MSYS2 UCRT64 gcc 15.2.0"
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Exact reproduction steps
+      description: Commands, key presses, scenario name, and tick if you know it.
+      placeholder: |
+        1. ./build.sh --tests && ./drifty_tests.exe --scenario handbrake
+        2. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behaviour
+    validations:
+      required: true
+
+  - type: dropdown
+    id: headless
+    attributes:
+      label: Does it reproduce headlessly?
+      description: A bug that reproduces in drifty_tests is worth ten that only appear on screen.
+      options:
+        - "Yes — it reproduces in drifty_tests"
+        - "No — only in the running game"
+        - "Not tried"
+    validations:
+      required: true
+
+  - type: input
+    id: first-bad
+    attributes:
+      label: First known bad commit
+      description: Optional, but it usually shortens the investigation to minutes.
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: |
+        Attach whatever you have: the failure bundle directory, `replay.bin`, the telemetry
+        CSV, `summary.json`, a screenshot or a video, the HTML report from
+        `mk report NAME=<scenario>`.

@@ -1,0 +1,75 @@
+{
+    // Debugging uses the MSYS2 UCRT64 gdb, which is what builds these binaries.
+    // Install it once with:  pacman -S mingw-w64-ucrt-x86_64-gdb
+    //
+    // "Attach to the running game" is the one that matters for hot reload: the developer
+    // leaves drifty.exe running, and you attach to it rather than restarting it.
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug headless tests",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/drifty_tests.exe",
+            "args": [],
+            "cwd": "${workspaceFolder}",
+            "MIMode": "gdb",
+            "miDebuggerPath": "C:/msys64/ucrt64/bin/gdb.exe",
+            "preLaunchTask": "Build headless tests",
+            "setupCommands": [
+                { "description": "pretty printing", "text": "-enable-pretty-printing",
+                  "ignoreFailures": true }
+            ]
+        },
+        {
+            "name": "Debug one scenario",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/drifty_tests.exe",
+            "args": ["--scenario", "${input:scenario}", "-v"],
+            "cwd": "${workspaceFolder}",
+            "MIMode": "gdb",
+            "miDebuggerPath": "C:/msys64/ucrt64/bin/gdb.exe",
+            "preLaunchTask": "Build headless tests"
+        },
+        {
+            "name": "Debug the game (fresh launch)",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/drifty.exe",
+            "args": [],
+            "cwd": "${workspaceFolder}",
+            "MIMode": "gdb",
+            "miDebuggerPath": "C:/msys64/ucrt64/bin/gdb.exe",
+            "preLaunchTask": "Build hot-reload module"
+        },
+        {
+            "name": "Attach to the running game",
+            "type": "cppdbg",
+            "request": "attach",
+            "program": "${workspaceFolder}/drifty.exe",
+            "MIMode": "gdb",
+            "miDebuggerPath": "C:/msys64/ucrt64/bin/gdb.exe"
+        },
+        {
+            "name": "Debug a scene capture",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/drifty.exe",
+            "args": ["--capture-scene", "physics_lab", "--output",
+                     "artifacts/screenshots/physics_lab.png"],
+            "cwd": "${workspaceFolder}",
+            "MIMode": "gdb",
+            "miDebuggerPath": "C:/msys64/ucrt64/bin/gdb.exe",
+            "preLaunchTask": "Build hot-reload module"
+        }
+    ],
+    "inputs": [
+        {
+            "id": "scenario",
+            "type": "promptString",
+            "description": "scenario name (drifty_tests --list)",
+            "default": "skidpad"
+        }
+    ]
+}

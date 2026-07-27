@@ -1,0 +1,53 @@
+{
+    // clangd reads compile_commands.json, which `mk.bat compile-commands` generates from the
+    // same source lists and flags the build scripts use. Without it clangd guesses, and
+    // reports errors the real build does not have.
+    "clangd.arguments": [
+        "--compile-commands-dir=${workspaceFolder}",
+        "--background-index",
+        "--header-insertion=never",
+        "--clang-tidy"
+    ],
+
+    // The Microsoft C/C++ extension is kept for its debugger only; clangd owns IntelliSense.
+    "C_Cpp.intelliSenseEngine": "disabled",
+
+    "files.associations": {
+        "*.h": "c",
+        "*.c": "c"
+    },
+    "files.eol": "\n",
+    "files.trimTrailingWhitespace": true,
+    "files.insertFinalNewline": true,
+
+    "[c]": {
+        "editor.rulers": [96],
+        "editor.tabSize": 4,
+        "editor.insertSpaces": true,
+        // Left off deliberately: the tree has not been normalised with clang-format yet.
+        // See the adoption note in .clang-format before turning this on.
+        "editor.formatOnSave": false,
+        "editor.defaultFormatter": "llvm-vs-code-extensions.vscode-clangd"
+    },
+    "[python]": {
+        "editor.rulers": [96],
+        "editor.tabSize": 4
+    },
+
+    "search.exclude": {
+        "**/.slim/**": true,
+        "**/build/**": true,
+        "**/artifacts/**": true,
+        "**/telemetry/**": true,
+        "third_party/raygui/raygui.h": true
+    },
+    "files.watcherExclude": {
+        "**/.slim/**": true,
+        "**/build/**": true,
+        "**/artifacts/**": true
+    },
+
+    "terminal.integrated.env.windows": {
+        "MSYS2_ROOT": "C:\\msys64"
+    }
+}

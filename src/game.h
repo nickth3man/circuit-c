@@ -11,8 +11,8 @@
  * in hotreload.h. Everything below is plain value data, which is what lets the block
  * survive a module swap unchanged.
  *
- * Phase 1 adds the canonical vehicle structures by value. This layout change requires one
- * platform restart; subsequent game-module-only edits preserve the block normally.
+ * Phase 2 extends the embedded canonical vehicle structures. This layout change requires
+ * one platform restart; subsequent game-module-only edits preserve the block normally.
  */
 #ifndef DRIFTY_GAME_H
 #define DRIFTY_GAME_H
@@ -23,6 +23,7 @@
 #include "raylib.h"     /* Vector2 only; game.c is the only TU here that calls raylib */
 
 #include "config.h"
+#include "dev_state.h"
 #include "hotreload.h"
 #include "input.h"
 #include "replay.h"
@@ -78,6 +79,12 @@ struct Game {
     int   reloadCount;
     float reloadFlashTimerS;
     bool  initialized;
+
+    /* Development tooling: Physics Lab, scope history, trajectory, invariant monitor, and
+     * the time controls the platform loop reads. Plain value data like everything else here,
+     * and present in every build configuration so that drifty.exe and build/game.dll cannot
+     * disagree about the layout of this struct. See src/dev_state.h. */
+    DevState dev;
 };
 
 /*

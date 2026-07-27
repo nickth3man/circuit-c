@@ -7,7 +7,7 @@
  *   - a corrupt candidate is rejected; the previous module stays callable
  *   - game_post_reload does not run for a rejected candidate
  *   - a valid rebuilt candidate swaps in; game_post_reload runs once
- *   - tick / position / checksum survive the swap
+ *   - tick / position / wheel speed / RPM / gear / checksum survive the swap
  *   - stale load copies are cleaned up after unload
  *
  * Failed-compile preservation of build/game.dll is exercised by
@@ -195,6 +195,10 @@ int main(void)
 
     const uint64_t tick_pre_swap = game->sim.tick;
     const Vector2 pos_pre_swap = game->vehicle.positionM;
+    const float rear_omega_pre_swap =
+        game->vehicle.wheels[WHEEL_REAR_LEFT].angularVelocityRadS;
+    const float engine_rpm_pre_swap = game->vehicle.engineRpm;
+    const int gear_pre_swap = game->vehicle.selectedGear;
     const uint32_t checksum_pre_swap = game->stateChecksum;
     const int reloads_pre_swap = game->reloadCount;
 
@@ -214,6 +218,10 @@ int main(void)
     if (game->sim.tick != tick_pre_swap ||
         game->vehicle.positionM.x != pos_pre_swap.x ||
         game->vehicle.positionM.y != pos_pre_swap.y ||
+        game->vehicle.wheels[WHEEL_REAR_LEFT].angularVelocityRadS !=
+            rear_omega_pre_swap ||
+        game->vehicle.engineRpm != engine_rpm_pre_swap ||
+        game->vehicle.selectedGear != gear_pre_swap ||
         game->stateChecksum != checksum_pre_swap) {
         fprintf(stderr, "harness: persistent state did not survive swap\n");
         Game_UnloadModule();

@@ -1,0 +1,149 @@
+# Physics regression: does this change move the car?
+#
+# The comparison is between TWO BUILDS MADE ON THE SAME RUNNER — the pull request head and
+# its merge base — rather than against committed baseline files. That is the only way to make
+# floating-point comparison meaningful: the same compiler, the same libm, the same flags.
+# Committed baselines in tests/baselines/ remain the local, same-machine reference.
+#
+# The job fails only on an invariant violation or a threshold breach. Everything else is
+# reported: a summary table in the run, plots and CSVs in the artifacts.
+name: physics-regression
+
+on:
+  pull_request:
+    paths:
+      - "src/physics.*"
+      - "src/vehicle.*"
+      - "src/tire.*"
+      - "src/drivetrain.*"
+      - "src/surface.*"
+      - "src/config.h"
+      - "src/dev_scenario.*"
+      - "tests/**"
+      - "tools/compare_telemetry.py"
+      - "tools/telemetry_common.py"
+      - ".github/workflows/physics-regression.yml"
+
+concurrency:
+  group: physics-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  compare:
+    name: scenarios vs merge base
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch raylib headers
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: raysan5/raylib
+          ref: "6.0"
+          path: third_party/raylib-src
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+
+      - name: Run every scenario at the pull request head
+        run: |
+          make test-physics
+          mkdir -p /tmp/head
+          cp telemetry/*.csv /tmp/head/
+
+      - name: Run every scenario at the merge base
+        id: base
+        run: |
+          set +e
+          base="${{ github.event.pull_request.base.sha }}"
+          git worktree add /tmp/base "$base"
+          # The base needs the raylib headers too; a symlink is enough for a header-only use.
+          mkdir -p /tmp/base/third_party
+          ln -s "$PWD/third_party/raylib-src" /tmp/base/third_party/raylib-src
+          ( cd /tmp/base && make test-physics )
+          if [ $? -ne 0 ]; then
+            echo "status=unbuildable" >> "$GITHUB_OUTPUT"
+            echo "The merge base could not be built with 'make test-physics'."
+            echo "This is expected for the pull request that introduces it; the comparison"
+            echo "is skipped rather than failed."
+            exit 0
+          fi
+          mkdir -p /tmp/basetelemetry
+          cp /tmp/base/telemetry/*.csv /tmp/basetelemetry/
+          echo "status=ok" >> "$GITHUB_OUTPUT"
+
+      - name: Compare
+        if: steps.base.outputs.status == 'ok'
+        id: compare
+        run: |
+          set +e
+          # Capture the comparison's own exit status, not the pipeline's.
+          python tools/compare_telemetry.py \
+            --baseline-dir /tmp/basetelemetry --current-dir /tmp/head \
+            --markdown /tmp/regression.md > /tmp/regression.txt 2>&1
+          status=$?
+          cat /tmp/regression.txt
+          echo "exit=$status" >> "$GITHUB_OUTPUT"
+
+      - name: Reports and plots
+        if: steps.base.outputs.status == 'ok'
+        run: |
+          mkdir -p artifacts
+          for csv in /tmp/head/scenario_*.csv; do
+            name=$(basename "$csv" .csv)
+            base="/tmp/basetelemetry/$name.csv"
+            if [ -f "$base" ]; then
+              python tools/make_report.py "$csv" --baseline "$base" \
+                --title "Drifty — $name" --out "artifacts/report_$name.html"
+            else
+              python tools/make_report.py "$csv" --title "Drifty — $name (new)" \
+                --out "artifacts/report_$name.html"
+            fi
+          done
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            if [ "${{ steps.base.outputs.status }}" != "ok" ]; then
+              echo "## Physics regression"
+              echo ""
+              echo "The merge base could not be built, so there is nothing to compare against."
+              echo "This resolves itself once this workflow's base commit contains the"
+              echo "\`make test-physics\` target."
+            else
+              cat /tmp/regression.md
+              echo ""
+              echo "<details><summary>Full comparison output</summary>"
+              echo ""
+              echo '```'
+              cat /tmp/regression.txt
+              echo '```'
+              echo ""
+              echo "</details>"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload telemetry, reports, and failure bundles
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: physics-regression
+          path: |
+            /tmp/head/*.csv
+            /tmp/regression.md
+            artifacts/**
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: Fail on a threshold breach
+        if: steps.base.outputs.status == 'ok' && steps.compare.outputs.exit != '0'
+        run: |
+          echo "One or more comparisons fell outside tolerance. See the summary above."
+          exit 1

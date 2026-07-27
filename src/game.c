@@ -1,5 +1,5 @@
 /*
- * game.c — reloadable game entry points and deterministic Phase 1 dispatch.
+ * game.c — reloadable game entry points and deterministic Phase 2 dispatch.
  *
  * physics.c is the sole owner of vehicle integration. This file retains Phase 0's input,
  * one-shot, replay, checksum, and module-lifecycle guarantees.
@@ -8,7 +8,11 @@
 
 #include <string.h>
 
+#include "dev_lab.h"
+#include "dev_scenario.h"
+#include "dev_state.h"
 #include "physics.h"
+#include "profile.h"
 #include "render.h"
 
 #if !defined(DRIFTY_HEADLESS)
@@ -108,13 +112,14 @@ static void apply_oneshots(Game *game, const Input *input)
         game->debugOverlay = !game->debugOverlay;
         game->sim.debugToggleCount++;
     }
-    /* Until Phase 2, these choose direction only; there are no ratios or engine behavior. */
     if (input->shiftUpPressed) {
-        game->vehicle.selectedGear = 1;
+        if (game->vehicle.selectedGear < game->spec.gearCount) {
+            game->vehicle.selectedGear++;
+        }
         game->sim.shiftUpCount++;
     }
     if (input->shiftDownPressed) {
-        game->vehicle.selectedGear = -1;
+        if (game->vehicle.selectedGear > -1) game->vehicle.selectedGear--;
         game->sim.shiftDownCount++;
     }
 }
@@ -141,10 +146,11 @@ GAME_API void game_init(Game *game)
         .zoom = 1.0f
     };
     replay_begin_recording(&game->replay, 0);
+    dev_state_init(&game->dev);
     game->stateChecksum = game_state_checksum(game);
     game->initialized = true;
 #if !defined(DRIFTY_HEADLESS)
-    TRACELOG(LOG_INFO, "GAME: initialised (Phase 1 rigid-body vehicle)");
+    TRACELOG(LOG_INFO, "GAME: initialised (Phase 3 load-transfer and resistance model)");
 #endif
 }
 
@@ -162,6 +168,10 @@ GAME_API void game_post_reload(Game *game)
 {
     if (game == NULL) return;
     if (game->replay.mode == REPLAY_MODE_IDLE) game->replay.mode = REPLAY_MODE_RECORDING;
+
+    /* raygui's style lives in the module's static data, which the swap threw away. */
+    dev_lab_reload_style();
+
     game->reloadCount++;
     game->reloadFlashTimerS = RELOAD_FLASH_S;
 #if !defined(DRIFTY_HEADLESS)
@@ -173,6 +183,7 @@ GAME_API void game_post_reload(Game *game)
 GAME_API void game_fixed_update(Game *game, float dt)
 {
     if (game == NULL) return;
+    DRIFTY_ZONE_BEGIN(fixedUpdate, "FixedUpdate");
     Input tickInput;
     input_zero(&tickInput);
     bool fromPlayback = false;
@@ -181,15 +192,32 @@ GAME_API void game_fixed_update(Game *game, float dt)
         else replay_stop(&game->replay);
     }
     if (!fromPlayback) tickInput = game->input;
+
+    /* A running scripted scenario replaces live input, but only when we are not already
+     * replaying a timeline: playback must never be second-guessed. The substituted input is
+     * recorded like any other, so the scenario itself is replayable. */
+    if (!fromPlayback && game->dev.scenarioRunning) {
+        dev_scenario_input(game->dev.scenario,
+                           game->sim.tick - game->dev.scenarioStartTick, &tickInput);
+    }
+
     input_clear_oneshots(&game->input);
     replay_record(&game->replay, &tickInput);
     apply_oneshots(game, &tickInput);
     if (game->state == STATE_PLAYING) {
+        DRIFTY_ZONE_BEGIN(physics, "Physics");
         physics_fixed_update(&game->spec, &game->vehicle, &game->derived,
                              &game->renderState, &tickInput, dt);
+        DRIFTY_ZONE_END(physics);
     }
     game->sim.tick++;
     game->stateChecksum = game_state_checksum(game);
+
+    /* Development history: scope channels, trajectory, and the invariant monitor. Reads the
+     * state, writes only to game->dev, and is excluded from the checksum, so it cannot
+     * influence the simulation. */
+    dev_state_record(game, &tickInput);
+    DRIFTY_ZONE_END(fixedUpdate);
 }
 
 #if defined(DRIFTY_HEADLESS)
@@ -214,5 +242,9 @@ GAME_API void game_shutdown(Game *game)
     if (game == NULL) return;
     TRACELOG(LOG_INFO, "GAME: shutdown after %llu fixed ticks (checksum %08x)",
              (unsigned long long)game->sim.tick, game->stateChecksum);
+
+    /* Every instrumented zone lives in this module, so this is where the table is. Compiles
+     * to nothing unless the build asked for a profiling backend. */
+    DRIFTY_PROFILE_REPORT(stdout);
 }
 #endif

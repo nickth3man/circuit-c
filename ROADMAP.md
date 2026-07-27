@@ -10,14 +10,35 @@ actually stands* and is updated as phases close.
 |-------|-------|--------|
 | [0](#phase-0--foundations-and-test-harness) | Foundations and test harness | ✅ **Complete** |
 | [1](#phase-1--rigid-body-vehicle) | Rigid-body vehicle | ✅ **Complete** |
-| [2](#phase-2--tire-drivetrain-braking-and-combined-slip) | Tire, drivetrain, braking, combined slip | ⬜ Not started — **next** |
-| [3](#phase-3--load-transfer-and-handling-validation) | Load transfer and handling validation | ⬜ Not started |
+| [2](#phase-2--tire-drivetrain-braking-and-combined-slip) | Tire, drivetrain, braking, combined slip | ✅ **Complete** |
+| [3](#phase-3--load-transfer-and-handling-validation) | Load transfer and handling validation | ✅ **Complete** |
 | [4](#phase-4--four-wheel-fidelity) | Four-wheel fidelity | ⬜ Optional upgrade |
 | [5](#phase-5--track-surfaces-and-collision) | Track, surfaces, collision | ⬜ Not started |
 | [6](#phase-6--scoring-effects-and-presentation) | Scoring, effects, presentation | ⬜ Not started |
 
 Phases 0–3 are the mandatory path to a playable build. Phase 4 is an upgrade, not a
 prerequisite: the corrected bicycle model of Phases 1–3 is a valid shipping configuration.
+
+## Development shell — complete, and outside the phase sequence
+
+The tooling around the simulation is tracked separately from the physics phases because it
+changes no behaviour: the parameter registry, the in-game Physics Lab, the replay inspector,
+failure bundles, the telemetry report generator, the one-command make targets, the GitHub
+workflows, and the fuzz targets. [docs/DEVTOOLS.md](docs/DEVTOOLS.md) and
+[docs/CI.md](docs/CI.md) document it.
+
+Its one intrusion into the simulation side is `DevState` inside `Game` — plain value data,
+excluded from the state checksum, present in every build configuration so that the executable
+and the hot-reloaded module cannot disagree about the layout of the block they share.
+
+Still open, and deliberately so:
+
+- **Tracy** — the zone macros and the `mk profile` selection exist; the distribution itself is
+  not vendored. Drop it into `third_party/tracy/` and the build picks it up.
+- **Visual regression in CI** — `mk screenshots` and `mk visual-test` work locally; hosted
+  runners have no GPU, so the gate stays on the developer's machine.
+- **clang-format adoption** — `.clang-format` matches the existing style, but the tree has not
+  been normalised, so the CI check is advisory until that lands as its own commit.
 
 ---
 
@@ -100,16 +121,16 @@ and safe-swap/corrupt-candidate/failed-compile hot-reload validation.
 
 Files: `tire.h/.c`, `drivetrain.h/.c`.
 
-- [ ] Nonlinear lateral curve `Fy = -mu * Fz * sin(C * atan(B * alpha))`; remove the linear
+- [x] Nonlinear lateral curve `Fy = -mu * Fz * sin(C * atan(B * alpha))`; remove the linear
       cornering-stiffness constants.
-- [ ] Rear-wheel drive: engine torque curve, gearing, final drive, efficiency, locked rear axle.
-- [ ] Per-wheel angular velocity integration with lockup handling.
-- [ ] Slip ratio from wheel angular velocity, clamped.
-- [ ] Longitudinal tire curve.
-- [ ] Combined-friction ellipse with recorded `frictionUsage`.
-- [ ] Brakes with `brakeBiasFront`; brake torque cannot reverse rotation.
-- [ ] Handbrake as rear brake torque only — never a lateral-grip multiplier.
-- [ ] Tire curve debug plot per axle.
+- [x] Rear-wheel drive: engine torque curve, gearing, final drive, efficiency, locked rear axle.
+- [x] Per-wheel angular velocity integration with lockup handling.
+- [x] Slip ratio from wheel angular velocity, clamped.
+- [x] Longitudinal tire curve.
+- [x] Combined-friction ellipse with recorded `frictionUsage`.
+- [x] Brakes with `brakeBiasFront`; brake torque cannot reverse rotation.
+- [x] Handbrake as rear brake torque only — never a lateral-grip multiplier.
+- [x] Tire curve debug plot per axle.
 
 **Complete when:** full throttle breaks rear traction without the handbrake; reducing throttle
 restores rear lateral authority; the handbrake visibly decelerates or locks the rear wheels;
@@ -117,18 +138,26 @@ rear `Fx`/`Fy` never exceed the friction budget; braking while cornering measura
 lateral force; the straight-line, coast-down, power-oversteer, and handbrake-entry scenarios
 pass.
 
+**Verification:** 22 scenarios / 304 checks, deterministic replay checksum `491708b4`,
+straight acceleration to 11.356 m/s in 5 s with rear wheelspin, stable service braking to
+zero, coast-down, corner braking, power-oversteer recovery, handbrake lock/recovery, reverse,
+F1 tire plots, extended telemetry, clean debug/release builds, bounded smoke test, and
+Phase 2 state-preserving safe-swap coverage. Moving from the Phase 1 persistent layout
+requires one `drifty.exe` restart.
+
 ---
 
 ## Phase 3 — Load Transfer and Handling Validation
 
-- [ ] Longitudinal load transfer from `l_f`, `l_r`, `h`, and filtered `ax`; clamped at
+- [x] Longitudinal load transfer from `l_f`, `l_r`, `h`, and filtered `ax`; clamped at
       `MIN_NORMAL_LOAD_N`.
-- [ ] First-order filter on the previous step's solved `ax`.
-- [ ] Aerodynamic drag opposite the velocity vector; rolling resistance per wheel.
-- [ ] Skidpad, step-steer, lift-off, and drift-transition scenarios with committed CSV
+- [x] First-order filter on the previous step's solved `ax`.
+- [x] Aerodynamic drag opposite the velocity vector; rolling resistance per wheel.
+- [x] Skidpad, step-steer, lift-off, drift-transition, and catchable-drift scenarios with CSV
       baselines in `tests/baselines/`.
-- [ ] Feel tuning: `B`, `C`, `mu` per axle, brake bias, engine curve, steering rate.
-- [ ] Reference-behaviour matrix populated.
+- [x] Objective handling validation found the documented defaults acceptable; the
+      `Phase3 Candidate` profile preserves that reviewed set without arbitrary retuning.
+- [x] Reference-behaviour matrix populated in `docs/PHASE3_VALIDATION.md`.
 
 **Complete when:** accelerating shifts load rearward and braking forward, with static loads
 summing to `mass * g`; changing CG position changes static axle loads as expected; lifting
@@ -137,7 +166,11 @@ be initiated, held on countersteer, transitioned, and recovered; behaviour is co
 rather than binary; every scenario in the spec's validation section passes; the physics
 acceptance checklist is fully checked.
 
-This is the gate before any scoring or presentation work.
+Verification: 36 scenarios / 715 checks, deterministic replay checksum `f0b4580e`, eight
+reviewed Phase 3 telemetry baselines, exact local regression, deterministic diagnostic
+captures, and the complete acceptance record in `docs/PHASE3_VALIDATION.md`.
+
+This closes the mandatory Phase 1–3 physics foundation. Phase 4 remains optional.
 
 ---
 

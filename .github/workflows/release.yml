@@ -1,0 +1,133 @@
+# Tagged releases.
+#
+# Windows is the only platform the game itself builds for, so that is the only binary
+# package. The Linux archive carries the headless simulation and the tools, which is what a
+# reviewer or a CI system actually needs from a tag.
+#
+# No third-party publishing action: the GitHub CLI is already on the runner and needs only
+# the token this workflow explicitly grants.
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    name: windows package
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884 # v2
+        with:
+          msystem: UCRT64
+          update: false
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-pkgconf
+            mingw-w64-ucrt-x86_64-raylib
+            make
+            git
+            zip
+
+      - name: Clean release build
+        run: ./build.sh --clean && ./build.sh --release
+
+      - name: Full headless suite (no sanitizer instrumentation)
+        run: ./build.sh --tests && ./drifty_tests.exe
+
+      - name: Package
+        run: |
+          set -e
+          mkdir -p dist/drifty
+          cp drifty_release.exe dist/drifty/drifty.exe
+          cp glfw3.dll dist/drifty/
+          cp README.md AGENTS.md dist/drifty/
+          cp docs/SPEC.md docs/SOURCES.md docs/PARAMETERS.md dist/drifty/ 2>/dev/null || true
+          cp third_party/README.md dist/drifty/THIRD_PARTY.md
+          ( cd dist && zip -r drifty-windows-x64.zip drifty )
+          ( cd dist && sha256sum drifty-windows-x64.zip > drifty-windows-x64.zip.sha256 )
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-package
+          path: |
+            dist/drifty-windows-x64.zip
+            dist/drifty-windows-x64.zip.sha256
+          retention-days: 7
+
+  linux:
+    name: linux headless package
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Fetch raylib headers
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: raysan5/raylib
+          ref: "6.0"
+          path: third_party/raylib-src
+
+      - name: Build and test
+        run: make test-physics
+
+      - name: Package
+        run: |
+          set -e
+          mkdir -p dist/drifty
+          cp drifty_tests dist/drifty/drifty_tests
+          cp -r tools dist/drifty/tools
+          cp README.md AGENTS.md dist/drifty/
+          cp docs/SPEC.md docs/SOURCES.md docs/PARAMETERS.md dist/drifty/ 2>/dev/null || true
+          tar -czf dist/drifty-linux-x64.tar.gz -C dist drifty
+          ( cd dist && sha256sum drifty-linux-x64.tar.gz > drifty-linux-x64.tar.gz.sha256 )
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: linux-package
+          path: |
+            dist/drifty-linux-x64.tar.gz
+            dist/drifty-linux-x64.tar.gz.sha256
+          retention-days: 7
+
+  publish:
+    name: publish the release
+    needs: [windows, linux]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      # Lets `gh attestation` record how these binaries were produced, if it is enabled.
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          path: packages
+
+      - name: Collect checksums
+        run: |
+          set -e
+          mkdir -p release
+          find packages -type f \( -name '*.zip' -o -name '*.tar.gz' \) -exec cp {} release/ \;
+          ( cd release && sha256sum ./* > checksums.txt )
+          cat release/checksums.txt
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "${GITHUB_REF_NAME}" \
+            --generate-notes \
+            release/*

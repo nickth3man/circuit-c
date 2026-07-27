@@ -11,12 +11,13 @@ incremental build plan. See `docs/SOURCES.md` for the technical references it ci
 
 ## Current phase
 
-**Phase 0 and Phase 1 are complete. Phase 2 has not started.** The game has a planar
-rigid-body vehicle, a temporary saturated linear lateral tire model, an isolated temporary
-body-level longitudinal command, interpolation, diagnostics, and headless coverage.
+**Phases 0–3 are complete.** The mandatory physics foundation now includes filtered
+previous-step longitudinal acceleration, static-plus-dynamic axle loads, per-wheel load
+propagation, quadratic aerodynamic drag, load-dependent rolling resistance, objective
+handling maneuvers, and reviewed local baselines.
 
-Do **not** begin nonlinear tires, drivetrain, wheel rotation/slip ratio, physical braking or
-handbrake torque, combined slip, or load transfer outside a deliberate Phase 2/3 task.
+Phase 4 is optional. Do **not** begin four-wheel fidelity, track/gameplay work, or
+presentation work outside a deliberate task for that phase.
 
 ## Toolchain
 
@@ -66,6 +67,27 @@ not already running. **It always terminates in under a second.**
   safe. Report it and fix it.
 - There is no POSIX hot-reload path and no expectation of Linux/macOS validation.
 
+### The development shell
+
+[docs/DEVTOOLS.md](docs/DEVTOOLS.md) documents the tooling around the game: the in-game
+Physics Lab (F2), the replay inspector (F3), failure bundles, telemetry reports, and one
+command per operation. [docs/CI.md](docs/CI.md) documents the workflows.
+
+```bash
+mk test                  # fast scenarios; mk.bat enters UCRT64 for you from cmd.exe
+mk scenario NAME=skidpad
+mk report NAME=skidpad   # runs it, then writes artifacts/report_skidpad.html
+mk verify                # static analysis + every scenario + the regression comparison
+mk ci                    # the local equivalent of the required CI checks
+```
+
+**`mk run` is the one target an agent must never invoke** — it launches `drifty.exe` and does
+not return. Rebuild with `build.bat` (or `mk dev`) and let the running game pick the module
+up, exactly as before.
+
+Tools that are not installed (clang, cppcheck, gcovr, clang-format) print a `SKIP` line with
+the install command instead of failing. That is expected locally; CI installs all of them.
+
 ### For physics work, prefer the headless loop
 
 ```bash
@@ -76,10 +98,25 @@ This terminates, writes CSV telemetry to `telemetry/`, and needs no window. It i
 feedback loop for equations and tuning; use hot reload for feel, camera, and presentation
 work. Run it from the repository root — the telemetry path is relative.
 
-`./drifty_tests.exe --list` prints 16 scenarios: the seven Phase 0 infrastructure scenarios
-plus `vehicle`, `rest`, `launch-stop`, `low-speed`, `reverse`, `steer-sign`, `lever-arm`,
-`integration`, and `fixed-rate`. The suite currently has 217 passing checks. Stable Phase 1
-telemetry is compared with `tests/baselines/phase1_launch_stop.csv`.
+`./drifty_tests.exe --list` prints 36 scenarios and the suite currently has 715 passing
+checks. Phase 3 adds focused acceleration-filter, load-transfer, resistance, acceleration
+load, braking load, skidpad sweep, step-steer, lift-off, transition, and catchable-drift
+coverage. Generated
+telemetry is written under `telemetry/`; `tests/baselines/` holds the reviewed baselines that
+`mk regression` compares against.
+
+Other modes of the same executable:
+
+```bash
+./drifty_tests.exe --scenario skidpad      # one scenario
+./drifty_tests.exe --dump-params docs/PARAMETERS.md
+./drifty_tests.exe --benchmark 240000      # fixed-update throughput
+./drifty_tests.exe --no-bundle             # do not write artifacts/failure-* on failure
+```
+
+A failing scenario writes `artifacts/failure-<scenario>-<timestamp>/` containing the input
+timeline, the telemetry, the tunables, the failing check, and the commit the binary was built
+from. Read that directory before re-running anything.
 
 ### When a restart is required
 
@@ -87,7 +124,10 @@ Tell the developer to restart `drifty.exe` after any of these — hot reload can
 them:
 
 - A change to the layout of `Game` or anything it contains (the existing memory block
-  becomes invalid).
+  becomes invalid). **The development-tool state (`DevState`, src/dev_state.h) is part of
+  `Game` in every build configuration**, deliberately: making it conditional would make two
+  separately compiled binaries disagree about the layout of the block they share. Adding a
+  field to it is therefore a restart, like any other layout change.
 - A change to `main.c` or `hotreload_windows.c` (the platform layer is not reloadable).
 - A change to `GAME_ENTRY_POINTS`.
 
@@ -126,6 +166,15 @@ and yaw rate are counterclockwise-positive, steering is left-positive. Physics t
 units must not call any raylib function, which is what keeps `drifty_tests` headless.
 
 `docs/SPEC.md` is authoritative for all of this.
+
+## Tunables
+
+Every tunable physical parameter is registered once in `src/dev_params.c` with its default,
+unit, range, and description, and that registry generates the Physics Lab sliders, the tuning
+profile format, the telemetry metadata, and `docs/PARAMETERS.md`. Changing a constant in
+`config.h` without updating the registry fails the `params` scenario, on purpose.
+
+After changing the registry, run `mk params-doc` to regenerate the documentation table.
 
 ## Cloned Dependency Source
 

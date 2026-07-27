@@ -1,0 +1,60 @@
+# CodeQL for C.
+#
+# The headless test executable is the build CodeQL analyses: it compiles every simulation
+# translation unit and needs no raylib library, so the analysis covers the code that matters
+# without a Windows runner.
+#
+# If this repository is not eligible for code scanning (private repositories need GitHub Code
+# Security), this workflow simply fails to upload; cppcheck, the Clang Static Analyzer, the
+# sanitizers, and the compiler warnings in ci.yml remain the working baseline.
+name: codeql
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly, so a newly published query still finds an old bug.
+    - cron: "27 4 * * 1"
+
+concurrency:
+  group: codeql-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: analyze (c-cpp)
+    runs-on: ubuntu-24.04
+    permissions:
+      security-events: write
+      packages: read
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Fetch raylib headers
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: raysan5/raylib
+          ref: "6.0"
+          path: third_party/raylib-src
+
+      - name: Initialise CodeQL
+        uses: github/codeql-action/init@4187e74d05793876e9989daffde9c3e66b4acd07 # v3
+        with:
+          languages: c-cpp
+          build-mode: manual
+          queries: security-and-quality
+
+      - name: Build the headless test executable
+        run: make tests
+
+      - name: Analyse
+        uses: github/codeql-action/analyze@4187e74d05793876e9989daffde9c3e66b4acd07 # v3
+        with:
+          category: "/language:c-cpp"

@@ -1,0 +1,115 @@
+{
+    // Shared tasks. Every one of them terminates on its own except "Run the game", which is
+    // the developer's to start — an agent rebuilds with "Build hot-reload module" instead and
+    // lets the already-running drifty.exe pick the module up.
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Build hot-reload module",
+            "detail": "build.bat — rebuilds build/game.dll (and drifty.exe when it is not running)",
+            "type": "shell",
+            "command": "${workspaceFolder}\\build.bat",
+            "group": { "kind": "build", "isDefault": true },
+            "problemMatcher": ["$gcc"],
+            "presentation": { "reveal": "silent", "clear": true }
+        },
+        {
+            "label": "Build headless tests",
+            "type": "shell",
+            "command": "${workspaceFolder}\\build.bat",
+            "args": ["--tests"],
+            "group": "build",
+            "problemMatcher": ["$gcc"]
+        },
+        {
+            "label": "Run headless tests",
+            "detail": "every scenario, with telemetry",
+            "type": "shell",
+            "command": "${workspaceFolder}\\drifty_tests.exe",
+            "dependsOn": "Build headless tests",
+            "group": { "kind": "test", "isDefault": true },
+            "problemMatcher": []
+        },
+        {
+            "label": "Run one scenario",
+            "detail": "pick from the scenario list",
+            "type": "shell",
+            "command": "${workspaceFolder}\\drifty_tests.exe",
+            "args": ["--scenario", "${input:scenario}"],
+            "dependsOn": "Build headless tests",
+            "group": "test",
+            "problemMatcher": []
+        },
+        {
+            "label": "Telemetry report for a scenario",
+            "detail": "runs the scenario, then writes artifacts/report_<name>.html",
+            "type": "shell",
+            "command": "${workspaceFolder}\\mk.bat",
+            "args": ["report", "NAME=${input:scenario}"],
+            "problemMatcher": []
+        },
+        {
+            "label": "Verify (fast)",
+            "detail": "format check + unit and infrastructure scenarios",
+            "type": "shell",
+            "command": "${workspaceFolder}\\mk.bat",
+            "args": ["verify-fast"],
+            "problemMatcher": ["$gcc"]
+        },
+        {
+            "label": "Verify (full local CI)",
+            "detail": "static analysis, every scenario, and the regression comparison",
+            "type": "shell",
+            "command": "${workspaceFolder}\\mk.bat",
+            "args": ["ci"],
+            "problemMatcher": ["$gcc"]
+        },
+        {
+            "label": "Capture screenshots",
+            "detail": "deterministic scene captures into artifacts/screenshots",
+            "type": "shell",
+            "command": "${workspaceFolder}\\mk.bat",
+            "args": ["screenshots"],
+            "problemMatcher": []
+        },
+        {
+            "label": "Regenerate docs/PARAMETERS.md",
+            "type": "shell",
+            "command": "${workspaceFolder}\\mk.bat",
+            "args": ["params-doc"],
+            "problemMatcher": []
+        },
+        {
+            "label": "Regenerate compile_commands.json",
+            "detail": "clangd needs this to use the real build flags",
+            "type": "shell",
+            "command": "${workspaceFolder}\\mk.bat",
+            "args": ["compile-commands"],
+            "problemMatcher": []
+        },
+        {
+            "label": "Run the game (developer only)",
+            "detail": "does not return until the window is closed",
+            "type": "shell",
+            "command": "${workspaceFolder}\\drifty.exe",
+            "dependsOn": "Build hot-reload module",
+            "isBackground": true,
+            "problemMatcher": []
+        }
+    ],
+    "inputs": [
+        {
+            "id": "scenario",
+            "type": "pickString",
+            "description": "scenario name",
+            "default": "skidpad",
+            "options": [
+                "math", "units", "timestep", "oneshot", "replay", "renderscale", "telemetry",
+                "vehicle", "tire", "drivetrain", "rest", "launch-stop", "coast-down",
+                "brake-corner", "power-oversteer", "handbrake", "low-speed", "reverse",
+                "steer-sign", "lever-arm", "integration", "fixed-rate", "params", "devreplay",
+                "skidpad", "step-steer", "transition", "lift-off"
+            ]
+        }
+    ]
+}

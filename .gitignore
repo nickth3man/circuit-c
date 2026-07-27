@@ -15,6 +15,8 @@
 /drifty_tests.exe
 /drifty_hotreload_harness
 /drifty_hotreload_harness.exe
+/drifty_tests_cov
+/drifty_tests_cov.exe
 *.dll
 *.so
 *.dylib
@@ -31,12 +33,41 @@
 /telemetry/*
 !/telemetry/.gitkeep
 
-# Editor / OS
-.vscode/
+# Generated development-tool output. None of it is an input to a build.
+# Named tuning profiles are the exception: they are reviewed handling decisions, so the
+# committed .txt profiles survive while scratch output does not.
+/artifacts/
+/dist/
+/tuning/*
+!/tuning/default.txt
+!/tuning/phase3-candidate.txt
+/replays/
+
+# Vendored dependencies fetched by CI or by the developer, rather than committed.
+# third_party/raygui/ IS committed; these two are not.
+/third_party/raylib-src/
+/third_party/tracy/
+compile_commands.json
+*.gcda
+*.gcno
+*.gcov
+/coverage/
+
+# Editor / OS. The four committed VS Code files are the shared task, launch, and extension
+# configuration described in docs/DEVTOOLS.md; everything else under .vscode/ is personal.
+.vscode/*
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/settings.json
+!.vscode/extensions.json
 .idea/
 *.swp
 Thumbs.db
 .DS_Store
+
+# Python tooling bytecode
+__pycache__/
+*.pyc
 
 # BEGIN oh-my-opencode-slim clonedeps
 .slim/*

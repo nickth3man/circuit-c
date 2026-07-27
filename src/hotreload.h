@@ -32,8 +32,15 @@
 #ifndef DRIFTY_HOTRELOAD_H
 #define DRIFTY_HOTRELOAD_H
 
-#ifndef _WIN32
-#error Drifty currently supports Windows only.
+/*
+ * The GAME itself is Windows-only and main.c says so with its own #error. The guard here is
+ * narrower on purpose: it fires only for a build that actually asks for hot reload, so that
+ * the headless test executable — which defines neither DRIFTY_HOT_RELOAD nor DRIFTY_GAME_MODULE
+ * and links no raylib library — still compiles on Linux. That is what lets CI run the
+ * sanitizer, coverage, and fuzzing jobs, none of which have a Windows equivalent.
+ */
+#if defined(DRIFTY_HOT_RELOAD) && !defined(_WIN32)
+#error Hot reload is implemented for Windows only.
 #endif
 
 #include <stdbool.h>

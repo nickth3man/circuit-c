@@ -1,0 +1,60 @@
+# drifty tuning profile v1
+# name = value    [unit]  (default)
+
+# --- Body ---
+body.mass                = 1200.000000  # kg (default 1200.000000)
+body.yaw_inertia         = 1800.000000  # kg*m^2 (default 1800.000000)
+body.cg_to_front         = 1.150000     # m (default 1.150000)
+body.cg_to_rear          = 1.400000     # m (default 1.400000)
+body.cg_height           = 0.500000     # m (default 0.500000)
+body.track_front         = 1.480000     # m (default 1.480000)
+body.track_rear          = 1.460000     # m (default 1.460000)
+body.drag_coefficient    = 0.320000     # (default 0.320000)
+body.frontal_area        = 1.900000     # m^2 (default 1.900000)
+body.rolling_resistance  = 0.015000     # (default 0.015000)
+body.load_filter_rate    = 20.000000    # Hz (default 20.000000)
+
+# --- Wheels ---
+wheel.radius             = 0.310000     # m (default 0.310000)
+wheel.inertia            = 1.200000     # kg*m^2 (default 1.200000)
+
+# --- Steering ---
+steer.max_angle          = 0.700000     # rad (default 0.700000)
+steer.rate               = 5.000000     # rad/s (default 5.000000)
+steer.return_rate        = 7.000000     # rad/s (default 7.000000)
+
+# --- Tires ---
+tire.lat_front.b         = 10.000000    # (default 10.000000)
+tire.lat_front.c         = 1.450000     # (default 1.450000)
+tire.lat_front.mu        = 1.300000     # (default 1.300000)
+tire.lat_rear.b          = 10.000000    # (default 10.000000)
+tire.lat_rear.c          = 1.450000     # (default 1.450000)
+tire.lat_rear.mu         = 1.200000     # (default 1.200000)
+tire.long.b              = 12.000000    # (default 12.000000)
+tire.long.c              = 1.550000     # (default 1.550000)
+tire.long.mu_scale       = 1.000000     # (default 1.000000)
+
+# --- Drivetrain ---
+drive.gear1              = 3.550000     # (default 3.550000)
+drive.gear2              = 2.050000     # (default 2.050000)
+drive.gear3              = 1.380000     # (default 1.380000)
+drive.gear4              = 1.000000     # (default 1.000000)
+drive.gear5              = 0.820000     # (default 0.820000)
+drive.reverse            = 3.200000     # (default 3.200000)
+drive.final              = 4.100000     # (default 4.100000)
+drive.efficiency         = 0.900000     # (default 0.900000)
+engine.idle_rpm          = 900.000000   # rpm (default 900.000000)
+engine.redline_rpm       = 7000.000000  # rpm (default 7000.000000)
+engine.torque_p0         = 140.000000   # N*m (default 140.000000)
+engine.torque_p1         = 200.000000   # N*m (default 200.000000)
+engine.torque_p2         = 240.000000   # N*m (default 240.000000)
+engine.torque_p3         = 255.000000   # N*m (default 255.000000)
+engine.torque_p4         = 250.000000   # N*m (default 250.000000)
+engine.torque_p5         = 230.000000   # N*m (default 230.000000)
+engine.torque_p6         = 195.000000   # N*m (default 195.000000)
+engine.braking_torque    = 35.000000    # N*m (default 35.000000)
+
+# --- Brakes ---
+brake.max_torque         = 3000.000000  # N*m (default 3000.000000)
+brake.bias_front         = 0.620000     # (default 0.620000)
+brake.handbrake_torque   = 1800.000000  # N*m (default 1800.000000)

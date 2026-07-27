@@ -1,0 +1,61 @@
+# Drifty C formatting.
+#
+# This encodes the style the codebase already uses rather than importing someone else's:
+# four spaces, 96 columns, opening brace on its own line for functions and attached
+# everywhere else, `const char *name` with the star on the name, and short guard clauses
+# like `if (game == NULL) return;` left on one line.
+#
+# ADOPTION NOTE. Running `make format` over the existing tree will still produce a diff —
+# some tables and assignment groups are hand-aligned in ways no tool reproduces. Land that
+# normalisation as its own commit, review it, and only then make the CI format check
+# blocking (it starts advisory; see .github/workflows/ci.yml).
+---
+Language: Cpp
+BasedOnStyle: LLVM
+
+ColumnLimit: 96
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+ContinuationIndentWidth: 4
+
+BreakBeforeBraces: Custom
+BraceWrapping:
+  AfterFunction: true
+  AfterControlStatement: Never
+  AfterEnum: false
+  AfterStruct: false
+  AfterUnion: false
+  AfterCaseLabel: false
+  BeforeElse: false
+  BeforeWhile: false
+  SplitEmptyFunction: false
+
+AllowShortIfStatementsOnASingleLine: WithoutElse
+AllowShortLoopsOnASingleLine: true
+AllowShortFunctionsOnASingleLine: Empty
+AllowShortCaseLabelsOnASingleLine: true
+AllowShortBlocksOnASingleLine: Never
+
+AlignAfterOpenBracket: Align
+AlignConsecutiveAssignments: false
+AlignConsecutiveDeclarations: false
+AlignEscapedNewlines: Left
+AlignTrailingComments: true
+
+PointerAlignment: Right
+DerivePointerAlignment: false
+SpaceAfterCStyleCast: false
+SpacesBeforeTrailingComments: 1
+Cpp11BracedListStyle: false
+
+IndentCaseLabels: true
+KeepEmptyLinesAtTheStartOfBlocks: false
+MaxEmptyLinesToKeep: 1
+
+# Include order is deliberate here (system, then raylib, then project) and the blocks are
+# already alphabetical inside themselves. Preserve rather than re-sort.
+SortIncludes: false
+IncludeBlocks: Preserve
+
+ReflowComments: false

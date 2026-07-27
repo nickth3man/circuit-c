@@ -1,5 +1,5 @@
 /*
- * vehicle.h — canonical vehicle structures and deterministic Phase 1 initialization.
+ * vehicle.h — canonical vehicle structures and deterministic Phase 2 initialization.
  *
  * Physical values use SI units. This header uses raylib's Vector2 type but neither this
  * translation unit nor physics.c calls a raylib function.
@@ -63,6 +63,7 @@ typedef struct {
     float dragCoefficient;
     float frontalAreaM2;
     float rollingResistanceCoefficient;
+    float loadFilterRateHz;
 
     float tireBLatFront, tireCLatFront, tireMuLatFront;
     float tireBLatRear,  tireCLatRear,  tireMuLatRear;
@@ -71,6 +72,7 @@ typedef struct {
 
     float gearRatios[MAX_GEARS];
     int   gearCount;
+    float reverseGearRatio;
     float finalDriveRatio;
     float drivetrainEfficiency;
     float engineIdleRpm;
@@ -102,8 +104,13 @@ typedef struct {
     float   longitudinalAccelerationMps2;
     float   lateralAccelerationMps2;
     float   speedMps;
+
+    /* The dynamic axle loads that actually fed the tire model this step: static split plus
+     * longitudinal transfer, then floored at MIN_NORMAL_LOAD_N. Phase 3 gives these their
+     * physical meaning; the unclamped pair below is kept for diagnosis. */
     float   normalLoadFrontN;
     float   normalLoadRearN;
+
     Vector2 totalBodyForceN;
     float   totalYawTorqueNm;
     float   maxFrictionUsage;
@@ -111,7 +118,7 @@ typedef struct {
     bool    physicallySliding;
     bool    scoringDrift;
 
-    /* Phase 1 diagnostics used by tests, telemetry, and the debug vectors. */
+    /* Phase 1/2 diagnostics used by tests, telemetry, and the debug overlay. */
     Vector2 wheelContactVelocityBodyMps[WHEEL_COUNT];
     Vector2 frontAxleContactVelocityBodyMps;
     Vector2 rearAxleContactVelocityBodyMps;
@@ -121,6 +128,37 @@ typedef struct {
     float   rearLateralForceN;
     Vector2 frontBodyForceN;
     Vector2 rearBodyForceN;
+    float   pureLongitudinalForceN[WHEEL_COUNT];
+    float   pureLateralForceN[WHEEL_COUNT];
+    float   driveTorqueNm[WHEEL_COUNT];
+    float   serviceBrakeTorqueNm[WHEEL_COUNT];
+    float   handbrakeTorqueNm[WHEEL_COUNT];
+    float   engineTorqueNm;
+    float   totalGearRatio;
+    float   drivelineTorqueNm;
+
+    /* ---------------------------------------------------------------- Phase 3 diagnostics --
+     *
+     * All recomputed every fixed update and never integrated, so none of them belongs in
+     * VehicleState and none of them is in the state checksum. The only Phase 3 values that
+     * ARE persistent — and therefore checksummed — are prevLongAccelMps2 and
+     * filteredLongAccelMps2 in VehicleState.
+     */
+    float   staticFrontLoadN;        /* m*g*l_r/L */
+    float   staticRearLoadN;         /* m*g*l_f/L */
+    float   unclampedFrontLoadN;     /* static -/+ transfer, before MIN_NORMAL_LOAD_N */
+    float   unclampedRearLoadN;      /* the pair always sums to m*g */
+    float   loadTransferN;           /* m * filtered ax * h / L; positive = rearward */
+
+    float   previousLongAccelMps2;   /* the value the filter consumed this step */
+    float   filteredLongAccelMps2;   /* the filtered value load transfer used this step */
+    float   solvedLongAccelMps2;     /* this step's solved body ax, stored for the next one */
+
+    float   aeroDragMagnitudeN;
+    Vector2 aeroDragBodyN;           /* body frame; opposes the full velocity vector */
+    float   rollingResistanceMagnitudeN;   /* sum of the four wheel magnitudes */
+    Vector2 rollingResistanceBodyN;        /* body frame; per-wheel sum */
+    float   wheelRollingResistanceN[WHEEL_COUNT];
 } VehicleDerived;
 
 typedef struct {

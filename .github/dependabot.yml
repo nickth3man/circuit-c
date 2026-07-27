@@ -1,0 +1,18 @@
+# Keep the pinned action SHAs current.
+#
+# Actions are pinned to full commit SHAs in every workflow, which is immutable but also means
+# nothing updates on its own. Dependabot opens one pull request a week with the new SHA and
+# the release notes, and that pull request goes through the same required checks as any other.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "ci"
+    labels:
+      - dependencies
+      - github-actions

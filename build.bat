@@ -32,6 +32,20 @@ if not exist "%MSYS2_ROOT%\usr\bin\bash.exe" (
     exit /b 127
 )
 
+rem Build provenance. git is on PATH here but usually not inside the MSYS2 minimal PATH, so
+rem the values are resolved in cmd.exe and inherited by the child shell. build.sh falls back
+rem to "unknown" when they are absent, so a git-less checkout still builds.
+set "DRIFTY_GIT_COMMIT="
+set "DRIFTY_GIT_BRANCH="
+set "DRIFTY_GIT_DIRTY="
+where git >nul 2>&1
+if not errorlevel 1 (
+    for /f "delims=" %%i in ('git rev-parse --short^=12 HEAD 2^>nul') do set "DRIFTY_GIT_COMMIT=%%i"
+    for /f "delims=" %%i in ('git rev-parse --abbrev-ref HEAD 2^>nul') do set "DRIFTY_GIT_BRANCH=%%i"
+    git diff --quiet HEAD >nul 2>&1
+    if errorlevel 1 (set "DRIFTY_GIT_DIRTY=dirty") else (set "DRIFTY_GIT_DIRTY=clean")
+)
+
 rem Convert the repository path to an MSYS path via a temp file (avoids brittle for /f quoting).
 set "MSYS_REPO_FILE=%TEMP%\drifty_msys_repo_%RANDOM%.txt"
 "%MSYS2_ROOT%\usr\bin\cygpath.exe" -u "%CD%" > "%MSYS_REPO_FILE%"

@@ -4,9 +4,14 @@
  * Deliberately independent of raylib and of any window: it is plain <stdio.h>, so the
  * headless test executable and (later) the game module can both emit telemetry.
  *
- * TelemetryRow carries the stable Phase 1 physics schema from docs/SPEC.md. The header
- * string is generated from the same field list that the row writer formats, so columns and
- * values cannot drift apart.
+ * TelemetryRow carries the stable physics schema. The header string is generated from the
+ * same field list that the row writer formats, so columns and values cannot drift apart.
+ *
+ * Phase 3 appended the load-transfer, acceleration-filter, and resistance block at the end,
+ * leaving every earlier column in place and in order. `front_normal_load_n` and
+ * `dynamic_front_load_n` therefore carry the same value: the first is the Phase 2 column
+ * name that existing baselines and tools use, the second is the Phase 3 name that reads
+ * correctly beside `static_front_load_n`. Both are written rather than one being renamed.
  *
  * Formatting is fixed-precision (%.6f) rather than %g so that byte-for-byte diffs against a
  * committed baseline are meaningful.
@@ -18,7 +23,7 @@
 #include <stdint.h>
 #include <stdio.h>
 
-/* Stable Phase 1 telemetry schema. */
+/* Stable Phase 2 telemetry schema. */
 typedef struct {
     uint64_t tick;
     double   timeS;
@@ -30,12 +35,32 @@ typedef struct {
     float speedMps;
     float yawRateRadS;
     float steeringAngleRad;
+    float engineRpm;
+    int selectedGear;
     float frontSlipAngleRad;
     float rearSlipAngleRad;
+    float frontSlipRatio;
+    float rearSlipRatio;
+    float frontWheelOmegaRadS;
+    float rearWheelOmegaRadS;
     float frontNormalLoadN;
     float rearNormalLoadN;
-    float frontLateralForceN;
-    float rearLateralForceN;
+    float frontFxPureN;
+    float rearFxPureN;
+    float frontFyPureN;
+    float rearFyPureN;
+    float frontFxLimitedN;
+    float rearFxLimitedN;
+    float frontFyLimitedN;
+    float rearFyLimitedN;
+    float frontFrictionUsage;
+    float rearFrictionUsage;
+    int frontLocked;
+    int rearLocked;
+    float driveTorqueNm;
+    float frontBrakeTorqueNm;
+    float rearBrakeTorqueNm;
+    float handbrakeTorqueNm;
     float totalForceXN;
     float totalForceYN;
     float yawTorqueNm;
@@ -44,6 +69,29 @@ typedef struct {
     int      substepCount;
     int      backlogDrops;
     uint32_t stateChecksum;
+
+    /* Phase 3: load transfer, the acceleration filter, and separated resistance. */
+    float staticFrontLoadN;
+    float staticRearLoadN;
+    float dynamicFrontLoadN;
+    float dynamicRearLoadN;
+    float loadTransferN;
+    float previousLongAccelMps2;
+    float filteredLongAccelMps2;
+    float solvedLongAccelMps2;
+    float lateralAccelMps2;
+    float aeroDragN;
+    float aeroDragXN;
+    float aeroDragYN;
+    float rollingResistanceN;
+    float rollingResistanceXN;
+    float rollingResistanceYN;
+
+    /* The driver's held controls, so a report can show what was asked for beside what the
+     * car did. Steering already appears as the rate-limited road-wheel angle. */
+    float throttleInput;
+    float brakeInput;
+    float handbrakeInput;
 } TelemetryRow;
 
 typedef struct {

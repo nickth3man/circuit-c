@@ -1,0 +1,71 @@
+name: Physics regression
+description: A maneuver, metric, or invariant moved and should not have
+labels: ["physics", "regression"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this when the car still runs but behaves differently — a metric moved, a
+        threshold breached, an invariant tripped. For crashes and build failures use the bug
+        report instead.
+
+  - type: input
+    id: scenario
+    attributes:
+      label: Scenario
+      description: "`drifty_tests --list`, e.g. skidpad, handbrake, power-oversteer"
+    validations:
+      required: true
+
+  - type: input
+    id: metric
+    attributes:
+      label: Metric that moved
+      description: "e.g. steady_radius_m, peak_sideslip_rad, zero_to_100kph_s"
+    validations:
+      required: true
+
+  - type: input
+    id: values
+    attributes:
+      label: Before → after
+      description: "e.g. 9.01 m → 11.4 m (+26%)"
+    validations:
+      required: true
+
+  - type: input
+    id: range
+    attributes:
+      label: Commit range
+      description: "good..bad, if known"
+
+  - type: dropdown
+    id: invariant
+    attributes:
+      label: Did an invariant fail?
+      options:
+        - "No — the run stayed valid, the numbers moved"
+        - "Yes — friction budget exceeded"
+        - "Yes — non-finite state"
+        - "Yes — speed or yaw rate above the safe limit"
+        - "Yes — something else (describe below)"
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Telemetry evidence
+      description: |
+        Attach the comparison output (`mk regression`), the HTML report
+        (`mk report NAME=<scenario>`), and the CSVs for both runs.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expectation
+    attributes:
+      label: Why the previous value was the correct one
+      description: |
+        If the new behaviour is actually correct, this is a baseline update instead — say so,
+        and explain what physical change justifies it.

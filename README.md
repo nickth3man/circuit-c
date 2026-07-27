@@ -11,10 +11,10 @@ load-transfer behaviour, not because a state machine reaches in and changes forc
 - Reference index: [docs/SOURCES.md](docs/SOURCES.md)
 - Agent-facing workflow rules: [AGENTS.md](AGENTS.md)
 
-## Current phase: Phase 1 — Rigid-Body Vehicle
+## Current phase: Phase 3 complete — Load Transfer and Handling Validation
 
-Phase 0 and Phase 1 are complete. The running game now uses a deterministic planar
-rigid-body vehicle in SI units:
+Phases 0–3 are complete. The running game uses a deterministic planar rigid-body vehicle
+in SI units:
 
 | System | State |
 |--------|-------|
@@ -30,24 +30,27 @@ rigid-body vehicle in SI units:
 | Bounded visual smoke test | `drifty.exe --smoke-test` |
 | Canonical vehicle specification/state/diagnostics | `src/vehicle.h/.c` |
 | Steering, contact kinematics, tire forces, body integration | `src/physics.h/.c` |
+| Normalized nonlinear lateral/longitudinal tire curves and friction ellipse | `src/tire.h/.c` |
+| Engine curve, signed gearing, RWD torque, brakes, handbrake, wheel integration | `src/drivetrain.h/.c` |
 | Interpolated body, four wheels, HUD, debug vectors | `src/render.h/.c` |
 
-Phase 1 uses distinct front/rear slip angles, static axle loads, and
-`Fy = -C_alpha * alpha` saturated at `mu * Fz`. Front force rotates through the road-wheel
-angle, and yaw comes only from tire-force torque. A kinematic derivative model blends into
-the dynamic model from 1.5 to 3.0 m/s before semi-implicit Euler integration.
+Front and rear lateral force use `-mu * Fz * sin(C * atan(B * alpha))`; longitudinal force
+uses the same normalized form with wheel slip ratio. Engine torque is interpolated from a
+seven-point curve, multiplied through forward/reverse gearing and final drive, and split
+only across the locked rear axle. Service brake torque follows the configured front bias;
+the handbrake is rear torque only. Each wheel integrates angular speed from drive, brake,
+and tire reaction torque, and longitudinal/lateral forces share one per-wheel ellipse.
 
-The temporary longitudinal command applies a body-level force in newtons. Q selects reverse,
-E selects forward, throttle applies force in that direction, and brake opposes current
-travel without pushing through zero. It is isolated in `physics.c` and is not an engine,
-drivetrain, longitudinal tire, or physical brake model.
+The 1.5–3.0 m/s kinematic/dynamic derivative blend remains in place. Phase 3 filters the
+previous step's solved body-longitudinal acceleration, transfers axle load from the physical
+CG geometry, propagates the dynamic loads into tire capacity, and applies separated
+quadratic aerodynamic drag and per-wheel rolling resistance.
 
-The test runner covers 16 scenarios and 217 checks. The reviewed launch/stop telemetry
-baseline is `tests/baselines/phase1_launch_stop.csv`; generated CSV and the bounded
-smoke-test screenshot are written under `telemetry/`.
-
-Phase 2 is next: nonlinear lateral tires, rear-wheel drivetrain torque, wheel angular
-velocity and longitudinal slip, physical braking/handbrake torque, and combined grip.
+The headless runner covers 36 scenarios and 715 checks. Eight reviewed Phase 3 CSV baselines
+cover acceleration/braking load transfer, coast-down, skidpad, step steer, lift-off,
+transition, and a catchable drift. The deterministic replay checksum is `f0b4580e`.
+[docs/PHASE3_VALIDATION.md](docs/PHASE3_VALIDATION.md) records the equations, numerical
+handling results, acceptance checklist, tuning decision, and baseline classification.
 
 ## Prerequisites (Windows / MSYS2 UCRT64)
 
@@ -210,13 +213,45 @@ Hot reload cannot handle these. Restart `drifty.exe` after:
 - Anything raylib tracks is released in `game_pre_reload` and re-acquired in
   `game_post_reload`.
 
+## Development tooling
+
+The game itself stays plain C and raylib. Around it sits a development shell — an in-game
+Physics Lab, a replay inspector, telemetry reports, failure bundles, and one command per
+operation. [docs/DEVTOOLS.md](docs/DEVTOOLS.md) is the guide; [docs/CI.md](docs/CI.md) covers
+the workflows and required checks.
+
+```bash
+mk test                 # fast scenarios          mk verify        analysis + tests + regression
+mk scenario NAME=skidpad
+mk report NAME=skidpad  # self-contained HTML report with plots and a baseline comparison
+mk ci                   # exactly what the required CI checks run
+```
+
+`mk.bat` enters MSYS2 UCRT64 for you; from a UCRT64 shell use `make <target>`. Every target
+terminates on its own except `mk run`, which launches the game.
+
+Press **F2** in the running game for the Physics Lab: scenario selector, pause and single
+step, live sliders for all 46 tunables with their defaults and units, tuning profiles,
+overlay toggles, an eight-channel scope with a baseline ghost, and an invariant panel. **F3**
+opens the replay inspector.
+
+![The Physics Lab](tests/visual/baseline/physics_lab.png)
+
+Every tunable is defined once, in `src/dev_params.c`, and that one definition generates the
+sliders, the profile format, the telemetry metadata, and
+[docs/PARAMETERS.md](docs/PARAMETERS.md).
+
 ## Known limitations
 
 - **Changing the `Game` struct layout requires a restart.** Inherent to the technique.
-- **Restart `drifty.exe` once for the Phase 1 layout.** `Game` now embeds the canonical
-  vehicle structures; normal code-only hot reload works after that restart.
-- **Phase 1 longitudinal force is intentionally temporary.** It provides launch, stopping,
-  and explicit reverse without pretending the Phase 2 drivetrain exists.
+- **Restart `drifty.exe` once for the development-tool layout.** `Game` now carries the
+  Physics Lab's state (`DevState`); restart the executable once after updating, and ordinary
+  module-only hot reload preserves state as usual after that.
+- **Restart `drifty.exe` once for the Phase 2 layout.** Canonical vehicle diagnostics and
+  reverse gearing changed persistent structure layout; normal code-only hot reload works
+  after that restart.
+- **Linux gameplay remains unsupported.** Linux builds are headless CI support only and are
+  not a substitute for the MSYS2 UCRT64 gameplay build.
 - **Release still needs `glfw3.dll`.** The MSYS2 `libraylib.a` was built against shared
   GLFW (`__imp_glfw*`), so a fully static single-file release without any third-party DLL
   is blocked by that package layout. `libraylib.dll` and `game.dll` are not required.
@@ -225,25 +260,45 @@ Hot reload cannot handle these. Restart `drifty.exe` after:
 
 ```
 Makefile, build.sh, build.bat   build entry points; all terminate immediately
+mk.bat                          run a Makefile target inside MSYS2 UCRT64 from cmd.exe
 scripts/setup_windows.ps1       idempotent MSYS2 UCRT64 bootstrap
 scripts/validate_hotreload.sh   harness + failed-compile preservation
+scripts/setup_ruleset.sh        branch ruleset via gh; prints unless given --apply
 docs/SPEC.md, docs/SOURCES.md   specification and reference index
+docs/DEVTOOLS.md                the development shell: lab, inspector, reports, targets
+docs/CI.md                      workflows, required checks, and why the gates are shaped so
+docs/PARAMETERS.md              generated from the tunable registry
 src/main.c                      platform layer: window, Game allocation, fixed-timestep loop
 src/timestep.h/.c               the accumulator, isolated so the harness can assert it
 src/hotreload.h                 GAME_ENTRY_POINTS, the one authoritative entry-point list
 src/hotreload_windows.c         LoadLibrary / GetProcAddress loader
 src/game.h/.c                   the Game block and the reloadable entry points
-src/config.h                    Phase 0/1 constants, every physical value unit-bearing
+src/config.h                    Phase 0–3 constants, every physical value unit-bearing
 src/units.h                     world<->render conversion and the coordinate convention
 src/math_utils.h/.c             scalar helpers raymath.h does not provide
 src/input.h/.c                  held controls and one-shot commands
 src/replay.h/.c                 deterministic fixed-tick input timeline
 src/telemetry.h/.c              CSV row writer, no raylib dependency
 src/vehicle.h/.c                canonical vehicle data and initialization
-src/physics.h/.c                pure Phase 1 physics and fixed-update owner
-src/render.h/.c                 interpolation, vehicle rendering, HUD, debug vectors
+src/tire.h/.c                   pure nonlinear curves, slip ratio, combined-friction limit
+src/drivetrain.h/.c             pure engine/gearing/torque/wheel dynamics
+src/physics.h/.c                pure Phase 3 integration and fixed-update owner
+src/render.h/.c                 interpolation, vehicle rendering, HUD, vectors, tire plots
+src/dev_params.h/.c             the one tunable registry: sliders, profiles, docs, metadata
+src/dev_scenario.h/.c           scripted maneuvers, shared by the lab and the headless runner
+src/dev_state.h/.c              lab state inside Game: scope, trajectory, invariant monitor
+src/dev_lab.h/.c                the raygui Physics Lab (development builds only)
+src/dev_replay.h/.c             durable replay timelines and the inspector's event markers
+src/failure_bundle.h/.c         reproducible failure directories
+src/profile.h/.c                zone instrumentation: off, built-in timers, or Tracy
+src/build_info.h                commit, branch, dirty flag, compiler, flags, platform
 tests/physics_tests.c           headless scenario runner
 tests/hotreload_harness.c       windowless hot-reload validation
 tests/baselines/                reviewed deterministic scenario CSV baselines
+tests/visual/                   deterministic scene baselines and the RMSE gate
+tools/*.py                      telemetry comparison, plots, summaries, HTML reports
+fuzz/fuzz_*.c                   libFuzzer targets for the parsers and the tire functions
+third_party/raygui/             vendored raygui, development builds only
 telemetry/                      generated CSV / smoke screenshot (gitignored)
+artifacts/                      reports, screenshots, failure bundles (gitignored)
 ```

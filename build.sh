@@ -87,16 +87,54 @@ RAYLIB_STATIC_LIBS="-l:libraylib.a -lglfw3 -lopengl32 -lgdi32 -lwinmm"
 RAYLIB_SHARED_DLL="${MINGW_PREFIX}/bin/libraylib.dll"
 GLFW_SHARED_DLL="${MINGW_PREFIX}/bin/glfw3.dll"
 
+# -------------------------------------------------------------------- build provenance --
+#
+# Recorded in the binary so a failure bundle can name the commit it came from. build.bat
+# passes these in from cmd.exe, where git is on PATH; when it is not set we ask git here and
+# fall back to "unknown". Values must not contain spaces: they are expanded unquoted into the
+# compiler command line below.
+
+if [ -z "${DRIFTY_GIT_COMMIT:-}" ] && command -v git >/dev/null 2>&1; then
+    DRIFTY_GIT_COMMIT="$(git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)"
+    DRIFTY_GIT_BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
+    if git diff --quiet HEAD 2>/dev/null; then
+        DRIFTY_GIT_DIRTY="clean"
+    else
+        DRIFTY_GIT_DIRTY="dirty"
+    fi
+fi
+BUILD_COMMIT="${DRIFTY_GIT_COMMIT:-unknown}"
+BUILD_BRANCH="${DRIFTY_GIT_BRANCH:-unknown}"
+BUILD_DIRTY="${DRIFTY_GIT_DIRTY:-unknown}"
+
+build_info_defines() {
+    # $1 = build mode, $2 = comma-separated optimisation flags (no spaces, see above)
+    echo "-DDRIFTY_BUILD_COMMIT=\"$BUILD_COMMIT\" -DDRIFTY_BUILD_BRANCH=\"$BUILD_BRANCH\"" \
+         "-DDRIFTY_BUILD_DIRTY=\"$BUILD_DIRTY\" -DDRIFTY_BUILD_MODE=\"$1\"" \
+         "-DDRIFTY_BUILD_FLAGS=\"$2\""
+}
+
 # -------------------------------------------------------------------------------- flags --
 
 CSTD="-std=c11"
-INCLUDES="-Isrc"
+INCLUDES="-Isrc -Ithird_party/raygui"
 WARNINGS="-Wall -Wextra -Wshadow -Wstrict-prototypes -Wmissing-prototypes -Wpointer-arith"
 DEBUG_FLAGS="-O0 -g"
 RELEASE_FLAGS="-O2 -DNDEBUG"
 
-SHARED_SRCS="src/input.c src/math_utils.c"
-GAME_SRCS="src/game.c src/vehicle.c src/physics.c src/render.c src/replay.c src/telemetry.c"
+# Development tooling (Physics Lab, replay inspector, failure bundles). The registry, the
+# scenario table, the scope history, and the bundle writer are raylib-free and are compiled
+# into every configuration; only the raygui interface is conditional.
+DEV_TOOL_DEFINES="-DDRIFTY_DEV_TOOLS"
+
+# Extra defines for opt-in builds: `DRIFTY_EXTRA_DEFINES=-DDRIFTY_PROFILE ./build.sh`.
+# `make profile` uses it. Values must not contain spaces (see the note above).
+EXTRA_DEFINES="${DRIFTY_EXTRA_DEFINES:-}"
+
+SHARED_SRCS="src/input.c src/math_utils.c src/dev_scenario.c src/profile.c"
+DEV_SRCS="src/dev_params.c src/dev_replay.c src/dev_state.c src/failure_bundle.c"
+DEV_UI_SRCS="src/dev_lab.c"
+GAME_SRCS="src/game.c src/vehicle.c src/physics.c src/tire.c src/drivetrain.c src/render.c src/replay.c src/telemetry.c $DEV_SRCS"
 PLATFORM_SRCS="src/main.c src/timestep.c"
 HOTRELOAD_SRC="src/hotreload_windows.c"
 TEST_SRCS="tests/physics_tests.c src/timestep.c $GAME_SRCS $SHARED_SRCS"
@@ -161,7 +199,7 @@ if [ "$MODE" = "clean" ]; then
     rm -rf build
     rm -f "$EXE" "$EXE_RELEASE" "$EXE_TESTS" "$EXE_HOTRELOAD"
     rm -f libraylib.dll raylib.dll glfw3.dll
-    rm -f telemetry/phase1_smoke.png
+    rm -f telemetry/phase1_smoke.png telemetry/phase2_smoke.png telemetry/phase3_smoke.png
     echo "cleaned."
     exit 0
 fi
@@ -169,6 +207,7 @@ fi
 if [ "$MODE" = "tests" ]; then
     # shellcheck disable=SC2086
     $CC $CSTD $INCLUDES $WARNINGS $RELEASE_FLAGS -DDRIFTY_HEADLESS \
+        $(build_info_defines tests "-O2,-DNDEBUG,-DDRIFTY_HEADLESS") \
         $TEST_SRCS -o "$EXE_TESTS" $RAYLIB_CFLAGS -lm
     status=$?
     [ $status -eq 0 ] && echo "Built $EXE_TESTS."
@@ -181,8 +220,10 @@ if [ "$MODE" = "hotreload-harness" ]; then
     # The harness loads build/game.dll; build it the same safe way as the dev path.
     # shellcheck disable=SC2086
     $CC $CSTD $INCLUDES $WARNINGS $DEBUG_FLAGS -shared \
-        -DDRIFTY_HOT_RELOAD -DDRIFTY_GAME_MODULE \
-        $GAME_SRCS $SHARED_SRCS -o build/game_tmp.tmp $RAYLIB_CFLAGS $RAYLIB_SHARED_LIBS
+        -DDRIFTY_HOT_RELOAD -DDRIFTY_GAME_MODULE $DEV_TOOL_DEFINES \
+        $(build_info_defines module "-O0,-g") $EXTRA_DEFINES \
+        $GAME_SRCS $DEV_UI_SRCS $SHARED_SRCS -o build/game_tmp.tmp \
+        $RAYLIB_CFLAGS $RAYLIB_SHARED_LIBS
     status=$?
     if [ $status -ne 0 ]; then
         rm -f build/game_tmp.tmp
@@ -203,6 +244,7 @@ if [ "$MODE" = "release" ]; then
     copy_release_runtime || exit 1
     # shellcheck disable=SC2086
     $CC $CSTD $INCLUDES $WARNINGS $RELEASE_FLAGS \
+        $(build_info_defines release "-O2,-DNDEBUG") \
         $PLATFORM_SRCS $GAME_SRCS $SHARED_SRCS -o "$EXE_RELEASE" \
         $RAYLIB_CFLAGS $RAYLIB_STATIC_LIBS
     status=$?
@@ -220,8 +262,10 @@ build_dev() {
     # survives.
     # shellcheck disable=SC2086
     $CC $CSTD $INCLUDES $WARNINGS $DEBUG_FLAGS -shared \
-        -DDRIFTY_HOT_RELOAD -DDRIFTY_GAME_MODULE \
-        $GAME_SRCS $SHARED_SRCS -o build/game_tmp.tmp $RAYLIB_CFLAGS $RAYLIB_SHARED_LIBS
+        -DDRIFTY_HOT_RELOAD -DDRIFTY_GAME_MODULE $DEV_TOOL_DEFINES \
+        $(build_info_defines module "-O0,-g") $EXTRA_DEFINES \
+        $GAME_SRCS $DEV_UI_SRCS $SHARED_SRCS -o build/game_tmp.tmp \
+        $RAYLIB_CFLAGS $RAYLIB_SHARED_LIBS
     status=$?
     if [ $status -ne 0 ]; then
         rm -f build/game_tmp.tmp
@@ -240,6 +284,7 @@ build_dev() {
 
     # shellcheck disable=SC2086
     $CC $CSTD $INCLUDES $WARNINGS $DEBUG_FLAGS -DDRIFTY_HOT_RELOAD \
+        $(build_info_defines platform "-O0,-g") $EXTRA_DEFINES \
         $PLATFORM_SRCS $SHARED_SRCS $HOTRELOAD_SRC -o "$EXE" \
         $RAYLIB_CFLAGS $RAYLIB_SHARED_LIBS
     status=$?

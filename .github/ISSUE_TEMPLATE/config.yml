@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Specification
+    url: https://github.com/nickth3man/drift-c/blob/main/docs/SPEC.md
+    about: The authoritative physics model, conventions, and build plan.
+  - name: Development tooling
+    url: https://github.com/nickth3man/drift-c/blob/main/docs/DEVTOOLS.md
+    about: Physics Lab, replay inspector, telemetry reports, failure bundles, and the make targets.
