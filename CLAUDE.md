@@ -8,8 +8,12 @@ build commands, the physics conventions, and the constraints that keep hot reloa
 `docs/PHASE3_VALIDATION.md` records the accepted handling metrics, baseline policy, and
 Phase 1–3 acceptance evidence.
 `docs/DEVTOOLS.md` covers the development shell — the Physics Lab, the replay inspector,
-failure bundles, telemetry reports, and the one-command make targets. `docs/CI.md` covers the
-workflows and the required checks.
+failure bundles, telemetry reports, the vehicle corpus and gallery, and the one-command make
+targets. `docs/CI.md` covers the workflows and the required checks.
+`docs/CAR_VISUAL.md` is the vehicle-appearance contract: a car's look is a pure function of
+its physics parameters, and that document states what every drawn feature reads, where the
+render-only gains are, and which rules a change must not break. `docs/CORPUS.md` lists the
+100 demonstration vehicles.
 
 **Windows only — MSYS2 UCRT64.** Use `build.bat` from cmd.exe, or `./build.sh` from an
 MSYS2 UCRT64 shell. Phases 0–3 are complete; Phase 4 is an optional, deliberate upgrade.

@@ -104,6 +104,21 @@ jobs:
         continue-on-error: true
         run: make regression CC=${{ matrix.compiler }}
 
+      - name: Vehicle contact sheet and corpus index
+        # The whole appearance system is CPU-side and raylib-free, so the fleet can be
+        # rendered and reviewed on a runner with no GPU and no window. Two things are checked
+        # here that nothing else checks: that the sheet still renders at all, and that the
+        # committed docs/CORPUS.md is still what the code generates rather than a stale copy.
+        run: |
+          set -e
+          ./drifty_tests --dump-corpus-sheet artifacts/gallery
+          ./drifty_tests --dump-corpus-index artifacts/CORPUS.generated.md
+          diff -u docs/CORPUS.md artifacts/CORPUS.generated.md || {
+            echo "docs/CORPUS.md is stale."
+            echo "Regenerate: ./drifty_tests.exe --dump-corpus-index docs/CORPUS.md"
+            exit 1
+          }
+
       - name: Standalone fuzz corpora
         run: |
           set -e
@@ -124,6 +139,21 @@ jobs:
             telemetry/*.csv
             artifacts/**
           retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Upload the vehicle contact sheet
+        # Separated from the telemetry bundle on purpose: this is the artifact a human
+        # actually downloads to look at the fleet, and burying it under a hundred CSVs makes
+        # it useless. `if: always()` so a distinctness failure — whose bundle lands in
+        # artifacts/car_visual_failures/ — still ships the pictures needed to diagnose it.
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: vehicle-gallery-${{ matrix.compiler }}
+          path: |
+            artifacts/gallery/**
+            artifacts/car_visual_failures/**
+          retention-days: 14
           if-no-files-found: ignore
 
   windows-build:

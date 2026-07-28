@@ -101,7 +101,32 @@ Deliberately boring, and all of it is visible in the workflow files:
   artifacts;
 - no secrets are exposed to pull request code — the workflows use none.
 
+## Downloadable artifacts
+
+Every run uploads what a human would need to diagnose it without reproducing it:
+
+| Artifact | From | Keeps |
+|---|---|---|
+| `telemetry-linux-<compiler>` | linux headless | scenario CSVs and everything under `artifacts/` | 7 days |
+| `vehicle-gallery-<compiler>` | linux headless | the headless vehicle contact sheet, plus any distinctness failure bundle | 14 days |
+| `windows-failure` | windows | telemetry and failure bundles, on failure only | — |
+| `sanitizer-failure` | sanitizers | failure bundles, on failure only | — |
+| `coverage` | coverage | the gcovr HTML and Cobertura report | — |
+
+The vehicle gallery is uploaded separately from the telemetry bundle on purpose: it is the
+artifact someone actually downloads to *look* at the fleet, and burying it under a hundred
+CSVs makes it useless. It uploads on success and failure alike, because a distinctness
+failure is exactly when the pictures are needed.
+
+The same job also regenerates `docs/CORPUS.md` and diffs it against the committed copy, so
+the generated corpus table cannot quietly rot away from the code that produces it.
+
 ## What is deliberately not in CI
+
+**The in-game vehicle gallery.** `mk gallery` needs a GPU and produces a human-review
+artifact, not a gate. A hundred cars behind an RMSE comparison, on hardware that rasterizes
+differently per vendor, is a maintenance sinkhole with no CI value. The headless contact sheet
+and the `corpus` scenario are the gates, and both run here.
 
 **Visual regression.** raylib renders through OpenGL and rasterisation differs enough between
 GPU vendors and drivers to make a pixel comparison flaky; hosted Windows runners have no GPU
