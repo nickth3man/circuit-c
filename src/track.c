@@ -12,24 +12,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* --------------- stadium geometry --------------------------------------------------------
- *
- * A ~200 m × 80 m stadium (rounded rectangle) with the bottom straight at y = 0. The world
- * origin (0,0) lies on the centreline, so the car starts on asphalt.
- *
- *   Bottom straight : y = 0,  x ∈ [-60, +60]   (6 nodes, left → right)
- *   Right semicircle: centre (60, 40), r = 40   (6 nodes, bottom → top)
- *   Top straight    : y = 80, x ∈ [+60, -60]   (6 nodes, right → left)
- *   Left semicircle : centre (-60, 40), r = 40  (6 nodes, top → bottom)
- *
- * Total: 24 nodes. halfWidthM = 8 m → a 16 m wide driving surface.
- */
-#define TRACK_STADIUM_COUNT   24
-#define TRACK_HALF_WIDTH_M    8.0f
 
-#define STADIUM_STRAIGHT_X_MAX 60.0f
-#define STADIUM_CIRCLE_RADIUS  40.0f
-#define STADIUM_TOP_Y          80.0f
 
 /* --------------- straight-line helpers ---------------------------------------------------- */
 
@@ -82,67 +65,33 @@ void track_init(Track *track)
     /* Defensive: free any previously-allocated state first. */
     track_free(track);
 
-    track->nodes = (TrackNode *)calloc(TRACK_STADIUM_COUNT, sizeof(TrackNode));
-    if (track->nodes == NULL) {
-        track->count = 0;
-        return;
-    }
+    /* Parking lot: 200m x 150m open rectangle centred at origin. */
+    track->isParkingLot = true;
+    track->lotMinXM = -100.0f;
+    track->lotMaxXM =  100.0f;
+    track->lotMinYM =  -75.0f;
+    track->lotMaxYM =   75.0f;
 
-    track->count = TRACK_STADIUM_COUNT;
+    /* Perimeter centreline for collision barriers. 4 sides in clockwise order:
+     * bottom (L→R), right (B→T), top (R→L), left (T→B), plus a closing node. */
+    #define LOT_NODES 5
+    track->count  = LOT_NODES;
+    track->nodes  = (TrackNode *)calloc((size_t)track->count, sizeof(TrackNode));
+    if (!track->nodes) return;
+
+    const float hw = 4.0f;  /* wide enough so inner/outer barriers don't sandwich the car */
+    int i = 0;
+    track->nodes[i++] = (TrackNode){ { track->lotMinXM, track->lotMinYM }, hw, SURFACE_ASPHALT };
+    track->nodes[i++] = (TrackNode){ { track->lotMaxXM, track->lotMinYM }, hw, SURFACE_ASPHALT };
+    track->nodes[i++] = (TrackNode){ { track->lotMaxXM, track->lotMaxYM }, hw, SURFACE_ASPHALT };
+    track->nodes[i++] = (TrackNode){ { track->lotMinXM, track->lotMaxYM }, hw, SURFACE_ASPHALT };
+    track->nodes[i++] = (TrackNode){ { track->lotMinXM, track->lotMinYM }, hw, SURFACE_ASPHALT };
+
     track->offTrackSurfaceId = SURFACE_GRASS;
     track->nextCheckpoint = 0;
     track->lap = 0;
     track->lapTimerS = 0.0f;
     track->lastLapTimeS = 0.0f;
-
-    /* Helper: assign one node. */
-    const float hw = TRACK_HALF_WIDTH_M;
-    const SurfaceId sid = SURFACE_ASPHALT;
-
-    #define SET_NODE(idx, xval, yval) do { \
-        track->nodes[idx].centerM.x = (xval); \
-        track->nodes[idx].centerM.y = (yval); \
-        track->nodes[idx].halfWidthM = hw; \
-        track->nodes[idx].surfaceId = sid; \
-    } while (0)
-
-    /* Bottom straight: y = 0, x from -60 to +60, 6 nodes.
-     * node indices 0 .. 5  (left → right). */
-    for (int i = 0; i < 6; i++) {
-        const float x = -STADIUM_STRAIGHT_X_MAX +
-                         (2.0f * STADIUM_STRAIGHT_X_MAX) * (float)i / 5.0f;
-        SET_NODE(i, x, 0.0f);
-    }
-
-    /* Right semicircle: centre (60, 40), radius 40, 6 nodes.
-     * Angle from -π/2 (bottom) to +π/2 (top).  node indices 6 .. 11. */
-    for (int i = 0; i < 6; i++) {
-        const float theta = -3.14159265358979323846f * 0.5f +
-                            3.14159265358979323846f * (float)i / 5.0f;
-        SET_NODE(6 + i,
-                 STADIUM_STRAIGHT_X_MAX + STADIUM_CIRCLE_RADIUS * cosf(theta),
-                 STADIUM_CIRCLE_RADIUS + STADIUM_CIRCLE_RADIUS * sinf(theta));
-    }
-
-    /* Top straight: y = 80, x from +60 to -60, 6 nodes.
-     * node indices 12 .. 17  (right → left). */
-    for (int i = 0; i < 6; i++) {
-        const float x = STADIUM_STRAIGHT_X_MAX -
-                         (2.0f * STADIUM_STRAIGHT_X_MAX) * (float)i / 5.0f;
-        SET_NODE(12 + i, x, STADIUM_TOP_Y);
-    }
-
-    /* Left semicircle: centre (-60, 40), radius 40, 6 nodes.
-     * Angle from +π/2 (top) to +3π/2 (bottom).  node indices 18 .. 23. */
-    for (int i = 0; i < 6; i++) {
-        const float theta = 3.14159265358979323846f * 0.5f +
-                            3.14159265358979323846f * (float)i / 5.0f;
-        SET_NODE(18 + i,
-                 -STADIUM_STRAIGHT_X_MAX + STADIUM_CIRCLE_RADIUS * cosf(theta),
-                 STADIUM_CIRCLE_RADIUS + STADIUM_CIRCLE_RADIUS * sinf(theta));
-    }
-
-    #undef SET_NODE
 }
 
 void track_free(Track *track)
@@ -164,6 +113,14 @@ SurfaceId Track_SurfaceAt(const Track *track, Vector2 pointM)
      * existing scenarios remain on asphalt and their CSVs are unchanged. */
     if (track == NULL || track->nodes == NULL || track->count <= 0) {
         return SURFACE_ASPHALT;
+    }
+
+    /* Parking lot: simple AABB test. */
+    if (track->isParkingLot) {
+        if (pointM.x >= track->lotMinXM && pointM.x <= track->lotMaxXM &&
+            pointM.y >= track->lotMinYM && pointM.y <= track->lotMaxYM)
+            return SURFACE_ASPHALT;
+        return track->offTrackSurfaceId;  /* grass */
     }
 
     int closestIdx = 0;

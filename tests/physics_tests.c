@@ -4348,14 +4348,14 @@ static void scenario_track_surface(void)
 
     track_init(&track);
     check(track.nodes != NULL, "track init: nodes is non-NULL");
-    check(track.count == 24, "track init: count == 24 (got %d)", track.count);
+    check(track.count == 5, "track init: count == 5 (got %d)", track.count);
     check(track.offTrackSurfaceId == SURFACE_GRASS,
           "track init: offTrackSurfaceId is SURFACE_GRASS (got %d)", (int)track.offTrackSurfaceId);
     check(track.nextCheckpoint == 0, "track init: nextCheckpoint is 0");
     check(track.lap == 0, "track init: lap is 0");
     check_near((double)track.lapTimerS, 0.0, 0.0, "track init: lapTimerS is 0");
 
-    /* Query the centre at (0, 0): inside the 180×100 m ellipse, so it should be asphalt. */
+    /* Query the centre at (0, 0): inside the 200×150 m parking lot, so it should be asphalt. */
     const SurfaceId centerSurf = Track_SurfaceAt(&track, (Vector2){ 0.0f, 0.0f });
     check(centerSurf == SURFACE_ASPHALT,
           "Track_SurfaceAt origin returns ASPHALT (got %d)", (int)centerSurf);
@@ -4365,8 +4365,7 @@ static void scenario_track_surface(void)
     check(nodeSurf == SURFACE_ASPHALT,
           "Track_SurfaceAt(centreline node) returns ASPHALT (got %d)", (int)nodeSurf);
 
-    /* Just inside the track boundary: a radial offset less than halfWidthM. The centreline
-     * node at (90, 0) has halfWidthM = 8 m, so a point at (90, 6) is inside. */
+    /* Just inside the lot boundary: offset from a perimeter node by less than halfWidthM. */
     {
         const Vector2 insidePoint = { track.nodes[0].centerM.x,
                                       track.nodes[0].centerM.y + track.nodes[0].halfWidthM * 0.7f };
@@ -4375,10 +4374,9 @@ static void scenario_track_surface(void)
               "Track_SurfaceAt inside boundary returns ASPHALT (got %d)", (int)insideSurf);
     }
 
-    /* Just outside: (0, 20) is 20 m away from the bottom straight at y=0, well past
-     * the halfWidth of 8 m. */
+    /* Just outside: (0, 100) is 25 m above the lot top at y = 75. */
     {
-        const Vector2 outsidePoint = { 0.0f, 20.0f };
+        const Vector2 outsidePoint = { 0.0f, 100.0f };
         const SurfaceId outsideSurf = Track_SurfaceAt(&track, outsidePoint);
         check(outsideSurf == SURFACE_GRASS,
               "Track_SurfaceAt outside boundary returns GRASS (got %d)", (int)outsideSurf);
@@ -4416,7 +4414,7 @@ static void scenario_track_surface(void)
     /* Re-init after free works. */
     track_init(&track);
     check(track.nodes != NULL, "track re-init: nodes is non-NULL");
-    check(track.count == 24, "track re-init: count == 24");
+    check(track.count == 5, "track re-init: count == 5");
     track_free(&track);
 }
 
@@ -4426,17 +4424,18 @@ static void scenario_track_surface(void)
 
 static void scenario_collision_barrier(void)
 {
-    /* --- Barrier hit from straight approach: car at origin aims DOWN at the
-     *     bottom straight's boundary (the bottom straight is at y = 0, boundary at y = -8 m) --- */
+    /* --- Barrier hit from straight approach: car aims DOWN at the
+     *     parking-lot bottom boundary (bottom edge at y = -75 m, barrier at y ≈ -79 m) --- */
     Game *game = alloc_game();
     game_init(game);
     /* In headless builds game_init does NOT call track_init, so we must. */
     track_init(&game->track);
 
-    /* Place the car near the boundary, heading straight down at it. */
-    game->vehicle.positionM = (Vector2){ 0.0f, -5.0f };   /* 3 m above the boundary */
-    game->vehicle.headingRad = -1.57079632679f;             /* pointing -Y (down) */
-    game->vehicle.velocityLongitudinalMps = 30.0f;          /* body X forward = world -Y */
+    /* Place the car near the boundary, heading straight down at it.
+     * The bottom barrier is at y ≈ -79 m (centerline -75 minus halfWidth 4). */
+    game->vehicle.positionM = (Vector2){ 0.0f, -75.5f }; /* ~3.5 m above the bottom barrier */
+    game->vehicle.headingRad = -1.57079632679f;           /* pointing -Y (down) */
+    game->vehicle.velocityLongitudinalMps = 30.0f;        /* body X forward = world -Y */
     game->vehicle.velocityLateralMps = 0.0f;
     game->renderState.prevPositionM = game->vehicle.positionM;
     game->renderState.prevHeadingRad = game->vehicle.headingRad;
@@ -4444,12 +4443,12 @@ static void scenario_collision_barrier(void)
     game->renderState.currHeadingRad = game->vehicle.headingRad;
     game->state = STATE_PLAYING;
 
-    /* Before tick: verify car is on the correct side (above the barrier at y = -8). */
+    /* Before tick: verify car is on the correct side (above the barrier at y ≈ -79). */
     const float yBefore = game->vehicle.positionM.y;
-    check(yBefore > -8.5f, "car starts inside the track boundary (y = %.2f > -8.5)", (double)yBefore);
+    check(yBefore > -79.0f, "car starts inside the track boundary (y = %.2f > -79.0)", (double)yBefore);
 
-    /* Run one fixed update at 120 Hz. The car moves ~0.25 m down at 30 m/s, then more ticks
-     * to reach and collide with the boundary at y ≈ -8 m. */
+    /* Run fixed updates at 120 Hz. The car moves ~0.25 m down per tick at 30 m/s.
+     * Even with engine braking, 60 ticks (~0.5 s) is enough to reach y ≈ -79 m. */
     Input tickInput;
     input_zero(&tickInput);
     tickInput.throttle = 0.0f;
@@ -4458,7 +4457,7 @@ static void scenario_collision_barrier(void)
     bool hitBarrier = false;
     float speedBeforeHit = 30.0f;
     float speedAfterHit = 30.0f;
-    float yAfter = -5.0f;
+    float yAfter = -72.0f;
 
     for (int i = 0; i < 60; i++) {
         speedBeforeHit = game->derived.speedMps;
@@ -4470,11 +4469,11 @@ static void scenario_collision_barrier(void)
             hitBarrier = true;
             break;
         }
-        if (yAfter < -9.5f) break; /* car passed far beyond, collision didn't work */
+        if (yAfter < -85.0f) break; /* car passed far beyond, collision didn't work */
     }
 
     /* After the tick, the car should NOT have passed through the boundary. */
-    check(yAfter >= -9.0f, "car did not tunnel through the barrier (y = %.4f, must be > -9.0)",
+    check(yAfter >= -80.5f, "car did not tunnel through the barrier (y = %.4f, must be > -80.5)",
           (double)yAfter);
     check(hitBarrier, "car hit the barrier (crashLockoutTimerS was set)");
     check(game->crashLockoutTimerS > 0.0f,
@@ -4497,10 +4496,9 @@ static void scenario_collision_barrier(void)
     game_init(game2);
     track_init(&game2->track);
 
-    /* Place car heading slightly angled toward the bottom boundary. Heading is mostly
-     * downward (-Y) but with a +X component (angled right-down), so it hits the boundary
-     * at a glancing angle. */
-    game2->vehicle.positionM = (Vector2){ 0.0f, -5.0f };
+    /* Place car near the bottom-right of the lot, heading right-down at a shallow angle
+     * toward the bottom barrier at y ≈ -79 m. */
+    game2->vehicle.positionM = (Vector2){ 80.0f, -75.5f };
     game2->vehicle.headingRad = -1.2f;    /* ~68° clockwise from +X, i.e. heading right-down */
     game2->vehicle.velocityLongitudinalMps = 30.0f;
     game2->vehicle.velocityLateralMps = 0.0f;

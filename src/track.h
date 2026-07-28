@@ -24,6 +24,9 @@ typedef struct {
     TrackNode *nodes;          /* heap-allocated, platform-owned, survives reload */
     int        count;
     SurfaceId  offTrackSurfaceId;  /* surface returned when point is off-track */
+    /* Parking lot mode: rectangular open area instead of laned road. */
+    bool  isParkingLot;
+    float lotMinXM, lotMaxXM, lotMinYM, lotMaxYM;
     int        nextCheckpoint;     /* index of the next gate the car must cross */
     int        lap;               /* completed laps */
     float      lapTimerS;         /* seconds elapsed since the last checkpoint/lap */

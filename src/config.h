@@ -198,9 +198,9 @@
 
 /* Phase 6 camera drift zoom ------------------------------------------------- */
 
-#define CAMERA_BASE_ZOOM        1.20f    /* dimensionless; >1 magnifies (zooms in) */
-#define CAMERA_ZOOM_RANGE       0.25f    /* dimensionless; subtracted at full drift -> 0.95 */
-#define CAMERA_MIN_ZOOM         0.50f    /* dimensionless; must stay > 0 */
+#define CAMERA_BASE_ZOOM        0.55f    /* dimensionless; >1 magnifies (zooms in) */
+#define CAMERA_ZOOM_RANGE       0.10f    /* dimensionless; subtracted at full drift -> 0.45 */
+#define CAMERA_MIN_ZOOM         0.30f    /* dimensionless; must stay > 0 */
 #define CAMERA_ZOOM_RATE        4.0f     /* 1/second smoothing rate */
 #define CAMERA_LOOKAHEAD        0.25f    /* seconds of velocity lookahead (reserved) */
 #define DRIFT_ZOOM_REF_RAD      0.70f    /* sideslip mapped to full zoom-out */

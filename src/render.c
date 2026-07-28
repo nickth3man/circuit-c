@@ -76,6 +76,92 @@ static void render_draw_track(const Track *track, float ppm)
 {
     if (track == NULL || track->nodes == NULL || track->count < 2) return;
 
+    /* Parking lot mode: wide open rectangular area with parking-space line grid. */
+    if (track->isParkingLot) {
+        const float lotL = track->lotMinXM;
+        const float lotR = track->lotMaxXM;
+        const float lotB = track->lotMinYM;
+        const float lotT = track->lotMaxYM;
+
+        /* ---- Grass surround (behind everything) ---- */
+        {
+            const float marginM = 60.0f;
+            const Vector2 blPx = units_world_to_render_px(
+                (Vector2){ lotL - marginM, lotB - marginM }, ppm);
+            const Vector2 trPx = units_world_to_render_px(
+                (Vector2){ lotR + marginM, lotT + marginM }, ppm);
+            DrawRectangle((int)blPx.x, (int)trPx.y,
+                          (int)(trPx.x - blPx.x), (int)(blPx.y - trPx.y),
+                          (Color){ 76, 117, 67, 255 });
+        }
+
+        /* ---- Asphalt lot ---- */
+        {
+            const Vector2 blPx = units_world_to_render_px(
+                (Vector2){ lotL, lotB }, ppm);
+            const Vector2 trPx = units_world_to_render_px(
+                (Vector2){ lotR, lotT }, ppm);
+            DrawRectangle((int)blPx.x, (int)trPx.y,
+                          (int)(trPx.x - blPx.x), (int)(blPx.y - trPx.y),
+                          (Color){ 45, 45, 50, 255 });
+        }
+
+        /* ---- Parking-space lines (vertical & horizontal grid) ---- */
+        {
+            const float spacingM  = 6.0f;   /* distance between line centres */
+            const float lineLenM  = 5.0f;   /* length of each painted line */
+            const float lineW     = 3.0f;   /* pixel thickness */
+            const Color colWhite  = { 210, 210, 215, 200 };  /* semi-transparent white */
+
+            /* Vertical parking strips: rows of short east-west lines at regular Y intervals */
+            for (float yy = lotB + 3.0f; yy <= lotT - 3.0f; yy += spacingM) {
+                for (float xx = lotL + 3.0f; xx <= lotR - 3.0f; xx += spacingM) {
+                    const Vector2 aPx = units_world_to_render_px(
+                        (Vector2){ xx - lineLenM * 0.5f, yy }, ppm);
+                    const Vector2 bPx = units_world_to_render_px(
+                        (Vector2){ xx + lineLenM * 0.5f, yy }, ppm);
+                    DrawLineEx(aPx, bPx, lineW, colWhite);
+                }
+            }
+
+            /* Perimeter double-line (curb) */
+            const Color colCurb = { 180, 180, 185, 230 };
+            const float curbThick = 4.0f;
+            {
+                const Vector2 bl = units_world_to_render_px((Vector2){ lotL, lotB }, ppm);
+                const Vector2 br = units_world_to_render_px((Vector2){ lotR, lotB }, ppm);
+                const Vector2 tr = units_world_to_render_px((Vector2){ lotR, lotT }, ppm);
+                const Vector2 tl = units_world_to_render_px((Vector2){ lotL, lotT }, ppm);
+                DrawLineEx(bl, br, curbThick, colCurb);
+                DrawLineEx(br, tr, curbThick, colCurb);
+                DrawLineEx(tr, tl, curbThick, colCurb);
+                DrawLineEx(tl, bl, curbThick, colCurb);
+            }
+
+            /* Inner curb offset line (2m inset) */
+            const float inset = 2.0f;
+            const Color colInnerCurb = { 140, 140, 145, 120 };
+            {
+                const Vector2 bl = units_world_to_render_px(
+                    (Vector2){ lotL + inset, lotB + inset }, ppm);
+                const Vector2 br = units_world_to_render_px(
+                    (Vector2){ lotR - inset, lotB + inset }, ppm);
+                const Vector2 tr = units_world_to_render_px(
+                    (Vector2){ lotR - inset, lotT - inset }, ppm);
+                const Vector2 tl = units_world_to_render_px(
+                    (Vector2){ lotL + inset, lotT - inset }, ppm);
+                DrawLineEx(bl, br, 2.0f, colInnerCurb);
+                DrawLineEx(br, tr, 2.0f, colInnerCurb);
+                DrawLineEx(tr, tl, 2.0f, colInnerCurb);
+                DrawLineEx(tl, bl, 2.0f, colInnerCurb);
+            }
+        }
+
+        return;
+    }
+
+    /* ---- Original stadium oval rendering (below) ---- */
+
     const int n = track->count;
     /* All current nodes share the same half-width; sample the first. */
     const float hwM = track->nodes[0].halfWidthM;
