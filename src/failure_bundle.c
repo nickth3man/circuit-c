@@ -34,6 +34,7 @@ static void timestamp_now(char *out, size_t capacity)
 {
     const time_t now = time(NULL);
     struct tm parts;
+    memset(&parts, 0, sizeof(parts));
     bool ok = false;
 
 #if defined(_WIN32)

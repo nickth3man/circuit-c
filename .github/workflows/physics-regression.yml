@@ -60,14 +60,12 @@ jobs:
       - name: Run every scenario at the merge base
         id: base
         run: |
-          set +e
           base="${{ github.event.pull_request.base.sha }}"
           git worktree add /tmp/base "$base"
           # The base needs the raylib headers too; a symlink is enough for a header-only use.
           mkdir -p /tmp/base/third_party
           ln -s "$PWD/third_party/raylib-src" /tmp/base/third_party/raylib-src
-          ( cd /tmp/base && make test-physics )
-          if [ $? -ne 0 ]; then
+          if ! ( cd /tmp/base && make test-physics ); then
             echo "status=unbuildable" >> "$GITHUB_OUTPUT"
             echo "The merge base could not be built with 'make test-physics'."
             echo "This is expected for the pull request that introduces it; the comparison"

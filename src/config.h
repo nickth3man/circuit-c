@@ -133,10 +133,14 @@
  *                                badly wrong, not merely aggressive.
  *   RESISTANCE_POWER_TOLERANCE_W slack for the "resistance never adds energy" assertion,
  *                                in watts, absorbing float rounding in the dot product.
+ *                                Aero is checked against body velocity.
+ *   RESISTANCE_FORCE_TOLERANCE_N slack when comparing stored per-wheel rolling-resistance
+ *                                magnitudes to a fresh pure-helper recompute (newtons).
  */
 #define RESISTANCE_EPSILON_MPS       1.0e-4f
 #define MAX_LOAD_TRANSFER_FRACTION   1.50f
 #define RESISTANCE_POWER_TOLERANCE_W 1.0e-2f
+#define RESISTANCE_FORCE_TOLERANCE_N 1.0e-2f
 
 /* Phase 5 collision --------------------------------------------------------- */
 

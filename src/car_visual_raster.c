@@ -76,9 +76,10 @@ static Vector2 to_px(const RasterTarget *t, float xM, float yM)
 static void fill_polygon_px(const RasterTarget *t, const Vector2 *pts, int count,
                             Color c, unsigned char label)
 {
-    if (count < 3) return;
+    if (pts == NULL || count < 3) return;
 
-    float minY = pts[0].y, maxY = pts[0].y;
+    float minY = pts[0].y;
+    float maxY = pts[0].y;
     for (int i = 1; i < count; i++) {
         if (pts[i].y < minY) minY = pts[i].y;
         if (pts[i].y > maxY) maxY = pts[i].y;
