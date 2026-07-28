@@ -6,95 +6,176 @@ generates the Physics Lab sliders and the tuning-profile format.
 
 ## Body
 
-| Parameter | Default | Unit | Range | Step | Reset | Meaning |
-|---|---:|---|---|---:|:-:|---|
-| `body.mass` | 1200 | kg | 600 .. 2500 | 10 | — | Sprung plus unsprung mass used by every force-to-acceleration conversion. |
-| `body.yaw_inertia` | 1800 | kg*m^2 | 500 .. 5000 | 25 | — | Yaw moment of inertia about the CG. Lower values make the car rotate more eagerly. |
-| `body.cg_to_front` | 1.15 | m | 0.6 .. 2.2 | 0.01 | yes | CG to front axle. Sets the front lever arm and the static front load share. |
-| `body.cg_to_rear` | 1.4 | m | 0.6 .. 2.2 | 0.01 | yes | CG to rear axle. Wheelbase is always the sum of the two CG distances. |
-| `body.cg_height` | 0.5 | m | 0.2 .. 1 | 0.01 | — | CG height above the road. Scales longitudinal load transfer: transfer = m*ax*h/L. |
-| `body.track_front` | 1.48 | m | 1 .. 2.2 | 0.01 | yes | Front track width; places the two front contact points. |
-| `body.track_rear` | 1.46 | m | 1 .. 2.2 | 0.01 | yes | Rear track width; places the two rear contact points. |
-| `body.drag_coefficient` | 0.32 | — | 0.1 .. 1.2 | 0.01 | — | Dimensionless drag coefficient Cd in 0.5*rho*Cd*A*v^2, opposing the velocity vector. |
-| `body.frontal_area` | 1.9 | m^2 | 1 .. 3.5 | 0.05 | — | Reference frontal area A paired with the drag coefficient. |
-| `body.rolling_resistance` | 0.015 | — | 0 .. 0.06 | 0.001 | — | Dimensionless rolling resistance coefficient; force is the coefficient times the wheel's current dynamic normal load, so load transfer moves it front to rear. |
-| `body.load_filter_rate` | 20 | Hz | 1 .. 60 | 0.5 | — | Corner frequency of the first-order filter on the previous step's solved longitudinal acceleration. Lower values make load transfer lag further behind a throttle or brake change; the filter input is never this step's own acceleration. |
-| `body.roll_stiffness_front` | 0.5 | — | 0 .. 1 | 0.01 | — | Front axle share of roll moment m*ay*h. 0.50 is symmetric; higher loads the front outer wheel more. |
+| Parameter | Default | Unit | Range | Step | Tier | Derived | Reset | Meaning |
+|---|---:|---|---|---:|---|:-:|:-:|---|
+| `body.wheelbase` | 2.55 | m | 1.8 .. 7 | 0.01 | essential | — | yes | Wheelbase; primary. CG distances derive from this plus mass particles. |
+| `body.track_front` | 1.48 | m | 1 .. 2.6 | 0.01 | essential | — | yes | Front track width. |
+| `body.track_rear` | 1.46 | m | 1 .. 2.6 | 0.01 | essential | — | yes | Rear track width. |
+| `body.front_overhang` | 0.78 | m | 0.2 .. 2.5 | 0.01 | advanced | — | — | Body ahead of the front axle. |
+| `body.rear_overhang` | 0.82 | m | 0.2 .. 2.5 | 0.01 | advanced | — | — | Body behind the rear axle. |
+| `body.width_overall` | 1.7 | m | 1.2 .. 2.6 | 0.01 | essential | — | yes | Overall body width; derives collision half-width. |
+| `body.height_overall` | 1.45 | m | 1 .. 3.2 | 0.01 | essential | — | — | Overall body height; derives frontal area with width. |
+| `body.ride_height_front` | 0.14 | m | 0.04 .. 0.5 | 0.005 | advanced | — | — | Front ride height / arch clearance. |
+| `body.ride_height_rear` | 0.14 | m | 0.04 .. 0.5 | 0.005 | advanced | — | — | Rear ride height / arch clearance. |
+| `body.cowl_x` | 0.55 | m | -2 .. 2 | 0.01 | advanced | — | — | Cowl X in layout frame (axle midpoint origin). |
+| `body.backlight_x` | -0.55 | m | -2 .. 2 | 0.01 | advanced | — | — | Backlight X in layout frame. |
+| `body.drag_coefficient` | 0.32 | — | 0.1 .. 1.2 | 0.01 | advanced | — | — | Cd in 0.5*rho*Cd*A*v^2. |
+| `body.rolling_resistance` | 0.015 | — | 0 .. 0.06 | 0.001 | advanced | — | — | Rolling resistance coefficient. |
+| `body.load_filter_rate` | 20 | Hz | 1 .. 60 | 0.5 | expert | — | — | Load-transfer accel filter corner frequency. |
+| `body.roll_stiffness_front` | 0.5 | — | 0 .. 1 | 0.01 | advanced | — | — | Front axle share of roll moment. |
+| `body.mass` | 1200 | kg | 400 .. 15000 | 10 | essential | yes | — | Total mass from particles (read-only). |
+| `body.yaw_inertia` | 1800 | kg*m^2 | 200 .. 40000 | 25 | advanced | yes | — | Yaw inertia from particles (read-only). |
+| `body.cg_to_front` | 1.15 | m | 0.4 .. 4 | 0.01 | essential | yes | yes | CG to front axle (derived). |
+| `body.cg_to_rear` | 1.4 | m | 0.4 .. 4 | 0.01 | essential | yes | yes | CG to rear axle (derived). |
+| `body.cg_height` | 0.5 | m | 0.15 .. 1.5 | 0.01 | advanced | yes | — | CG height (derived). |
+| `body.frontal_area` | 1.9 | m^2 | 1 .. 8 | 0.05 | advanced | yes | — | Frontal area from width*height*fill (derived). |
+| `body.length_overall` | 4.15 | m | 2.5 .. 12 | 0.01 | advanced | yes | — | Overall length = wheelbase + overhangs. |
+
+## Mass
+
+| Parameter | Default | Unit | Range | Step | Tier | Derived | Reset | Meaning |
+|---|---:|---|---|---:|---|:-:|:-:|---|
+| `mass.engine` | 160 | kg | 20 .. 8000 | 5 | essential | — | — | Engine mass particle. |
+| `mass.engine_x` | 1.1 | m | -4 .. 4 | 0.01 | essential | — | — | Engine X in layout frame. |
+| `mass.engine_z` | 0.4 | m | 0.05 .. 2 | 0.01 | expert | — | — | Engine Z (height) in layout frame. |
+| `mass.gearbox` | 70 | kg | 20 .. 8000 | 5 | advanced | — | — | Gearbox mass particle. |
+| `mass.gearbox_x` | 0.5 | m | -4 .. 4 | 0.01 | advanced | — | — | Gearbox X in layout frame. |
+| `mass.gearbox_z` | 0.35 | m | 0.05 .. 2 | 0.01 | expert | — | — | Gearbox Z (height) in layout frame. |
+| `mass.fuel` | 60 | kg | 20 .. 8000 | 5 | advanced | — | — | Fuel mass particle. |
+| `mass.fuel_x` | -1.1 | m | -4 .. 4 | 0.01 | advanced | — | — | Fuel X in layout frame. |
+| `mass.fuel_z` | 0.3 | m | 0.05 .. 2 | 0.01 | expert | — | — | Fuel Z (height) in layout frame. |
+| `mass.driver` | 90 | kg | 20 .. 8000 | 5 | advanced | — | — | Driver mass particle. |
+| `mass.driver_x` | 0.2 | m | -4 .. 4 | 0.01 | advanced | — | — | Driver X in layout frame. |
+| `mass.driver_z` | 0.55 | m | 0.05 .. 2 | 0.01 | expert | — | — | Driver Z (height) in layout frame. |
+| `mass.chassis` | 820 | kg | 20 .. 8000 | 5 | essential | — | — | Chassis mass particle. |
+| `mass.chassis_x` | -0.0158537 | m | -4 .. 4 | 0.01 | advanced | — | — | Chassis X in layout frame. |
+| `mass.chassis_z` | 0.541463 | m | 0.05 .. 2 | 0.01 | expert | — | — | Chassis Z (height) in layout frame. |
 
 ## Wheels
 
-| Parameter | Default | Unit | Range | Step | Reset | Meaning |
-|---|---:|---|---|---:|:-:|---|
-| `wheel.radius` | 0.31 | m | 0.2 .. 0.45 | 0.005 | — | Loaded rolling radius; converts wheel speed to contact-patch speed. |
-| `wheel.inertia` | 1.2 | kg*m^2 | 0.3 .. 4 | 0.05 | — | Rotational inertia of one wheel. Governs how fast a wheel spins up or locks. |
-
-## Steering
-
-| Parameter | Default | Unit | Range | Step | Reset | Meaning |
-|---|---:|---|---|---:|:-:|---|
-| `steer.max_angle` | 0.7 | rad | 0.2 .. 1.2 | 0.01 | — | Maximum road-wheel angle at full lock. Left is positive. |
-| `steer.rate` | 5 | rad/s | 0.5 .. 20 | 0.1 | — | How fast the road wheels follow a steering input. |
-| `steer.return_rate` | 7 | rad/s | 0.5 .. 25 | 0.1 | — | How fast the road wheels centre when the input is released. |
-| `steer.ackermann_percent` | 0 | — | 0 .. 1 | 0.01 | — | 0=parallel steer, 1=true Ackermann. The inner wheel steers more than the outer. |
+| Parameter | Default | Unit | Range | Step | Tier | Derived | Reset | Meaning |
+|---|---:|---|---|---:|---|:-:|:-:|---|
+| `wheel.inertia` | 1.2 | kg*m^2 | 0.3 .. 8 | 0.05 | advanced | — | — | Rotational inertia of one wheel. |
+| `wheel.radius` | 0.31 | m | 0.15 .. 0.6 | 0.005 | advanced | yes | — | Legacy rear rolling radius (derived). |
+| `wheel.radius_front` | 0.31 | m | 0.15 .. 0.6 | 0.005 | essential | yes | — | Front loaded rolling radius (derived). |
+| `wheel.radius_rear` | 0.31 | m | 0.15 .. 0.6 | 0.005 | essential | yes | — | Rear loaded rolling radius (derived). |
+| `wheel.offset_et_front` | 35 | mm | -20 .. 60 | 1 | expert | — | — | Front wheel ET offset. |
+| `wheel.offset_et_rear` | 35 | mm | -20 .. 60 | 1 | expert | — | — | Rear wheel ET offset. |
 
 ## Tires
 
-| Parameter | Default | Unit | Range | Step | Reset | Meaning |
-|---|---:|---|---|---:|:-:|---|
-| `tire.lat_front.b` | 10 | — | 2 .. 25 | 0.1 | — | Front lateral stiffness factor: larger reaches peak grip at a smaller slip angle. |
-| `tire.lat_front.c` | 1.45 | — | 1 .. 2.2 | 0.01 | — | Front lateral shape factor: controls how sharply force falls off past the peak. |
-| `tire.lat_front.mu` | 1.3 | — | 0.3 .. 2 | 0.01 | — | Front lateral peak friction coefficient, as a multiple of normal load. |
-| `tire.lat_rear.b` | 10 | — | 2 .. 25 | 0.1 | — | Rear lateral stiffness factor. |
-| `tire.lat_rear.c` | 1.45 | — | 1 .. 2.2 | 0.01 | — | Rear lateral shape factor. |
-| `tire.lat_rear.mu` | 1.2 | — | 0.3 .. 2 | 0.01 | — | Rear lateral peak friction. Below the front value the car oversteers sooner. |
-| `tire.long.b` | 12 | — | 2 .. 30 | 0.1 | — | Longitudinal stiffness factor against slip ratio. |
-| `tire.long.c` | 1.55 | — | 1 .. 2.2 | 0.01 | — | Longitudinal shape factor. |
-| `tire.long.mu_scale` | 1 | — | 0.3 .. 2 | 0.01 | — | Longitudinal friction scale applied on top of the lateral peak friction. |
-| `tire.relaxation_length` | 0 | m | 0 .. 1 | 0.01 | — | First-order lateral-force relaxation length. 0 disables; rate=|vx|/L. |
-| `tire.load_sensitivity_k` | 0 | — | 0 .. 0.05 | 0.001 | — | Exponent in mu_eff = mu * (Fz/FzRef)^-k. 0 disables. |
-| `tire.load_ref_per_wheel` | 2940 | N | 500 .. 8000 | 10 | — | Reference load for the load-sensitivity curve; stock = m*g/4 per wheel. |
+| Parameter | Default | Unit | Range | Step | Tier | Derived | Reset | Meaning |
+|---|---:|---|---|---:|---|:-:|:-:|---|
+| `tire.section_width_front` | 225 | mm | 145 .. 355 | 5 | essential | — | — | Front tire section width. |
+| `tire.aspect_front` | 45 | % | 25 .. 80 | 1 | advanced | — | — | Front tire aspect ratio. |
+| `tire.rim_diameter_front` | 17 | in | 12 .. 22 | 0.5 | advanced | — | — | Front rim diameter. |
+| `tire.rim_width_front` | 8 | in | 4 .. 14 | 0.5 | expert | — | — | Front rim width. |
+| `tire.pressure_front` | 220 | kPa | 120 .. 400 | 5 | expert | — | — | Front cold pressure. |
+| `tire.section_width_rear` | 225 | mm | 145 .. 355 | 5 | essential | — | — | Rear tire section width. |
+| `tire.aspect_rear` | 45 | % | 25 .. 80 | 1 | advanced | — | — | Rear tire aspect ratio. |
+| `tire.rim_diameter_rear` | 17 | in | 12 .. 22 | 0.5 | advanced | — | — | Rear rim diameter. |
+| `tire.rim_width_rear` | 8 | in | 4 .. 14 | 0.5 | expert | — | — | Rear rim width. |
+| `tire.pressure_rear` | 220 | kPa | 120 .. 400 | 5 | expert | — | — | Rear cold pressure. |
+| `tire.lat_front.b` | 10 | — | 2 .. 25 | 0.1 | advanced | — | — | Front lateral stiffness factor. |
+| `tire.lat_front.c` | 1.45 | — | 1 .. 2.2 | 0.01 | advanced | — | — | Front lateral shape factor. |
+| `tire.lat_front.mu` | 1.3 | — | 0.3 .. 2 | 0.01 | advanced | — | — | Front lateral peak friction. |
+| `tire.lat_rear.b` | 10 | — | 2 .. 25 | 0.1 | advanced | — | — | Rear lateral stiffness factor. |
+| `tire.lat_rear.c` | 1.45 | — | 1 .. 2.2 | 0.01 | advanced | — | — | Rear lateral shape factor. |
+| `tire.lat_rear.mu` | 1.2 | — | 0.3 .. 2 | 0.01 | advanced | — | — | Rear lateral peak friction. |
+| `tire.long.b` | 12 | — | 2 .. 30 | 0.1 | advanced | — | — | Longitudinal stiffness factor. |
+| `tire.long.c` | 1.55 | — | 1 .. 2.2 | 0.01 | advanced | — | — | Longitudinal shape factor. |
+| `tire.long.mu_scale` | 1 | — | 0.3 .. 2 | 0.01 | advanced | — | — | Longitudinal friction scale. |
+| `tire.relaxation_length` | 0 | m | 0 .. 1 | 0.01 | expert | — | — | Lateral force relaxation length. |
+| `tire.load_sensitivity_k` | 0 | — | 0 .. 0.05 | 0.001 | expert | — | — | Load sensitivity exponent. |
+| `tire.load_ref_per_wheel` | 2942 | N | 500 .. 15000 | 10 | expert | yes | — | Reference load = m*g/4 (derived). |
+
+## Steering
+
+| Parameter | Default | Unit | Range | Step | Tier | Derived | Reset | Meaning |
+|---|---:|---|---|---:|---|:-:|:-:|---|
+| `steer.max_angle` | 0.7 | rad | 0.2 .. 1.2 | 0.01 | essential | — | — | Max road-wheel angle. |
+| `steer.rate` | 5 | rad/s | 0.5 .. 20 | 0.1 | advanced | — | — | Steer follow rate. |
+| `steer.return_rate` | 7 | rad/s | 0.5 .. 25 | 0.1 | advanced | — | — | Steer return rate. |
+| `steer.ackermann_percent` | 0 | — | 0 .. 1 | 0.01 | advanced | — | — | Ackermann blend. |
+
+## Suspension
+
+| Parameter | Default | Unit | Range | Step | Tier | Derived | Reset | Meaning |
+|---|---:|---|---|---:|---|:-:|:-:|---|
+| `susp.camber_front` | -0.0175 | rad | -0.12 .. 0.05 | 0.001 | expert | — | — | Front static camber. |
+| `susp.camber_rear` | -0.0175 | rad | -0.12 .. 0.05 | 0.001 | expert | — | — | Rear static camber. |
+| `susp.toe_front` | 0.0035 | rad | -0.05 .. 0.05 | 0.001 | expert | — | — | Front static toe. |
+| `susp.toe_rear` | 0.0017 | rad | -0.05 .. 0.05 | 0.001 | expert | — | — | Rear static toe. |
+| `susp.caster_front` | 0.087 | rad | 0 .. 0.25 | 0.001 | expert | — | — | Front caster. |
+| `susp.caster_rear` | 0.052 | rad | 0 .. 0.25 | 0.001 | expert | — | — | Rear caster. |
+| `susp.wheel_rate_front` | 28000 | N/m | 5000 .. 80000 | 100 | expert | — | — | Front wheel rate. |
+| `susp.wheel_rate_rear` | 26000 | N/m | 5000 .. 80000 | 100 | expert | — | — | Rear wheel rate. |
+| `susp.anti_roll_front` | 18000 | N/m | 0 .. 60000 | 100 | expert | — | — | Front anti-roll stiffness. |
+| `susp.anti_roll_rear` | 16000 | N/m | 0 .. 60000 | 100 | expert | — | — | Rear anti-roll stiffness. |
+| `susp.travel_front` | 0.09 | m | 0.03 .. 0.25 | 0.005 | advanced | — | — | Front suspension travel. |
+| `susp.travel_rear` | 0.095 | m | 0.03 .. 0.25 | 0.005 | advanced | — | — | Rear suspension travel. |
+| `susp.roll_centre_front` | 0.08 | m | 0 .. 0.4 | 0.005 | expert | — | — | Front roll-centre height. |
+| `susp.roll_centre_rear` | 0.1 | m | 0 .. 0.4 | 0.005 | expert | — | — | Rear roll-centre height. |
 
 ## Drivetrain
 
-| Parameter | Default | Unit | Range | Step | Reset | Meaning |
-|---|---:|---|---|---:|:-:|---|
-| `drive.gear1` | 3.55 | — | 0.4 .. 6 | 0.01 | — | First gear ratio. |
-| `drive.gear2` | 2.05 | — | 0.4 .. 6 | 0.01 | — | Second gear ratio. |
-| `drive.gear3` | 1.38 | — | 0.4 .. 6 | 0.01 | — | Third gear ratio. |
-| `drive.gear4` | 1 | — | 0.4 .. 6 | 0.01 | — | Fourth gear ratio. |
-| `drive.gear5` | 0.82 | — | 0.4 .. 6 | 0.01 | — | Fifth gear ratio. |
-| `drive.reverse` | 3.2 | — | 0.4 .. 6 | 0.01 | — | Reverse gear ratio. |
-| `drive.final` | 4.1 | — | 1 .. 8 | 0.01 | — | Final drive ratio. |
-| `drive.efficiency` | 0.9 | — | 0.5 .. 1 | 0.01 | — | Fraction of engine torque that reaches the driven wheels. |
-| `engine.idle_rpm` | 900 | rpm | 500 .. 2000 | 25 | — | Idle speed floor. |
-| `engine.redline_rpm` | 7000 | rpm | 3000 .. 10000 | 100 | — | Redline; also the upper end of the torque curve's rpm axis. |
-| `engine.torque_p0` | 140 | N*m | 0 .. 600 | 5 | — | Torque curve point 0 (idle end). |
-| `engine.torque_p1` | 200 | N*m | 0 .. 600 | 5 | — | Torque curve point 1. |
-| `engine.torque_p2` | 240 | N*m | 0 .. 600 | 5 | — | Torque curve point 2. |
-| `engine.torque_p3` | 255 | N*m | 0 .. 600 | 5 | — | Torque curve point 3 (peak). |
-| `engine.torque_p4` | 250 | N*m | 0 .. 600 | 5 | — | Torque curve point 4. |
-| `engine.torque_p5` | 230 | N*m | 0 .. 600 | 5 | — | Torque curve point 5. |
-| `engine.torque_p6` | 195 | N*m | 0 .. 600 | 5 | — | Torque curve point 6 (redline end). |
-| `engine.braking_torque` | 35 | N*m | 0 .. 200 | 1 | — | Closed-throttle engine braking torque at the crankshaft. |
-| `drive.diff_mode` | 0 | — | 0 .. 2 | 1 | — | 0=locked (both rear wheels share omega equally), 1=open (equal torque split), 2=LSD torque-biasing. |
-| `drive.diff_bias_ratio` | 2 | — | 1 .. 5 | 0.1 | — | LSD: maximum ratio of slower to faster wheel torque. |
-| `drive.diff_preload` | 60 | N*m | 0 .. 400 | 5 | — | LSD clutch preload torque; minimum torque bias even at zero difference. |
+| Parameter | Default | Unit | Range | Step | Tier | Derived | Reset | Meaning |
+|---|---:|---|---|---:|---|:-:|:-:|---|
+| `drive.gear1` | 3.55 | — | 0.4 .. 6 | 0.01 | advanced | — | — | First gear ratio. |
+| `drive.gear2` | 2.05 | — | 0.4 .. 6 | 0.01 | advanced | — | — | Second gear ratio. |
+| `drive.gear3` | 1.38 | — | 0.4 .. 6 | 0.01 | advanced | — | — | Third gear ratio. |
+| `drive.gear4` | 1 | — | 0.4 .. 6 | 0.01 | advanced | — | — | Fourth gear ratio. |
+| `drive.gear5` | 0.82 | — | 0.4 .. 6 | 0.01 | advanced | — | — | Fifth gear ratio. |
+| `drive.reverse` | 3.2 | — | 0.4 .. 6 | 0.01 | advanced | — | — | Reverse gear ratio. |
+| `drive.final` | 4.1 | — | 1 .. 8 | 0.01 | advanced | — | — | Final drive ratio. |
+| `drive.efficiency` | 0.9 | — | 0.5 .. 1 | 0.01 | expert | — | — | Drivetrain efficiency. |
+| `drive.diff_mode` | 0 | — | 0 .. 2 | 1 | advanced | — | — | 0=locked 1=open 2=LSD. |
+| `drive.diff_bias_ratio` | 2 | — | 1 .. 5 | 0.1 | expert | — | — | LSD bias ratio. |
+| `drive.diff_preload` | 60 | N*m | 0 .. 400 | 5 | expert | — | — | LSD preload. |
+| `drive.layout` | 0 | — | 0 .. 2 | 1 | essential | — | — | 0=RWD 1=FWD 2=AWD. |
+| `drive.front_torque_split` | 0 | — | 0 .. 1 | 0.01 | advanced | — | — | AWD front torque share. |
+| `engine.idle_rpm` | 900 | rpm | 500 .. 2000 | 25 | advanced | — | — | Idle RPM. |
+| `engine.redline_rpm` | 7000 | rpm | 3000 .. 10000 | 100 | essential | — | — | Redline RPM. |
+| `engine.torque_p0` | 140 | N*m | 0 .. 600 | 5 | advanced | — | — | Torque curve point 0. |
+| `engine.torque_p1` | 200 | N*m | 0 .. 600 | 5 | advanced | — | — | Torque curve point 1. |
+| `engine.torque_p2` | 240 | N*m | 0 .. 600 | 5 | advanced | — | — | Torque curve point 2. |
+| `engine.torque_p3` | 255 | N*m | 0 .. 600 | 5 | advanced | — | — | Torque curve point 3. |
+| `engine.torque_p4` | 250 | N*m | 0 .. 600 | 5 | advanced | — | — | Torque curve point 4. |
+| `engine.torque_p5` | 230 | N*m | 0 .. 600 | 5 | advanced | — | — | Torque curve point 5. |
+| `engine.torque_p6` | 195 | N*m | 0 .. 600 | 5 | advanced | — | — | Torque curve point 6. |
+| `engine.braking_torque` | 35 | N*m | 0 .. 200 | 1 | expert | — | — | Engine braking torque. |
+| `engine.cylinders` | 4 | — | 2 .. 12 | 1 | advanced | — | — | Cylinder count. |
+| `engine.displacement` | 2 | L | 0.5 .. 8 | 0.1 | advanced | — | — | Displacement litres. |
 
 ## Brakes
 
-| Parameter | Default | Unit | Range | Step | Reset | Meaning |
-|---|---:|---|---|---:|:-:|---|
-| `brake.max_torque` | 3000 | N*m | 0 .. 8000 | 50 | — | Total service brake torque at full pedal, before bias. |
-| `brake.bias_front` | 0.62 | — | 0 .. 1 | 0.01 | — | Fraction of service brake torque sent to the front axle. |
-| `brake.handbrake_torque` | 1800 | N*m | 0 .. 6000 | 50 | — | Rear-axle handbrake torque at full pull. |
+| Parameter | Default | Unit | Range | Step | Tier | Derived | Reset | Meaning |
+|---|---:|---|---|---:|---|:-:|:-:|---|
+| `brake.max_torque` | 3000 | N*m | 0 .. 8000 | 50 | essential | — | — | Total service brake torque. |
+| `brake.bias_front` | 0.62 | — | 0 .. 1 | 0.01 | advanced | — | — | Front brake bias. |
+| `brake.handbrake_torque` | 1800 | N*m | 0 .. 6000 | 50 | advanced | — | — | Handbrake torque. |
+| `brake.disc_radius_front` | 0.15 | m | 0.08 .. 0.22 | 0.005 | expert | — | — | Front disc radius. |
+| `brake.disc_radius_rear` | 0.14 | m | 0.08 .. 0.22 | 0.005 | expert | — | — | Rear disc radius. |
+| `brake.pad_friction` | 0.38 | — | 0.15 .. 0.6 | 0.01 | expert | — | — | Pad friction coefficient. |
+
+## Aero
+
+| Parameter | Default | Unit | Range | Step | Tier | Derived | Reset | Meaning |
+|---|---:|---|---|---:|---|:-:|:-:|---|
+| `aero.lift_front` | 0.05 | — | -2 .. 1 | 0.01 | advanced | — | — | Front lift coefficient. |
+| `aero.lift_rear` | 0.1 | — | -3 .. 1 | 0.01 | advanced | — | — | Rear lift coefficient. |
+| `aero.ref_area_front` | 0.4 | m^2 | 0.05 .. 2 | 0.01 | expert | — | — | Front aero reference area. |
+| `aero.ref_area_rear` | 0.55 | m^2 | 0.05 .. 2 | 0.01 | expert | — | — | Rear aero reference area. |
+| `aero.cop_x` | -0.2 | m | -2 .. 2 | 0.01 | expert | — | — | Centre of pressure X. |
 
 ## Collision
 
-| Parameter | Default | Unit | Range | Step | Reset | Meaning |
-|---|---:|---|---|---:|:-:|---|
-| `collision.half_width` | 0.85 | m | 0.4 .. 1.5 | 0.01 | yes | Vehicle body half-width for the collision capsule. Smaller than tyre track width. |
-| `collision.restitution` | 0.3 | — | 0 .. 0.9 | 0.01 | — | Barrier bounce restitution. 0 = no bounce (full impact absorption); 0.3 = low bounce. |
-| `collision.friction` | 0.5 | — | 0 .. 1.5 | 0.01 | — | Coulomb friction coefficient at barrier impact. Governs how much a glancing hit spins the car. |
+| Parameter | Default | Unit | Range | Step | Tier | Derived | Reset | Meaning |
+|---|---:|---|---|---:|---|:-:|:-:|---|
+| `collision.half_width` | 0.85 | m | 0.4 .. 1.5 | 0.01 | advanced | yes | yes | Collision capsule half-width = width/2 (derived). |
+| `collision.restitution` | 0.3 | — | 0 .. 0.9 | 0.01 | expert | — | — | Barrier restitution. |
+| `collision.friction` | 0.5 | — | 0 .. 1.5 | 0.01 | expert | — | — | Barrier friction. |
 
 `Reset` marks a parameter that only takes full effect after a simulation
-reset, because it moves the wheel contact points.
+reset, because it moves the wheel contact points. `Derived` rows are
+read-only; write the primaries that produce them.

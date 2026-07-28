@@ -25,6 +25,7 @@
  */
 #include "dev_presets.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 #include "dev_params.h"
@@ -506,13 +507,15 @@ int dev_preset_apply(VehicleSpec *spec, int presetIndex)
 
     const PresetOverride *overrides = kOverrideTables[presetIndex];
     const int count = kOverrideCounts[presetIndex];
-    int applied = 0;
+    if (count <= 0 || overrides == NULL) return 0;
 
+    DevParamAssignment *items = (DevParamAssignment *)malloc((size_t)count * sizeof(*items));
+    if (items == NULL) return 0;
     for (int i = 0; i < count; i++) {
-        const DevParameter *param = dev_param_find(overrides[i].key);
-        if (param != NULL && dev_param_set(spec, param, overrides[i].value)) {
-            applied++;
-        }
+        items[i].key = overrides[i].key;
+        items[i].value = overrides[i].value;
     }
+    const int applied = dev_params_apply_assignments(spec, items, count, NULL, NULL);
+    free(items);
     return applied;
 }

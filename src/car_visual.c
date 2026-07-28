@@ -24,15 +24,8 @@
 
 /* ------------------------------------------------------------------ phase-2 constants --
  *
- * Each of these becomes a real VehicleSpec field in Phase 2. Until then it is the same for
- * every car. Grep TODO(phase-2) to find every site that must change. */
-#define CV_FRONT_OVERHANG_M   0.78f   /* TODO(phase-2): body.front_overhang */
-#define CV_REAR_OVERHANG_M    0.82f   /* TODO(phase-2): body.rear_overhang */
-#define CV_TIRE_WIDTH_M       0.225f  /* TODO(phase-2): tire.width_front / _rear */
-#define CV_RIM_FRACTION       0.58f   /* TODO(phase-2): tire.aspect_front / _rear */
-#define CV_ARCH_CLEARANCE_M   0.045f  /* TODO(phase-2): body.ride_height_front / _rear */
-#define CV_CABIN_WIDTH_FRAC   0.74f   /* TODO(phase-2): body.height_overall */
-
+ * Presentation-only gains that are not VehicleSpec fields. Grep TODO(phase-2) is retired;
+ * geometry now reads the Phase 2 primaries. */
 /* Presentation gain on the resting wheel angle. Static toe is ~0.15 degrees, which is far
  * below the ~7.6 cm / one-pixel visibility floor at the scale the game draws at, so the cue is
  * amplified to be seen at all. Render-only, exactly like steerVisualGain in render.c; no
@@ -114,7 +107,8 @@ uint32_t car_visual_colour_seed(const VehicleSpec *spec)
     fnv_mix(&h, spec->cgToRearM);
     fnv_mix(&h, spec->trackWidthFrontM);
     fnv_mix(&h, spec->trackWidthRearM);
-    fnv_mix(&h, spec->wheelRadiusM);
+    fnv_mix(&h, spec->wheelRadiusFrontM);
+    fnv_mix(&h, spec->wheelRadiusRearM);
     fnv_mix(&h, spec->bodyHalfWidthM);
     fnv_mix(&h, spec->cgHeightM);
     fnv_mix(&h, spec->tireMuLatFront);
@@ -202,9 +196,9 @@ void car_visual_derive(const VehicleSpec *spec, CarVisual *out)
     const float wheelbase = spec->cgToFrontM + spec->cgToRearM;
     out->wheelbaseM = wheelbase;
 
-    /* TODO(phase-2): real overhang parameters. */
-    out->frontOverhangM = CV_FRONT_OVERHANG_M;
-    out->rearOverhangM  = CV_REAR_OVERHANG_M;
+    /* [identity] overhangs from the Phase 2 geometry primaries. */
+    out->frontOverhangM = spec->frontOverhangM;
+    out->rearOverhangM  = spec->rearOverhangM;
 
     const float noseX = spec->cgToFrontM + out->frontOverhangM;
     const float tailX = -(spec->cgToRearM + out->rearOverhangM);
@@ -234,11 +228,14 @@ void car_visual_derive(const VehicleSpec *spec, CarVisual *out)
 
     /* ---- wheels ---- */
 
-    /* TODO(phase-2): per-axle tire width and aspect ratio. */
-    const float tireWidth = CV_TIRE_WIDTH_M;
-    /* [identity] the radius the tire model and drivetrain integrate against. */
-    const float tireDia = 2.0f * spec->wheelRadiusM;
-    const float rimDia = tireDia * CV_RIM_FRACTION;
+    /* [identity] tire width from section width; diameter from per-axle loaded radius. */
+    const float tireWidthF = spec->tireSectionWidthFrontMm * 0.001f;
+    const float tireWidthR = spec->tireSectionWidthRearMm * 0.001f;
+    const float tireDiaF = 2.0f * spec->wheelRadiusFrontM;
+    const float tireDiaR = 2.0f * spec->wheelRadiusRearM;
+    /* [rule] rim diameter from designation inches, clamped inside the tire. */
+    const float rimDiaF = fminf(spec->tireRimDiameterFrontIn * 0.0254f, tireDiaF * 0.92f);
+    const float rimDiaR = fminf(spec->tireRimDiameterRearIn * 0.0254f, tireDiaR * 0.92f);
 
     /* [rule] a heavier wheel reads as fewer, fatter spokes. */
     const float inertia = spec->wheelInertiaKgM2;
@@ -266,10 +263,10 @@ void car_visual_derive(const VehicleSpec *spec, CarVisual *out)
         w->centreM.x = isFront ? spec->cgToFrontM : -spec->cgToRearM;
         w->centreM.y = (isLeft ? 1.0f : -1.0f) * (isFront ? halfTrackF : halfTrackR);
 
-        w->diameterM    = tireDia;
-        w->widthM       = tireWidth;
-        w->rimDiameterM = rimDia;
-        w->discDiameterM = rimDia * (0.70f + 0.22f * torque01)
+        w->diameterM    = isFront ? tireDiaF : tireDiaR;
+        w->widthM       = isFront ? tireWidthF : tireWidthR;
+        w->rimDiameterM = isFront ? rimDiaF : rimDiaR;
+        w->discDiameterM = w->rimDiameterM * (0.70f + 0.22f * torque01)
                          * (isFront ? (0.85f + 0.30f * biasF)
                                     : (0.85f + 0.30f * (1.0f - biasF)));
         w->spokeCount = spokes;
@@ -279,19 +276,31 @@ void car_visual_derive(const VehicleSpec *spec, CarVisual *out)
     /* [rule] the arch stands proud wherever the track pushes the tire outboard of the hull —
      * a narrow body on a wide track produces bolt-on flares, exactly as it does in reality. */
     const float widestTrack = maxf(spec->trackWidthFrontM, spec->trackWidthRearM);
-    const float outboard = maxf(0.0f, 0.5f * widestTrack + 0.5f * tireWidth - halfW);
-    out->archFlareM = CV_ARCH_CLEARANCE_M + outboard;
+    const float meanTireWidth = 0.5f * (tireWidthF + tireWidthR);
+    const float outboard = maxf(0.0f, 0.5f * widestTrack + 0.5f * meanTireWidth - halfW);
+    const float archClearance = 0.5f * (spec->rideHeightFrontM + spec->rideHeightRearM) * 0.32f;
+    out->archFlareM = archClearance + outboard;
 
     /* ---- greenhouse ---- */
 
     /* [rule] the cabin sits where the weight distribution puts it: a rear-biased CG pushes the
      * greenhouse back and lengthens the bonnet, which is what makes a mid-engine car read as
-     * mid-engine. Cites cgToFrontM and cgToRearM. */
+     * mid-engine. Cites cgToFrontM and cgToRearM. Prefer cowl/backlight when they span a
+     * sensible cabin. */
     out->cabinCentreXM = 0.55f * (spec->cgToRearM - spec->cgToFrontM);
     out->cabinLengthM  = out->lengthM * (0.34f + 0.18f * (1.0f - l.sport01));
-    out->cabinHalfWidthM = halfW * CV_CABIN_WIDTH_FRAC;  /* TODO(phase-2): body height */
+    /* [rule] taller bodies get a wider cabin fraction of the body half-width. */
+    const float cabinFrac = lerpf(0.62f, 0.82f, u01(spec->heightOverallM, 1.10f, 2.20f));
+    out->cabinHalfWidthM = halfW * cabinFrac;
     out->windscreenXM = out->cabinCentreXM + 0.5f * out->cabinLengthM;
     out->backlightXM  = out->cabinCentreXM - 0.5f * out->cabinLengthM;
+    /* Prefer explicit cowl/backlight stations when they form a forward-to-rear glass band. */
+    if (spec->cowlXM > spec->backlightXM + 0.40f) {
+        out->windscreenXM = spec->cowlXM;
+        out->backlightXM = spec->backlightXM;
+        out->cabinCentreXM = 0.5f * (spec->cowlXM + spec->backlightXM);
+        out->cabinLengthM = spec->cowlXM - spec->backlightXM;
+    }
 
     /* ---- appendages ---- */
 

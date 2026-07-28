@@ -796,7 +796,7 @@ void render_draw_game(struct Game *game, float interpolationAlpha)
              (double)game->vehicle.wheels[WHEEL_FRONT_RIGHT].angularVelocityRadS,
              (double)game->vehicle.wheels[WHEEL_REAR_LEFT].angularVelocityRadS,
              (double)(game->vehicle.wheels[WHEEL_REAR_LEFT].angularVelocityRadS *
-                      game->spec.wheelRadiusM)), dim);
+                      vehicle_wheel_radius_m(&game->spec, WHEEL_REAR_LEFT))), dim);
     hud_line(14, &y, TextFormat("kappa FL/FR/RL/RR %+.3f %+.3f %+.3f %+.3f",
              (double)game->vehicle.wheels[WHEEL_FRONT_LEFT].slipRatio,
              (double)game->vehicle.wheels[WHEEL_FRONT_RIGHT].slipRatio,
