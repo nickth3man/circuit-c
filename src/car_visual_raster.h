@@ -39,6 +39,44 @@ typedef struct {
 /* Bytes per pixel of every buffer this module writes. */
 #define CAR_RASTER_BPP 4
 
+/* ------------------------------------------------------------------ composable parts ----
+ *
+ * The contact sheet wants one finished picture; the game wants the body and each wheel as
+ * separate sprites, so the front wheels can be rotated to the steer angle every frame while
+ * the body is baked once. Both come out of the SAME geometry pass, so there is no second
+ * grammar and no way for the two to drift apart.
+ *
+ * The split is at the joint that actually moves. Wheel ARCHES are bodywork — a fender does
+ * not steer — so they stay with the body; the tire, sidewall, rim and disc travel with the
+ * wheel. Composited body-then-wheels at zero steer, the result is the same picture
+ * CAR_RASTER_PART_ALL draws, in the same order.
+ *
+ * PIVOTS, which the caller must respect:
+ *   ALL / BODY   body-space (0,0) — the CG — sits at (originXPx, originYPx). Rotate about
+ *                that point by the vehicle heading.
+ *   WHEEL        the wheel's own hub sits at (originXPx, originYPx), and the sprite is drawn
+ *                axis-aligned: the derived static toe/camber angle is NOT baked in. Rotate
+ *                about the hub by heading + steer + CarWheelVisual.staticAngleRad. Baking the
+ *                static angle in would make it impossible to steer the wheel afterwards
+ *                without double-counting it.
+ */
+typedef enum {
+    CAR_RASTER_PART_ALL = 0,   /* the whole car, wheels in place at their static angles */
+    CAR_RASTER_PART_BODY,      /* everything except the tires: hull, glass, arches, appendages */
+    CAR_RASTER_PART_WHEEL      /* one wheel, about its hub, unrotated */
+} CarRasterPart;
+
+/* Size the buffer for one part. For CAR_RASTER_PART_WHEEL, wheelIndex selects the wheel;
+ * it is ignored otherwise. BODY deliberately uses the same bounds as ALL: the wheel arches
+ * are body geometry and reach past the hull wherever the track does, so the car's bounds are
+ * the body's bounds. */
+CarRasterInfo car_raster_part_info(const CarVisual *visual, CarRasterPart part,
+                                   int wheelIndex, float pxPerM, int padPx);
+
+/* Draw one part. Same contract as car_raster_draw otherwise. */
+bool car_raster_draw_part(const CarVisual *visual, CarRasterPart part, int wheelIndex,
+                          CarRasterInfo info, unsigned char *rgba, size_t bytes);
+
 /* Size the buffer needed to draw `visual` at `pxPerM`, with `padPx` pixels of margin on every
  * side. Accounts for everything actually drawn, including wheels outboard of the hull, the
  * wing, the splitter and the mirrors. Returns a zero-sized info for a NULL or degenerate

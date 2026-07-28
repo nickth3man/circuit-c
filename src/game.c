@@ -337,6 +337,10 @@ GAME_API void game_pre_reload(Game *game)
     if (game->replay.mode == REPLAY_MODE_RECORDING) replay_stop(&game->replay);
 #if !defined(DRIFTY_HEADLESS)
     audio_pre_reload();
+    /* Same contract as the sounds above: the baked vehicle textures are raylib-tracked GPU
+     * resources held in the render module's statics, and a handle from the outgoing module
+     * is a dangling GPU name in the incoming one. */
+    render_pre_reload();
     TRACELOG(LOG_INFO, "GAME: pre-reload (tick %llu)",
              (unsigned long long)game->sim.tick);
 #endif
@@ -354,6 +358,7 @@ GAME_API void game_post_reload(Game *game)
     game->reloadFlashTimerS = RELOAD_FLASH_S;
 #if !defined(DRIFTY_HEADLESS)
     audio_post_reload();
+    render_post_reload();
     TRACELOG(LOG_INFO, "GAME: post-reload #%d (tick %llu, checksum %08x)",
              game->reloadCount, (unsigned long long)game->sim.tick, game->stateChecksum);
 #endif
@@ -538,6 +543,7 @@ GAME_API void game_shutdown(Game *game)
     }
     track_free(&game->track);
     audio_shutdown();
+    render_shutdown();
     TRACELOG(LOG_INFO, "GAME: shutdown after %llu fixed ticks (checksum %08x)",
              (unsigned long long)game->sim.tick, game->stateChecksum);
 

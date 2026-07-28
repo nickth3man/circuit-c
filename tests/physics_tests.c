@@ -5328,6 +5328,39 @@ static float cv_signature_linf(const CarVisual *a, const CarVisual *b, int *wors
     return worst;
 }
 
+/* The designated visual drivers: the registry keys the grammar promises to be sensitive to.
+ *
+ * These are exactly the twenty keys plans/ISSUE.md designates, minus one. `wheel.offset` is
+ * deliberately absent: with body.track_* primary, an ET offset is already folded into the
+ * track the hubs sit at, so a grammar that read it again would be double-counting a quantity
+ * it has already consumed. car_visual.h states that where the field is described.
+ *
+ * At file scope because two assertions use the list — the sensitivity sweep and the bake-key
+ * coverage check — and a driver that only one of them knew about would be a gap. */
+static const char *const kVisualDrivers[] = {
+    "body.wheelbase",             /* axle span, and the body length that follows it   */
+    "body.front_overhang",        /* nose length                                      */
+    "body.rear_overhang",         /* tail length                                      */
+    "body.width_overall",         /* silhouette width and fender flare                */
+    "body.height_overall",        /* roof share of the plan area, glass band, windows */
+    "body.cowl_x",                /* windscreen station                               */
+    "body.backlight_x",           /* rear glass station, and the deck/bed behind it   */
+    "body.track_front",           /* front stance                                     */
+    "body.track_rear",            /* rear stance                                      */
+    "body.ride_height_front",     /* front arch clearance                             */
+    "mass.engine_x",              /* CG, hood bulge, and the whole layout read        */
+    "mass.driver_x",              /* the glasshouse has to contain the driver         */
+    "tire.section_width_front",   /* front tire width and diameter                    */
+    "tire.section_width_rear",    /* rear tire width and diameter                     */
+    "tire.aspect_front",          /* front sidewall and overall diameter              */
+    "tire.aspect_rear",           /* rear sidewall and overall diameter               */
+    "tire.rim_diameter_front",    /* front rim, and the tire wrapped around it        */
+    "tire.rim_diameter_rear",     /* rear rim                                         */
+    "aero.lift_rear",             /* tail taper and the wing on it                    */
+    "engine.cylinders",           /* exhaust count                                    */
+};
+#define CV_VISUAL_DRIVER_COUNT ((int)(sizeof(kVisualDrivers) / sizeof(kVisualDrivers[0])))
+
 /* Euclidean distance between two signature vectors, in the same "visible metres" currency. */
 static float cv_signature_l2(const CarVisual *a, const CarVisual *b)
 {
@@ -5644,35 +5677,10 @@ static void scenario_car_visual(void)
      * by at least one screen pixel. A rule that was deleted, mis-wired, or shadowed by a
      * fallback branch scores 0.0000 here and cannot hide.
      *
-     * These are exactly the twenty keys plans/ISSUE.md designates, minus one. `wheel.offset`
-     * is deliberately absent: with body.track_* primary, an ET offset is already folded into
-     * the track the hubs sit at, so a grammar that read it again would be double-counting a
-     * quantity it has already consumed. car_visual.h states that where the field is
-     * described. --- */
+     * The list is kVisualDrivers at file scope; see the comment there for what is on it and
+     * what is deliberately not. --- */
     {
-        static const char *const kVisualDrivers[] = {
-            "body.wheelbase",             /* axle span, and the body length that follows it   */
-            "body.front_overhang",        /* nose length                                      */
-            "body.rear_overhang",         /* tail length                                      */
-            "body.width_overall",         /* silhouette width and fender flare                */
-            "body.height_overall",        /* roof share of the plan area, glass band, windows */
-            "body.cowl_x",                /* windscreen station                               */
-            "body.backlight_x",           /* rear glass station, and the deck/bed behind it   */
-            "body.track_front",           /* front stance                                     */
-            "body.track_rear",            /* rear stance                                      */
-            "body.ride_height_front",     /* front arch clearance                             */
-            "mass.engine_x",              /* CG, hood bulge, and the whole layout read        */
-            "mass.driver_x",              /* the glasshouse has to contain the driver         */
-            "tire.section_width_front",   /* front tire width and diameter                    */
-            "tire.section_width_rear",    /* rear tire width and diameter                     */
-            "tire.aspect_front",          /* front sidewall and overall diameter              */
-            "tire.aspect_rear",           /* rear sidewall and overall diameter               */
-            "tire.rim_diameter_front",    /* front rim, and the tire wrapped around it        */
-            "tire.rim_diameter_rear",     /* rear rim                                         */
-            "aero.lift_rear",             /* tail taper and the wing on it                    */
-            "engine.cylinders",           /* exhaust count                                    */
-        };
-        const int driverCount = (int)(sizeof(kVisualDrivers) / sizeof(kVisualDrivers[0]));
+        const int driverCount = CV_VISUAL_DRIVER_COUNT;
         check(driverCount >= 20, "at least twenty designated visual drivers (%d)", driverCount);
 
         const CarRasterInfo canvas = cv_shared_canvas(CV_TEST_PX_PER_M);
@@ -5724,6 +5732,172 @@ static void scenario_car_visual(void)
         }
         free(la);
         free(lb);
+    }
+
+    /* --- composable parts: the game draws the body and each wheel as separate sprites so
+     * the front wheels can steer, and it must be the SAME picture. Body and whole-car
+     * rasters are compared pixel for pixel; every disagreement has to fall on a pixel the
+     * label map calls tire, sidewall, rim or disc. If the body sprite ever grew its own
+     * geometry — a second, production-only grammar — this is what would catch it. --- */
+    {
+        int wrongPixels = 0, emptyWheels = 0, tested = 0;
+        const int step = (car_corpus_count() > 12) ? (car_corpus_count() / 12) : 1;
+
+        for (int c = 0; c < car_corpus_count(); c += step) {
+            VehicleSpec probe;
+            CarVisual v;
+            if (!car_corpus_spec(c, &probe)) continue;
+            car_visual_derive(&probe, &v);
+
+            const CarRasterInfo info = car_raster_info(&v, CV_TEST_PX_PER_M, 1);
+            const CarRasterInfo bodyInfo =
+                car_raster_part_info(&v, CAR_RASTER_PART_BODY, 0, CV_TEST_PX_PER_M, 1);
+            if (info.width != bodyInfo.width || info.height != bodyInfo.height ||
+                info.originXPx != bodyInfo.originXPx || info.originYPx != bodyInfo.originYPx) {
+                wrongPixels++;
+                continue;
+            }
+
+            const size_t bytes = car_raster_bytes(info);
+            const size_t labelBytes = (size_t)info.width * (size_t)info.height;
+            unsigned char *all = (unsigned char *)malloc(bytes);
+            unsigned char *body = (unsigned char *)malloc(bytes);
+            unsigned char *labels = (unsigned char *)malloc(labelBytes);
+            if (all == NULL || body == NULL || labels == NULL) {
+                free(all); free(body); free(labels);
+                continue;
+            }
+
+            if (car_raster_draw_part(&v, CAR_RASTER_PART_ALL, 0, info, all, bytes) &&
+                car_raster_draw_part(&v, CAR_RASTER_PART_BODY, 0, info, body, bytes) &&
+                car_raster_draw_labels(&v, info, labels, labelBytes)) {
+                int differing = 0;
+                for (size_t p = 0; p < labelBytes; p++) {
+                    if (memcmp(all + p * CAR_RASTER_BPP, body + p * CAR_RASTER_BPP,
+                               CAR_RASTER_BPP) == 0) {
+                        continue;
+                    }
+                    differing++;
+                    const unsigned char lab = labels[p];
+                    if (lab != CAR_LABEL_TIRE && lab != CAR_LABEL_TIRE_SIDEWALL &&
+                        lab != CAR_LABEL_RIM && lab != CAR_LABEL_DISC) {
+                        if (wrongPixels == 0) {
+                            char id[128];
+                            car_corpus_id(c, id, sizeof(id));
+                            printf("      body sprite differs from the whole car outside the"
+                                   " wheels: %s, label %d\n", id, (int)lab);
+                        }
+                        wrongPixels++;
+                    }
+                }
+                if (differing == 0) emptyWheels++;
+                tested++;
+            }
+            free(all); free(body); free(labels);
+        }
+
+        check(tested > 0, "composability sampled %d corpus vehicles", tested);
+        check(wrongPixels == 0,
+              "the body sprite is the whole car minus its tires, pixel for pixel");
+        check(emptyWheels == 0, "and the tires are actually drawn in the whole-car raster");
+    }
+
+    /* --- the wheel sprite pivots on its hub and does not bake in its static angle --- */
+    {
+        CarVisual v;
+        vehicle_spec_set_default(&spec);
+        car_visual_derive(&spec, &v);
+
+        const CarRasterInfo w0 =
+            car_raster_part_info(&v, CAR_RASTER_PART_WHEEL, WHEEL_FRONT_LEFT,
+                                 CV_TEST_PX_PER_M, 1);
+        check(w0.width > 0 && w0.height > 0, "a wheel sprite has a size");
+        check(fabsf(w0.originXPx - 0.5f * (float)w0.width) < 1e-6f &&
+              fabsf(w0.originYPx - 0.5f * (float)w0.height) < 1e-6f,
+              "the wheel sprite pivots on its own hub, at the centre of its buffer");
+
+        const size_t bytes = car_raster_bytes(w0);
+        unsigned char *buf = (unsigned char *)malloc(bytes);
+        if (buf != NULL) {
+            check(car_raster_draw_part(&v, CAR_RASTER_PART_WHEEL, WHEEL_FRONT_LEFT,
+                                       w0, buf, bytes),
+                  "a wheel sprite rasterizes");
+            int opaque = 0;
+            for (size_t p = 3; p < bytes; p += CAR_RASTER_BPP) {
+                if (buf[p] > 0) opaque++;
+            }
+            check(opaque > 0, "and it is not empty (%d covered pixels)", opaque);
+            check(!car_raster_draw_part(&v, CAR_RASTER_PART_WHEEL, WHEEL_COUNT,
+                                        w0, buf, bytes),
+                  "an out-of-range wheel index is refused rather than read out of bounds");
+            free(buf);
+        }
+    }
+
+    /* --- the bake key: what src/render.c uses to decide whether to rebuild its textures ---
+     *
+     * Two properties, and the whole texture cache rests on them: an unchanged spec must not
+     * rebake (or a still car pays for a bake every frame), and any change a player could see
+     * MUST rebake (or the car goes stale after a Physics Lab edit). --- */
+    {
+        VehicleSpec a1, a2;
+        CarVisual v1, v2;
+        vehicle_spec_set_default(&a1);
+        vehicle_spec_set_default(&a2);
+        car_visual_derive(&a1, &v1);
+        car_visual_derive(&a2, &v2);
+        check(car_visual_bake_key(&v1) == car_visual_bake_key(&v2),
+              "the bake key is pure: an unchanged spec never triggers a rebake");
+        check(car_visual_bake_key(NULL) == 0u, "a NULL visual yields no key rather than a read");
+
+        int deadKeys = 0;
+        for (int d = 0; d < CV_VISUAL_DRIVER_COUNT; d++) {
+            const DevParameter *param = dev_param_find(kVisualDrivers[d]);
+            if (param == NULL) continue;
+
+            VehicleSpec lo, hi;
+            CarVisual vlo, vhi;
+            vehicle_spec_set_default(&lo);
+            vehicle_spec_set_default(&hi);
+            dev_param_set(&lo, param, param->minimum);
+            dev_param_set(&hi, param, param->maximum);
+            car_visual_derive(&lo, &vlo);
+            car_visual_derive(&hi, &vhi);
+
+            if (car_visual_bake_key(&vlo) == car_visual_bake_key(&vhi)) {
+                if (deadKeys == 0) {
+                    printf("      bake key ignores a visual driver: %s\n", param->name);
+                }
+                deadKeys++;
+            }
+        }
+        check(deadKeys == 0, "every designated visual driver changes the bake key");
+
+        /* Distinct cars must not collide onto one cached sprite. */
+        int collisions = 0;
+        const int count = car_corpus_count();
+        for (int i = 0; i < count && collisions == 0; i++) {
+            VehicleSpec si;
+            CarVisual vi;
+            if (!car_corpus_spec(i, &si)) continue;
+            car_visual_derive(&si, &vi);
+            const uint32_t ki = car_visual_bake_key(&vi);
+            for (int j = i + 1; j < count; j++) {
+                VehicleSpec sj;
+                CarVisual vj;
+                if (!car_corpus_spec(j, &sj)) continue;
+                car_visual_derive(&sj, &vj);
+                if (car_visual_bake_key(&vj) == ki) {
+                    char ida[128], idb[128];
+                    car_corpus_id(i, ida, sizeof(ida));
+                    car_corpus_id(j, idb, sizeof(idb));
+                    printf("      bake key collision: '%s' and '%s'\n", ida, idb);
+                    collisions++;
+                    break;
+                }
+            }
+        }
+        check(collisions == 0, "no two corpus vehicles share a bake key");
     }
 
     /* --- scale independence: the grammar is metres, the raster is pixels, and only the
