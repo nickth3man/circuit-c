@@ -2715,28 +2715,48 @@ static void scenario_params(void)
         check(dev_param_find(param->name) == param, "'%s' is findable by name", param->name);
     }
 
-    /* Setting clamps, rejects non-finite input, and keeps wheelbase consistent. */
+    /* Setting clamps, rejects non-finite input, and refuses derived readouts. */
     VehicleSpec spec = defaults;
     const DevParameter *mass = dev_param_find("body.mass");
-    check(mass != NULL, "body.mass is registered");
-    dev_param_set(&spec, mass, 1e9f);
-    check_near(dev_param_get(&spec, mass), mass->maximum, 1e-3, "an out-of-range set clamps");
-    check(!dev_param_set(&spec, mass, NAN), "a NaN set is refused");
-    check_near(dev_param_get(&spec, mass), mass->maximum, 1e-3,
-               "a refused set leaves the value untouched");
+    check(mass != NULL && mass->derived, "body.mass is a derived readout");
+    check(!dev_param_set(&spec, mass, 1e9f), "a derived parameter refuses writes");
+    check_near(dev_param_get(&spec, mass), mass->defaultValue, 1e-3,
+               "a refused derived write leaves the value untouched");
 
-    const DevParameter *cgFront = dev_param_find("body.cg_to_front");
-    dev_param_set(&spec, cgFront, 1.30f);
-    check_near(spec.wheelbaseM, spec.cgToFrontM + spec.cgToRearM, 1e-6,
-               "wheelbase follows the CG distances");
+    const DevParameter *wheelbase = dev_param_find("body.wheelbase");
+    check(wheelbase != NULL && !wheelbase->derived, "body.wheelbase is primary");
+    check(dev_param_set(&spec, wheelbase, 1e9f), "an out-of-range primary set clamps");
+    check_near(dev_param_get(&spec, wheelbase), wheelbase->maximum, 1e-3,
+               "an out-of-range set clamps");
+    check(!dev_param_set(&spec, wheelbase, NAN), "a NaN set is refused");
+    check_near(dev_param_get(&spec, wheelbase), wheelbase->maximum, 1e-3,
+               "a refused set leaves the value untouched");
+    check_near(spec.wheelbaseM, spec.cgToFrontM + spec.cgToRearM, 1e-4,
+               "CG distances follow the primary wheelbase");
     check(vehicle_spec_is_valid(&spec), "the spec stays valid after tuning");
 
-    check(dev_params_modified_count(&spec) == 2, "two parameters differ from their defaults");
+    check(dev_params_modified_count(&spec) == 1, "one primary parameter differs from default");
+    const DevParameter *track = dev_param_find("body.track_front");
+    check(dev_param_set(&spec, track, track->maximum), "a second primary set succeeds");
+    check(dev_params_modified_count(&spec) == 2, "two primary parameters differ from defaults");
     dev_params_reset_all(&spec);
     check(dev_params_modified_count(&spec) == 0, "reset_all restores every default");
 
-    /* Profile round-trip. */
+    /* Stock mass-particle model recovers the historical defaults. */
+    check_near(defaults.massKg, VEH_MASS_KG, 1e-3, "stock mass from particles");
+    check_near(defaults.cgToFrontM, VEH_CG_TO_FRONT_M, 1e-3, "stock cg_to_front from particles");
+    check_near(defaults.cgToRearM, VEH_CG_TO_REAR_M, 1e-3, "stock cg_to_rear from particles");
+    check_near(defaults.cgHeightM, VEH_CG_HEIGHT_M, 1e-3, "stock cg_height from particles");
+    check_near(defaults.yawInertiaKgM2, VEH_YAW_INERTIA_KGM2, 1e-2, "stock yaw inertia from particles");
+    check_near(defaults.wheelRadiusFrontM, WHEEL_RADIUS_M, 1e-4, "stock front radius from tires");
+    check_near(defaults.wheelRadiusRearM, WHEEL_RADIUS_M, 1e-4, "stock rear radius from tires");
+
+    /* Profile round-trip (primaries only — derived rows are omitted from saves). */
     check(telemetry_ensure_dir("tuning"), "the tuning directory exists or was created");
+    int primaryCount = 0;
+    for (int i = 0; i < count; i++) {
+        if (!dev_param_at(i)->derived) primaryCount++;
+    }
     dev_param_set(&spec, dev_param_find("tire.lat_rear.mu"), 1.05f);
     dev_param_set(&spec, dev_param_find("brake.bias_front"), 0.55f);
     const char *profilePath = "tuning/_test_roundtrip.txt";
@@ -2747,7 +2767,7 @@ static void scenario_params(void)
     int applied = 0, unknown = 0, rejected = 0;
     check(dev_params_load(&loaded, profilePath, &applied, &unknown, &rejected),
           "the profile loads back");
-    check(applied == dev_params_count(), "every parameter round-tripped (%d applied)", applied);
+    check(applied == primaryCount, "every primary parameter round-tripped (%d applied)", applied);
     check(unknown == 0 && rejected == 0, "no unknown or rejected keys (%d/%d)",
           unknown, rejected);
     check_near(loaded.tireMuLatRear, 1.05f, 1e-6, "a tuned tire value survives the round trip");
@@ -2768,13 +2788,25 @@ static void scenario_params(void)
     check(dev_params_apply_text(&probe, unknownKeys, strlen(unknownKeys),
                                 &applied, &unknown, &rejected),
           "an unknown key is skipped rather than failing the load");
-    check(applied == 1 && unknown == 1, "one applied, one unknown (%d/%d)", applied, unknown);
+    check(applied == 1 && unknown == 1, "one applied (mass alias), one unknown (%d/%d)",
+          applied, unknown);
+    check_near(probe.massKg, 1300.0f, 1e-2, "body.mass alias scales particles");
 
     /* A profile that would produce an invalid spec must change nothing at all. */
     VehicleSpec guarded;
     vehicle_spec_set_default(&guarded);
-    const char *invalid = "engine.idle_rpm = 1900\nengine.redline_rpm = 3000\n";
-    dev_params_apply_text(&guarded, invalid, strlen(invalid), NULL, NULL, NULL);
+    const VehicleSpec beforeGuard = guarded;
+    /* idle above redline after clamping is impossible via the registry ranges; force an
+     * invalid candidate by applying a primary that makes CG distances non-positive. */
+    const char *invalid = "body.wheelbase = 1.80\nmass.engine_x = 4.00\nmass.chassis_x = 4.00\n";
+    const bool accepted = dev_params_apply_text(&guarded, invalid, strlen(invalid),
+                                                NULL, NULL, NULL);
+    if (accepted) {
+        check(vehicle_spec_is_valid(&guarded), "accepted profile left a valid spec");
+    } else {
+        check(memcmp(&guarded, &beforeGuard, sizeof(VehicleSpec)) == 0,
+              "a refused profile changes nothing");
+    }
     check(vehicle_spec_is_valid(&guarded), "the spec is valid whatever the profile said");
 }
 
@@ -5398,8 +5430,10 @@ static void scenario_car_visual(void)
         check(matched, "drawn wheel centres equal vehicle.c set_wheel_positions()");
         check(fabsf(a.wheelbaseM - (spec.cgToFrontM + spec.cgToRearM)) < 1e-6f,
               "drawn wheelbase equals the simulated wheelbase");
-        check(fabsf(a.wheels[WHEEL_FRONT_LEFT].diameterM - 2.0f * spec.wheelRadiusM) < 1e-6f,
-              "drawn tire diameter equals 2 * wheelRadiusM");
+        check(fabsf(a.wheels[WHEEL_FRONT_LEFT].diameterM - 2.0f * spec.wheelRadiusFrontM) < 1e-6f,
+              "drawn front tire diameter equals 2 * wheelRadiusFrontM");
+        check(fabsf(a.wheels[WHEEL_REAR_LEFT].diameterM - 2.0f * spec.wheelRadiusRearM) < 1e-6f,
+              "drawn rear tire diameter equals 2 * wheelRadiusRearM");
         check(fabsf(a.widthM - 2.0f * spec.bodyHalfWidthM) < 1e-6f,
               "drawn body width equals the collision half-width doubled");
     }
@@ -5438,30 +5472,48 @@ static void scenario_car_visual(void)
 
         vehicle_spec_set_default(&lo);
         hi = lo;
-        lo.wheelRadiusM = 0.25f;
-        hi.wheelRadiusM = 0.40f;
+        lo.tireRimDiameterFrontIn = 14.0f;
+        lo.tireRimDiameterRearIn = 14.0f;
+        hi.tireRimDiameterFrontIn = 20.0f;
+        hi.tireRimDiameterRearIn = 20.0f;
+        vehicle_spec_refresh_derived(&lo);
+        vehicle_spec_refresh_derived(&hi);
         car_visual_derive(&lo, &vlo);
         car_visual_derive(&hi, &vhi);
         check(vhi.wheels[0].diameterM > vlo.wheels[0].diameterM,
-              "a larger wheel radius draws a larger tire");
+              "a larger rim designation draws a larger tire");
 
         vehicle_spec_set_default(&lo);
         hi = lo;
-        lo.bodyHalfWidthM = 0.70f;
-        hi.bodyHalfWidthM = 1.10f;
+        lo.widthOverallM = 1.40f;
+        hi.widthOverallM = 2.20f;
+        vehicle_spec_refresh_derived(&lo);
+        vehicle_spec_refresh_derived(&hi);
         car_visual_derive(&lo, &vlo);
         car_visual_derive(&hi, &vhi);
-        check(vhi.widthM > vlo.widthM, "a wider collision body draws a wider car");
+        check(vhi.widthM > vlo.widthM, "a wider body draws a wider silhouette");
 
         vehicle_spec_set_default(&lo);
         hi = lo;
-        lo.cgToRearM = 1.00f;
-        hi.cgToRearM = 1.90f;
-        dev_params_refresh_derived(&lo);
-        dev_params_refresh_derived(&hi);
+        lo.wheelbaseM = 2.10f;
+        hi.wheelbaseM = 3.10f;
+        vehicle_spec_refresh_derived(&lo);
+        vehicle_spec_refresh_derived(&hi);
         car_visual_derive(&lo, &vlo);
         car_visual_derive(&hi, &vhi);
-        check(vhi.lengthM > vlo.lengthM, "a longer wheelbase draws a longer car");
+        check(vhi.wheelbaseM > vlo.wheelbaseM, "a longer wheelbase draws a longer axle span");
+        check(vhi.lengthM > vlo.lengthM, "a longer wheelbase draws a longer body");
+
+        vehicle_spec_set_default(&lo);
+        hi = lo;
+        lo.frontOverhangM = 0.40f;
+        hi.frontOverhangM = 1.40f;
+        vehicle_spec_refresh_derived(&lo);
+        vehicle_spec_refresh_derived(&hi);
+        car_visual_derive(&lo, &vlo);
+        car_visual_derive(&hi, &vhi);
+        check(vhi.frontOverhangM > vlo.frontOverhangM, "a longer front overhang draws a longer nose");
+        check(vhi.lengthM > vlo.lengthM, "a longer front overhang draws a longer body");
 
         vehicle_spec_set_default(&lo);
         hi = lo;

@@ -38,9 +38,9 @@
  *     of the tire at the body edge (Phase 2).
  */
 static const char *const kSweepKeys[] = {
-    "body.cg_to_rear",         /* wheelbase and weight bias -> length, greenhouse position */
-    "body.cg_to_front",        /* the same lever from the other end -> bonnet length */
-    "collision.half_width",    /* body width -> the whole silhouette */
+    "body.wheelbase",          /* length + axle span */
+    "body.front_overhang",     /* nose length without moving the CG */
+    "body.width_overall",      /* body width -> the whole silhouette */
 };
 
 #define SWEEP_AXES ((int)(sizeof(kSweepKeys) / sizeof(kSweepKeys[0])))

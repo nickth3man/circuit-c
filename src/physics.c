@@ -541,9 +541,11 @@ void physics_fixed_update(const VehicleSpec *spec,
      * (Fx * R). On the first step after reset these are 0, which conservatively
      * limits the LSD to its preload only. */
     const float rearTireReactionLeftNm =
-        state->wheels[WHEEL_REAR_LEFT].forceLongitudinalN * spec->wheelRadiusM;
+        state->wheels[WHEEL_REAR_LEFT].forceLongitudinalN *
+        vehicle_wheel_radius_m(spec, WHEEL_REAR_LEFT);
     const float rearTireReactionRightNm =
-        state->wheels[WHEEL_REAR_RIGHT].forceLongitudinalN * spec->wheelRadiusM;
+        state->wheels[WHEEL_REAR_RIGHT].forceLongitudinalN *
+        vehicle_wheel_radius_m(spec, WHEEL_REAR_RIGHT);
     const DrivetrainTorques torques = drivetrain_calculate_torques(
         spec, state->selectedGear,
         rearOmegaLeftRadS, rearOmegaRightRadS,
@@ -598,7 +600,7 @@ void physics_fixed_update(const VehicleSpec *spec,
          * scrub. See docs/SPEC.md Phase 4 exit criteria. */
         const bool front = i <= WHEEL_FRONT_RIGHT;
         wheel->slipRatio = tire_slip_ratio(
-            wheel->angularVelocityRadS, spec->wheelRadiusM,
+            wheel->angularVelocityRadS, vehicle_wheel_radius_m(spec, i),
             front ? derived->frontAxleContactVelocityBodyMps.x
                   : derived->rearAxleContactVelocityBodyMps.x,
             SLIP_SPEED_EPSILON_MPS, SLIP_RATIO_CLAMP);
@@ -905,11 +907,12 @@ void physics_fixed_update(const VehicleSpec *spec,
          * guard uses the updated contact speed rather than lagging one fixed tick behind. */
         const float wheelVxMps = state->velocityLongitudinalMps;
         const float previousOmegaRadS = state->wheels[i].angularVelocityRadS;
+        const float radiusM = vehicle_wheel_radius_m(spec, i);
         float nextOmegaRadS = drivetrain_integrate_wheel(
             previousOmegaRadS, wheelVxMps,
             torques.driveTorqueNm[i], torques.serviceBrakeTorqueNm[i],
             torques.handbrakeTorqueNm[i], state->wheels[i].forceLongitudinalN,
-            spec->wheelRadiusM, spec->wheelInertiaKgM2, dt,
+            radiusM, spec->wheelInertiaKgM2, dt,
             &state->wheels[i].locked);
 
         /* Stiff-limit equilibrium treatment for the unbraked wheel.
@@ -935,7 +938,7 @@ void physics_fixed_update(const VehicleSpec *spec,
             torques.handbrakeTorqueNm[i] <= 0.0f) {
             float equilibriumOmegaRadS;
             if (drivetrain_wheel_equilibrium_omega(
-                    torques.driveTorqueNm[i], wheelVxMps, spec->wheelRadiusM,
+                    torques.driveTorqueNm[i], wheelVxMps, radiusM,
                     spec->tireMuLongScale *
                         Surface_Get(state->wheels[i].surfaceId)->muLongitudinal *
                         derived->tireLoadSensitivityMuScale[i] *
@@ -943,7 +946,7 @@ void physics_fixed_update(const VehicleSpec *spec,
                     spec->tireBLong, spec->tireCLong, SLIP_SPEED_EPSILON_MPS,
                     &equilibriumOmegaRadS)) {
                 const float vxSafeMps = fmaxf(fabsf(wheelVxMps), SLIP_SPEED_EPSILON_MPS);
-                const float bandRadS = peakSlip * vxSafeMps / spec->wheelRadiusM;
+                const float bandRadS = peakSlip * vxSafeMps / radiusM;
                 const bool crossed =
                     (previousOmegaRadS - equilibriumOmegaRadS) *
                     (nextOmegaRadS - equilibriumOmegaRadS) < 0.0f;
