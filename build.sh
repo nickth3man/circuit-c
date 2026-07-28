@@ -205,7 +205,7 @@ if [ "$MODE" = "clean" ]; then
 fi
 
 if [ "$MODE" = "tests" ]; then
-    # shellcheck disable=SC2086
+    # shellcheck disable=SC2086,SC2046
     $CC $CSTD $INCLUDES $WARNINGS $RELEASE_FLAGS -DDRIFTY_HEADLESS \
         $(build_info_defines tests "-O2,-DNDEBUG,-DDRIFTY_HEADLESS") \
         $TEST_SRCS -o "$EXE_TESTS" $RAYLIB_CFLAGS -lm
@@ -218,7 +218,7 @@ if [ "$MODE" = "hotreload-harness" ]; then
     copy_dev_runtime || exit 1
 
     # The harness loads build/game.dll; build it the same safe way as the dev path.
-    # shellcheck disable=SC2086
+    # shellcheck disable=SC2086,SC2046
     $CC $CSTD $INCLUDES $WARNINGS $DEBUG_FLAGS -shared \
         -DDRIFTY_HOT_RELOAD -DDRIFTY_GAME_MODULE $DEV_TOOL_DEFINES \
         $(build_info_defines module "-O0,-g") $EXTRA_DEFINES \
@@ -242,7 +242,7 @@ fi
 
 if [ "$MODE" = "release" ]; then
     copy_release_runtime || exit 1
-    # shellcheck disable=SC2086
+    # shellcheck disable=SC2086,SC2046
     $CC $CSTD $INCLUDES $WARNINGS $RELEASE_FLAGS \
         $(build_info_defines release "-O2,-DNDEBUG") \
         $PLATFORM_SRCS $GAME_SRCS $SHARED_SRCS -o "$EXE_RELEASE" \
@@ -260,7 +260,7 @@ build_dev() {
     # load that. The rename is atomic, so the running game either sees the old module or a
     # complete new one. If the compile fails, the rename never happens and the previous module
     # survives.
-    # shellcheck disable=SC2086
+    # shellcheck disable=SC2086,SC2046
     $CC $CSTD $INCLUDES $WARNINGS $DEBUG_FLAGS -shared \
         -DDRIFTY_HOT_RELOAD -DDRIFTY_GAME_MODULE $DEV_TOOL_DEFINES \
         $(build_info_defines module "-O0,-g") $EXTRA_DEFINES \
@@ -282,7 +282,7 @@ build_dev() {
         fi
     fi
 
-    # shellcheck disable=SC2086
+    # shellcheck disable=SC2086,SC2046
     $CC $CSTD $INCLUDES $WARNINGS $DEBUG_FLAGS -DDRIFTY_HOT_RELOAD \
         $(build_info_defines platform "-O0,-g") $EXTRA_DEFINES \
         $PLATFORM_SRCS $SHARED_SRCS $HOTRELOAD_SRC -o "$EXE" \

@@ -1,3 +1,8 @@
+/* localtime_r needs a POSIX feature macro before <time.h> on strict C11 Linux builds. */
+#if !defined(_WIN32) && !defined(_POSIX_C_SOURCE)
+#define _POSIX_C_SOURCE 200809L
+#endif
+
 #include "failure_bundle.h"
 
 #include <stdio.h>

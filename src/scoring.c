@@ -8,6 +8,7 @@
 #include "scoring.h"
 
 #include <math.h>
+#include <stddef.h>
 
 #include "config.h"
 #include "game.h"
