@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "car_corpus.h"
 #include "car_visual.h"
 #include "car_visual_raster.h"
 #include "dev_lab.h"
@@ -39,6 +40,8 @@ void render_draw_game(struct Game *game, float interpolationAlpha)
 void render_pre_reload(void)  {}
 void render_post_reload(void) {}
 void render_shutdown(void)    {}
+int  render_gallery_page_count(void) { return 0; }
+void render_draw_gallery(struct Game *game, int page) { (void)game; (void)page; }
 #else
 
 #include "raylib.h"
@@ -314,10 +317,11 @@ static unsigned char pulse_alpha(float cyclesPerSecond, unsigned char lo, unsign
  * the textures are rebuilt only when that key or the metres-to-pixels scale differs from what
  * is already on the GPU. A still car costs one derive and one integer compare per frame.
  *
- * SCALE. Baked at game->renderPixelsPerMeter, i.e. one texel per world render pixel, and drawn
- * at 1:1 into the Camera2D — so the camera's zoom is the only thing scaling the sprite and a
- * zoom change never invalidates the bake. Phase 5 replaces this with an integer-scaled
- * low-resolution world target.
+ * SCALE. Baked at the WORLD scale, PIXELS_PER_METER * CAMERA_BASE_ZOOM, so one texel is
+ * exactly one pixel of the low-resolution world target at rest and the sprite is never
+ * resampled — see the scale chain in src/config.h. The drift zoom still moves continuously
+ * around that resting point; at rest, which is where a still image is judged, the mapping is
+ * exact.
  *
  * COMPOSITION. Body first, then the four wheels on top, matching the L6-after-L1 order the
  * rasterizer draws them in. The front wheels rotate to heading + steer + their derived static
@@ -331,26 +335,28 @@ static unsigned char pulse_alpha(float cyclesPerSecond, unsigned char lo, unsign
  */
 #define CAR_TEX_PAD_PX 1
 
-static bool      s_carTexReady = false;
-static uint32_t  s_carTexKey = 0u;
-static float     s_carTexPxPerM = 0.0f;
-static Texture2D s_carBodyTex;
-static Vector2   s_carBodyOriginPx;
-static Texture2D s_carWheelTex[WHEEL_COUNT];
-static Vector2   s_carWheelOriginPx[WHEEL_COUNT];
+/* One car's sprites. The running game keeps exactly one of these in a module static; the
+ * gallery builds and discards one per cell, so reviewing a hundred vehicles never holds more
+ * than a single car's textures on the GPU. */
+typedef struct {
+    bool      ready;
+    float     pxPerM;          /* texels per metre these were baked at */
+    Texture2D body;
+    Vector2   bodyOriginPx;
+    Texture2D wheel[WHEEL_COUNT];
+    Vector2   wheelOriginPx[WHEEL_COUNT];
+} CarSprites;
 
-static void unload_car_textures(void)
+static void car_sprites_unload(CarSprites *s)
 {
-    if (!s_carTexReady) return;
-    UnloadTexture(s_carBodyTex);
-    for (int i = 0; i < WHEEL_COUNT; i++) UnloadTexture(s_carWheelTex[i]);
-    memset(&s_carBodyTex, 0, sizeof(s_carBodyTex));
-    memset(s_carWheelTex, 0, sizeof(s_carWheelTex));
-    s_carTexReady = false;
+    if (s == NULL || !s->ready) return;
+    UnloadTexture(s->body);
+    for (int i = 0; i < WHEEL_COUNT; i++) UnloadTexture(s->wheel[i]);
+    memset(s, 0, sizeof(*s));
 }
 
-/* Upload one rasterized part. Returns a zeroed texture on failure, which the caller treats as
- * a failed bake rather than drawing a garbage handle. */
+/* Upload one rasterized part. Returns false on any failure, which the caller treats as a
+ * failed bake rather than drawing a garbage handle. */
 static bool upload_part(const CarVisual *visual, CarRasterPart part, int wheelIndex,
                         float pxPerM, Texture2D *texOut, Vector2 *originOut)
 {
@@ -388,41 +394,107 @@ static bool upload_part(const CarVisual *visual, CarRasterPart part, int wheelIn
     return true;
 }
 
+/* Bake one car's five sprites. Leaves `out` not-ready and holding nothing on failure. */
+static bool car_sprites_bake(CarSprites *out, const CarVisual *visual, float pxPerM)
+{
+    if (out == NULL || visual == NULL) return false;
+    car_sprites_unload(out);
+
+    bool ok = upload_part(visual, CAR_RASTER_PART_BODY, 0, pxPerM,
+                          &out->body, &out->bodyOriginPx);
+    for (int i = 0; i < WHEEL_COUNT && ok; i++) {
+        ok = upload_part(visual, CAR_RASTER_PART_WHEEL, i, pxPerM,
+                         &out->wheel[i], &out->wheelOriginPx[i]);
+    }
+    if (!ok) {
+        car_sprites_unload(out);
+        return false;
+    }
+    out->pxPerM = pxPerM;
+    out->ready = true;
+    return true;
+}
+
+/* Draw a baked part about its documented pivot, `scale` destination pixels per texel.
+ * `rotationRad` is a heading in world terms; units_heading_to_rotation_deg handles the
+ * screen-space Y flip. */
+static void draw_car_part(Texture2D tex, Vector2 originPx, Vector2 centrePx,
+                          float rotationRad, float scale)
+{
+    if (tex.id == 0) return;
+    const Rectangle src = { 0.0f, 0.0f, (float)tex.width, (float)tex.height };
+    const Rectangle dst = { centrePx.x, centrePx.y,
+                            (float)tex.width * scale, (float)tex.height * scale };
+    /* DrawTexturePro measures `origin` in DESTINATION units, so the pivot scales with the
+     * sprite. Getting this wrong shifts the car off its own centre of mass as the scale
+     * changes, which is exactly the kind of bug a still screenshot hides. */
+    const Vector2 origin = { originPx.x * scale, originPx.y * scale };
+    DrawTexturePro(tex, src, dst, origin, units_heading_to_rotation_deg(rotationRad), WHITE);
+}
+
+/* The one place a car is composited, used by the running game and by the gallery alike.
+ * `steerRad` is per wheel and is added to the derived static alignment; pass NULL for a
+ * straight-ahead pose. `scale` is destination pixels per texel. */
+static void car_sprites_draw(const CarSprites *s, const CarVisual *visual,
+                             Vector2 centrePx, float headingRad,
+                             const float *steerRad, float scale)
+{
+    if (s == NULL || !s->ready || visual == NULL) return;
+
+    draw_car_part(s->body, s->bodyOriginPx, centrePx, headingRad, scale);
+
+    /* Destination pixels per metre follows from what the sprites were baked at and what they
+     * are being drawn at, so a caller never has to restate the world scale. */
+    const float destPxPerM = s->pxPerM * scale;
+    const float c = cosf(headingRad);
+    const float sn = sinf(headingRad);
+
+    for (int i = 0; i < WHEEL_COUNT; i++) {
+        const Vector2 hubM = visual->wheels[i].centreM;
+        /* Body frame -> world offset in metres, then metres -> destination pixels. +Y is
+         * left in body and world space and up the screen, hence the negated Y. */
+        const float wx = hubM.x * c - hubM.y * sn;
+        const float wy = hubM.x * sn + hubM.y * c;
+        const Vector2 hubPx = { centrePx.x + wx * destPxPerM,
+                                centrePx.y - wy * destPxPerM };
+
+        const float steer = (steerRad != NULL) ? steerRad[i] : 0.0f;
+        draw_car_part(s->wheel[i], s->wheelOriginPx[i], hubPx,
+                      headingRad + steer + visual->wheels[i].staticAngleRad, scale);
+    }
+}
+
+/* ---- the running game's single cached car ---- */
+
+static CarSprites s_car;
+static uint32_t   s_carTexKey = 0u;
+static float      s_carTexPxPerM = 0.0f;
+
 /* Rebake if and only if the picture or the scale changed. */
 static void ensure_car_textures(const CarVisual *visual, float pxPerM)
 {
     const uint32_t key = car_visual_bake_key(visual);
-    if (s_carTexReady && key == s_carTexKey && pxPerM == s_carTexPxPerM) return;
+    if (s_car.ready && key == s_carTexKey && pxPerM == s_carTexPxPerM) return;
 
-    unload_car_textures();
-
-    bool ok = upload_part(visual, CAR_RASTER_PART_BODY, 0, pxPerM,
-                          &s_carBodyTex, &s_carBodyOriginPx);
-    for (int i = 0; i < WHEEL_COUNT && ok; i++) {
-        ok = upload_part(visual, CAR_RASTER_PART_WHEEL, i, pxPerM,
-                         &s_carWheelTex[i], &s_carWheelOriginPx[i]);
-    }
-
-    if (!ok) {
+    if (!car_sprites_bake(&s_car, visual, pxPerM)) {
         TRACELOG(LOG_WARNING, "RENDER: vehicle sprite bake failed; retrying next frame");
-        unload_car_textures();
+        s_carTexKey = 0u;
+        s_carTexPxPerM = 0.0f;
         return;
     }
-
-    s_carTexReady = true;
     s_carTexKey = key;
     s_carTexPxPerM = pxPerM;
 }
 
-/* Draw a baked part about its documented pivot. `rotationRad` is a heading in world terms;
- * units_heading_to_rotation_deg handles the screen-space Y flip. */
-static void draw_car_part(Texture2D tex, Vector2 originPx, Vector2 centrePx, float rotationRad)
+/* Destination pixels per texel inside the world camera. Sprites are baked at the world scale
+ * (PIXELS_PER_METER * CAMERA_BASE_ZOOM) but drawn in render-pixel space, which the camera
+ * then multiplies by its zoom — so a texel becomes exactly one target pixel when the zoom is
+ * at rest, and the drift zoom moves smoothly around that. */
+#define CAR_WORLD_TEXEL_SCALE (1.0f / CAMERA_BASE_ZOOM)
+
+static float car_bake_px_per_m(float renderPixelsPerMeter)
 {
-    if (tex.id == 0) return;
-    const Rectangle src = { 0.0f, 0.0f, (float)tex.width, (float)tex.height };
-    const Rectangle dst = { centrePx.x, centrePx.y, (float)tex.width, (float)tex.height };
-    DrawTexturePro(tex, src, dst, originPx,
-                   units_heading_to_rotation_deg(rotationRad), WHITE);
+    return renderPixelsPerMeter * CAMERA_BASE_ZOOM;
 }
 
 static void draw_vehicle(const Game *game, const VehicleDrawState *draw)
@@ -431,47 +503,230 @@ static void draw_vehicle(const Game *game, const VehicleDrawState *draw)
 
     CarVisual visual;                       /* stack-local by design: never stored in Game */
     car_visual_derive(&game->spec, &visual);
-    ensure_car_textures(&visual, ppm);
-    if (!s_carTexReady) return;
-
-    const Vector2 bodyCentrePx = units_world_to_render_px(draw->positionM, ppm);
-    draw_car_part(s_carBodyTex, s_carBodyOriginPx, bodyCentrePx, draw->headingRad);
+    ensure_car_textures(&visual, car_bake_px_per_m(ppm));
+    if (!s_car.ready) return;
 
     /* Front wheels draw at heading + steerAngleRad with a presentation-only gain so the steer
      * is unmistakable at top-down scale; the physics angle itself is untouched. Rear wheels
      * carry no steer, but they do carry whatever static alignment the grammar derived for
-     * them, so that is added for every wheel rather than only the front pair. */
+     * them, which car_sprites_draw adds for every wheel. */
     const float steerVisualGain = 1.25f;  /* render-only amplification, documented above */
+    float steer[WHEEL_COUNT];
     for (int i = 0; i < WHEEL_COUNT; i++) {
         const bool isFront = (i == WHEEL_FRONT_LEFT || i == WHEEL_FRONT_RIGHT);
-        const float steerVis = isFront ? draw->wheelAngleRad[i] * steerVisualGain : 0.0f;
-        const Vector2 hubWorldM = body_point_to_world(
-            visual.wheels[i].centreM, draw->positionM, draw->headingRad);
-        draw_car_part(s_carWheelTex[i], s_carWheelOriginPx[i],
-                      units_world_to_render_px(hubWorldM, ppm),
-                      draw->headingRad + steerVis + visual.wheels[i].staticAngleRad);
+        steer[i] = isFront ? draw->wheelAngleRad[i] * steerVisualGain : 0.0f;
     }
+
+    car_sprites_draw(&s_car, &visual,
+                     units_world_to_render_px(draw->positionM, ppm),
+                     draw->headingRad, steer, CAR_WORLD_TEXEL_SCALE);
+}
+
+/* ------------------------------------------------------------- pixel-art world target ----
+ *
+ * The world is rasterized into a low-resolution RenderTexture2D and blown up once by an exact
+ * integer factor with nearest-neighbour filtering; the HUD, raygui and the Physics Lab draw
+ * afterwards at native resolution. src/config.h carries the whole scale chain and the reason
+ * for each number in it.
+ */
+static RenderTexture2D s_worldTarget;
+static bool s_worldTargetReady = false;
+
+static void unload_world_target(void)
+{
+    if (!s_worldTargetReady) return;
+    UnloadRenderTexture(s_worldTarget);
+    memset(&s_worldTarget, 0, sizeof(s_worldTarget));
+    s_worldTargetReady = false;
+}
+
+static void ensure_world_target(void)
+{
+    if (s_worldTargetReady) return;
+    s_worldTarget = LoadRenderTexture(PIXEL_ART_TARGET_W, PIXEL_ART_TARGET_H);
+    if (s_worldTarget.id == 0) return;
+    SetTextureFilter(s_worldTarget.texture, TEXTURE_FILTER_POINT);
+    s_worldTargetReady = true;
+}
+
+/* The world camera, adjusted for the low-resolution target.
+ *
+ * Two changes from game->camera, both load-bearing:
+ *   - the offset centres on the TARGET, which is half the window in each axis;
+ *   - the camera translation is snapped to whole target pixels. A Camera2D maps world to
+ *     screen as (world - target) * zoom + offset, so a fractional (-target * zoom) makes
+ *     every world pixel land between two target pixels and the whole grid crawls a pixel at a
+ *     time as the car moves. Snapping costs sub-pixel camera smoothness, which nobody can
+ *     see, and buys a stable pixel grid, which everybody can.
+ */
+static Camera2D world_camera_for_target(Camera2D camera)
+{
+    Camera2D cam = camera;
+    cam.offset = (Vector2){ (float)PIXEL_ART_TARGET_W * 0.5f,
+                            (float)PIXEL_ART_TARGET_H * 0.5f };
+
+    cam.offset.x = units_snap_camera_offset_axis(cam.offset.x, cam.target.x, cam.zoom);
+    cam.offset.y = units_snap_camera_offset_axis(cam.offset.y, cam.target.y, cam.zoom);
+    return cam;
+}
+
+/* Blit the finished world target over the whole window. The source height is negative because
+ * a RenderTexture2D is stored bottom-up; the destination is exactly SCREEN_W x SCREEN_H, so
+ * the enlargement is PIXEL_ART_UPSCALE and nothing else. */
+static void blit_world_target(void)
+{
+    if (!s_worldTargetReady) return;
+    const Rectangle src = { 0.0f, 0.0f,
+                            (float)s_worldTarget.texture.width,
+                            -(float)s_worldTarget.texture.height };
+    const Rectangle dst = { 0.0f, 0.0f, (float)SCREEN_W, (float)SCREEN_H };
+    DrawTexturePro(s_worldTarget.texture, src, dst, (Vector2){ 0.0f, 0.0f }, 0.0f, WHITE);
 }
 
 void render_pre_reload(void)
 {
     /* Release before the module is swapped: the handles belong to this module's statics and
      * would be dangling GPU names after the reload. */
-    unload_car_textures();
+    car_sprites_unload(&s_car);
+    unload_world_target();
 }
 
 void render_post_reload(void)
 {
     /* Nothing to re-acquire eagerly. Clearing the key makes the next draw rebake, which is
      * both simpler and safer than baking here without a spec in hand. */
-    s_carTexReady = false;
     s_carTexKey = 0u;
     s_carTexPxPerM = 0.0f;
 }
 
 void render_shutdown(void)
 {
-    unload_car_textures();
+    car_sprites_unload(&s_car);
+    unload_world_target();
+}
+
+/* ------------------------------------------------------------------------- gallery ----
+ *
+ * See render.h for the contract. Layout numbers, and why they are what they are:
+ *
+ *   GALLERY_COLS/ROWS   4 x 4 cells, so a cell is exactly 320 x 180 native pixels and the
+ *                       grid divides SCREEN_W and SCREEN_H without a remainder.
+ *   GALLERY_SCALE       2 destination pixels per texel — integer, like the world pass, so
+ *                       the cars stay pixel art and are not smeared by a fractional resize.
+ *   bake scale          the world scale, PIXELS_PER_METER * CAMERA_BASE_ZOOM, ONE common
+ *                       value for every car. Fitting each cell to its own car would erase
+ *                       the size axis, which is the single most informative thing the
+ *                       gallery shows: a kei car and a bus have to look different sizes.
+ *
+ * At that scale the longest vehicle in the corpus (the bus, 12 m) is about 316 px, which is
+ * what sets the cell width. A car wider than its cell overhangs rather than being rescaled —
+ * a visible, honest overflow rather than a quiet lie about scale.
+ */
+#define GALLERY_COLS      4
+#define GALLERY_ROWS      4
+#define GALLERY_PER_PAGE  (GALLERY_COLS * GALLERY_ROWS)
+#define GALLERY_SCALE     2.0f
+/* Front wheels turned so lock, Ackermann and static toe are all legible in a still image. */
+#define GALLERY_STEER_RAD (8.0f * DRIFTY_DEG2RAD)
+
+int render_gallery_page_count(void)
+{
+    const int count = car_corpus_count();
+    if (count <= 0) return 0;
+    return (count + GALLERY_PER_PAGE - 1) / GALLERY_PER_PAGE;
+}
+
+void render_draw_gallery(struct Game *game, int page)
+{
+    const int pageCount = render_gallery_page_count();
+    const float ppm = (game != NULL) ? game->renderPixelsPerMeter : (float)PIXELS_PER_METER;
+    const float bakePxPerM = car_bake_px_per_m(ppm);
+
+    if (page < 1 || page > pageCount) {
+        BeginDrawing();
+        ClearBackground((Color){ 21, 24, 29, 255 });
+        DrawText(TextFormat("gallery page %d is out of range (1..%d)", page, pageCount),
+                 24, 24, 20, COL_TEXT);
+        EndDrawing();
+        return;
+    }
+
+    /* ONE PAGE of sprites is uploaded at a time — sixteen cars, not the whole corpus.
+     *
+     * Bake-draw-discard PER CELL was the obvious shape and is wrong: raylib batches draw
+     * calls and only resolves texture ids when the batch is flushed, so unloading a texture
+     * between DrawTexturePro and the end of the frame leaves the batch pointing at a freed
+     * id — which renders as whatever happens to be bound, in practice the default font atlas.
+     * Every car came out as a block of glyphs. So: bake the page, draw the page, then release
+     * once the frame has actually been submitted. */
+    static CarSprites cells[GALLERY_PER_PAGE];
+    static CarVisual  visuals[GALLERY_PER_PAGE];
+    bool              baked[GALLERY_PER_PAGE];
+
+    const int first = (page - 1) * GALLERY_PER_PAGE;
+    const int count = car_corpus_count();
+
+    for (int slot = 0; slot < GALLERY_PER_PAGE; slot++) {
+        const int index = first + slot;
+        baked[slot] = false;
+        memset(&cells[slot], 0, sizeof(cells[slot]));
+        if (index >= count) continue;
+
+        VehicleSpec spec;
+        if (!car_corpus_spec(index, &spec)) continue;
+        car_visual_derive(&spec, &visuals[slot]);
+        baked[slot] = car_sprites_bake(&cells[slot], &visuals[slot], bakePxPerM);
+    }
+
+    const int cellW = SCREEN_W / GALLERY_COLS;
+    const int cellH = SCREEN_H / GALLERY_ROWS;
+
+    float steer[WHEEL_COUNT];
+    for (int w = 0; w < WHEEL_COUNT; w++) {
+        const bool isFront = (w == WHEEL_FRONT_LEFT || w == WHEEL_FRONT_RIGHT);
+        steer[w] = isFront ? GALLERY_STEER_RAD : 0.0f;
+    }
+
+    BeginDrawing();
+    ClearBackground((Color){ 21, 24, 29, 255 });
+
+    for (int slot = 0; slot < GALLERY_PER_PAGE; slot++) {
+        const int index = first + slot;
+        if (index >= count) break;
+
+        const int col = slot % GALLERY_COLS;
+        const int row = slot / GALLERY_COLS;
+        const int cellX = col * cellW;
+        const int cellY = row * cellH;
+
+        /* Cell plate, so a car with a dark palette still reads against the background. */
+        DrawRectangle(cellX + 2, cellY + 2, cellW - 4, cellH - 4, (Color){ 29, 33, 40, 255 });
+
+        if (baked[slot]) {
+            const Vector2 centrePx = { (float)cellX + (float)cellW * 0.5f,
+                                       (float)cellY + (float)cellH * 0.5f - 8.0f };
+            car_sprites_draw(&cells[slot], &visuals[slot], centrePx, 0.0f,
+                             steer, GALLERY_SCALE);
+        }
+
+        char id[128], note[192];
+        car_corpus_id(index, id, sizeof(id));
+        car_corpus_describe(index, note, sizeof(note));
+        DrawText(id, cellX + 8, cellY + cellH - 34, 10, COL_COOL);
+        DrawText(note, cellX + 8, cellY + cellH - 20, 10, COL_TEXT_DIM);
+    }
+
+    DrawText(TextFormat("vehicle corpus - page %d / %d - %d vehicles - %.1f px/m x%d",
+                        page, pageCount, count,
+                        (double)bakePxPerM, (int)GALLERY_SCALE),
+             12, 8, 12, COL_TEXT);
+
+    EndDrawing();
+
+    /* The frame is submitted; the ids are resolved and these are safe to release. */
+    for (int slot = 0; slot < GALLERY_PER_PAGE; slot++) {
+        if (baked[slot]) car_sprites_unload(&cells[slot]);
+    }
 }
 
 static void draw_debug_vectors(const Game *game, const VehicleDrawState *draw)
@@ -831,6 +1086,15 @@ void render_draw_game(struct Game *game, float interpolationAlpha)
 {
     if (game == NULL) return;
 
+    /* The gallery is a whole-screen mode, not an overlay: no world, no HUD, no simulation.
+     * It is selected through the DevState field Phase 2 reserved for it rather than a new
+     * GAME_ENTRY_POINTS function, so the platform layer can ask for a page without changing
+     * the module's ABI or the layout of anything persistent. */
+    if (game->dev.galleryPage > 0) {
+        render_draw_gallery(game, game->dev.galleryPage);
+        return;
+    }
+
     /* Development shortcuts and the status-line timer, once per render frame. Compiles to
      * nothing when the dev tools are not built in. */
     dev_lab_update(game);
@@ -855,9 +1119,27 @@ void render_draw_game(struct Game *game, float interpolationAlpha)
                                       CAMERA_ZOOM_RATE, renderDt);
     }
 
-    BeginDrawing();
-    ClearBackground((Color){ 22, 24, 28, 255 });
-    BeginMode2D(game->camera);
+    ensure_world_target();
+
+    /* ---- the world, at pixel-art resolution -------------------------------------------
+     *
+     * Everything inside the camera goes into the low-resolution target and is enlarged once
+     * by an exact integer factor. Everything after the blit — HUD, raygui, Physics Lab — is
+     * drawn at native resolution, because text through a nearest-neighbour upscale is
+     * unreadable. If the target could not be created the world draws straight to the window;
+     * a missing render texture should cost the pixel-art look, not the game. */
+    const bool pixelArt = s_worldTargetReady;
+    const Camera2D worldCam = pixelArt ? world_camera_for_target(game->camera) : game->camera;
+
+    if (pixelArt) {
+        BeginTextureMode(s_worldTarget);
+        ClearBackground((Color){ 22, 24, 28, 255 });
+    } else {
+        BeginDrawing();
+        ClearBackground((Color){ 22, 24, 28, 255 });
+    }
+
+    BeginMode2D(worldCam);
     render_draw_track(&game->track, game->renderPixelsPerMeter);
 
     /* ---- particles (between track and car, per the spec draw order) ---- */
@@ -867,6 +1149,13 @@ void render_draw_game(struct Game *game, float interpolationAlpha)
     if (game->debugOverlay) draw_debug_vectors(game, &draw);
     dev_lab_draw_world(game, &draw);
     EndMode2D();
+
+    if (pixelArt) {
+        EndTextureMode();
+        BeginDrawing();
+        ClearBackground((Color){ 22, 24, 28, 255 });
+        blit_world_target();
+    }
 
     /* ---- raw physics diagnostics (F1) -------------------------------------------------
      * The development readout. Everything from here to the tire-curve panel draws only

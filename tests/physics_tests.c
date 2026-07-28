@@ -538,6 +538,58 @@ static void scenario_units(void)
     /* The compiled default must be the documented one. */
     check_near((double)PIXELS_PER_METER, 24.0, 1e-6,
                "PIXELS_PER_METER default is 24 px/m");
+
+    /* ---- pixel-art world pass ------------------------------------------------------ */
+
+    /* The upscale has to be an exact integer division of the window or the final blit is
+     * fractional, which is the one thing the whole low-resolution pass exists to prevent. */
+    check(PIXEL_ART_UPSCALE >= 1, "the pixel-art upscale is at least 1");
+    check(SCREEN_W % PIXEL_ART_UPSCALE == 0 && SCREEN_H % PIXEL_ART_UPSCALE == 0,
+          "%dx%d divides exactly by the %dx upscale", SCREEN_W, SCREEN_H, PIXEL_ART_UPSCALE);
+    check(PIXEL_ART_TARGET_W * PIXEL_ART_UPSCALE == SCREEN_W &&
+          PIXEL_ART_TARGET_H * PIXEL_ART_UPSCALE == SCREEN_H,
+          "the low-resolution target enlarges to exactly the window (%dx%d -> %dx%d)",
+          PIXEL_ART_TARGET_W, PIXEL_ART_TARGET_H, SCREEN_W, SCREEN_H);
+
+    /* Camera snapping: the arithmetic behind "camera motion does not shimmer". A Camera2D
+     * translates by (offset - target * zoom); if that is fractional, every world pixel lands
+     * between two target pixels and the grid crawls as the car moves. The shimmer itself
+     * needs a moving camera and an eye, but this is the property underneath it, and it is
+     * checkable here — including at the awkward values, negative targets and the drift zoom's
+     * whole range. */
+    {
+        const float offsets[] = { 0.0f, 320.0f, 180.0f };
+        const float targets[] = { 0.0f, 1.0f, -1.0f, 37.317f, -204.9993f, 1e4f, -1e4f };
+        const float zooms[]   = { CAMERA_MIN_ZOOM, CAMERA_BASE_ZOOM - CAMERA_ZOOM_RANGE,
+                                  CAMERA_BASE_ZOOM, 1.0f, 2.0f };
+        int unsnapped = 0;
+        for (size_t o = 0; o < sizeof(offsets) / sizeof(offsets[0]); o++) {
+            for (size_t t = 0; t < sizeof(targets) / sizeof(targets[0]); t++) {
+                for (size_t z = 0; z < sizeof(zooms) / sizeof(zooms[0]); z++) {
+                    const float snapped =
+                        units_snap_camera_offset_axis(offsets[o], targets[t], zooms[z]);
+                    const float translation =
+                        units_camera_translation_axis(snapped, targets[t], zooms[z]);
+                    /* Tolerance, not equality: the snap is float arithmetic on values up to
+                     * 1e4, where one ulp is ~1e-3 of a pixel. Anything under a hundredth of a
+                     * pixel is invisible; a genuinely unsnapped translation is off by ~0.5. */
+                    const float frac = translation - floorf(translation);
+                    const float distanceToWhole = (frac < 0.5f) ? frac : (1.0f - frac);
+                    if (distanceToWhole > 0.01f) {
+                        if (unsnapped == 0) {
+                            printf("      camera translation not on a whole pixel:"
+                                   " offset %g target %g zoom %g -> %g\n",
+                                   (double)offsets[o], (double)targets[t],
+                                   (double)zooms[z], (double)translation);
+                        }
+                        unsnapped++;
+                    }
+                }
+            }
+        }
+        check(unsnapped == 0,
+              "the snapped camera translation always lands on a whole target pixel");
+    }
 }
 
 /* ------------------------------------------------------------------------------------- */

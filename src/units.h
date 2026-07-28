@@ -34,6 +34,8 @@
 #ifndef DRIFTY_UNITS_H
 #define DRIFTY_UNITS_H
 
+#include <math.h>
+
 #include "raylib.h"
 
 #include "config.h"
@@ -87,6 +89,33 @@ static inline float units_heading_to_rotation_deg(float headingRad)
 static inline float units_rotation_deg_to_heading(float rotationDeg)
 {
     return -rotationDeg * DRIFTY_DEG2RAD;
+}
+
+/* ---------------------------------------------------------------- pixel-grid snapping --
+ *
+ * A raylib Camera2D maps world to screen as (world - target) * zoom + offset. When the world
+ * is rendered into a low-resolution target and then enlarged by an integer factor with
+ * nearest-neighbour filtering, a FRACTIONAL camera translation makes every world pixel land
+ * between two target pixels — and as the camera follows the car, the whole grid crawls a
+ * pixel at a time. That shimmer is the single most visible way to get pixel art wrong.
+ *
+ * Given an integral base offset, this returns the offset that makes the translation
+ * (-target * zoom + offset) land exactly on a whole target pixel. The cost is sub-pixel
+ * camera smoothness, which nobody can see; the gain is a stable grid, which everybody can.
+ *
+ * Pure and header-only so the property is reachable from the headless test binary — the
+ * shimmer itself needs a moving camera and an eye, but the arithmetic underneath does not.
+ */
+static inline float units_snap_camera_offset_axis(float offset, float target, float zoom)
+{
+    const float translated = target * zoom;
+    return offset + (translated - floorf(translated));
+}
+
+/* The resulting translation, which callers assert is integral. */
+static inline float units_camera_translation_axis(float offset, float target, float zoom)
+{
+    return offset - target * zoom;
 }
 
 #endif /* DRIFTY_UNITS_H */
