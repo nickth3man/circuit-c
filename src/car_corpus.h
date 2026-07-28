@@ -13,7 +13,7 @@
  *   archetype  the hand-designed presets from dev_presets.c — recognisable anchors that prove
  *              deliberately authored specs render sensibly
  *   sweep      one registry key varied across its declared [minimum, maximum] with everything
- *              else at stock. A row of five cars where ONLY the wheelbase changes is the most
+ *              else at stock. A row of cars where ONLY the wheelbase changes is the most
  *              direct evidence that appearance is a function of the parameters, and it is
  *              self-documenting in a way a random sample never is.
  *

@@ -10,36 +10,37 @@
  */
 #include "car_corpus.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 
 #include "dev_params.h"
 #include "dev_presets.h"
 
-/* Steps per sweep axis. Five is enough to read a trend across a contact-sheet row without
- * the row dominating the page. */
-#define SWEEP_STEPS 5
+/* Steps per sweep axis. Fourteen steps across the three silhouette drivers that clear both
+ * the signature and pixel distinctness floors yields 10 + 3*14 = 52 corpus vehicles. */
+#define SWEEP_STEPS 14
 
 /* The registry keys whose visual effect Phase 1 can honestly demonstrate. Each must name a
  * parameter that car_visual.c actually reads AND that visibly changes the rendering; the
  * `car-visual` scenario asserts the latter, which is what catches an axis going dead.
  *
- * Deliberately NOT here: brake.max_torque and wheel.inertia. car_visual.c does derive a brake
- * disc diameter and a spoke count from them, but on a normal car the wheels sit entirely under
- * the body, and at the ~13 px/m the game draws at the wheel interior is a pixel or two wide.
- * Both axes measured as literally zero-pixel changes. Listing them anyway would advertise
- * variety the player cannot see — the same dishonesty as deriving tire width from grip. They
- * become real drivers in Phase 2, when tire width, wheel offset and ride height expose the
- * wheel at the body edge. */
+ * Deliberately NOT here:
+ *   - brake.max_torque, wheel.inertia: disc/spoke cues derive, but at ~13 px/m the wheel
+ *     interior is sub-pixel and sensitivity measured zero-pixel changes.
+ *   - body.mass, body.drag_coefficient: latents / appendage smoothsteps only; intermediate
+ *     steps stay within centimetres of the stock silhouette until a wing threshold snaps.
+ *   - wheel.radius: identity-mapped and visible at the extremes, but after excluding a
+ *     one-pixel window around stock the usable span cannot hold several distinct steps.
+ *   - body.track_front, body.track_rear: signature L∞ clears 0.08 m between neighbours, but
+ *     at gallery scale a ~15 cm track change only rewrites ~1.5% of silhouette pixels — below
+ *     the 3% colour-blind pixel floor. They return once wheel width / offset expose more
+ *     of the tire at the body edge (Phase 2).
+ */
 static const char *const kSweepKeys[] = {
     "body.cg_to_rear",         /* wheelbase and weight bias -> length, greenhouse position */
     "body.cg_to_front",        /* the same lever from the other end -> bonnet length */
-    "body.track_rear",         /* rear stance -> hips, arch flare, wheels proud of the body */
-    "body.track_front",        /* front stance */
     "collision.half_width",    /* body width -> the whole silhouette */
-    "wheel.radius",            /* tire diameter */
-    "body.mass",               /* bulk latent -> tail fullness, stripped-out cues */
-    "body.drag_coefficient",   /* nose taper and whether a wing appears */
 };
 
 #define SWEEP_AXES ((int)(sizeof(kSweepKeys) / sizeof(kSweepKeys[0])))
@@ -94,7 +95,19 @@ const char *car_corpus_sweep_key(int index)
     return kSweepKeys[axis];
 }
 
-/* The value this sweep step sets, spread evenly across the registry's declared range. */
+/* The value this sweep step sets.
+ *
+ * Even spacing over [min, max] is wrong when the stock default sits inside the interval:
+ * the midpoint step of body.cg_to_rear reproduced VEH_CG_TO_REAR_M exactly and made
+ * sweep_body_cg_to_rear_2 bit-identical to archetype_00_stock_baseline. Near-default
+ * interior ticks on track / half_width / wheel.radius were only centimetres from stock and
+ * failed the pairwise distinctness floor even though the grammar reads those fields.
+ *
+ * Map the step index through the complement of an exclusion window around the default so
+ * every step is at least one visible metre-scale tick away from stock, the sequence stays
+ * monotonic, and neighbouring steps cannot collapse onto the same patched value. This is a
+ * corpus sampling correction — cgToRearM (and the other keys) already drive geometry in
+ * car_visual.c. */
 static bool sweep_value(int index, const DevParameter **paramOut, float *valueOut)
 {
     int axis = 0, step = 0;
@@ -103,9 +116,36 @@ static bool sweep_value(int index, const DevParameter **paramOut, float *valueOu
     const DevParameter *param = dev_param_find(kSweepKeys[axis]);
     if (param == NULL) return false;
 
-    const float t = (SWEEP_STEPS > 1) ? ((float)step / (float)(SWEEP_STEPS - 1)) : 0.0f;
+    const float span = param->maximum - param->minimum;
+    const float stepSpan = (SWEEP_STEPS > 1) ? (span / (float)(SWEEP_STEPS - 1)) : span;
+    /* Half a grid step, but never less than ~one visible pixel (0.08 m) for metre-valued
+     * drivers. wheel.radius is also in metres; excluding 0.08 m of radius clears 0.16 m of
+     * drawn diameter, which is above the signature L∞ floor. */
+    const float exclude = fmaxf(0.5f * fabsf(stepSpan), 0.08f);
+
+    const float leftHi = param->defaultValue - exclude;
+    const float rightLo = param->defaultValue + exclude;
+    const float leftLen = fmaxf(0.0f, leftHi - param->minimum);
+    const float rightLen = fmaxf(0.0f, param->maximum - rightLo);
+    const float usable = leftLen + rightLen;
+
+    float value;
+    if (!(usable > 0.0f)) {
+        /* Degenerate registry range; fall back to plain endpoints. */
+        const float t = (SWEEP_STEPS > 1) ? ((float)step / (float)(SWEEP_STEPS - 1)) : 0.0f;
+        value = param->minimum + span * t;
+    } else {
+        const float t = (SWEEP_STEPS > 1) ? ((float)step / (float)(SWEEP_STEPS - 1)) : 0.0f;
+        const float pos = t * usable;
+        if (pos <= leftLen) {
+            value = param->minimum + fminf(pos, leftLen);
+        } else {
+            value = rightLo + fminf(pos - leftLen, rightLen);
+        }
+    }
+
     if (paramOut != NULL) *paramOut = param;
-    if (valueOut != NULL) *valueOut = param->minimum + (param->maximum - param->minimum) * t;
+    if (valueOut != NULL) *valueOut = value;
     return true;
 }
 

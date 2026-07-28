@@ -5452,6 +5452,73 @@ static void scenario_corpus(void)
         check(invalid == 0, "every corpus vehicle passes vehicle_spec_is_valid()");
     }
 
+    /* --- sweep steps must not reproduce stock or collapse onto a neighbour ---
+     * Regression for the midpoint-default collision: evenly spaced [min, max] steps of
+     * body.cg_to_rear landed on VEH_CG_TO_REAR_M at step 2, so sweep_body_cg_to_rear_2 was
+     * bit-identical to archetype_00_stock_baseline. The grammar already reads cgToRearM;
+     * the bug was corpus sampling, not a disconnected mapping. */
+    {
+        VehicleSpec stock;
+        vehicle_spec_set_default(&stock);
+
+        int collapsed = 0;
+        for (int i = 0; i < count; i++) {
+            if (car_corpus_group(i) != CAR_CORPUS_SWEEP) continue;
+
+            const char *key = car_corpus_sweep_key(i);
+            const DevParameter *param = (key != NULL) ? dev_param_find(key) : NULL;
+            VehicleSpec spec;
+            if (param == NULL || !car_corpus_spec(i, &spec)) {
+                collapsed++;
+                continue;
+            }
+
+            const float value = dev_param_get(&spec, param);
+            const float stockValue = dev_param_get(&stock, param);
+            /* Corpus sampling excludes a >= 0.08 m window around the stock default for
+             * metre-valued drivers; require at least that gap here so a midpoint collision
+             * fails loudly. Neighbour spacing is allowed to be tighter — the pairwise pixel
+             * test owns visual separation between adjacent steps. */
+            const float minStockGap = 0.08f;
+            const float minNeighbourGap = (param->step > 0.0f) ? param->step : 1e-4f;
+
+            if (fabsf(value - stockValue) < minStockGap) {
+                if (collapsed == 0) {
+                    char id[128];
+                    car_corpus_id(i, id, sizeof(id));
+                    printf("      sweep reproduces stock: %s (%s = %g, stock %g)\n",
+                           id, param->name, (double)value, (double)stockValue);
+                }
+                collapsed++;
+                continue;
+            }
+
+            /* Neighbour on the same axis (previous step), if any. */
+            if (i > 0 && car_corpus_group(i - 1) == CAR_CORPUS_SWEEP &&
+                car_corpus_sweep_key(i - 1) != NULL &&
+                strcmp(car_corpus_sweep_key(i - 1), key) == 0) {
+                VehicleSpec prev;
+                if (!car_corpus_spec(i - 1, &prev)) {
+                    collapsed++;
+                    continue;
+                }
+                const float prevValue = dev_param_get(&prev, param);
+                if (fabsf(value - prevValue) < minNeighbourGap) {
+                    if (collapsed == 0) {
+                        char id[128], pid[128];
+                        car_corpus_id(i, id, sizeof(id));
+                        car_corpus_id(i - 1, pid, sizeof(pid));
+                        printf("      sweep neighbours collide: %s vs %s (%s = %g / %g)\n",
+                               pid, id, param->name, (double)prevValue, (double)value);
+                    }
+                    collapsed++;
+                }
+            }
+        }
+        check(collapsed == 0,
+              "every sweep step differs from stock and from neighbouring steps on its axis");
+    }
+
     /* --- all-pairs distinctness on the colour-blind label maps --- */
     {
         const CarRasterInfo canvas = cv_shared_canvas(CV_TEST_PX_PER_M);
