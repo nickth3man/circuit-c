@@ -453,22 +453,22 @@ bool physics_state_is_valid(const VehicleSpec *spec, const VehicleState *state,
      * check. Rolling resistance is computed per wheel from contact velocity (which differs
      * from CG velocity under yaw), then optionally clamped by limit_resistance_to_stop
      * against body axes - so aggregate RR . body_velocity is not a valid dissipation check
-     * (it fails near-zero CG speed with residual yaw). Recompute each wheel's pure RR and
-     * require RR . contact_velocity <= tolerance instead. */
+     * (it fails near-zero CG speed with residual yaw). Validate stored per-wheel magnitudes
+     * against a fresh pure-helper recompute instead of checking a freshly generated force
+     * against the velocity that produced it. */
     if (derived->aeroDragBodyN.x * state->velocityLongitudinalMps +
         derived->aeroDragBodyN.y * state->velocityLateralMps >
         RESISTANCE_POWER_TOLERANCE_W) return false;
     for (int i = 0; i < WHEEL_COUNT; i++) {
         if (derived->wheelRollingResistanceN[i] < 0.0f) return false;
-        float magnitudeN = 0.0f;
-        const Vector2 wheelRollingN = physics_rolling_resistance_body_n(
+        float expectedMagnitudeN = 0.0f;
+        (void)physics_rolling_resistance_body_n(
             Surface_Get(state->wheels[i].surfaceId)->rollingResistanceCoefficient,
             state->wheels[i].normalLoadN,
             derived->wheelContactVelocityBodyMps[i],
-            &magnitudeN);
-        const Vector2 contact = derived->wheelContactVelocityBodyMps[i];
-        if (wheelRollingN.x * contact.x + wheelRollingN.y * contact.y >
-            RESISTANCE_POWER_TOLERANCE_W) {
+            &expectedMagnitudeN);
+        if (fabsf(derived->wheelRollingResistanceN[i] - expectedMagnitudeN) >
+            RESISTANCE_FORCE_TOLERANCE_N) {
             return false;
         }
     }
