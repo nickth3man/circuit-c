@@ -127,6 +127,7 @@ typedef struct {
     int         height;
     int         ticks;          /* -1: use the scene's own tick count */
     uint32_t    seed;
+    int         galleryPage;    /* 0: not a gallery capture; >=1: the 1-based page */
 } Options;
 
 static void print_usage(const char *argv0)
@@ -147,6 +148,7 @@ static bool parse_options(int argc, char **argv, Options *options, int *statusOu
     options->height = SCREEN_H;
     options->ticks = -1;
     options->seed = 0u;
+    options->galleryPage = 0;
     *statusOut = 0;
 
     for (int i = 1; i < argc; i++) {
@@ -176,6 +178,8 @@ static bool parse_options(int argc, char **argv, Options *options, int *statusOu
             options->ticks = atoi(argv[++i]);
         } else if (strcmp(arg, "--seed") == 0 && hasValue) {
             options->seed = (uint32_t)strtoul(argv[++i], NULL, 10);
+        } else if (strcmp(arg, "--gallery-page") == 0 && hasValue) {
+            options->galleryPage = atoi(argv[++i]);
         } else {
             fprintf(stderr, "error: unrecognised argument '%s'\n", arg);
             print_usage(argv[0]);
@@ -252,6 +256,33 @@ static int run_capture(Game *game, const Options *options)
     return 0;
 }
 
+/*
+ * Bounded gallery capture: no simulation, one page of the vehicle corpus drawn through the
+ * production texture path, one screenshot, exit. Selected through the DevState field the
+ * module already owns, so this needs no new entry point.
+ */
+static int run_gallery(Game *game, const Options *options)
+{
+    const char *output = (options->outputPath != NULL)
+                       ? options->outputPath : "artifacts/gallery-ingame/page.png";
+
+    game_init(game);
+    game->dev.uiDeterministic = true;
+    game->dev.galleryPage = options->galleryPage;
+
+    /* Two frames for the same reason a scene capture takes two: the first lets raylib settle
+     * its own per-frame state, the second is the one that gets written. */
+    game_draw(game, 0.0f);
+    game_draw(game, 0.0f);
+
+    ensure_parent_directory(output);
+    TakeScreenshot(output);
+
+    printf("GALLERY: page=%d size=%dx%d -> %s\n",
+           options->galleryPage, options->width, options->height, output);
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
     Options options;
@@ -260,6 +291,7 @@ int main(int argc, char **argv)
 
     const bool smoke_test = options.smokeTest;
     const bool capture = (options.captureScene != NULL);
+    const bool gallery = (options.galleryPage > 0);
 
     Game *game = (Game *)calloc(1, sizeof(Game));
     if (game == NULL) {
@@ -277,6 +309,7 @@ int main(int argc, char **argv)
     const char *title = "Drifty - Phase 2";
     if (smoke_test) title = "Drifty - Phase 2 smoke test";
     if (capture) title = "Drifty - scene capture";
+    if (gallery) title = "Drifty - vehicle gallery";
 
     InitWindow(options.width, options.height, title);
     if (!IsWindowReady()) {
@@ -288,8 +321,9 @@ int main(int argc, char **argv)
 
     SetTargetFPS(TARGET_FPS);
 
-    if (capture) {
-        const int status = run_capture(game, &options);
+    if (capture || gallery) {
+        const int status = capture ? run_capture(game, &options)
+                                   : run_gallery(game, &options);
         game_shutdown(game);
         CloseWindow();
         Game_UnloadModule();

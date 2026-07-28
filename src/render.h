@@ -33,4 +33,23 @@ void render_pre_reload(void);
 void render_post_reload(void);
 void render_shutdown(void);
 
+/* ------------------------------------------------------------------------- gallery ----
+ *
+ * One page of the vehicle corpus, drawn through the production texture path — the same bake
+ * and the same compositor the running game uses, so the gallery cannot show a car the game
+ * would not. No simulation runs; the pose is fixed with the front wheels turned so lock,
+ * Ackermann and static toe are all visible at once.
+ *
+ * Bake-draw-DISCARD, one car at a time: reviewing a hundred vehicles never holds more than a
+ * single car's textures on the GPU.
+ *
+ * `page` is 1-based. Out-of-range pages draw the page-count notice and nothing else, so
+ * `--gallery-page 99` is a readable no-op rather than an empty screen.
+ *
+ * A human-review artifact, deliberately not a GPU regression baseline: a hundred cars behind
+ * an RMSE gate on hardware that renders differently per vendor is a maintenance sinkhole with
+ * no CI value. The headless contact sheet and the `corpus` scenario are the actual gates. */
+int  render_gallery_page_count(void);
+void render_draw_gallery(struct Game *game, int page);
+
 #endif /* DRIFTY_RENDER_H */

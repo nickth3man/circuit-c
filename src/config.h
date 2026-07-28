@@ -296,4 +296,42 @@
 #define DRIFT_ZOOM_REF_RAD      0.70f    /* sideslip mapped to full zoom-out */
 #define SLIDE_USAGE_THRESHOLD   0.98f    /* dimensionless friction usage = physically sliding */
 
+/* Pixel-art world pass ------------------------------------------------------
+ *
+ * THE SCALE CHAIN, END TO END. Five numbers have to agree for the world to be pixel art
+ * rather than a smoothly-filtered approximation of it, and this is where they are reconciled:
+ *
+ *   PIXELS_PER_METER       24      the render layer's world scale, held in
+ *                                  Game.renderPixelsPerMeter (src/units.h consumes it)
+ *   CAMERA_BASE_ZOOM       0.55    the Camera2D zoom at rest
+ *   world scale            13.2    PIXELS_PER_METER * CAMERA_BASE_ZOOM px/m — the scale the
+ *                                  world is rasterized at inside the low-resolution target
+ *   sprite bake scale      13.2    the SAME number, so a vehicle texel is exactly one target
+ *                                  pixel at rest and the sprite is never resampled
+ *   PIXEL_ART_UPSCALE      2       integer, nearest-neighbour, applied once to the finished
+ *                                  target: 640x360 -> 1280x720
+ *
+ * WHY 13.2 AND NOT SOMETHING ROUNDER. It is what the vehicle grammar is calibrated to. The
+ * corpus distinctness thresholds, the one-pixel visibility floor behind every presentation
+ * gain, and the headless contact sheet are all stated at PIXELS_PER_METER * CAMERA_BASE_ZOOM.
+ * Rendering the world at any other scale would mean the player looks at a different car from
+ * the one the tests gate.
+ *
+ * WHY 2 AND NOT 3. 1280 and 720 must both divide by it exactly, or the final blit is
+ * fractional and the pixel grid crawls under camera motion — which is the whole thing this
+ * pass exists to prevent. 2 and 4 divide 1280x720; 3 does not.
+ *
+ * WHAT THIS CHANGES FOR THE PLAYER. The world is drawn into a 640x360 target and doubled, so
+ * the on-screen scale becomes 26.4 px/m and the visible world halves. CAMERA_BASE_ZOOM itself
+ * is deliberately NOT touched: the alternative — halving it to hold the old framing — would
+ * put the world back at 6.6 px/m, where a car is 27 px long and most of the grammar is below
+ * the visibility floor.
+ *
+ * WHAT IS NOT UPSCALED. The HUD, raygui and the Physics Lab draw at native resolution on top
+ * of the blit. Text through a 2x nearest-neighbour upscale would be unreadable.
+ */
+#define PIXEL_ART_UPSCALE       2       /* integer; must divide SCREEN_W and SCREEN_H exactly */
+#define PIXEL_ART_TARGET_W      (SCREEN_W / PIXEL_ART_UPSCALE)
+#define PIXEL_ART_TARGET_H      (SCREEN_H / PIXEL_ART_UPSCALE)
+
 #endif /* DRIFTY_CONFIG_H */

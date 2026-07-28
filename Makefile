@@ -18,6 +18,7 @@
 #   make coverage         gcov/gcovr text, HTML, and Cobertura output
 #   make screenshots      capture the deterministic visual scenes
 #   make visual-test      compare captured scenes against tests/visual/baseline
+#   make gallery          capture every page of the in-game vehicle corpus gallery
 #   make profile          build with the Tracy hooks enabled (DRIFTY_TRACY)
 #   make benchmark        fixed-update throughput
 #   make release          release build
@@ -151,7 +152,7 @@ REGRESSION_SCENARIOS := skidpad step-steer transition lift-off \
                         accel-load brake-load coast-down catchable-drift
 
 .PHONY: all help info dev run release tests test test-physics scenario report regression \
-        baselines verify-fast verify sanitize coverage screenshots visual-test profile \
+        baselines verify-fast verify sanitize coverage screenshots visual-test gallery profile \
         benchmark ci params-doc compile-commands format format-check lint analyze fuzz \
         clean clean-telemetry dirs windows-only
 
@@ -350,6 +351,27 @@ screenshots: windows-only dev
 	    ./$(EXE_DEBUG) --capture-scene $$scene --width 1280 --height 720 --seed 12345 \
 	        --output $(ARTIFACTS)/screenshots/$$scene.png || exit 1; \
 	done
+
+# The in-game vehicle gallery: every corpus page through the production texture path.
+#
+# Bounded and self-exiting like every other capture here — `drifty.exe --gallery-page N`
+# draws one page and quits, so this target never launches an interactive session.
+#
+# The output is a HUMAN-REVIEW artifact and deliberately not a GPU regression baseline: a
+# hundred cars behind an RMSE gate, on hardware that rasterizes differently per vendor, is a
+# maintenance sinkhole with no CI value. The gates that matter are headless — the `corpus`
+# scenario and `drifty_tests --dump-corpus-sheet`.
+GALLERY_PAGES ?= 7
+
+gallery: windows-only dev
+	@mkdir -p $(ARTIFACTS)/gallery-ingame
+	@page=1; \
+	while [ $$page -le $(GALLERY_PAGES) ]; do \
+	    ./$(EXE_DEBUG) --gallery-page $$page --width 1280 --height 720 \
+	        --output $(ARTIFACTS)/gallery-ingame/page_$$page.png || exit 1; \
+	    page=$$((page + 1)); \
+	done
+	@echo "gallery: $(GALLERY_PAGES) page(s) in $(ARTIFACTS)/gallery-ingame/"
 
 visual-test: screenshots
 ifeq ($(MAGICK),)
