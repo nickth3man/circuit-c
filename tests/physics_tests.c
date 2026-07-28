@@ -34,6 +34,8 @@
 
 #include "car_corpus.h"
 #include "car_sheet.h"
+#include "car_visual.h"
+#include "car_visual_raster.h"
 #include "config.h"
 #include "dev_params.h"
 #include "dev_replay.h"
@@ -5191,6 +5193,335 @@ static void scenario_state_machine(void)
 
 
 /* ------------------------------------------------------------------------------------- */
+/* Vehicle appearance: purity, totality, sensitivity, and corpus distinctness              */
+/* ------------------------------------------------------------------------------------- */
+
+/* The scale everything visual is asserted at: what the game actually draws. Asserting at a
+ * higher scale would let differences pass that no player could ever see. */
+#define CV_TEST_PX_PER_M   (PIXELS_PER_METER * CAMERA_BASE_ZOOM)
+
+/* Fraction of the union silhouette that must differ for two cars to count as distinguishable.
+ * The authoritative metric — a colour-blind comparison of feature-label maps. */
+#define CV_MIN_PIXEL_DIFF  0.030f
+
+/* Per-component floor on the diagnostic feature vector: 0.08 m is almost exactly one screen
+ * pixel at CV_TEST_PX_PER_M, so "one visible pixel somewhere" is a literal reading of it. */
+#define CV_MIN_LINF        0.080f
+
+/* Every car is rasterized into ONE canvas with the CG at a fixed point, so label maps are
+ * directly comparable and an alignment difference cannot masquerade as a shape difference. */
+static CarRasterInfo cv_shared_canvas(float pxPerM)
+{
+    float left = 1.0f, right = 1.0f, up = 1.0f, down = 1.0f;
+
+    for (int i = 0; i < car_corpus_count(); i++) {
+        VehicleSpec spec;
+        CarVisual visual;
+        if (!car_corpus_spec(i, &spec)) continue;
+        car_visual_derive(&spec, &visual);
+
+        const CarRasterInfo info = car_raster_info(&visual, pxPerM, 2);
+        const float l = info.originXPx;
+        const float r = (float)info.width - info.originXPx;
+        const float u = info.originYPx;
+        const float d = (float)info.height - info.originYPx;
+        if (l > left)  left  = l;
+        if (r > right) right = r;
+        if (u > up)    up    = u;
+        if (d > down)  down  = d;
+    }
+
+    CarRasterInfo shared;
+    memset(&shared, 0, sizeof(shared));
+    shared.pxPerM    = pxPerM;
+    shared.width     = (int)ceilf(left + right);
+    shared.height    = (int)ceilf(up + down);
+    shared.originXPx = left;
+    shared.originYPx = up;
+    return shared;
+}
+
+static bool cv_labels_for_spec(const VehicleSpec *spec, CarRasterInfo canvas,
+                               unsigned char *labels, size_t bytes)
+{
+    CarVisual visual;
+    car_visual_derive(spec, &visual);
+    return car_raster_draw_labels(&visual, canvas, labels, bytes);
+}
+
+/* Largest single-component gap between two signature vectors, and which component it was. */
+static float cv_signature_linf(const CarVisual *a, const CarVisual *b, int *worstOut)
+{
+    float sa[64], sb[64];
+    const int n = car_visual_signature_count();
+    if (n > (int)(sizeof(sa) / sizeof(sa[0]))) return 0.0f;
+    if (car_visual_signature(a, sa, n) != n) return 0.0f;
+    if (car_visual_signature(b, sb, n) != n) return 0.0f;
+
+    float worst = 0.0f;
+    int worstIndex = 0;
+    for (int i = 0; i < n; i++) {
+        const float d = fabsf(sa[i] - sb[i]);
+        if (d > worst) { worst = d; worstIndex = i; }
+    }
+    if (worstOut != NULL) *worstOut = worstIndex;
+    return worst;
+}
+
+static void scenario_car_visual(void)
+{
+    VehicleSpec spec;
+    CarVisual a, b;
+
+    /* --- purity: same input, byte-identical output (derive memsets first, so padding is
+     * deterministic and memcmp is meaningful) --- */
+    vehicle_spec_set_default(&spec);
+    car_visual_derive(&spec, &a);
+    car_visual_derive(&spec, &b);
+    check(memcmp(&a, &b, sizeof(CarVisual)) == 0,
+          "car_visual_derive is pure: identical specs give identical visuals");
+
+    /* --- the wheel centres ARE the simulation's wheel positions, not a lookalike --- */
+    {
+        VehicleState state;
+        VehicleDerived derived;
+        VehicleRenderState renderState;
+        vehicle_state_reset(&spec, &state, &derived, &renderState);
+        bool matched = true;
+        for (int i = 0; i < WHEEL_COUNT; i++) {
+            if (fabsf(a.wheels[i].centreM.x - state.wheels[i].localPositionM.x) > 1e-6f ||
+                fabsf(a.wheels[i].centreM.y - state.wheels[i].localPositionM.y) > 1e-6f) {
+                matched = false;
+            }
+        }
+        check(matched, "drawn wheel centres equal vehicle.c set_wheel_positions()");
+        check(fabsf(a.wheelbaseM - (spec.cgToFrontM + spec.cgToRearM)) < 1e-6f,
+              "drawn wheelbase equals the simulated wheelbase");
+        check(fabsf(a.wheels[WHEEL_FRONT_LEFT].diameterM - 2.0f * spec.wheelRadiusM) < 1e-6f,
+              "drawn tire diameter equals 2 * wheelRadiusM");
+        check(fabsf(a.widthM - 2.0f * spec.bodyHalfWidthM) < 1e-6f,
+              "drawn body width equals the collision half-width doubled");
+    }
+
+    /* --- totality: every declared range corner yields finite, sane geometry --- */
+    {
+        int bad = 0;
+        for (int p = 0; p < dev_params_count(); p++) {
+            const DevParameter *param = dev_param_at(p);
+            for (int corner = 0; corner < 2; corner++) {
+                VehicleSpec probe;
+                vehicle_spec_set_default(&probe);
+                dev_param_set(&probe, param, corner == 0 ? param->minimum : param->maximum);
+
+                CarVisual v;
+                car_visual_derive(&probe, &v);
+                if (!isfinite(v.lengthM) || !isfinite(v.widthM) ||
+                    v.lengthM <= 0.0f || v.widthM <= 0.0f) {
+                    if (bad == 0) {
+                        printf("      first bad corner: %s = %g -> length %g width %g\n",
+                               param->name,
+                               (double)(corner == 0 ? param->minimum : param->maximum),
+                               (double)v.lengthM, (double)v.widthM);
+                    }
+                    bad++;
+                    continue;
+                }
+                for (int s = 0; s < CAR_HULL_STATIONS; s++) {
+                    if (!isfinite(v.hull[s].halfWidthM) || v.hull[s].halfWidthM < 0.0f) bad++;
+                }
+            }
+        }
+        check(bad == 0, "every registry range corner produces finite, non-negative geometry");
+    }
+
+    /* --- monotonicity: the obvious knobs move the obvious way. These are what stop a
+     * distinctness failure being "fixed" by injecting noise into the grammar. --- */
+    {
+        VehicleSpec lo, hi;
+        CarVisual vlo, vhi;
+
+        vehicle_spec_set_default(&lo);
+        hi = lo;
+        lo.wheelRadiusM = 0.25f;
+        hi.wheelRadiusM = 0.40f;
+        car_visual_derive(&lo, &vlo);
+        car_visual_derive(&hi, &vhi);
+        check(vhi.wheels[0].diameterM > vlo.wheels[0].diameterM,
+              "a larger wheel radius draws a larger tire");
+
+        vehicle_spec_set_default(&lo);
+        hi = lo;
+        lo.bodyHalfWidthM = 0.70f;
+        hi.bodyHalfWidthM = 1.10f;
+        car_visual_derive(&lo, &vlo);
+        car_visual_derive(&hi, &vhi);
+        check(vhi.widthM > vlo.widthM, "a wider collision body draws a wider car");
+
+        vehicle_spec_set_default(&lo);
+        hi = lo;
+        lo.cgToRearM = 1.00f;
+        hi.cgToRearM = 1.90f;
+        dev_params_refresh_derived(&lo);
+        dev_params_refresh_derived(&hi);
+        car_visual_derive(&lo, &vlo);
+        car_visual_derive(&hi, &vhi);
+        check(vhi.lengthM > vlo.lengthM, "a longer wheelbase draws a longer car");
+
+        vehicle_spec_set_default(&lo);
+        hi = lo;
+        lo.maxBrakeTorqueNm = 500.0f;
+        hi.maxBrakeTorqueNm = 6000.0f;
+        car_visual_derive(&lo, &vlo);
+        car_visual_derive(&hi, &vhi);
+        check(vhi.wheels[0].discDiameterM > vlo.wheels[0].discDiameterM,
+              "more brake torque draws a larger disc");
+    }
+
+    /* --- sensitivity: every sweep axis must actually move the picture. A dead rule is
+     * invisible on a contact sheet but fails here. --- */
+    {
+        const CarRasterInfo canvas = cv_shared_canvas(CV_TEST_PX_PER_M);
+        const size_t pixels = (size_t)canvas.width * (size_t)canvas.height;
+        unsigned char *la = (unsigned char *)malloc(pixels);
+        unsigned char *lb = (unsigned char *)malloc(pixels);
+        check(la != NULL && lb != NULL && pixels > 0, "sensitivity canvas allocated");
+
+        if (la != NULL && lb != NULL) {
+            int dead = 0;
+            for (int p = 0; p < dev_params_count(); p++) {
+                const DevParameter *param = dev_param_at(p);
+                /* Only the keys the corpus advertises as visual drivers. */
+                bool isDriver = false;
+                for (int i = 0; i < car_corpus_count(); i++) {
+                    const char *key = car_corpus_sweep_key(i);
+                    if (key != NULL && strcmp(key, param->name) == 0) { isDriver = true; break; }
+                }
+                if (!isDriver) continue;
+
+                VehicleSpec lo, hi;
+                vehicle_spec_set_default(&lo);
+                vehicle_spec_set_default(&hi);
+                dev_param_set(&lo, param, param->minimum);
+                dev_param_set(&hi, param, param->maximum);
+
+                cv_labels_for_spec(&lo, canvas, la, pixels);
+                cv_labels_for_spec(&hi, canvas, lb, pixels);
+                const float diff = car_raster_difference(la, lb, canvas.width, canvas.height);
+                if (diff < CV_MIN_PIXEL_DIFF) {
+                    printf("      dead visual axis: %s (min..max moves only %.4f of pixels)\n",
+                           param->name, (double)diff);
+                    dead++;
+                }
+            }
+            check(dead == 0, "every advertised visual-driver parameter changes the rendering");
+        }
+        free(la);
+        free(lb);
+    }
+
+    /* --- the raster scales with the requested resolution, mirroring scenario_renderscale --- */
+    {
+        CarVisual v;
+        vehicle_spec_set_default(&spec);
+        car_visual_derive(&spec, &v);
+        const CarRasterInfo one = car_raster_info(&v, 16.0f, 0);
+        const CarRasterInfo two = car_raster_info(&v, 32.0f, 0);
+        check(two.width >= one.width * 2 - 3 && two.width <= one.width * 2 + 3,
+              "doubling the raster scale doubles the sprite width");
+    }
+}
+
+static void scenario_corpus(void)
+{
+    const int count = car_corpus_count();
+    check(count >= 50, "the corpus holds at least 50 vehicles (have %d)", count);
+
+    /* --- every entry is a valid, renderable car --- */
+    {
+        int invalid = 0;
+        for (int i = 0; i < count; i++) {
+            VehicleSpec spec;
+            char id[128];
+            car_corpus_id(i, id, sizeof(id));
+            if (!car_corpus_spec(i, &spec)) { invalid++; continue; }
+            if (!vehicle_spec_is_valid(&spec)) {
+                if (invalid == 0) printf("      first invalid corpus spec: %s\n", id);
+                invalid++;
+            }
+        }
+        check(invalid == 0, "every corpus vehicle passes vehicle_spec_is_valid()");
+    }
+
+    /* --- all-pairs distinctness on the colour-blind label maps --- */
+    {
+        const CarRasterInfo canvas = cv_shared_canvas(CV_TEST_PX_PER_M);
+        const size_t pixels = (size_t)canvas.width * (size_t)canvas.height;
+        unsigned char *maps = (unsigned char *)malloc(pixels * (size_t)count);
+        CarVisual *visuals = (CarVisual *)malloc(sizeof(CarVisual) * (size_t)count);
+        check(maps != NULL && visuals != NULL && pixels > 0, "distinctness buffers allocated");
+
+        if (maps != NULL && visuals != NULL) {
+            bool built = true;
+            for (int i = 0; i < count; i++) {
+                VehicleSpec spec;
+                if (!car_corpus_spec(i, &spec)) { built = false; break; }
+                car_visual_derive(&spec, &visuals[i]);
+                if (!car_raster_draw_labels(&visuals[i], canvas,
+                                            maps + pixels * (size_t)i, pixels)) {
+                    built = false;
+                    break;
+                }
+            }
+            check(built, "every corpus vehicle rasterizes onto the shared canvas");
+
+            if (built) {
+                float worstDiff = 1.0f;
+                int worstA = -1, worstB = -1;
+                for (int i = 0; i < count; i++) {
+                    for (int j = i + 1; j < count; j++) {
+                        const float d = car_raster_difference(maps + pixels * (size_t)i,
+                                                              maps + pixels * (size_t)j,
+                                                              canvas.width, canvas.height);
+                        if (d < worstDiff) { worstDiff = d; worstA = i; worstB = j; }
+                    }
+                }
+
+                if (worstDiff < CV_MIN_PIXEL_DIFF && worstA >= 0) {
+                    char ida[128], idb[128];
+                    int worstComponent = 0;
+                    car_corpus_id(worstA, ida, sizeof(ida));
+                    car_corpus_id(worstB, idb, sizeof(idb));
+                    const float linf = cv_signature_linf(&visuals[worstA], &visuals[worstB],
+                                                         &worstComponent);
+                    printf("      closest pair '%s' vs '%s': %.4f of pixels differ,"
+                           " largest feature gap %.4f m in '%s'\n",
+                           ida, idb, (double)worstDiff, (double)linf,
+                           car_visual_signature_component_name(worstComponent));
+                }
+                check(worstDiff >= CV_MIN_PIXEL_DIFF,
+                      "every corpus pair differs in >= %.1f%% of pixels (closest %.2f%%)",
+                      (double)(CV_MIN_PIXEL_DIFF * 100.0f), (double)(worstDiff * 100.0f));
+
+                /* The diagnostic vector must agree that the closest pair is separable, so a
+                 * failure can always name a feature rather than only a pixel count. */
+                float worstLinf = 1e9f;
+                for (int i = 0; i < count; i++) {
+                    for (int j = i + 1; j < count; j++) {
+                        const float linf = cv_signature_linf(&visuals[i], &visuals[j], NULL);
+                        if (linf < worstLinf) worstLinf = linf;
+                    }
+                }
+                check(worstLinf >= CV_MIN_LINF,
+                      "every corpus pair differs by >= %.3f m in some feature (closest %.4f m)",
+                      (double)CV_MIN_LINF, (double)worstLinf);
+            }
+        }
+        free(maps);
+        free(visuals);
+    }
+}
+
+/* ------------------------------------------------------------------------------------- */
 /* Runner                                                                                  */
 /* ------------------------------------------------------------------------------------- */
 
@@ -5209,6 +5540,8 @@ static const Scenario g_scenarios[] = {
     { "oneshot",     "one-shot commands consumed exactly once per press",            scenario_oneshot },
     { "replay",      "deterministic recording, repeatable playback, ring overflow",  scenario_replay },
     { "renderscale", "simulation state is independent of PIXELS_PER_METER",          scenario_renderscale },
+    { "car-visual",  "appearance is a pure, total function of VehicleSpec",          scenario_car_visual },
+    { "corpus",      "every corpus vehicle is valid and visibly distinct",           scenario_corpus },
     { "telemetry",   "CSV writer: stable header, row count, failure handling",       scenario_telemetry },
     { "vehicle",     "canonical structures, steering, contact velocity, render",      scenario_vehicle_units },
     { "tire",        "nonlinear curves, slip ratio, and combined-friction ellipse",   scenario_tire },
