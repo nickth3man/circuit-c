@@ -448,19 +448,29 @@ bool physics_state_is_valid(const VehicleSpec *spec, const VehicleState *state,
 
     /* ---------------------------------------------------------------- Phase 3 resistance -- */
 
-    /* Resistance removes energy or does nothing; it never adds any. A positive dot product
-     * with the velocity it opposes would mean drag is propelling the car. The per-wheel
-     * direction property is asserted against the pure function in the `resistance` unit
-     * scenario; here the stored aggregates are checked so validation stays cheap enough to
-     * run every tick. */
+    /* Resistance removes energy or does nothing; it never adds any. Aero drag is computed
+     * from body velocity, so the stored aggregate dotted with body velocity is the right
+     * check. Rolling resistance is computed per wheel from contact velocity (which differs
+     * from CG velocity under yaw), then optionally clamped by limit_resistance_to_stop
+     * against body axes — so aggregate RR · body_velocity is not a valid dissipation check
+     * (it fails near-zero CG speed with residual yaw). Recompute each wheel's pure RR and
+     * require RR · contact_velocity ≤ tolerance instead. */
     if (derived->aeroDragBodyN.x * state->velocityLongitudinalMps +
         derived->aeroDragBodyN.y * state->velocityLateralMps >
         RESISTANCE_POWER_TOLERANCE_W) return false;
-    if (derived->rollingResistanceBodyN.x * state->velocityLongitudinalMps +
-        derived->rollingResistanceBodyN.y * state->velocityLateralMps >
-        RESISTANCE_POWER_TOLERANCE_W) return false;
     for (int i = 0; i < WHEEL_COUNT; i++) {
         if (derived->wheelRollingResistanceN[i] < 0.0f) return false;
+        float magnitudeN = 0.0f;
+        const Vector2 wheelRollingN = physics_rolling_resistance_body_n(
+            Surface_Get(state->wheels[i].surfaceId)->rollingResistanceCoefficient,
+            state->wheels[i].normalLoadN,
+            derived->wheelContactVelocityBodyMps[i],
+            &magnitudeN);
+        const Vector2 contact = derived->wheelContactVelocityBodyMps[i];
+        if (wheelRollingN.x * contact.x + wheelRollingN.y * contact.y >
+            RESISTANCE_POWER_TOLERANCE_W) {
+            return false;
+        }
     }
 
     if (derived->speedMps >= MAX_SAFE_SPEED_MPS) return false;

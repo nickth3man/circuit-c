@@ -44,7 +44,7 @@ jobs:
         id: head
         run: |
           make tests
-          for i in 1 2 3; do ./drifty_tests --benchmark 480000 | tee -a /tmp/head.txt; done
+          for _ in 1 2 3; do ./drifty_tests --benchmark 480000 | tee -a /tmp/head.txt; done
           best=$(grep -o 'ticks_per_second=[0-9]*' /tmp/head.txt | cut -d= -f2 | sort -n | tail -1)
           echo "ticks=$best" >> "$GITHUB_OUTPUT"
           echo "head: $best ticks/s"
@@ -52,12 +52,10 @@ jobs:
       - name: Measure the merge base
         id: base
         run: |
-          set +e
           git worktree add /tmp/base "${{ github.event.pull_request.base.sha }}"
           mkdir -p /tmp/base/third_party
           ln -s "$PWD/third_party/raylib-src" /tmp/base/third_party/raylib-src
-          ( cd /tmp/base && make tests && for i in 1 2 3; do ./drifty_tests --benchmark 480000; done ) > /tmp/base.txt 2>&1
-          if [ $? -ne 0 ]; then
+          if ! ( cd /tmp/base && make tests && for _ in 1 2 3; do ./drifty_tests --benchmark 480000; done ) > /tmp/base.txt 2>&1; then
             echo "status=unbuildable" >> "$GITHUB_OUTPUT"
             exit 0
           fi

@@ -133,6 +133,8 @@
  *                                badly wrong, not merely aggressive.
  *   RESISTANCE_POWER_TOLERANCE_W slack for the "resistance never adds energy" assertion,
  *                                in watts, absorbing float rounding in the dot product.
+ *                                Aero is checked against body velocity; rolling resistance
+ *                                is checked per wheel against contact velocity.
  */
 #define RESISTANCE_EPSILON_MPS       1.0e-4f
 #define MAX_LOAD_TRANSFER_FRACTION   1.50f
