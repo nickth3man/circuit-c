@@ -26,7 +26,9 @@
 #include "dev_state.h"
 #include "hotreload.h"
 #include "input.h"
+#include "particle.h"
 #include "replay.h"
+#include "track.h"
 #include "vehicle.h"
 
 typedef enum {
@@ -54,6 +56,8 @@ struct Game {
     VehicleState       vehicle;
     VehicleDerived     derived;
     VehicleRenderState renderState;
+    Track               track;
+    ParticlePool        particles;
     Camera2D            camera;
 
     /* Fixed-timestep bookkeeping, written by the platform loop via timestep_advance(). */
@@ -75,6 +79,12 @@ struct Game {
     float renderPixelsPerMeter;
 
     /* Presentation and diagnostics. */
+    float driftScore;
+    float bestScore;
+    float driftTimeS;
+    float comboMultiplier;
+    float comboTimerS;
+    float crashLockoutTimerS;   /* seconds remaining in the post-impact scoring lockout */
     bool  debugOverlay;
     int   reloadCount;
     float reloadFlashTimerS;

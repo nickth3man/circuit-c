@@ -29,6 +29,12 @@ typedef enum {
     WHEEL_COUNT
 } WheelId;
 
+typedef enum {
+    DIFF_LOCKED = 0,   /* both rear wheels share one omega; equal torque split */
+    DIFF_OPEN,         /* equal torque split; independent rear wheel speeds    */
+    DIFF_LSD           /* torque-biasing clutch: biasRatio + preload            */
+} DifferentialMode;
+
 typedef struct {
     Vector2 localPositionM;
     float   steerAngleRad;
@@ -38,6 +44,7 @@ typedef struct {
     float   slipRatio;
     float   forceLongitudinalN;
     float   forceLateralN;
+    float   forceLateralRelaxedN;   /* N; persistent relaxation state (Phase 4 feature 6) */
     float   frictionUsage;
     bool    locked;
     SurfaceId surfaceId;
@@ -83,6 +90,21 @@ typedef struct {
     float maxBrakeTorqueNm;
     float brakeBiasFront;
     float handbrakeTorqueNm;
+
+    /* ---------------------------------------------------------------- Phase 5 collision -- */
+    float bodyHalfWidthM;        /* m; collision capsule circle radius */
+    float collisionRestitution;  /* dimensionless; barrier bounce */
+    float collisionFriction;     /* dimensionless; Coulomb friction at impact */
+
+    /* ---------------------------------------------------------------- Phase 4 four-wheel -- */
+    float tireLoadSensitivityK;        /* dimensionless; exponent mu_eff=mu*(Fz/FzRef)^-k */
+    float tireLoadRefPerWheelN;        /* N; reference load for load-sensitivity curve */
+    float ackermannPercent;            /* dimensionless 0..1; 0=parallel, 1=true Ackermann */
+    float differentialMode;            /* 0=LOCKED, 1=OPEN, 2=LSD; cast to enum at use */
+    float differentialBiasRatio;       /* dimensionless; LSD slower/faster torque cap */
+    float differentialPreloadNm;       /* N*m; LSD clutch preload */
+    float rollStiffnessFrontFraction;  /* dimensionless 0..1; front axle share of roll moment */
+    bool  lateralLoadTransferEnabled;  /* master switch for lateral load transfer */
 } VehicleSpec;
 
 typedef struct {
@@ -94,8 +116,13 @@ typedef struct {
     float   frontRoadWheelAngleRad;
     float   engineRpm;
     int     selectedGear;
-    float   filteredLongAccelMps2;
-    float   prevLongAccelMps2;
+    float filteredLongAccelMps2;
+    float prevLongAccelMps2;
+
+    /* Phase 4 lateral-acceleration filter state for lateral load transfer */
+    float filteredLatAccelMps2;
+    float prevLatAccelMps2;
+
     WheelState wheels[WHEEL_COUNT];
 } VehicleState;
 
@@ -159,6 +186,18 @@ typedef struct {
     float   rollingResistanceMagnitudeN;   /* sum of the four wheel magnitudes */
     Vector2 rollingResistanceBodyN;        /* body frame; per-wheel sum */
     float   wheelRollingResistanceN[WHEEL_COUNT];
+
+    /* ---------------------------------------------------------------- Phase 4 diagnostics --
+     *
+     * All recomputed every fixed update and never integrated. None of them is in the state
+     * checksum. The logic that fills them is wired in subsequent sub-steps. */
+    float   lateralLoadTransferFrontN;            /* N; inner->outer delta on front axle */
+    float   lateralLoadTransferRearN;             /* N; inner->outer delta on rear axle  */
+    float   rollMomentNm;                         /* N*m; m*ay*h */
+    float   tireLoadSensitivityMuScale[WHEEL_COUNT];  /* dimensionless; per-wheel (Fz/FzRef)^-k */
+    float   differentialOmegaRadS[2];             /* rad/s; {omega_RL, omega_RR} post-diff */
+    float   differentialTorqueNm[2];              /* N*m; {T_RL, T_RR} post-redistribution  */
+    Vector2 looseSurfaceDragBodyN;                /* N; summed per-wheel loose-surface drag */
 } VehicleDerived;
 
 typedef struct {

@@ -70,37 +70,220 @@ static void draw_world_vector(Vector2 startM, Vector2 vectorM, float ppm,
     }
 }
 
+/* ---- track rendering --------------------------------------------------------------- */
+
+static void render_draw_track(const Track *track, float ppm)
+{
+    if (track == NULL || track->nodes == NULL || track->count < 2) return;
+
+    const int n = track->count;
+    /* All current nodes share the same half-width; sample the first. */
+    const float hwM = track->nodes[0].halfWidthM;
+    const float ribbonThicknessPx = 2.0f * hwM * ppm;
+
+    /* --- grass surround (drawn first, behind everything) --- */
+    {
+        float minXM = track->nodes[0].centerM.x;
+        float maxXM = track->nodes[0].centerM.x;
+        float minYM = track->nodes[0].centerM.y;
+        float maxYM = track->nodes[0].centerM.y;
+        for (int i = 1; i < n; i++) {
+            const Vector2 c = track->nodes[i].centerM;
+            if (c.x < minXM) minXM = c.x;
+            if (c.x > maxXM) maxXM = c.x;
+            if (c.y < minYM) minYM = c.y;
+            if (c.y > maxYM) maxYM = c.y;
+        }
+        const float marginM = 60.0f;
+        minXM -= marginM; maxXM += marginM;
+        minYM -= marginM; maxYM += marginM;
+
+        /* Convert corners.  Y is negated by units_world_to_render_px, so the
+         * bottom-left world corner produces the largest render Y. */
+        const Vector2 blPx = units_world_to_render_px((Vector2){minXM, minYM}, ppm);
+        const Vector2 trPx = units_world_to_render_px((Vector2){maxXM, maxYM}, ppm);
+        DrawRectangle((int)blPx.x, (int)trPx.y,
+                      (int)(trPx.x - blPx.x), (int)(blPx.y - trPx.y),
+                      (Color){ 76, 117, 67, 255 });
+    }
+
+    /* --- asphalt ribbon (thick filled centreline) --- */
+    for (int i = 0; i < n; i++) {
+        const int j = (i + 1) % n;
+        const Vector2 aPx = units_world_to_render_px(track->nodes[i].centerM, ppm);
+        const Vector2 bPx = units_world_to_render_px(track->nodes[j].centerM, ppm);
+        DrawLineEx(aPx, bPx, ribbonThicknessPx, (Color){ 40, 40, 45, 255 });
+    }
+
+    /* --- track boundaries (two offset polylines) --- */
+    for (int i = 0; i < n; i++) {
+        const int j = (i + 1) % n;
+        const Vector2 a = track->nodes[i].centerM;
+        const Vector2 b = track->nodes[j].centerM;
+
+        const float dx = b.x - a.x;
+        const float dy = b.y - a.y;
+        const float len = sqrtf(dx * dx + dy * dy);
+        if (len < 1e-6f) continue;
+
+        const float invLen = 1.0f / len;
+        const float ux = dx * invLen;
+        const float uy = dy * invLen;
+
+        /* Perpendicular in world space: (-uy, ux) = left side of forward direction. */
+        const float perpX = -uy * hwM;
+        const float perpY =  ux * hwM;
+
+        const Vector2 leftA  = units_world_to_render_px((Vector2){a.x + perpX, a.y + perpY}, ppm);
+        const Vector2 leftB  = units_world_to_render_px((Vector2){b.x + perpX, b.y + perpY}, ppm);
+        const Vector2 rightA = units_world_to_render_px((Vector2){a.x - perpX, a.y - perpY}, ppm);
+        const Vector2 rightB = units_world_to_render_px((Vector2){b.x - perpX, b.y - perpY}, ppm);
+
+        DrawLineEx(leftA,  leftB,  2.5f, (Color){ 220, 220, 225, 255 });
+        DrawLineEx(rightA, rightB, 2.5f, (Color){ 220, 220, 225, 255 });
+    }
+
+    /* --- centreline hint (faint guide) --- */
+    for (int i = 0; i < n; i++) {
+        const int j = (i + 1) % n;
+        const Vector2 aPx = units_world_to_render_px(track->nodes[i].centerM, ppm);
+        const Vector2 bPx = units_world_to_render_px(track->nodes[j].centerM, ppm);
+        DrawLineEx(aPx, bPx, 1.5f, (Color){ 180, 180, 190, 80 });
+    }
+}
+
+/* ---- presentation palette, type scale, and screen-space helpers -----------------------
+ *
+ * Arcade-drift palette (documented for the design review):
+ *   COL_ACCENT       hot gold    - score, combo, DRIFT! callouts, the car nose marker
+ *   COL_ACCENT_WARM  warm orange - NEW BEST flash and other "payoff" moments
+ *   COL_COOL         steel cyan  - secondary info (best score, rpm bar fill)
+ *   COL_TEXT         near-white  - primary HUD text
+ *   COL_TEXT_DIM     slate       - secondary and hint text
+ *   COL_PANEL        translucent charcoal - backing panels behind HUD clusters
+ *   COL_PANEL_EDGE   faint white          - panel outline, separates panel from track
+ *   COL_DIM_SCREEN   heavy translucent charcoal - full-screen dim behind overlays
+ *
+ * Type scale (one scale, used everywhere below):
+ *   title 64 | overlay heading 40-48 | results figure 56 | cluster figure 34-46 |
+ *   body 18-20 | labels/hints 14-16 | micro 12.
+ */
+static const Color COL_ACCENT       = { 255, 198,  64, 255 };
+static const Color COL_ACCENT_WARM  = { 255, 120,  72, 255 };
+static const Color COL_COOL         = { 110, 205, 235, 255 };
+static const Color COL_TEXT         = { 236, 238, 242, 255 };
+static const Color COL_TEXT_DIM     = { 152, 158, 170, 255 };
+static const Color COL_PANEL        = {  12,  14,  18, 170 };
+static const Color COL_PANEL_EDGE   = { 255, 255, 255,  26 };
+static const Color COL_DIM_SCREEN   = {   8,  10,  14, 185 };
+
+static const Color COL_CAR_BODY     = { 214,  76,  58, 255 };
+static const Color COL_CAR_OUTLINE  = {  22,  16,  14, 255 };
+static const Color COL_CAR_CABIN    = {  40,  34,  38, 255 };
+static const Color COL_TIRE         = {  24,  26,  30, 255 };
+static const Color COL_RIM          = { 150, 155, 165, 255 };
+
+static void draw_text_centered(const char *text, int y, int fontSize, Color color)
+{
+    DrawText(text, (SCREEN_W - MeasureText(text, fontSize)) / 2, y, fontSize, color);
+}
+
+static void draw_text_centered_shadow(const char *text, int y, int fontSize, Color color)
+{
+    const int x = (SCREEN_W - MeasureText(text, fontSize)) / 2;
+    DrawText(text, x + 3, y + 3, fontSize, (Color){ 0, 0, 0, 170 });
+    DrawText(text, x, y, fontSize, color);
+}
+
+static void draw_hud_panel(Rectangle rec)
+{
+    DrawRectangleRounded(rec, 0.16f, 6, COL_PANEL);
+    DrawRectangleRoundedLines(rec, 0.16f, 6, COL_PANEL_EDGE);
+}
+
+/* Slow pulse between two alpha levels, for "press a key" prompts and the DRIFT! callout.
+ * Render-only time source; nothing here feeds the simulation. */
+static unsigned char pulse_alpha(float cyclesPerSecond, unsigned char lo, unsigned char hi)
+{
+    const float s = 0.5f + 0.5f * sinf((float)GetTime() * 6.2831853f * cyclesPerSecond);
+    return (unsigned char)(lo + (unsigned char)((float)(hi - lo) * s));
+}
+
 static void draw_vehicle(const Game *game, const VehicleDrawState *draw)
 {
     const float ppm = game->renderPixelsPerMeter;
     const Vector2 bodyCenterPx = units_world_to_render_px(draw->positionM, ppm);
-    const Rectangle body = {
-        bodyCenterPx.x, bodyCenterPx.y,
-        units_meters_to_pixels(4.2f, ppm),
-        units_meters_to_pixels(1.82f, ppm)
-    };
-    DrawRectanglePro(body, (Vector2){ body.width * 0.5f, body.height * 0.5f },
-                     units_heading_to_rotation_deg(draw->headingRad),
-                     (Color){ 214, 76, 58, 255 });
+    const float bodyLenPx = units_meters_to_pixels(4.2f, ppm);
+    const float bodyWidPx = units_meters_to_pixels(1.82f, ppm);
+    const float rotDeg = units_heading_to_rotation_deg(draw->headingRad);
 
-    const Vector2 noseM = body_point_to_world((Vector2){ 2.25f, 0.0f },
-                                              draw->positionM, draw->headingRad);
-    DrawCircleV(units_world_to_render_px(noseM, ppm), 5.0f,
-                (Color){ 255, 220, 100, 255 });
+    /* Dark outline plate slightly larger than the body, then the body on top, so the
+     * silhouette reads cleanly against both asphalt and grass. */
+    DrawRectanglePro((Rectangle){ bodyCenterPx.x, bodyCenterPx.y,
+                                  bodyLenPx + 6.0f, bodyWidPx + 6.0f },
+                     (Vector2){ (bodyLenPx + 6.0f) * 0.5f, (bodyWidPx + 6.0f) * 0.5f },
+                     rotDeg, COL_CAR_OUTLINE);
+    DrawRectanglePro((Rectangle){ bodyCenterPx.x, bodyCenterPx.y, bodyLenPx, bodyWidPx },
+                     (Vector2){ bodyLenPx * 0.5f, bodyWidPx * 0.5f },
+                     rotDeg, COL_CAR_BODY);
 
+    /* Subtle two-tone shading: translucent dark over the rear half of the body. */
+    {
+        const Vector2 rearM = body_point_to_world((Vector2){ -1.05f, 0.0f },
+                                                  draw->positionM, draw->headingRad);
+        const Vector2 rearPx = units_world_to_render_px(rearM, ppm);
+        DrawRectanglePro((Rectangle){ rearPx.x, rearPx.y, bodyLenPx * 0.5f, bodyWidPx },
+                         (Vector2){ bodyLenPx * 0.25f, bodyWidPx * 0.5f },
+                         rotDeg, (Color){ 30, 18, 16, 90 });
+    }
+
+    /* Cabin band forward of centre: instant front/rear distinction at top-down scale. */
+    {
+        const float cabinLenPx = units_meters_to_pixels(1.30f, ppm);
+        const float cabinWidPx = bodyWidPx * 0.72f;
+        const Vector2 cabinM = body_point_to_world((Vector2){ 0.55f, 0.0f },
+                                                   draw->positionM, draw->headingRad);
+        const Vector2 cabinPx = units_world_to_render_px(cabinM, ppm);
+        DrawRectanglePro((Rectangle){ cabinPx.x, cabinPx.y, cabinLenPx, cabinWidPx },
+                         (Vector2){ cabinLenPx * 0.5f, cabinWidPx * 0.5f },
+                         rotDeg, COL_CAR_CABIN);
+    }
+
+    /* Nose triangle (SPEC Phase 6): a gold wedge at the front so heading is readable at
+     * a glance. DrawTriangle is winding-agnostic in the default raylib draw mode. */
+    {
+        const Vector2 tipM   = body_point_to_world((Vector2){ 2.30f,  0.00f },
+                                                   draw->positionM, draw->headingRad);
+        const Vector2 baseLM = body_point_to_world((Vector2){ 1.30f,  0.52f },
+                                                   draw->positionM, draw->headingRad);
+        const Vector2 baseRM = body_point_to_world((Vector2){ 1.30f, -0.52f },
+                                                   draw->positionM, draw->headingRad);
+        DrawTriangle(units_world_to_render_px(tipM, ppm),
+                     units_world_to_render_px(baseLM, ppm),
+                     units_world_to_render_px(baseRM, ppm),
+                     COL_ACCENT);
+    }
+
+    /* Wheels: small dark tires with a lighter rim inset so orientation reads even at
+     * partial steer. Front wheels draw at heading + steerAngleRad with a presentation-only
+     * gain so the steer is unmistakable; the physics angle itself is untouched. Rear
+     * wheels draw at heading (their steerAngleRad is always 0). */
+    const float steerVisualGain = 1.25f;  /* render-only amplification, documented above */
     for (int i = 0; i < WHEEL_COUNT; i++) {
+        const bool isFront = (i == WHEEL_FRONT_LEFT || i == WHEEL_FRONT_RIGHT);
+        const float steerVis = isFront ? draw->wheelAngleRad[i] * steerVisualGain : 0.0f;
         const Vector2 wheelWorldM = body_point_to_world(
             game->vehicle.wheels[i].localPositionM, draw->positionM, draw->headingRad);
         const Vector2 wheelPx = units_world_to_render_px(wheelWorldM, ppm);
-        const Rectangle wheel = {
-            wheelPx.x, wheelPx.y,
-            units_meters_to_pixels(0.72f, ppm),
-            units_meters_to_pixels(0.24f, ppm)
-        };
-        DrawRectanglePro(wheel, (Vector2){ wheel.width * 0.5f, wheel.height * 0.5f },
-                         units_heading_to_rotation_deg(draw->headingRad +
-                                                       draw->wheelAngleRad[i]),
-                         (Color){ 35, 38, 43, 255 });
+        const float wLenPx = units_meters_to_pixels(0.72f, ppm);
+        const float wWidPx = units_meters_to_pixels(0.28f, ppm);
+        const float wRotDeg = units_heading_to_rotation_deg(draw->headingRad + steerVis);
+        DrawRectanglePro((Rectangle){ wheelPx.x, wheelPx.y, wLenPx, wWidPx },
+                         (Vector2){ wLenPx * 0.5f, wWidPx * 0.5f },
+                         wRotDeg, COL_TIRE);
+        DrawRectanglePro((Rectangle){ wheelPx.x, wheelPx.y, wLenPx * 0.55f, wWidPx * 0.55f },
+                         (Vector2){ wLenPx * 0.275f, wWidPx * 0.275f },
+                         wRotDeg, COL_RIM);
     }
 }
 
@@ -143,6 +326,212 @@ static void draw_debug_vectors(const Game *game, const VehicleDrawState *draw)
         (Vector2){ game->derived.rearBodyForceN.x * 0.00008f,
                    game->derived.rearBodyForceN.y * 0.00008f }, heading),
         ppm, MAROON, "rear force");
+}
+
+static const char *gear_label(int selectedGear);
+
+/* ---- tire smoke ------------------------------------------------------------------
+ * Each active particle renders as a soft puff: three overlapping translucent circles
+ * whose offsets come from a deterministic per-slot wobble (no per-frame randomness).
+ * Colour drifts from a dark rubber-grey when fresh at the tire to near-white as it
+ * disperses, and alpha falls off quadratically with age so the trail dissolves softly.
+ * Cost: 3 DrawCircleV per active particle, pool cap 512 — comfortably cheap.
+ */
+static void draw_smoke_particles(const Game *game)
+{
+    const float ppm = game->renderPixelsPerMeter;
+    for (int i = 0; i < MAX_PARTICLES; i++) {
+        const Particle *p = &game->particles.particles[i];
+        if (!p->active) continue;
+
+        const float maxLifeS = (p->maxLifeS > 0.0f) ? p->maxLifeS : 1.0f;
+        const float t = clampf(1.0f - p->lifeS / maxLifeS, 0.0f, 1.0f);  /* 0 fresh -> 1 gone */
+
+        const unsigned char cr = (unsigned char)lerpf(104.0f, 236.0f, t);
+        const unsigned char cg = (unsigned char)lerpf( 96.0f, 236.0f, t);
+        const unsigned char cb = (unsigned char)lerpf( 88.0f, 240.0f, t);
+        const float fade = (1.0f - t) * (1.0f - t);
+        const float baseA = (float)p->color.a * fade;
+
+        const Vector2 px = units_world_to_render_px(p->positionM, ppm);
+        const float radiusPx = p->sizeM * ppm * 0.5f * (1.0f + t * 1.1f);
+
+        /* Two fixed wobble directions per pool slot, slowly swirling as the puff ages. */
+        const float wobA = (float)(((unsigned)i * 2654435761u) >> 16 & 0xFF) / 255.0f *
+                           6.2831853f + t * 1.7f;
+        const float wobB = wobA + 2.4f;
+        const Vector2 offA = { cosf(wobA) * radiusPx * 0.45f, sinf(wobA) * radiusPx * 0.45f };
+        const Vector2 offB = { cosf(wobB) * radiusPx * 0.50f, sinf(wobB) * radiusPx * 0.50f };
+
+        /* Outer puffs first (larger, fainter), core last. */
+        DrawCircleV((Vector2){ px.x + offA.x, px.y + offA.y }, radiusPx * 1.35f,
+                    (Color){ cr, cg, cb, (unsigned char)(baseA * 0.36f) });
+        DrawCircleV((Vector2){ px.x + offB.x, px.y + offB.y }, radiusPx * 1.05f,
+                    (Color){ cr, cg, cb, (unsigned char)(baseA * 0.28f) });
+        DrawCircleV(px, radiusPx,
+                    (Color){ cr, cg, cb, (unsigned char)(baseA * 0.85f) });
+    }
+}
+
+/* ---- full-screen overlays (STATE_MENU / STATE_PAUSED / STATE_RESULTS) ----------------
+ * Pure screen space: called after EndMode2D so the camera transform never touches them.
+ * Copy is deliberately short and direct; wording is up for review.
+ */
+static void draw_overlay_menu(const Game *game)
+{
+    DrawRectangle(0, 0, SCREEN_W, SCREEN_H, COL_DIM_SCREEN);
+
+    draw_text_centered_shadow("DRIFTY", 226, 64, COL_ACCENT);
+    draw_text_centered("a tiny top-down drift sandbox", 306, 20, COL_TEXT_DIM);
+
+    draw_text_centered("PRESS P TO START", 414, 24,
+                       (Color){ COL_TEXT.r, COL_TEXT.g, COL_TEXT.b,
+                                pulse_alpha(0.6f, 90, 255) });
+    draw_text_centered("W/S throttle & brake    A/D steer    SPACE handbrake    "
+                       "Q/E shift    P pause    R reset",
+                       466, 16, COL_TEXT_DIM);
+
+    if (game->bestScore > 0.0f) {
+        draw_text_centered(TextFormat("BEST  %.0f", (double)game->bestScore),
+                           528, 18, COL_COOL);
+    }
+}
+
+static void draw_overlay_paused(const Game *game)
+{
+    (void)game;
+    DrawRectangle(0, 0, SCREEN_W, SCREEN_H, (Color){ COL_DIM_SCREEN.r, COL_DIM_SCREEN.g,
+                                                     COL_DIM_SCREEN.b, 150 });
+    draw_text_centered_shadow("PAUSED", 300, 48, COL_TEXT);
+    draw_text_centered("P resume    R reset", 372, 18, COL_TEXT_DIM);
+}
+
+static void draw_overlay_results(const Game *game)
+{
+    DrawRectangle(0, 0, SCREEN_W, SCREEN_H, COL_DIM_SCREEN);
+
+    /* bestScore is raised to driftScore on entering STATE_RESULTS, so equality here
+     * means this run set (or matched) the best; guard against the 0/0 first-boot case. */
+    const bool newBest = game->driftScore >= game->bestScore && game->driftScore > 0.0f;
+
+    draw_text_centered_shadow("RUN COMPLETE", 196, 40, COL_TEXT);
+
+    /* The payoff: the final drift score, biggest thing on the screen. */
+    draw_text_centered_shadow(TextFormat("%.0f", (double)game->driftScore),
+                              286, 56, COL_ACCENT);
+    draw_text_centered("DRIFT SCORE", 352, 16, COL_TEXT_DIM);
+
+    draw_text_centered(TextFormat("BEST  %.0f", (double)game->bestScore),
+                       398, 20, COL_COOL);
+    if (newBest) {
+        draw_text_centered("NEW BEST!", 436, 24,
+                           (Color){ COL_ACCENT_WARM.r, COL_ACCENT_WARM.g, COL_ACCENT_WARM.b,
+                                    pulse_alpha(0.9f, 120, 255) });
+    }
+
+    draw_text_centered("P drive again    R menu", 504, 18, COL_TEXT_DIM);
+}
+
+/* ---- arcade HUD clusters -------------------------------------------------------------
+ * Three clusters with clear hierarchy, each on a translucent panel so it reads against
+ * any track background:
+ *   speed  - bottom-left: km/h large, gear, rpm bar. The most-glanced readout.
+ *   score  - top-right:   drift score prominent, combo in accent gold (larger while a
+ *                         drift is scoring), DRIFT! callout, best score small.
+ *   lap    - top-center:  lap count, running timer, checkpoint progress.
+ */
+static void draw_hud_clusters(const Game *game)
+{
+    /* ---- speed cluster (bottom-left) ---- */
+    {
+        const Rectangle panel = { 18.0f, SCREEN_H - 168.0f, 244.0f, 140.0f };
+        draw_hud_panel(panel);
+
+        const float kmh = game->derived.speedMps * 3.6f;
+        const char *kmhText = TextFormat("%.0f", (double)kmh);
+        DrawText(kmhText, (int)panel.x + 16, (int)panel.y + 12, 46, COL_TEXT);
+        DrawText("KM/H", (int)panel.x + 20 + MeasureText(kmhText, 46),
+                 (int)panel.y + 40, 16, COL_TEXT_DIM);
+
+        DrawText(TextFormat("GEAR %s", gear_label(game->vehicle.selectedGear)),
+                 (int)panel.x + 16, (int)panel.y + 66, 18, COL_TEXT);
+
+        /* RPM bar: cool cyan, flipping to accent gold near the redline. */
+        const float idleRpm = game->spec.engineIdleRpm;
+        const float redlineRpm = game->spec.engineRedlineRpm;
+        const float rpmFrac = clampf((game->vehicle.engineRpm - idleRpm) /
+                                     (redlineRpm - idleRpm), 0.0f, 1.0f);
+        const Rectangle barBg = { panel.x + 16.0f, panel.y + 98.0f,
+                                  panel.width - 32.0f, 10.0f };
+        DrawRectangleRec(barBg, (Color){ 255, 255, 255, 22 });
+        DrawRectangleRec((Rectangle){ barBg.x, barBg.y, barBg.width * rpmFrac, barBg.height },
+                         (rpmFrac > 0.85f) ? COL_ACCENT : COL_COOL);
+        DrawText(TextFormat("%.0f RPM", (double)game->vehicle.engineRpm),
+                 (int)panel.x + 16, (int)panel.y + 114, 12, COL_TEXT_DIM);
+    }
+
+    /* ---- score cluster (top-right) ---- */
+    {
+        const Rectangle panel = { SCREEN_W - 266.0f, 16.0f, 248.0f, 122.0f };
+        const int right = (int)(panel.x + panel.width) - 16;
+        draw_hud_panel(panel);
+
+        DrawText("SCORE", (int)panel.x + 16, (int)panel.y + 10, 14, COL_TEXT_DIM);
+        DrawText(TextFormat("%.0f", (double)game->driftScore),
+                 (int)panel.x + 16, (int)panel.y + 26, 34, COL_TEXT);
+        DrawText(TextFormat("BEST %.0f", (double)game->bestScore),
+                 (int)panel.x + 16, (int)panel.y + 68, 14, COL_COOL);
+
+        /* Combo: prominent in gold while a drift is scoring, quiet otherwise. */
+        const bool drifting = game->derived.scoringDrift;
+        const char *comboText = TextFormat("x%.1f", (double)game->comboMultiplier);
+        const int comboSize = drifting ? 30 : 18;
+        DrawText(comboText, right - MeasureText(comboText, comboSize),
+                 (int)panel.y + (drifting ? 22 : 30), comboSize,
+                 drifting ? COL_ACCENT : COL_TEXT_DIM);
+        if (drifting) {
+            const char *callout = "DRIFT!";
+            DrawText(callout, right - MeasureText(callout, 16),
+                     (int)panel.y + 58, 16,
+                     (Color){ COL_ACCENT_WARM.r, COL_ACCENT_WARM.g, COL_ACCENT_WARM.b,
+                              pulse_alpha(1.2f, 110, 255) });
+        }
+    }
+
+    /* ---- lap cluster (top-center) ---- */
+    {
+        const Rectangle panel = { (SCREEN_W - 360.0f) * 0.5f, 16.0f, 360.0f, 56.0f };
+        draw_hud_panel(panel);
+
+        int shownLap = game->track.lap + 1;
+        if (shownLap > RESULTS_TARGET_LAPS) shownLap = RESULTS_TARGET_LAPS;
+        DrawText(TextFormat("LAP %d/%d", shownLap, RESULTS_TARGET_LAPS),
+                 (int)panel.x + 16, (int)panel.y + 18, 18, COL_TEXT);
+
+        const int minutes = (int)(game->track.lapTimerS / 60.0f);
+        const float seconds = game->track.lapTimerS - (float)minutes * 60.0f;
+        const char *timerText = TextFormat("%d:%05.2f", minutes, (double)seconds);
+        DrawText(timerText,
+                 (int)(panel.x + (panel.width - (float)MeasureText(timerText, 22)) * 0.5f),
+                 (int)panel.y + 16, 22, COL_TEXT);
+
+        const char *cpText = TextFormat("CP %d/%d", game->track.nextCheckpoint,
+                                        game->track.count);
+        DrawText(cpText, (int)(panel.x + panel.width) - 16 - MeasureText(cpText, 18),
+                 (int)panel.y + 18, 18, COL_TEXT_DIM);
+    }
+
+    /* Hot-reload notice, top-left: preserves the information the old HUD line carried. */
+    if (game->reloadFlashTimerS > 0.0f) {
+        DrawText("module reloaded - state preserved", 18, 18, 14, COL_ACCENT);
+    }
+
+    DrawText("W throttle  S brake  Space handbrake  Q/E shift  A/D steer  R reset  "
+             "F1 diagnostics  F2 physics lab",
+             (SCREEN_W - MeasureText("W throttle  S brake  Space handbrake  Q/E shift  "
+                                     "A/D steer  R reset  F1 diagnostics  F2 physics lab",
+                                     14)) / 2,
+             SCREEN_H - 26, 14, COL_TEXT_DIM);
 }
 
 static void hud_line(int x, int *y, const char *text, Color color)
@@ -267,20 +656,39 @@ void render_draw_game(struct Game *game, float interpolationAlpha)
     const VehicleDrawState draw = render_interpolate_vehicle(&game->renderState, alpha);
     game->camera.target = units_world_to_render_px(draw.positionM, game->renderPixelsPerMeter);
 
+    /* Camera drift zoom: zoom out during a drift proportional to body sideslip.
+     * Smoothed against render delta time and independent of physics determinism. */
+    {
+        const float driftIntensity = clampf(
+            fabsf(game->derived.bodySideslipRad) / DRIFT_ZOOM_REF_RAD, 0.0f, 1.0f);
+        float targetZoom = CAMERA_BASE_ZOOM - driftIntensity * CAMERA_ZOOM_RANGE;
+        targetZoom = fmaxf(targetZoom, CAMERA_MIN_ZOOM);
+        game->camera.zoom = smooth_to(game->camera.zoom, targetZoom,
+                                      CAMERA_ZOOM_RATE, renderDt);
+    }
+
     BeginDrawing();
     ClearBackground((Color){ 22, 24, 28, 255 });
     BeginMode2D(game->camera);
-    DrawLine(-10000, 0, 10000, 0, (Color){ 55, 59, 66, 255 });
-    DrawLine(0, -10000, 0, 10000, (Color){ 55, 59, 66, 255 });
+    render_draw_track(&game->track, game->renderPixelsPerMeter);
+
+    /* ---- particles (between track and car, per the spec draw order) ---- */
+    draw_smoke_particles(game);
+
     draw_vehicle(game, &draw);
     if (game->debugOverlay) draw_debug_vectors(game, &draw);
     dev_lab_draw_world(game, &draw);
     EndMode2D();
 
+    /* ---- raw physics diagnostics (F1) -------------------------------------------------
+     * The development readout. Everything from here to the tire-curve panel draws only
+     * when the debug overlay is on; the always-on presentation is the arcade HUD below.
+     * Lines are unchanged from the previous always-on stack, just gated. */
+    if (game->debugOverlay) {
     const Color label = (Color){ 235, 235, 235, 255 };
     const Color dim = (Color){ 155, 160, 170, 255 };
     int y = 12;
-    hud_line(14, &y, "DRIFTY  Phase 3 - load transfer, drag, and rolling resistance", label);
+    hud_line(14, &y, "DRIFTY diagnostics", label);
     hud_line(14, &y, TextFormat("pos (%+.2f,%+.2f) m  heading %+.3f rad",
              (double)game->vehicle.positionM.x, (double)game->vehicle.positionM.y,
              (double)game->vehicle.headingRad), dim);
@@ -325,8 +733,17 @@ void render_draw_game(struct Game *game, float interpolationAlpha)
              game->reloadCount, game->reloadFlashTimerS > 0.0f ? " (state preserved)" : "",
              gear_label(game->vehicle.selectedGear),
              (double)game->renderPixelsPerMeter), dim);
+    hud_line(14, &y, TextFormat("Lap: %d  Timer: %d:%05.2f  Checkpoint: %d / %d",
+             game->track.lap, (int)(game->track.lapTimerS / 60.0f),
+             (double)(game->track.lapTimerS -
+                      (float)(int)(game->track.lapTimerS / 60.0f) * 60.0f),
+             game->track.nextCheckpoint, game->track.count), label);
+    hud_line(14, &y, TextFormat("Score: %.0f  Best: %.0f  Combo: x%.1f  Drift: %.2fs%s",
+             (double)game->driftScore, (double)game->bestScore,
+             (double)game->comboMultiplier, (double)game->driftTimeS,
+             game->derived.scoringDrift ? "  DRIFT!" : ""), dim);
 
-    if (game->debugOverlay) {
+    {
         hud_line(14, &y, TextFormat("pure Fx F/R %+.0f/%+.0f  pure Fy F/R %+.0f/%+.0f N",
                  (double)(game->derived.pureLongitudinalForceN[WHEEL_FRONT_LEFT] +
                           game->derived.pureLongitudinalForceN[WHEEL_FRONT_RIGHT]),
@@ -368,10 +785,18 @@ void render_draw_game(struct Game *game, float interpolationAlpha)
                  (double)game->derived.rollingResistanceMagnitudeN), dim);
         draw_tire_curve_panel(game);
     }
+    }
 
-    DrawText("W throttle  S brake  Space handbrake  Q/E shift  A/D steer  R reset  "
-             "F1 diagnostics  F2 physics lab",
-             14, SCREEN_H - 28, 17, dim);
+    /* ---- arcade HUD + state overlays (screen space, after EndMode2D) ----------------- */
+    if (game->state == STATE_PLAYING || game->state == STATE_PAUSED) {
+        draw_hud_clusters(game);
+    }
+    switch (game->state) {
+        case STATE_MENU:    draw_overlay_menu(game);    break;
+        case STATE_PAUSED:  draw_overlay_paused(game);  break;
+        case STATE_RESULTS: draw_overlay_results(game); break;
+        default: break;
+    }
 
     /* The lab paints over the HUD deliberately: when it is open it is what you are reading. */
     DRIFTY_ZONE_BEGIN(lab, "PhysicsLab");

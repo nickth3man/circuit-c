@@ -6,17 +6,32 @@
  */
 #include "game.h"
 
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "dev_lab.h"
 #include "dev_scenario.h"
 #include "dev_state.h"
+#include "audio.h"
+#include "collision.h"
 #include "physics.h"
 #include "profile.h"
 #include "render.h"
+#include "scoring.h"
+#include "track.h"
 
 #if !defined(DRIFTY_HEADLESS)
 #include "raylib.h"
+#endif
+
+#if defined(_WIN32)
+#include <direct.h>
+#define DRIFTY_MKDIR(path) _mkdir(path)
+#else
+#include <sys/stat.h>
+#define DRIFTY_MKDIR(path) mkdir(path, 0755)
 #endif
 
 #define FNV1A_OFFSET_BASIS 2166136261u
@@ -97,15 +112,136 @@ GAME_API void game_reset_sim(Game *game)
     vehicle_state_reset(&game->spec, &game->vehicle, &game->derived, &game->renderState);
 }
 
+
+/* -------------------------------------------------------------------------------------
+ * High-score persistence (Phase 6). Uses standard C file I/O so it works in both the
+ * headless test executable and the full game. The directory is created if it does not
+ * exist; the load path validates and clamps every value it reads.
+ * ------------------------------------------------------------------------------------- */
+
+static const char *persistence_score_path(void)
+{
+    static char path[512];
+    const char *appData = getenv("APPDATA");
+    if (appData != NULL && appData[0] != '\0') {
+        snprintf(path, sizeof(path), "%s/drifty/bestscore.txt", appData);
+    } else {
+        snprintf(path, sizeof(path), "bestscore.txt");
+    }
+    return path;
+}
+
+static void persistence_load_score(Game *game)
+{
+    if (game == NULL) return;
+    const char *path = persistence_score_path();
+    FILE *file = fopen(path, "r");
+    if (file == NULL) return;
+
+    long parsed = 0;
+    int matched = fscanf(file, "%ld", &parsed);
+    fclose(file);
+
+    /* Validate: must have read exactly one integer, in range. */
+    if (matched == 1 && parsed >= 0 && parsed <= (long)MAX_VALID_SCORE) {
+        game->bestScore = (float)parsed;
+#if !defined(DRIFTY_HEADLESS)
+        TRACELOG(LOG_INFO, "GAME: loaded high score %.0f from %s", game->bestScore, path);
+#endif
+    }
+}
+
+static void persistence_save_score(const Game *game)
+{
+    if (game == NULL) return;
+
+    /* Only save when the new score beats the best. */
+    if (game->driftScore <= game->bestScore) return;
+
+    const char *path = persistence_score_path();
+
+    /* Create the parent directory if we can. */
+    const char *appData = getenv("APPDATA");
+    if (appData != NULL && appData[0] != '\0') {
+        char dir[512];
+        snprintf(dir, sizeof(dir), "%s/drifty", appData);
+        DRIFTY_MKDIR(dir);
+    }
+
+    FILE *file = fopen(path, "w");
+    if (file == NULL) {
+#if !defined(DRIFTY_HEADLESS)
+        TRACELOG(LOG_WARNING, "GAME: could not open %s for writing", path);
+#endif
+        return;
+    }
+
+    fprintf(file, "%d", (int)game->driftScore);
+    fclose(file);
+    /* bestScore is const in this function — the caller updates it. */
+
+#if !defined(DRIFTY_HEADLESS)
+    TRACELOG(LOG_INFO, "GAME: saved new high score %.0f to %s",
+             game->driftScore, path);
+#endif
+}
+
+
 static void apply_oneshots(Game *game, const Input *input)
 {
     if (input->pausePressed) {
-        if (game->state == STATE_PLAYING) game->state = STATE_PAUSED;
-        else if (game->state == STATE_PAUSED) game->state = STATE_PLAYING;
+        switch (game->state) {
+            case STATE_MENU:
+                game_reset_sim(game);
+                game->state = STATE_PLAYING;
+                game->driftScore = 0.0f;
+                game->driftTimeS = 0.0f;
+                game->comboMultiplier = 1.0f;
+                game->comboTimerS = 0.0f;
+                break;
+            case STATE_PLAYING:
+                game->state = STATE_PAUSED;
+                break;
+            case STATE_PAUSED:
+                game->state = STATE_PLAYING;
+                break;
+            case STATE_RESULTS:
+                game_reset_sim(game);
+                game->driftScore = 0.0f;
+                game->driftTimeS = 0.0f;
+                game->comboMultiplier = 1.0f;
+                game->comboTimerS = 0.0f;
+                game->state = STATE_PLAYING;
+                break;
+            default:
+                break;
+        }
         game->sim.pauseToggleCount++;
     }
     if (input->resetPressed) {
-        game_reset_sim(game);
+        switch (game->state) {
+            case STATE_PLAYING:
+                game_reset_sim(game);
+                game->driftScore = 0.0f;
+                game->driftTimeS = 0.0f;
+                game->comboMultiplier = 1.0f;
+                game->comboTimerS = 0.0f;
+                /* stay STATE_PLAYING */
+                break;
+            case STATE_PAUSED:
+                game_reset_sim(game);
+                game->driftScore = 0.0f;
+                game->driftTimeS = 0.0f;
+                game->comboMultiplier = 1.0f;
+                game->comboTimerS = 0.0f;
+                game->state = STATE_PLAYING;
+                break;
+            case STATE_RESULTS:
+                game->state = STATE_MENU;
+                break;
+            default:
+                break;
+        }
         game->sim.resetCount++;
     }
     if (input->debugPressed) {
@@ -131,26 +267,42 @@ GAME_API void game_init(Game *game)
     memset(&game->sim, 0, sizeof(game->sim));
     vehicle_spec_set_default(&game->spec);
     game_reset_sim(game);
-    game->state = STATE_PLAYING;
+#if defined(DRIFTY_HEADLESS)
+    game->state = STATE_PLAYING;  /* headless: no menus, simulate immediately */
+#else
+    game->state = STATE_MENU;
+#endif
     game->accumulatorS = 0.0f;
     game->lastSubstepCount = 0;
     game->physicsBacklogDrops = 0;
     game->debugOverlay = false;
     game->reloadCount = 0;
     game->reloadFlashTimerS = 0.0f;
+    game->driftScore = 0.0f;
+    game->bestScore = 0.0f;
+    game->driftTimeS = 0.0f;
+    game->comboMultiplier = 1.0f;
+    game->comboTimerS = 0.0f;
+    game->crashLockoutTimerS = 0.0f;
+    persistence_load_score(game);
+    particle_pool_init(&game->particles);
     game->renderPixelsPerMeter = PIXELS_PER_METER;
     game->camera = (Camera2D){
         .offset = { SCREEN_W * 0.5f, SCREEN_H * 0.5f },
         .target = { 0.0f, 0.0f },
         .rotation = 0.0f,
-        .zoom = 1.0f
+        .zoom = CAMERA_BASE_ZOOM
     };
     replay_begin_recording(&game->replay, 0);
     dev_state_init(&game->dev);
+#if !defined(DRIFTY_HEADLESS)
+    track_init(&game->track);
+    audio_init();
+#endif
     game->stateChecksum = game_state_checksum(game);
     game->initialized = true;
 #if !defined(DRIFTY_HEADLESS)
-    TRACELOG(LOG_INFO, "GAME: initialised (Phase 3 load-transfer and resistance model)");
+    TRACELOG(LOG_INFO, "GAME: initialised (Phase 6 presentation backbone — particles, camera, state machine)");
 #endif
 }
 
@@ -159,6 +311,7 @@ GAME_API void game_pre_reload(Game *game)
     if (game == NULL) return;
     if (game->replay.mode == REPLAY_MODE_RECORDING) replay_stop(&game->replay);
 #if !defined(DRIFTY_HEADLESS)
+    audio_pre_reload();
     TRACELOG(LOG_INFO, "GAME: pre-reload (tick %llu)",
              (unsigned long long)game->sim.tick);
 #endif
@@ -175,6 +328,7 @@ GAME_API void game_post_reload(Game *game)
     game->reloadCount++;
     game->reloadFlashTimerS = RELOAD_FLASH_S;
 #if !defined(DRIFTY_HEADLESS)
+    audio_post_reload();
     TRACELOG(LOG_INFO, "GAME: post-reload #%d (tick %llu, checksum %08x)",
              game->reloadCount, (unsigned long long)game->sim.tick, game->stateChecksum);
 #endif
@@ -204,11 +358,113 @@ GAME_API void game_fixed_update(Game *game, float dt)
     input_clear_oneshots(&game->input);
     replay_record(&game->replay, &tickInput);
     apply_oneshots(game, &tickInput);
+
+    /* Particle pool: always updates so existing particles fade over time regardless of the
+     * game state. Spawn only happens inside the PLAYING gate below. */
+    particle_pool_update(&game->particles, dt);
+
     if (game->state == STATE_PLAYING) {
         DRIFTY_ZONE_BEGIN(physics, "Physics");
+        /* Save start-of-tick position for checkpoint crossing (renderState->prev* was
+         * already set by physics_fixed_update before integration). */
+        const Vector2 startPosM = game->renderState.prevPositionM;
+
+        /* Per-wheel surface query: each contact point tests the track independently so the
+         * car can straddle two surfaces. This lives in game.c, not physics.c, keeping the
+         * physics TU free of track knowledge. The query is done every fixed tick before the
+         * physics step consumes the surface ids.
+         *
+         * Guarded: skip when no track is loaded so tests and scenarios that explicitly set
+         * per-wheel surfaceId are not overwritten. */
+        if (game->track.nodes != NULL && game->track.count > 0) {
+            for (int i = 0; i < WHEEL_COUNT; i++) {
+                const Vector2 worldContact = physics_wheel_world_position(
+                    &game->vehicle, (WheelId)i);
+                game->vehicle.wheels[i].surfaceId = Track_SurfaceAt(&game->track, worldContact);
+            }
+        }
         physics_fixed_update(&game->spec, &game->vehicle, &game->derived,
                              &game->renderState, &tickInput, dt);
         DRIFTY_ZONE_END(physics);
+
+        /* Checkpoint crossing: check if the car crossed the next gate this tick. */
+        if (game->track.nodes != NULL && game->track.count > 0) {
+            track_update_checkpoints(&game->track, startPosM,
+                                     game->renderState.currPositionM);
+            game->track.lapTimerS += dt;
+        }
+
+        /* Crash lockout timer: count down toward zero. */
+        if (game->crashLockoutTimerS > 0.0f) {
+            game->crashLockoutTimerS -= dt;
+            if (game->crashLockoutTimerS < 0.0f) game->crashLockoutTimerS = 0.0f;
+        }
+
+        /* Collision with track barriers. */
+        if (game->track.nodes != NULL && game->track.count > 0) {
+            float oldLockout = game->crashLockoutTimerS;
+            collision_resolve_track(&game->spec, &game->vehicle,
+                                    &game->renderState, &game->track,
+                                    &game->crashLockoutTimerS);
+            if (game->crashLockoutTimerS > oldLockout) {
+                audio_play_collision_thud();
+            }
+        }
+
+        /* Audio: per-tick engine pitch and tyre screech (after physics, before scoring). */
+        audio_update(game->vehicle.engineRpm,
+                     game->spec.engineIdleRpm,
+                     game->spec.engineRedlineRpm,
+                     game->derived.physicallySliding,
+                     game->derived.speedMps,
+                     dt);
+
+        /* Phase 6 drift scoring: classify, then accumulate. These mutate only the
+         * presentation fields (driftScore, driftTimeS, comboMultiplier, etc.) which are
+         * explicitly excluded from the state checksum. No physical force depends on them. */
+        scoring_classify(&game->vehicle, &game->derived, game->crashLockoutTimerS);
+        scoring_update(game, dt);
+
+        /* Phase 6 results trigger: when the target lap count is reached, transition to
+         * STATE_RESULTS and persist the high score. The car is no longer simulated after
+         * this tick. */
+        if (game->track.lap >= RESULTS_TARGET_LAPS) {
+            if (game->driftScore > game->bestScore) {
+                game->bestScore = game->driftScore;
+                persistence_save_score(game);
+            }
+            game->state = STATE_RESULTS;
+        }
+
+        /* Phase 6 particle spawn: smoke trails from the rear wheels while in a scoring
+         * drift. Two spawns per rear wheel per tick at 120 Hz ≈ 480 / s while drifting,
+         * which the 512-slot pool sustains over the 0.8 s particle life. */
+        if (game->derived.scoringDrift) {
+            const float heading = game->vehicle.headingRad;
+            const float speedMps = fminf(game->derived.speedMps, 50.0f);
+
+            /* Base velocity: rearward, opposite to the car's heading. */
+            const float baseBackX = -cosf(heading) * speedMps * 0.25f;
+            const float baseBackY = -sinf(heading) * speedMps * 0.25f;
+
+            for (int w = 0; w < 2; w++) {
+                const WheelId wheelId = (w == 0) ? WHEEL_REAR_LEFT : WHEEL_REAR_RIGHT;
+                const Vector2 wheelWorldM =
+                    physics_wheel_world_position(&game->vehicle, wheelId);
+
+                for (int s = 0; s < 2; s++) {
+                    /* Deterministic spread that varies per-tick for visual variety. */
+                    const float hashX = (float)((int)(game->sim.tick * 7  + s * 13 + w * 31) & 0xFF);
+                    const float hashY = (float)((int)(game->sim.tick * 11 + s * 17 + w * 23) & 0xFF);
+                    const float spreadX = (hashX / 255.0f - 0.5f) * 1.2f;
+                    const float spreadY = (hashY / 255.0f - 0.5f) * 1.2f + 0.6f;
+                    const Vector2 vel = { baseBackX + spreadX, baseBackY + spreadY };
+
+                    particle_spawn(&game->particles, wheelWorldM, vel, 0.30f,
+                                   (Color){ 200, 200, 200, 180 });
+                }
+            }
+        }
     }
     game->sim.tick++;
     game->stateChecksum = game_state_checksum(game);
@@ -229,6 +485,13 @@ GAME_API void game_draw(Game *game, float interpolationAlpha)
 
 GAME_API void game_shutdown(Game *game)
 {
+    if (game != NULL) {
+        if (game->driftScore > game->bestScore) {
+            game->bestScore = game->driftScore;
+            persistence_save_score(game);
+        }
+        track_free(&game->track);
+    }
     (void)game;
 }
 #else
@@ -240,6 +503,12 @@ GAME_API void game_draw(Game *game, float interpolationAlpha)
 GAME_API void game_shutdown(Game *game)
 {
     if (game == NULL) return;
+    if (game->driftScore > game->bestScore) {
+        game->bestScore = game->driftScore;
+        persistence_save_score(game);
+    }
+    track_free(&game->track);
+    audio_shutdown();
     TRACELOG(LOG_INFO, "GAME: shutdown after %llu fixed ticks (checksum %08x)",
              (unsigned long long)game->sim.tick, game->stateChecksum);
 

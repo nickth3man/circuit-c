@@ -49,6 +49,15 @@ void vehicle_spec_set_default(VehicleSpec *spec)
     spec->tireBLong = TIRE_B_LONG;
     spec->tireCLong = TIRE_C_LONG;
     spec->tireMuLongScale = TIRE_MU_LONG_SCALE;
+    spec->tireRelaxationLengthM = TIRE_RELAXATION_LENGTH_M;
+    spec->tireLoadSensitivityK = TIRE_LOAD_SENSITIVITY_K;
+    spec->tireLoadRefPerWheelN = TIRE_LOAD_REF_PER_WHEEL_N;
+    spec->ackermannPercent = ACKERMANN_PERCENT;
+    spec->differentialMode = (float)DIFFERENTIAL_MODE_DEFAULT;
+    spec->differentialBiasRatio = DIFFERENTIAL_BIAS_RATIO;
+    spec->differentialPreloadNm = DIFFERENTIAL_PRELOAD_NM;
+    spec->rollStiffnessFrontFraction = ROLL_STIFFNESS_FRONT_FRACTION;
+    spec->lateralLoadTransferEnabled = false;
     {
         const float ratios[MAX_GEARS] = GEAR_RATIOS;
         memcpy(spec->gearRatios, ratios, sizeof(ratios));
@@ -67,6 +76,9 @@ void vehicle_spec_set_default(VehicleSpec *spec)
     spec->maxBrakeTorqueNm = MAX_BRAKE_TORQUE_NM;
     spec->brakeBiasFront = BRAKE_BIAS_FRONT;
     spec->handbrakeTorqueNm = HANDBRAKE_TORQUE_NM;
+    spec->bodyHalfWidthM = VEHICLE_BODY_HALF_WIDTH_M;
+    spec->collisionRestitution = COLLISION_RESTITUTION;
+    spec->collisionFriction = COLLISION_FRICTION;
 }
 
 bool vehicle_spec_is_valid(const VehicleSpec *spec)
@@ -117,6 +129,31 @@ bool vehicle_spec_is_valid(const VehicleSpec *spec)
     if (!(isfinite(spec->brakeBiasFront) &&
           spec->brakeBiasFront >= 0.0f && spec->brakeBiasFront <= 1.0f)) return false;
     if (!(isfinite(spec->handbrakeTorqueNm) && spec->handbrakeTorqueNm >= 0.0f)) return false;
+
+    /* Phase 5 collision validation */
+    if (!(isfinite(spec->bodyHalfWidthM) && spec->bodyHalfWidthM > 0.0f)) return false;
+    if (!(isfinite(spec->collisionRestitution) &&
+          spec->collisionRestitution >= 0.0f && spec->collisionRestitution <= 1.0f)) return false;
+    if (!(isfinite(spec->collisionFriction) && spec->collisionFriction >= 0.0f)) return false;
+
+    /* Phase 4 scaffolding validation */
+    if (!(isfinite(spec->tireRelaxationLengthM) &&
+          spec->tireRelaxationLengthM >= 0.0f && spec->tireRelaxationLengthM <= 1.0f)) return false;
+    if (!(isfinite(spec->tireLoadSensitivityK) &&
+          spec->tireLoadSensitivityK >= 0.0f && spec->tireLoadSensitivityK <= 0.05f)) return false;
+    if (!(isfinite(spec->tireLoadRefPerWheelN) &&
+          spec->tireLoadRefPerWheelN > 0.0f && spec->tireLoadRefPerWheelN <= 20000.0f)) return false;
+    if (!(isfinite(spec->ackermannPercent) &&
+          spec->ackermannPercent >= 0.0f && spec->ackermannPercent <= 1.0f)) return false;
+    if (!(isfinite(spec->differentialMode) &&
+          spec->differentialMode >= 0.0f && spec->differentialMode <= 2.0f)) return false;
+    if (!(isfinite(spec->differentialBiasRatio) &&
+          spec->differentialBiasRatio >= 1.0f && spec->differentialBiasRatio <= 5.0f)) return false;
+    if (!(isfinite(spec->differentialPreloadNm) &&
+          spec->differentialPreloadNm >= 0.0f && spec->differentialPreloadNm <= 400.0f)) return false;
+    if (!(isfinite(spec->rollStiffnessFrontFraction) &&
+          spec->rollStiffnessFrontFraction >= 0.0f && spec->rollStiffnessFrontFraction <= 1.0f)) return false;
+
     return true;
 }
 
@@ -143,7 +180,9 @@ void vehicle_state_reset(const VehicleSpec *spec,
     for (int i = 0; i < WHEEL_COUNT; i++) state->wheels[i].surfaceId = SURFACE_ASPHALT;
 
     /* memset already zeroed prevLongAccelMps2 and filteredLongAccelMps2, which is what a
-     * reset means for the load filter: no history, so the first step sees the static split. */
+     * reset means for the load filter: no history, so the first step sees the static split.
+     * Similarly, the Phase 4 fields filteredLatAccelMps2, prevLatAccelMps2, and every
+     * wheel's forceLateralRelaxedN are zeroed here for a cold start. */
     derived->normalLoadFrontN = frontLoadN;
     derived->normalLoadRearN = rearLoadN;
     derived->staticFrontLoadN = frontLoadN;

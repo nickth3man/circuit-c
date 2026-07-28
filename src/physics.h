@@ -33,6 +33,7 @@ typedef struct {
 } AxleLoads;
 
 Vector2 physics_contact_point_velocity_body(const VehicleState *state, Vector2 pointM);
+Vector2 physics_wheel_world_position(const VehicleState *state, WheelId wheelId);
 void physics_static_axle_loads(const VehicleSpec *spec, float *frontLoadN, float *rearLoadN);
 
 /* One step of the first-order load-transfer filter, in isolation.

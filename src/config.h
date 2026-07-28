@@ -138,6 +138,49 @@
 #define MAX_LOAD_TRANSFER_FRACTION   1.50f
 #define RESISTANCE_POWER_TOLERANCE_W 1.0e-2f
 
+/* Phase 5 collision --------------------------------------------------------- */
+
+/* Capsule covering the car footprint: two circles at front/rear axle plus the connecting
+ * body. The radius of each circle is the half-width of the car body, smaller than the track
+ * width which is wheel-to-wheel center distance. */
+#define VEHICLE_BODY_HALF_WIDTH_M   0.85f   /* m; collision capsule circle radius */
+#define COLLISION_RESTITUTION       0.30f   /* dimensionless; barrier bounce (< 1) */
+#define COLLISION_FRICTION          0.50f   /* dimensionless; Coulomb friction at impact */
+
+/* Scoring lockout after a barrier impact (Phase 6). Timer starts counting down from this. */
+#define CRASH_LOCKOUT_S             1.0f    /* seconds; post-impact scoring suspension */
+
+/* Drift classification thresholds (Phase 6). Gameplay rules, not physical tunables:
+ * these are compile-time constants that never feed back into the force model. */
+#define MIN_DRIFT_SPEED_MPS         5.0f    /* m/s; below this speed a slide is not scored */
+#define MIN_DRIFT_ANGLE_RAD         0.175f  /* rad (~10 deg); minimum body sideslip for scoring */
+#define MIN_REAR_SLIP_RAD           0.12f   /* rad; minimum rear-axle slip for scoring */
+#define MIN_DRIFT_YAW_RATE_RADS     0.25f   /* rad/s; minimum yaw rate for scoring */
+#define SPIN_CUTOFF_RAD             1.48f   /* rad (~85 deg); beyond this the car has spun */
+
+/* Score accumulation (Phase 6). Points are accrued per fixed tick while scoringDrift is true. */
+#define SCORE_BASE_RATE             100.0f  /* points/second at full factors and base multiplier */
+#define SCORE_SPEED_REF_MPS         35.0f   /* m/s; the speed at which speedFactor saturates */
+#define COMBO_GRACE_S               1.50f   /* s; reset multiplier after this long outside a scoring drift */
+#define MAX_VALID_SCORE             100000000L  /* upper bound for file-load validation and clamping */
+
+/* Phase 6 results trigger (presentation only; no effect on simulation). */
+#define RESULTS_TARGET_LAPS         3       /* laps to complete before entering STATE_RESULTS */
+
+/* Phase 4 four-wheel fidelity ---------------------------------------------- */
+#define TIRE_LOAD_SENSITIVITY_K          0.00f   /* dimensionless; realistic ~0.02. 0 disables */
+#define TIRE_LOAD_REF_PER_WHEEL_N        2940.0f /* N; = VEH_MASS_KG*g/4 at default mass */
+#define TIRE_RELAXATION_LENGTH_M         0.00f   /* m; realistic 0.20..0.50. 0 disables */
+#define ACKERMANN_PERCENT                0.00f   /* dimensionless; 0=parallel, 1=true Ackermann */
+#define DIFFERENTIAL_MODE_DEFAULT        0       /* 0=LOCKED, 1=OPEN, 2=LSD */
+#define DIFFERENTIAL_BIAS_RATIO          2.0f    /* dimensionless; LSD slower/faster cap */
+#define DIFFERENTIAL_PRELOAD_NM          60.0f   /* N*m; LSD clutch preload */
+#define DIFF_OMEGA_EPSILON_RAD_S         1.0e-3f /* rad/s; LSD omega-difference deadband */
+#define ROLL_STIFFNESS_FRONT_FRACTION    0.50f   /* dimensionless 0..1; front axle roll-moment share */
+#define SURFACE_REFERENCE_MU_LAT        1.30f   /* asphalt lateral mu; tireMuLat* are absolute vs this */
+#define SURFACE_REFERENCE_MU_LONG       1.35f   /* asphalt longitudinal mu; documentation reference only */
+#define RELAXATION_VX_FLOOR_MPS         0.50f   /* m/s; floor for relaxation vx denominator */
+
 /* -------------------------------------------------------------------------------------
  * Window and presentation (no effect on the simulation layer)
  * ------------------------------------------------------------------------------------- */
@@ -147,5 +190,20 @@
 #define TARGET_FPS              60      /* render frames per second */
 
 #define RELOAD_FLASH_S          2.0f    /* seconds the "module reloaded" HUD notice persists */
+
+/* Phase 6 particles --------------------------------------------------------- */
+
+#define MAX_PARTICLES           512           /* total slots in the round-robin particle pool */
+#define PARTICLE_LIFE_S         0.80f         /* seconds a smoke particle lives before fading out */
+
+/* Phase 6 camera drift zoom ------------------------------------------------- */
+
+#define CAMERA_BASE_ZOOM        1.20f    /* dimensionless; >1 magnifies (zooms in) */
+#define CAMERA_ZOOM_RANGE       0.25f    /* dimensionless; subtracted at full drift -> 0.95 */
+#define CAMERA_MIN_ZOOM         0.50f    /* dimensionless; must stay > 0 */
+#define CAMERA_ZOOM_RATE        4.0f     /* 1/second smoothing rate */
+#define CAMERA_LOOKAHEAD        0.25f    /* seconds of velocity lookahead (reserved) */
+#define DRIFT_ZOOM_REF_RAD      0.70f    /* sideslip mapped to full zoom-out */
+#define SLIDE_USAGE_THRESHOLD   0.98f    /* dimensionless friction usage = physically sliding */
 
 #endif /* DRIFTY_CONFIG_H */

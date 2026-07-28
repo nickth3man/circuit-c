@@ -59,6 +59,10 @@ static const DevParameter g_params[] = {
       "Corner frequency of the first-order filter on the previous step's solved longitudinal "
       "acceleration. Lower values make load transfer lag further behind a throttle or brake "
       "change; the filter input is never this step's own acceleration." },
+    { "body.roll_stiffness_front", "Body", "", SPEC_OFFSET(rollStiffnessFrontFraction),
+      0.50f, 0.00f, 1.00f, 0.01f, false,
+      "Front axle share of roll moment m*ay*h. 0.50 is symmetric; higher loads the front "
+      "outer wheel more." },
 
     /* -------------------------------------------------------------------------- wheels -- */
     { "wheel.radius", "Wheels", "m", SPEC_OFFSET(wheelRadiusM),
@@ -78,6 +82,9 @@ static const DevParameter g_params[] = {
     { "steer.return_rate", "Steering", "rad/s", SPEC_OFFSET(steerReturnRateRadS),
       STEER_RETURN_RATE_RAD_S, 0.50f, 25.0f, 0.10f, false,
       "How fast the road wheels centre when the input is released." },
+    { "steer.ackermann_percent", "Steering", "", SPEC_OFFSET(ackermannPercent),
+      0.00f, 0.00f, 1.00f, 0.01f, false,
+      "0=parallel steer, 1=true Ackermann. The inner wheel steers more than the outer." },
 
     /* --------------------------------------------------------------------------- tires -- */
     { "tire.lat_front.b", "Tires", "", SPEC_OFFSET(tireBLatFront),
@@ -107,6 +114,15 @@ static const DevParameter g_params[] = {
     { "tire.long.mu_scale", "Tires", "", SPEC_OFFSET(tireMuLongScale),
       TIRE_MU_LONG_SCALE, 0.30f, 2.00f, 0.01f, false,
       "Longitudinal friction scale applied on top of the lateral peak friction." },
+    { "tire.relaxation_length", "Tires", "m", SPEC_OFFSET(tireRelaxationLengthM),
+      0.00f, 0.00f, 1.00f, 0.01f, false,
+      "First-order lateral-force relaxation length. 0 disables; rate=|vx|/L." },
+    { "tire.load_sensitivity_k", "Tires", "", SPEC_OFFSET(tireLoadSensitivityK),
+      0.00f, 0.00f, 0.05f, 0.001f, false,
+      "Exponent in mu_eff = mu * (Fz/FzRef)^-k. 0 disables." },
+    { "tire.load_ref_per_wheel", "Tires", "N", SPEC_OFFSET(tireLoadRefPerWheelN),
+      2940.0f, 500.0f, 8000.0f, 10.0f, false,
+      "Reference load for the load-sensitivity curve; stock = m*g/4 per wheel." },
 
     /* ---------------------------------------------------------------------- drivetrain -- */
     { "drive.gear1", "Drivetrain", "", SPEC_ARRAY_OFFSET(gearRatios, 0),
@@ -148,6 +164,16 @@ static const DevParameter g_params[] = {
     { "engine.braking_torque", "Drivetrain", "N*m", SPEC_OFFSET(engineBrakingTorqueNm),
       ENGINE_BRAKING_TORQUE_NM, 0.0f, 200.0f, 1.0f, false,
       "Closed-throttle engine braking torque at the crankshaft." },
+    { "drive.diff_mode", "Drivetrain", "", SPEC_OFFSET(differentialMode),
+      0.0f, 0.0f, 2.0f, 1.0f, false,
+      "0=locked (both rear wheels share omega equally), 1=open (equal torque split), "
+      "2=LSD torque-biasing." },
+    { "drive.diff_bias_ratio", "Drivetrain", "", SPEC_OFFSET(differentialBiasRatio),
+      2.0f, 1.0f, 5.0f, 0.1f, false,
+      "LSD: maximum ratio of slower to faster wheel torque." },
+    { "drive.diff_preload", "Drivetrain", "N*m", SPEC_OFFSET(differentialPreloadNm),
+      60.0f, 0.0f, 400.0f, 5.0f, false,
+      "LSD clutch preload torque; minimum torque bias even at zero difference." },
 
     /* -------------------------------------------------------------------------- brakes -- */
     { "brake.max_torque", "Brakes", "N*m", SPEC_OFFSET(maxBrakeTorqueNm),
@@ -159,6 +185,17 @@ static const DevParameter g_params[] = {
     { "brake.handbrake_torque", "Brakes", "N*m", SPEC_OFFSET(handbrakeTorqueNm),
       HANDBRAKE_TORQUE_NM, 0.0f, 6000.0f, 50.0f, false,
       "Rear-axle handbrake torque at full pull." },
+
+    /* ---------------------------------------------------------------------- collision -- */
+    { "collision.half_width", "Collision", "m", SPEC_OFFSET(bodyHalfWidthM),
+      VEHICLE_BODY_HALF_WIDTH_M, 0.40f, 1.50f, 0.01f, true,
+      "Vehicle body half-width for the collision capsule. Smaller than tyre track width." },
+    { "collision.restitution", "Collision", "", SPEC_OFFSET(collisionRestitution),
+      COLLISION_RESTITUTION, 0.00f, 0.90f, 0.01f, false,
+      "Barrier bounce restitution. 0 = no bounce (full impact absorption); 0.3 = low bounce." },
+    { "collision.friction", "Collision", "", SPEC_OFFSET(collisionFriction),
+      COLLISION_FRICTION, 0.00f, 1.50f, 0.01f, false,
+      "Coulomb friction coefficient at barrier impact. Governs how much a glancing hit spins the car." },
 };
 
 #define PARAM_COUNT ((int)(sizeof(g_params) / sizeof(g_params[0])))

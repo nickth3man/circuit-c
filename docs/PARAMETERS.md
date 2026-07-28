@@ -19,6 +19,7 @@ generates the Physics Lab sliders and the tuning-profile format.
 | `body.frontal_area` | 1.9 | m^2 | 1 .. 3.5 | 0.05 | — | Reference frontal area A paired with the drag coefficient. |
 | `body.rolling_resistance` | 0.015 | — | 0 .. 0.06 | 0.001 | — | Dimensionless rolling resistance coefficient; force is the coefficient times the wheel's current dynamic normal load, so load transfer moves it front to rear. |
 | `body.load_filter_rate` | 20 | Hz | 1 .. 60 | 0.5 | — | Corner frequency of the first-order filter on the previous step's solved longitudinal acceleration. Lower values make load transfer lag further behind a throttle or brake change; the filter input is never this step's own acceleration. |
+| `body.roll_stiffness_front` | 0.5 | — | 0 .. 1 | 0.01 | — | Front axle share of roll moment m*ay*h. 0.50 is symmetric; higher loads the front outer wheel more. |
 
 ## Wheels
 
@@ -34,6 +35,7 @@ generates the Physics Lab sliders and the tuning-profile format.
 | `steer.max_angle` | 0.7 | rad | 0.2 .. 1.2 | 0.01 | — | Maximum road-wheel angle at full lock. Left is positive. |
 | `steer.rate` | 5 | rad/s | 0.5 .. 20 | 0.1 | — | How fast the road wheels follow a steering input. |
 | `steer.return_rate` | 7 | rad/s | 0.5 .. 25 | 0.1 | — | How fast the road wheels centre when the input is released. |
+| `steer.ackermann_percent` | 0 | — | 0 .. 1 | 0.01 | — | 0=parallel steer, 1=true Ackermann. The inner wheel steers more than the outer. |
 
 ## Tires
 
@@ -48,6 +50,9 @@ generates the Physics Lab sliders and the tuning-profile format.
 | `tire.long.b` | 12 | — | 2 .. 30 | 0.1 | — | Longitudinal stiffness factor against slip ratio. |
 | `tire.long.c` | 1.55 | — | 1 .. 2.2 | 0.01 | — | Longitudinal shape factor. |
 | `tire.long.mu_scale` | 1 | — | 0.3 .. 2 | 0.01 | — | Longitudinal friction scale applied on top of the lateral peak friction. |
+| `tire.relaxation_length` | 0 | m | 0 .. 1 | 0.01 | — | First-order lateral-force relaxation length. 0 disables; rate=|vx|/L. |
+| `tire.load_sensitivity_k` | 0 | — | 0 .. 0.05 | 0.001 | — | Exponent in mu_eff = mu * (Fz/FzRef)^-k. 0 disables. |
+| `tire.load_ref_per_wheel` | 2940 | N | 500 .. 8000 | 10 | — | Reference load for the load-sensitivity curve; stock = m*g/4 per wheel. |
 
 ## Drivetrain
 
@@ -71,6 +76,9 @@ generates the Physics Lab sliders and the tuning-profile format.
 | `engine.torque_p5` | 230 | N*m | 0 .. 600 | 5 | — | Torque curve point 5. |
 | `engine.torque_p6` | 195 | N*m | 0 .. 600 | 5 | — | Torque curve point 6 (redline end). |
 | `engine.braking_torque` | 35 | N*m | 0 .. 200 | 1 | — | Closed-throttle engine braking torque at the crankshaft. |
+| `drive.diff_mode` | 0 | — | 0 .. 2 | 1 | — | 0=locked (both rear wheels share omega equally), 1=open (equal torque split), 2=LSD torque-biasing. |
+| `drive.diff_bias_ratio` | 2 | — | 1 .. 5 | 0.1 | — | LSD: maximum ratio of slower to faster wheel torque. |
+| `drive.diff_preload` | 60 | N*m | 0 .. 400 | 5 | — | LSD clutch preload torque; minimum torque bias even at zero difference. |
 
 ## Brakes
 
@@ -79,6 +87,14 @@ generates the Physics Lab sliders and the tuning-profile format.
 | `brake.max_torque` | 3000 | N*m | 0 .. 8000 | 50 | — | Total service brake torque at full pedal, before bias. |
 | `brake.bias_front` | 0.62 | — | 0 .. 1 | 0.01 | — | Fraction of service brake torque sent to the front axle. |
 | `brake.handbrake_torque` | 1800 | N*m | 0 .. 6000 | 50 | — | Rear-axle handbrake torque at full pull. |
+
+## Collision
+
+| Parameter | Default | Unit | Range | Step | Reset | Meaning |
+|---|---:|---|---|---:|:-:|---|
+| `collision.half_width` | 0.85 | m | 0.4 .. 1.5 | 0.01 | yes | Vehicle body half-width for the collision capsule. Smaller than tyre track width. |
+| `collision.restitution` | 0.3 | — | 0 .. 0.9 | 0.01 | — | Barrier bounce restitution. 0 = no bounce (full impact absorption); 0.3 = low bounce. |
+| `collision.friction` | 0.5 | — | 0 .. 1.5 | 0.01 | — | Coulomb friction coefficient at barrier impact. Governs how much a glancing hit spins the car. |
 
 `Reset` marks a parameter that only takes full effect after a simulation
 reset, because it moves the wheel contact points.

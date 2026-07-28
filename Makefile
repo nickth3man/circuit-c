@@ -120,8 +120,8 @@ BUILD_DEFINES = -DDRIFTY_BUILD_COMMIT=\"$(BUILD_COMMIT)\" \
 
 SHARED_SRCS := src/input.c src/math_utils.c src/dev_scenario.c src/profile.c
 DEV_SRCS    := src/dev_params.c src/dev_replay.c src/dev_state.c src/failure_bundle.c
-GAME_SRCS   := src/game.c src/vehicle.c src/physics.c src/tire.c src/drivetrain.c \
-               src/render.c src/replay.c src/telemetry.c $(DEV_SRCS)
+GAME_SRCS   := src/game.c src/audio.c src/vehicle.c src/physics.c src/tire.c src/drivetrain.c \
+               src/surface.c src/track.c src/render.c src/replay.c src/telemetry.c $(DEV_SRCS)
 PLATFORM_SRCS := src/main.c src/timestep.c
 TEST_SRCS   := tests/physics_tests.c src/timestep.c $(GAME_SRCS) $(SHARED_SRCS)
 ALL_C_SRCS  := $(wildcard src/*.c) $(wildcard tests/*.c) $(wildcard fuzz/*.c)

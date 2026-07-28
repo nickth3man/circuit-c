@@ -69,6 +69,9 @@ Thumbs.db
 __pycache__/
 *.pyc
 
+# Ad-hoc verification / scratch logs (output of `mk verify` redirected to a file)
+mk_verify*.log
+
 # BEGIN oh-my-opencode-slim clonedeps
 .slim/*
 # END oh-my-opencode-slim clonedeps

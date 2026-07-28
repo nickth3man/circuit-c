@@ -22,7 +22,10 @@ float drivetrain_engine_rpm(const VehicleSpec *spec, int selectedGear,
 
 DrivetrainTorques drivetrain_calculate_torques(const VehicleSpec *spec,
                                                int selectedGear,
-                                               float rearAngularVelocityRadS,
+                                               float rearOmegaLeftRadS,
+                                               float rearOmegaRightRadS,
+                                               float rearTireReactionTorqueLeftNm,
+                                               float rearTireReactionTorqueRightNm,
                                                float throttle,
                                                float brake,
                                                float handbrake);
