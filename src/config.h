@@ -56,12 +56,96 @@
 #define VEH_YAW_INERTIA_KGM2    1800.0f
 #define VEH_CG_TO_FRONT_M       1.15f
 #define VEH_CG_TO_REAR_M        1.40f
+#define VEH_WHEELBASE_M         (VEH_CG_TO_FRONT_M + VEH_CG_TO_REAR_M)
 #define VEH_CG_HEIGHT_M         0.50f
 #define VEH_TRACK_FRONT_M       1.48f
 #define VEH_TRACK_REAR_M        1.46f
 
 #define WHEEL_RADIUS_M          0.31f
 #define WHEEL_INERTIA_KGM2      1.20f
+
+/* Phase 2 geometry — primary inputs. Derived length = wheelbase + overhangs. */
+#define VEH_FRONT_OVERHANG_M    0.78f
+#define VEH_REAR_OVERHANG_M     0.82f
+#define VEH_WIDTH_OVERALL_M     1.70f   /* 2 * VEHICLE_BODY_HALF_WIDTH_M */
+#define VEH_HEIGHT_OVERALL_M    1.45f
+#define VEH_RIDE_HEIGHT_FRONT_M 0.140f
+#define VEH_RIDE_HEIGHT_REAR_M  0.140f
+/* Cowl / backlight X in the layout frame (axle midpoint origin, +X forward). */
+#define VEH_COWL_X_M            0.55f
+#define VEH_BACKLIGHT_X_M      (-0.55f)
+/* Derived readout default: the staged refresh computes exactly this sum. */
+#define VEH_LENGTH_OVERALL_M   (VEH_WHEELBASE_M + VEH_FRONT_OVERHANG_M + VEH_REAR_OVERHANG_M)
+/* Frontal area fill of width*height that recovers FRONTAL_AREA_M2 at stock. */
+#define VEH_FRONTAL_AREA_FILL   0.7707910751f
+
+/* Mass particles in the layout frame. Tuned so staged refresh recovers the stock mass,
+ * CG distances, CG height, and yaw inertia (see VEH_YAW_RADIUS_FACTOR). */
+#define MASS_ENGINE_KG          160.0f
+#define MASS_ENGINE_X_M         1.10f
+#define MASS_ENGINE_Z_M         0.40f
+#define MASS_GEARBOX_KG         70.0f
+#define MASS_GEARBOX_X_M        0.50f
+#define MASS_GEARBOX_Z_M        0.35f
+#define MASS_FUEL_KG            60.0f
+#define MASS_FUEL_X_M          (-1.10f)
+#define MASS_FUEL_Z_M           0.30f
+#define MASS_DRIVER_KG          90.0f
+#define MASS_DRIVER_X_M         0.20f
+#define MASS_DRIVER_Z_M         0.55f
+#define MASS_CHASSIS_KG         820.0f
+#define MASS_CHASSIS_X_M       (-0.0158536585f)
+#define MASS_CHASSIS_Z_M        0.5414634146f
+/* Izz = sum m*(x-x_cg)^2 + M*(factor*wheelbase)^2. Factor recovers VEH_YAW_INERTIA_KGM2. */
+#define VEH_YAW_RADIUS_FACTOR   0.4429874092f
+
+/* Tire designation (ISO metric). Loaded radius = unloaded * TIRE_LOAD_RADIUS_FACTOR. */
+#define TIRE_SECTION_WIDTH_MM   225.0f
+#define TIRE_ASPECT_RATIO_PCT   45.0f
+#define TIRE_RIM_DIAMETER_IN    17.0f
+#define TIRE_RIM_WIDTH_IN       8.0f
+#define TIRE_PRESSURE_KPA       220.0f
+#define TIRE_LOAD_RADIUS_FACTOR 0.9774554627f
+
+/* Suspension / stance (visual + roll-share inputs). */
+#define SUSP_CAMBER_FRONT_RAD  (-0.0175f)
+#define SUSP_CAMBER_REAR_RAD   (-0.0175f)
+#define SUSP_TOE_FRONT_RAD      0.0035f
+#define SUSP_TOE_REAR_RAD       0.0017f
+#define SUSP_CASTER_FRONT_RAD   0.087f
+#define SUSP_CASTER_REAR_RAD    0.052f
+#define SUSP_WHEEL_RATE_FRONT_NPM 28000.0f
+#define SUSP_WHEEL_RATE_REAR_NPM  26000.0f
+#define SUSP_ANTI_ROLL_FRONT_NPM  18000.0f
+#define SUSP_ANTI_ROLL_REAR_NPM   16000.0f
+#define SUSP_TRAVEL_FRONT_M     0.090f
+#define SUSP_TRAVEL_REAR_M      0.095f
+#define SUSP_ROLL_CENTRE_FRONT_M 0.080f
+#define SUSP_ROLL_CENTRE_REAR_M  0.100f
+
+/* Wheel offset (ET, mm) and brake hardware. */
+#define WHEEL_OFFSET_ET_FRONT_MM 35.0f
+#define WHEEL_OFFSET_ET_REAR_MM  35.0f
+#define BRAKE_DISC_RADIUS_FRONT_M 0.150f
+#define BRAKE_DISC_RADIUS_REAR_M  0.140f
+#define BRAKE_PAD_FRICTION        0.38f
+#define BRAKE_PAD_AREA_M2         0.0045f
+#define BRAKE_HYDRAULIC_PRESSURE_PA 1.0e7f
+/* Scale so padFriction*area*pressure*(rF+rR)*scale == MAX_BRAKE_TORQUE_NM at stock. */
+#define BRAKE_TORQUE_SCALE        0.5730659029f
+
+/* Aero appendage inputs (visual + future downforce). */
+#define AERO_LIFT_COEF_FRONT    0.05f
+#define AERO_LIFT_COEF_REAR     0.10f
+#define AERO_REF_AREA_FRONT_M2  0.40f
+#define AERO_REF_AREA_REAR_M2   0.55f
+#define AERO_COP_X_M           (-0.20f)
+
+/* Drivetrain layout: 0=RWD, 1=FWD, 2=AWD. */
+#define DRIVETRAIN_LAYOUT_DEFAULT 0.0f
+#define DRIVETRAIN_FRONT_TORQUE_SPLIT 0.0f
+#define ENGINE_CYLINDERS        4.0f
+#define ENGINE_DISPLACEMENT_L   2.0f
 
 #define STEER_MAX_RAD           0.70f
 #define STEER_RATE_RAD_S        5.0f
@@ -173,7 +257,9 @@
 
 /* Phase 4 four-wheel fidelity ---------------------------------------------- */
 #define TIRE_LOAD_SENSITIVITY_K          0.00f   /* dimensionless; realistic ~0.02. 0 disables */
-#define TIRE_LOAD_REF_PER_WHEEL_N        2940.0f /* N; = VEH_MASS_KG*g/4 at default mass */
+/* N; the staged refresh derives this as m*g/4, so the constant must be that expression
+ * rather than a rounded literal — the params scenario compares the two exactly. */
+#define TIRE_LOAD_REF_PER_WHEEL_N        (VEH_MASS_KG * GRAVITY_MPS2 * 0.25f)
 #define TIRE_RELAXATION_LENGTH_M         0.00f   /* m; realistic 0.20..0.50. 0 disables */
 #define ACKERMANN_PERCENT                0.00f   /* dimensionless; 0=parallel, 1=true Ackermann */
 #define DIFFERENTIAL_MODE_DEFAULT        0       /* 0=LOCKED, 1=OPEN, 2=LSD */

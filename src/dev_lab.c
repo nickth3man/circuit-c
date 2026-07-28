@@ -597,21 +597,25 @@ static void draw_parameter_rows(struct Game *game, Rectangle view, float scrollY
     for (int i = 0; i < count; i++) {
         const DevParameter *param = dev_param_at(i);
         if (strcmp(param->group, group) != 0) continue;
+        if (param->tier > game->dev.labTierFilter) continue;
 
         const Rectangle labelBounds = { view.x + 6.0f, y, view.width - 12.0f, 14.0f };
         const Rectangle sliderBounds = { view.x + 6.0f, y + 15.0f, view.width - 66.0f, 14.0f };
         const Rectangle resetBounds = { view.x + view.width - 54.0f, y + 15.0f, 48.0f, 14.0f };
 
-        /* Skip rows scrolled out of view: with forty parameters this matters. */
+        /* Skip rows scrolled out of view: with ~100 parameters this matters. */
         if (y + 30.0f >= view.y && y <= view.y + view.height) {
-            const bool modified = !dev_param_is_default(&game->spec, param);
-            GuiLabel(labelBounds, TextFormat("%s%s  [%s]  default %g",
+            const bool modified = !param->derived && !dev_param_is_default(&game->spec, param);
+            GuiLabel(labelBounds, TextFormat("%s%s  [%s]  default %g%s",
                                              modified ? "* " : "", param->name,
                                              param->unit[0] != '\0' ? param->unit : "-",
-                                             (double)param->defaultValue));
+                                             (double)param->defaultValue,
+                                             param->derived ? "  (derived)" : ""));
 
             float value = dev_param_get(&game->spec, param);
-            if (GuiSlider(sliderBounds, "", TextFormat("%.3f", (double)value), &value,
+            if (param->derived) {
+                GuiLabel(sliderBounds, TextFormat("%.3f", (double)value));
+            } else if (GuiSlider(sliderBounds, "", TextFormat("%.3f", (double)value), &value,
                           param->minimum, param->maximum)) {
                 /* Snap to the declared step so a slider drag produces a value a human can
                  * type back into a profile. */
@@ -625,7 +629,7 @@ static void draw_parameter_rows(struct Game *game, Rectangle view, float scrollY
                                          param->name);
                 }
             }
-            if (modified && GuiButton(resetBounds, "reset")) {
+            if (!param->derived && modified && GuiButton(resetBounds, "reset")) {
                 dev_param_reset(&game->spec, param);
             }
         }

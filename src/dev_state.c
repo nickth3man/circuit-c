@@ -28,6 +28,8 @@ void dev_state_init(DevState *dev)
     dev->showResistance = false;
     dev->inspectorFollowsLive = true;
     dev->activeGroup = 0;
+    dev->galleryPage = 0;
+    dev->labTierFilter = 2; /* DEV_TIER_EXPERT — show all tiers by default */
     dev->scopePreset = DEV_SCOPE_PRESET_HANDLING;
     dev->markerPeakTransferSlot = -1;
 }

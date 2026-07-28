@@ -118,6 +118,8 @@ typedef struct {
     bool  uiDeterministic;
     int   activeGroup;          /* index into the dev_params group list */
     float paramScrollY;         /* raygui scroll offset for the parameter panel */
+    int   galleryPage;          /* bounded corpus gallery page (Phase 5 capture) */
+    int   labTierFilter;        /* DevParamTier; hide deeper tiers in the Lab */
 
     /* ------------------------------------------------------ time control (read by main.c) -- */
     bool  paused;

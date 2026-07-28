@@ -8,6 +8,7 @@
 #define DRIFTY_VEHICLE_H
 
 #include <stdbool.h>
+#include <stddef.h>
 
 #include "raylib.h"
 
@@ -51,31 +52,87 @@ typedef struct {
 } WheelState;
 
 typedef struct {
+    /* ---- primary layout ---- */
+    float wheelbaseM;              /* primary; cg distances derive from this + mass particles */
+    float trackWidthFrontM;
+    float trackWidthRearM;
+    float frontOverhangM;
+    float rearOverhangM;
+    float widthOverallM;
+    float heightOverallM;
+    float rideHeightFrontM;
+    float rideHeightRearM;
+    float cowlXM;                  /* layout-frame X of cowl / windscreen foot */
+    float backlightXM;             /* layout-frame X of backlight / hatch foot */
+
+    /* ---- mass particles (layout frame: axle midpoint origin, +X forward) ---- */
+    float massEngineKg, massEngineXM, massEngineZM;
+    float massGearboxKg, massGearboxXM, massGearboxZM;
+    float massFuelKg, massFuelXM, massFuelZM;
+    float massDriverKg, massDriverXM, massDriverZM;
+    float massChassisKg, massChassisXM, massChassisZM;
+
+    /* ---- tire designation (primary) ---- */
+    float tireSectionWidthFrontMm, tireSectionWidthRearMm;
+    float tireAspectFrontPct, tireAspectRearPct;
+    float tireRimDiameterFrontIn, tireRimDiameterRearIn;
+    float tireRimWidthFrontIn, tireRimWidthRearIn;
+    float tirePressureFrontKpa, tirePressureRearKpa;
+
+    /* ---- suspension / stance (primary) ---- */
+    float suspCamberFrontRad, suspCamberRearRad;
+    float suspToeFrontRad, suspToeRearRad;
+    float suspCasterFrontRad, suspCasterRearRad;
+    float suspWheelRateFrontNpm, suspWheelRateRearNpm;
+    float suspAntiRollFrontNpm, suspAntiRollRearNpm;
+    float suspTravelFrontM, suspTravelRearM;
+    float suspRollCentreFrontM, suspRollCentreRearM;
+
+    /* ---- wheel offset + brake hardware (primary) ---- */
+    float wheelOffsetEtFrontMm, wheelOffsetEtRearMm;
+    float brakeDiscRadiusFrontM, brakeDiscRadiusRearM;
+    float brakePadFriction;
+
+    /* ---- aero (primary) ---- */
+    float aeroLiftCoefFront, aeroLiftCoefRear;
+    float aeroRefAreaFrontM2, aeroRefAreaRearM2;
+    float aeroCentreOfPressureXM;
+
+    /* ---- layout / engine packaging (primary) ---- */
+    float drivetrainLayout;        /* 0=RWD, 1=FWD, 2=AWD */
+    float frontTorqueSplit;        /* 0..1 front share when AWD */
+    float engineCylinders;
+    float engineDisplacementL;
+
+    /* ---- derived dynamics (filled by dev_params_refresh_derived) ---- */
     float massKg;
     float yawInertiaKgM2;
     float cgToFrontM;
     float cgToRearM;
-    float wheelbaseM;
     float cgHeightM;
-    float trackWidthFrontM;
-    float trackWidthRearM;
-
-    float wheelRadiusM;
+    float lengthOverallM;
+    float wheelRadiusFrontM;
+    float wheelRadiusRearM;
+    float wheelRadiusM;            /* legacy alias: equals wheelRadiusRearM after refresh */
     float wheelInertiaKgM2;
+    float frontalAreaM2;
+    float bodyHalfWidthM;
+    float maxBrakeTorqueNm;
+    float rollStiffnessFrontFraction;
+    float tireRelaxationLengthM;
+    float tireLoadRefPerWheelN;
 
     float maxRoadWheelAngleRad;
     float maxSteerRateRadS;
     float steerReturnRateRadS;
 
     float dragCoefficient;
-    float frontalAreaM2;
     float rollingResistanceCoefficient;
     float loadFilterRateHz;
 
     float tireBLatFront, tireCLatFront, tireMuLatFront;
     float tireBLatRear,  tireCLatRear,  tireMuLatRear;
     float tireBLong, tireCLong, tireMuLongScale;
-    float tireRelaxationLengthM;
 
     float gearRatios[MAX_GEARS];
     int   gearCount;
@@ -87,25 +144,31 @@ typedef struct {
     float engineTorqueCurveNm[ENGINE_CURVE_POINTS];
     float engineBrakingTorqueNm;
 
-    float maxBrakeTorqueNm;
     float brakeBiasFront;
     float handbrakeTorqueNm;
 
     /* ---------------------------------------------------------------- Phase 5 collision -- */
-    float bodyHalfWidthM;        /* m; collision capsule circle radius */
     float collisionRestitution;  /* dimensionless; barrier bounce */
     float collisionFriction;     /* dimensionless; Coulomb friction at impact */
 
     /* ---------------------------------------------------------------- Phase 4 four-wheel -- */
     float tireLoadSensitivityK;        /* dimensionless; exponent mu_eff=mu*(Fz/FzRef)^-k */
-    float tireLoadRefPerWheelN;        /* N; reference load for load-sensitivity curve */
     float ackermannPercent;            /* dimensionless 0..1; 0=parallel, 1=true Ackermann */
     float differentialMode;            /* 0=LOCKED, 1=OPEN, 2=LSD; cast to enum at use */
     float differentialBiasRatio;       /* dimensionless; LSD slower/faster torque cap */
     float differentialPreloadNm;       /* N*m; LSD clutch preload */
-    float rollStiffnessFrontFraction;  /* dimensionless 0..1; front axle share of roll moment */
     bool  lateralLoadTransferEnabled;  /* master switch for lateral load transfer */
 } VehicleSpec;
+
+/* Effective rolling radius for a wheel index. Safe with a NULL spec (returns 0). */
+static inline float vehicle_wheel_radius_m(const VehicleSpec *spec, int wheelId)
+{
+    if (spec == NULL) return 0.0f;
+    if (wheelId == WHEEL_FRONT_LEFT || wheelId == WHEEL_FRONT_RIGHT) {
+        return spec->wheelRadiusFrontM;
+    }
+    return spec->wheelRadiusRearM;
+}
 
 typedef struct {
     Vector2 positionM;
@@ -210,6 +273,9 @@ typedef struct {
 } VehicleRenderState;
 
 void vehicle_spec_set_default(VehicleSpec *spec);
+/* Staged recompute of derived VehicleSpec fields (dimensions → mass → tires →
+ * suspension → brakes). Safe to call repeatedly; does nothing on NULL. */
+void vehicle_spec_refresh_derived(VehicleSpec *spec);
 bool vehicle_spec_is_valid(const VehicleSpec *spec);
 void vehicle_state_reset(const VehicleSpec *spec,
                          VehicleState *state,
