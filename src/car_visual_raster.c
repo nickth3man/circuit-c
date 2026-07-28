@@ -49,6 +49,9 @@
 
 #define MAX_POLY_POINTS (2 * CAR_HULL_STATIONS + 8)
 
+static float maxf(float a, float b) { return (a > b) ? a : b; }
+static float minf(float a, float b) { return (a < b) ? a : b; }
+
 /* Where a fill writes. Either channel may be NULL. */
 typedef struct {
     unsigned char *rgba;
@@ -296,21 +299,93 @@ CarRasterInfo car_raster_info(const CarVisual *visual, float pxPerM, int padPx)
     return info;
 }
 
+CarRasterInfo car_raster_part_info(const CarVisual *visual, CarRasterPart part,
+                                   int wheelIndex, float pxPerM, int padPx)
+{
+    if (part != CAR_RASTER_PART_WHEEL) {
+        /* BODY shares the car's bounds with ALL: the wheel arches are body geometry and
+         * reach wherever the track puts the wheels, so anything tighter would clip them. */
+        return car_raster_info(visual, pxPerM, padPx);
+    }
+
+    CarRasterInfo info;
+    memset(&info, 0, sizeof(info));
+    if (visual == NULL || !(pxPerM > 0.0f)) return info;
+    if (wheelIndex < 0 || wheelIndex >= WHEEL_COUNT) return info;
+    if (padPx < 0) padPx = 0;
+
+    const CarWheelVisual *w = &visual->wheels[wheelIndex];
+    /* About the hub, so the caller can rotate the sprite to the steer angle. Half-extents
+     * cover the largest ring drawn — the tread — in both directions. */
+    const float halfLen = 0.5f * maxf(w->diameterM, w->rimDiameterM);
+    const float halfWid = 0.5f * maxf(w->widthM, w->rimWidthM);
+
+    info.pxPerM = pxPerM;
+    info.width  = (int)ceilf(2.0f * halfLen * pxPerM) + 2 * padPx;
+    info.height = (int)ceilf(2.0f * halfWid * pxPerM) + 2 * padPx;
+    if (info.width  < 1) info.width  = 1;
+    if (info.height < 1) info.height = 1;
+    info.originXPx = 0.5f * (float)info.width;
+    info.originYPx = 0.5f * (float)info.height;
+    return info;
+}
+
 size_t car_raster_bytes(CarRasterInfo info)
 {
     if (info.width <= 0 || info.height <= 0) return 0;
     return (size_t)info.width * (size_t)info.height * CAR_RASTER_BPP;
 }
 
-/* ----------------------------------------------------------------------------- helpers -- */
-
-static float maxf(float a, float b) { return (a > b) ? a : b; }
-static float minf(float a, float b) { return (a < b) ? a : b; }
-
 /* ------------------------------------------------------------------------------ render -- */
 
-static void render(const CarVisual *v, RasterTarget *t)
+/* The tire stack: tread, sidewall, rim, disc, outside in. Drawn about (cxM, cyM) at
+ * `angleRad`, which is what lets the same code serve the in-place wheel of a contact sheet
+ * and the standalone, steerable wheel sprite the game composites. */
+static void draw_wheel_stack(const RasterTarget *t, const CarVisual *v,
+                             const CarWheelVisual *w,
+                             float cxM, float cyM, float angleRad)
 {
+    const float visualWidth = w->widthM * w->camberVisualCos;
+
+    fill_oriented_rect(t, cxM, cyM, w->diameterM, visualWidth, angleRad,
+                       v->tire, CAR_LABEL_TIRE);
+
+    /* Sidewall ring — between tread and rim. Slightly different shade from tread.
+     * Only drawn when the sidewall is thick enough to read (> 0.5 px). */
+    if (w->sidewallHeightM > 0.005f) {
+        /* The sidewall takes the inner 70% of the band between the rim and the tread, the
+         * tread the outer 30%. Proportional rather than a fixed depth, so a 25-series and
+         * an 80-series tire differ in where the boundary sits as well as in how big the
+         * tire is — two moving edges instead of one, which is the difference between the
+         * profile reading at 13 px/m and not reading at all. */
+        const float swDia = w->rimDiameterM + 2.0f * w->sidewallHeightM * 0.70f;
+        fill_oriented_rect(t, cxM, cyM, swDia, visualWidth * 0.88f, angleRad,
+                           v->tireSidewall, CAR_LABEL_TIRE_SIDEWALL);
+    }
+
+    /* Rim barrel. Width reflects the actual rim width from the designation. */
+    fill_oriented_rect(t, cxM, cyM, w->rimDiameterM,
+                       maxf(w->rimWidthM, visualWidth * 0.55f), angleRad,
+                       v->rim, CAR_LABEL_RIM);
+
+    /* Brake disc — centre of the rim. */
+    if (w->discDiameterM > 0.0f && w->discDiameterM < w->rimDiameterM) {
+        fill_oriented_rect(t, cxM, cyM, w->discDiameterM, w->rimWidthM * 0.50f, angleRad,
+                           v->disc, CAR_LABEL_DISC);
+    }
+}
+
+static void render(const CarVisual *v, RasterTarget *t, CarRasterPart part, int wheelIndex)
+{
+    if (part == CAR_RASTER_PART_WHEEL) {
+        if (wheelIndex < 0 || wheelIndex >= WHEEL_COUNT) return;
+        /* Axis-aligned about its own hub. The static toe angle is the CALLER's to apply, on
+         * top of heading and steer — see the pivot contract in car_visual_raster.h. */
+        draw_wheel_stack(t, v, &v->wheels[wheelIndex], 0.0f, 0.0f, 0.0f);
+        return;
+    }
+    const bool withTires = (part == CAR_RASTER_PART_ALL);
+
     Vector2 poly[MAX_POLY_POINTS];
     const float onePx = 1.0f / t->pxPerM;
     const float noseX = v->hull[CAR_HULL_STATIONS - 1].xM;
@@ -438,16 +513,13 @@ static void render(const CarVisual *v, RasterTarget *t)
      */
     for (int i = 0; i < WHEEL_COUNT; i++) {
         const CarWheelVisual *w = &v->wheels[i];
-        const float visualWidth = w->widthM * w->camberVisualCos;
 
         /* Arch brow at the outboard edge; arch gap from rideHeight + suspTravel sets how far
-         * the lip stands off the tire. */
+         * the lip stands off the tire. The arch is BODYWORK and stays with the body sprite:
+         * a fender does not steer with the wheel it covers. */
         if (v->archFlareM > 0.0f) {
             const float inboard = (w->centreM.y > 0.0f) ? -1.0f : 1.0f;
             const float archDia = w->diameterM + 2.0f * w->archGapM + 2.0f * v->archFlareM;
-            /* The lip is as deep as the flare it belongs to, floored at the two pixels that
-             * make it visible at all. A bolt-on flare over a wide-track car is genuinely a
-             * band, not a hairline; a flush-fitted road car keeps the hairline. */
             const float archBandM = 2.0f * onePx;
             fill_oriented_rect(t, w->centreM.x,
                                w->centreM.y + inboard * (0.5f * w->widthM + 0.5f * archBandM),
@@ -455,34 +527,8 @@ static void render(const CarVisual *v, RasterTarget *t)
                                v->bodyShade, CAR_LABEL_ARCH);
         }
 
-        /* Tread — outer tire ring. */
-        fill_oriented_rect(t, w->centreM.x, w->centreM.y, w->diameterM, visualWidth,
-                           w->staticAngleRad, v->tire, CAR_LABEL_TIRE);
-
-        /* Sidewall ring — between tread and rim. Slightly different shade from tread.
-         * Only drawn when the sidewall is thick enough to read (> 0.5 px). */
-        if (w->sidewallHeightM > 0.005f) {
-            /* The sidewall takes the inner 70% of the band between the rim and the tread, the
-             * tread the outer 30%. Proportional rather than a fixed depth, so a 25-series and
-             * an 80-series tire differ in where the boundary sits as well as in how big the
-             * tire is — two moving edges instead of one, which is the difference between the
-             * profile reading at 13 px/m and not reading at all. */
-            const float swDia = w->rimDiameterM + 2.0f * w->sidewallHeightM * 0.70f;
-            fill_oriented_rect(t, w->centreM.x, w->centreM.y, swDia,
-                               visualWidth * 0.88f, w->staticAngleRad,
-                               v->tireSidewall, CAR_LABEL_TIRE_SIDEWALL);
-        }
-
-        /* Rim barrel. Width reflects the actual rim width from the designation. */
-        fill_oriented_rect(t, w->centreM.x, w->centreM.y, w->rimDiameterM,
-                           maxf(w->rimWidthM, visualWidth * 0.55f),
-                           w->staticAngleRad, v->rim, CAR_LABEL_RIM);
-
-        /* Brake disc — centre of the rim. */
-        if (w->discDiameterM > 0.0f && w->discDiameterM < w->rimDiameterM) {
-            fill_oriented_rect(t, w->centreM.x, w->centreM.y, w->discDiameterM,
-                               w->rimWidthM * 0.50f, w->staticAngleRad,
-                               v->disc, CAR_LABEL_DISC);
+        if (withTires) {
+            draw_wheel_stack(t, v, w, w->centreM.x, w->centreM.y, w->staticAngleRad);
         }
     }
 
@@ -634,19 +680,27 @@ static bool prepare(const CarVisual *visual, CarRasterInfo info, RasterTarget *t
     return true;
 }
 
-bool car_raster_draw(const CarVisual *visual, CarRasterInfo info,
-                     unsigned char *rgba, size_t bytes)
+bool car_raster_draw_part(const CarVisual *visual, CarRasterPart part, int wheelIndex,
+                          CarRasterInfo info, unsigned char *rgba, size_t bytes)
 {
     RasterTarget t;
     memset(&t, 0, sizeof(t));
     if (rgba == NULL || bytes < car_raster_bytes(info)) return false;
     if (!prepare(visual, info, &t)) return false;
+    if (part == CAR_RASTER_PART_WHEEL &&
+        (wheelIndex < 0 || wheelIndex >= WHEEL_COUNT)) return false;
 
     memset(rgba, 0, car_raster_bytes(info));
     t.rgba = rgba;
     t.labels = NULL;
-    render(visual, &t);
+    render(visual, &t, part, wheelIndex);
     return true;
+}
+
+bool car_raster_draw(const CarVisual *visual, CarRasterInfo info,
+                     unsigned char *rgba, size_t bytes)
+{
+    return car_raster_draw_part(visual, CAR_RASTER_PART_ALL, 0, info, rgba, bytes);
 }
 
 bool car_raster_draw_labels(const CarVisual *visual, CarRasterInfo info,
@@ -661,7 +715,7 @@ bool car_raster_draw_labels(const CarVisual *visual, CarRasterInfo info,
     memset(labels, CAR_LABEL_EMPTY, need);
     t.rgba = NULL;
     t.labels = labels;
-    render(visual, &t);
+    render(visual, &t, CAR_RASTER_PART_ALL, 0);
     return true;
 }
 

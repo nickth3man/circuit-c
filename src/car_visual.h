@@ -225,4 +225,26 @@ int car_visual_signature(const CarVisual *visual, float *out, int cap);
  * compiler. Exposed so tests can assert that colour and only colour depends on it. */
 uint32_t car_visual_colour_seed(const VehicleSpec *spec);
 
+/* ------------------------------------------------------------------------- bake key ----
+ *
+ * A cache key for a baked sprite: FNV-1a over every drawn field of CarVisual, named one at a
+ * time. src/render.c rebakes its GPU textures when this changes and does nothing when it does
+ * not, which is what keeps a spec edit in the Physics Lab cheap and a still car free.
+ *
+ * WHY OVER CarVisual AND NOT OVER VehicleSpec. CarVisual is exactly what the rasterizer
+ * reads, so a key over it cannot miss a driver: if the picture would change, this changes. A
+ * key over the spec would have to re-list which fields the grammar happens to consume, and
+ * would go stale the first time a rule was rewired.
+ *
+ * WHY NOT memcmp OR A HASH OF THE RAW BYTES. Both structs contain padding, whose contents are
+ * unspecified — a key built from them could differ between two identical cars, or between two
+ * compilers, and would rebake for no reason. Every field below is hashed by name, floats
+ * through their exact bit pattern. Adding a field to CarVisual means adding it here; the
+ * `car-visual` scenario asserts every designated visual driver moves the key, which is what
+ * catches the omission.
+ *
+ * This key MAY invalidate a cache and MAY seed colour. It may not produce geometry — see the
+ * no-hashing rule at the top of this header. */
+uint32_t car_visual_bake_key(const CarVisual *visual);
+
 #endif /* DRIFTY_CAR_VISUAL_H */

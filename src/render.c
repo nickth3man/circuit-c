@@ -1,8 +1,12 @@
 #include "render.h"
 
 #include <math.h>
+#include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 
+#include "car_visual.h"
+#include "car_visual_raster.h"
 #include "dev_lab.h"
 #include "game.h"
 #include "math_utils.h"
@@ -32,6 +36,9 @@ void render_draw_game(struct Game *game, float interpolationAlpha)
     (void)game;
     (void)interpolationAlpha;
 }
+void render_pre_reload(void)  {}
+void render_post_reload(void) {}
+void render_shutdown(void)    {}
 #else
 
 #include "raylib.h"
@@ -263,11 +270,11 @@ static const Color COL_PANEL        = {  12,  14,  18, 170 };
 static const Color COL_PANEL_EDGE   = { 255, 255, 255,  26 };
 static const Color COL_DIM_SCREEN   = {   8,  10,  14, 185 };
 
-static const Color COL_CAR_BODY     = { 214,  76,  58, 255 };
-static const Color COL_CAR_OUTLINE  = {  22,  16,  14, 255 };
-static const Color COL_CAR_CABIN    = {  40,  34,  38, 255 };
-static const Color COL_TIRE         = {  24,  26,  30, 255 };
-static const Color COL_RIM          = { 150, 155, 165, 255 };
+/* The car's own palette used to live here as COL_CAR_BODY / COL_CAR_OUTLINE / COL_CAR_CABIN /
+ * COL_TIRE / COL_RIM, next to a hardcoded 4.2 x 1.82 m box. Both are gone: the vehicle's
+ * colours and its geometry are now derived in src/car_visual.c and rasterized by
+ * src/car_visual_raster.c, and this file only uploads and draws what they produce. Adding a
+ * styling decision back here would put it where drifty_tests cannot reach it. */
 
 static void draw_text_centered(const char *text, int y, int fontSize, Color color)
 {
@@ -295,82 +302,176 @@ static unsigned char pulse_alpha(float cyclesPerSecond, unsigned char lo, unsign
     return (unsigned char)(lo + (unsigned char)((float)(hi - lo) * s));
 }
 
+/* ------------------------------------------------------------- baked vehicle sprites ----
+ *
+ * The car is drawn from textures baked by the SAME CPU rasterizer the headless contact sheet
+ * uses (src/car_visual_raster.c), so there is exactly one geometry grammar in the project and
+ * the gallery cannot drift away from the game.
+ *
+ * BAKE, DO NOT REDRAW. A car's pixels change only when its spec changes, which for a running
+ * game is almost never — but the Physics Lab writes game->spec live, so it does happen. Every
+ * frame derives the CarVisual (cheap, no allocation) and hashes it with car_visual_bake_key();
+ * the textures are rebuilt only when that key or the metres-to-pixels scale differs from what
+ * is already on the GPU. A still car costs one derive and one integer compare per frame.
+ *
+ * SCALE. Baked at game->renderPixelsPerMeter, i.e. one texel per world render pixel, and drawn
+ * at 1:1 into the Camera2D — so the camera's zoom is the only thing scaling the sprite and a
+ * zoom change never invalidates the bake. Phase 5 replaces this with an integer-scaled
+ * low-resolution world target.
+ *
+ * COMPOSITION. Body first, then the four wheels on top, matching the L6-after-L1 order the
+ * rasterizer draws them in. The front wheels rotate to heading + steer + their derived static
+ * toe; the rears keep their derived static alignment. The wheels are NOT baked into the body
+ * texture — a wheel that cannot turn would make the steering unreadable at exactly the moment
+ * it matters most.
+ *
+ * HOT RELOAD. Texture2D handles are raylib-tracked GPU resources living in module statics, so
+ * render_pre_reload() releases them and render_post_reload() drops the cache key so the next
+ * frame rebakes. This is the audio.c contract applied to textures; see render.h.
+ */
+#define CAR_TEX_PAD_PX 1
+
+static bool      s_carTexReady = false;
+static uint32_t  s_carTexKey = 0u;
+static float     s_carTexPxPerM = 0.0f;
+static Texture2D s_carBodyTex;
+static Vector2   s_carBodyOriginPx;
+static Texture2D s_carWheelTex[WHEEL_COUNT];
+static Vector2   s_carWheelOriginPx[WHEEL_COUNT];
+
+static void unload_car_textures(void)
+{
+    if (!s_carTexReady) return;
+    UnloadTexture(s_carBodyTex);
+    for (int i = 0; i < WHEEL_COUNT; i++) UnloadTexture(s_carWheelTex[i]);
+    memset(&s_carBodyTex, 0, sizeof(s_carBodyTex));
+    memset(s_carWheelTex, 0, sizeof(s_carWheelTex));
+    s_carTexReady = false;
+}
+
+/* Upload one rasterized part. Returns a zeroed texture on failure, which the caller treats as
+ * a failed bake rather than drawing a garbage handle. */
+static bool upload_part(const CarVisual *visual, CarRasterPart part, int wheelIndex,
+                        float pxPerM, Texture2D *texOut, Vector2 *originOut)
+{
+    const CarRasterInfo info =
+        car_raster_part_info(visual, part, wheelIndex, pxPerM, CAR_TEX_PAD_PX);
+    const size_t bytes = car_raster_bytes(info);
+    if (bytes == 0) return false;
+
+    unsigned char *rgba = (unsigned char *)malloc(bytes);
+    if (rgba == NULL) return false;
+    if (!car_raster_draw_part(visual, part, wheelIndex, info, rgba, bytes)) {
+        free(rgba);
+        return false;
+    }
+
+    /* Wrap the buffer raylib expects without handing ownership over: LoadTextureFromImage
+     * copies to the GPU and does not keep the pointer, so this frees its own memory rather
+     * than calling UnloadImage on something raylib never allocated. */
+    Image image;
+    memset(&image, 0, sizeof(image));
+    image.data = rgba;
+    image.width = info.width;
+    image.height = info.height;
+    image.mipmaps = 1;
+    image.format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8;
+
+    *texOut = LoadTextureFromImage(image);
+    free(rgba);
+
+    if (texOut->id == 0) return false;
+    /* Pixel art: nearest neighbour, never a smoothed upscale. */
+    SetTextureFilter(*texOut, TEXTURE_FILTER_POINT);
+    originOut->x = info.originXPx;
+    originOut->y = info.originYPx;
+    return true;
+}
+
+/* Rebake if and only if the picture or the scale changed. */
+static void ensure_car_textures(const CarVisual *visual, float pxPerM)
+{
+    const uint32_t key = car_visual_bake_key(visual);
+    if (s_carTexReady && key == s_carTexKey && pxPerM == s_carTexPxPerM) return;
+
+    unload_car_textures();
+
+    bool ok = upload_part(visual, CAR_RASTER_PART_BODY, 0, pxPerM,
+                          &s_carBodyTex, &s_carBodyOriginPx);
+    for (int i = 0; i < WHEEL_COUNT && ok; i++) {
+        ok = upload_part(visual, CAR_RASTER_PART_WHEEL, i, pxPerM,
+                         &s_carWheelTex[i], &s_carWheelOriginPx[i]);
+    }
+
+    if (!ok) {
+        TRACELOG(LOG_WARNING, "RENDER: vehicle sprite bake failed; retrying next frame");
+        unload_car_textures();
+        return;
+    }
+
+    s_carTexReady = true;
+    s_carTexKey = key;
+    s_carTexPxPerM = pxPerM;
+}
+
+/* Draw a baked part about its documented pivot. `rotationRad` is a heading in world terms;
+ * units_heading_to_rotation_deg handles the screen-space Y flip. */
+static void draw_car_part(Texture2D tex, Vector2 originPx, Vector2 centrePx, float rotationRad)
+{
+    if (tex.id == 0) return;
+    const Rectangle src = { 0.0f, 0.0f, (float)tex.width, (float)tex.height };
+    const Rectangle dst = { centrePx.x, centrePx.y, (float)tex.width, (float)tex.height };
+    DrawTexturePro(tex, src, dst, originPx,
+                   units_heading_to_rotation_deg(rotationRad), WHITE);
+}
+
 static void draw_vehicle(const Game *game, const VehicleDrawState *draw)
 {
     const float ppm = game->renderPixelsPerMeter;
-    const Vector2 bodyCenterPx = units_world_to_render_px(draw->positionM, ppm);
-    const float bodyLenPx = units_meters_to_pixels(4.2f, ppm);
-    const float bodyWidPx = units_meters_to_pixels(1.82f, ppm);
-    const float rotDeg = units_heading_to_rotation_deg(draw->headingRad);
 
-    /* Dark outline plate slightly larger than the body, then the body on top, so the
-     * silhouette reads cleanly against both asphalt and grass. */
-    DrawRectanglePro((Rectangle){ bodyCenterPx.x, bodyCenterPx.y,
-                                  bodyLenPx + 6.0f, bodyWidPx + 6.0f },
-                     (Vector2){ (bodyLenPx + 6.0f) * 0.5f, (bodyWidPx + 6.0f) * 0.5f },
-                     rotDeg, COL_CAR_OUTLINE);
-    DrawRectanglePro((Rectangle){ bodyCenterPx.x, bodyCenterPx.y, bodyLenPx, bodyWidPx },
-                     (Vector2){ bodyLenPx * 0.5f, bodyWidPx * 0.5f },
-                     rotDeg, COL_CAR_BODY);
+    CarVisual visual;                       /* stack-local by design: never stored in Game */
+    car_visual_derive(&game->spec, &visual);
+    ensure_car_textures(&visual, ppm);
+    if (!s_carTexReady) return;
 
-    /* Subtle two-tone shading: translucent dark over the rear half of the body. */
-    {
-        const Vector2 rearM = body_point_to_world((Vector2){ -1.05f, 0.0f },
-                                                  draw->positionM, draw->headingRad);
-        const Vector2 rearPx = units_world_to_render_px(rearM, ppm);
-        DrawRectanglePro((Rectangle){ rearPx.x, rearPx.y, bodyLenPx * 0.5f, bodyWidPx },
-                         (Vector2){ bodyLenPx * 0.25f, bodyWidPx * 0.5f },
-                         rotDeg, (Color){ 30, 18, 16, 90 });
-    }
+    const Vector2 bodyCentrePx = units_world_to_render_px(draw->positionM, ppm);
+    draw_car_part(s_carBodyTex, s_carBodyOriginPx, bodyCentrePx, draw->headingRad);
 
-    /* Cabin band forward of centre: instant front/rear distinction at top-down scale. */
-    {
-        const float cabinLenPx = units_meters_to_pixels(1.30f, ppm);
-        const float cabinWidPx = bodyWidPx * 0.72f;
-        const Vector2 cabinM = body_point_to_world((Vector2){ 0.55f, 0.0f },
-                                                   draw->positionM, draw->headingRad);
-        const Vector2 cabinPx = units_world_to_render_px(cabinM, ppm);
-        DrawRectanglePro((Rectangle){ cabinPx.x, cabinPx.y, cabinLenPx, cabinWidPx },
-                         (Vector2){ cabinLenPx * 0.5f, cabinWidPx * 0.5f },
-                         rotDeg, COL_CAR_CABIN);
-    }
-
-    /* Nose triangle (SPEC Phase 6): a gold wedge at the front so heading is readable at
-     * a glance. DrawTriangle is winding-agnostic in the default raylib draw mode. */
-    {
-        const Vector2 tipM   = body_point_to_world((Vector2){ 2.30f,  0.00f },
-                                                   draw->positionM, draw->headingRad);
-        const Vector2 baseLM = body_point_to_world((Vector2){ 1.30f,  0.52f },
-                                                   draw->positionM, draw->headingRad);
-        const Vector2 baseRM = body_point_to_world((Vector2){ 1.30f, -0.52f },
-                                                   draw->positionM, draw->headingRad);
-        DrawTriangle(units_world_to_render_px(tipM, ppm),
-                     units_world_to_render_px(baseLM, ppm),
-                     units_world_to_render_px(baseRM, ppm),
-                     COL_ACCENT);
-    }
-
-    /* Wheels: small dark tires with a lighter rim inset so orientation reads even at
-     * partial steer. Front wheels draw at heading + steerAngleRad with a presentation-only
-     * gain so the steer is unmistakable; the physics angle itself is untouched. Rear
-     * wheels draw at heading (their steerAngleRad is always 0). */
+    /* Front wheels draw at heading + steerAngleRad with a presentation-only gain so the steer
+     * is unmistakable at top-down scale; the physics angle itself is untouched. Rear wheels
+     * carry no steer, but they do carry whatever static alignment the grammar derived for
+     * them, so that is added for every wheel rather than only the front pair. */
     const float steerVisualGain = 1.25f;  /* render-only amplification, documented above */
     for (int i = 0; i < WHEEL_COUNT; i++) {
         const bool isFront = (i == WHEEL_FRONT_LEFT || i == WHEEL_FRONT_RIGHT);
         const float steerVis = isFront ? draw->wheelAngleRad[i] * steerVisualGain : 0.0f;
-        const Vector2 wheelWorldM = body_point_to_world(
-            game->vehicle.wheels[i].localPositionM, draw->positionM, draw->headingRad);
-        const Vector2 wheelPx = units_world_to_render_px(wheelWorldM, ppm);
-        const float wLenPx = units_meters_to_pixels(0.72f, ppm);
-        const float wWidPx = units_meters_to_pixels(0.28f, ppm);
-        const float wRotDeg = units_heading_to_rotation_deg(draw->headingRad + steerVis);
-        DrawRectanglePro((Rectangle){ wheelPx.x, wheelPx.y, wLenPx, wWidPx },
-                         (Vector2){ wLenPx * 0.5f, wWidPx * 0.5f },
-                         wRotDeg, COL_TIRE);
-        DrawRectanglePro((Rectangle){ wheelPx.x, wheelPx.y, wLenPx * 0.55f, wWidPx * 0.55f },
-                         (Vector2){ wLenPx * 0.275f, wWidPx * 0.275f },
-                         wRotDeg, COL_RIM);
+        const Vector2 hubWorldM = body_point_to_world(
+            visual.wheels[i].centreM, draw->positionM, draw->headingRad);
+        draw_car_part(s_carWheelTex[i], s_carWheelOriginPx[i],
+                      units_world_to_render_px(hubWorldM, ppm),
+                      draw->headingRad + steerVis + visual.wheels[i].staticAngleRad);
     }
+}
+
+void render_pre_reload(void)
+{
+    /* Release before the module is swapped: the handles belong to this module's statics and
+     * would be dangling GPU names after the reload. */
+    unload_car_textures();
+}
+
+void render_post_reload(void)
+{
+    /* Nothing to re-acquire eagerly. Clearing the key makes the next draw rebake, which is
+     * both simpler and safer than baking here without a spec in hand. */
+    s_carTexReady = false;
+    s_carTexKey = 0u;
+    s_carTexPxPerM = 0.0f;
+}
+
+void render_shutdown(void)
+{
+    unload_car_textures();
 }
 
 static void draw_debug_vectors(const Game *game, const VehicleDrawState *draw)

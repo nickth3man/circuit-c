@@ -430,10 +430,16 @@ void car_visual_derive(const VehicleSpec *spec, CarVisual *out)
             0.74f - 0.34f * l.sport01 - 0.18f * (1.0f - l.aero01)
                   + 0.16f * frontAero + 0.16f * slab - 0.08f * drag01,
             0.12f, 0.98f);
+        /* The constant is where an aerodynamically neutral car's tail sits. It was low enough
+         * that the stock car rendered as a boat-tailed wedge, which nothing in its spec asks
+         * for and which the reference sheet's saloons plainly are not. Raised so a neutral
+         * tail is squarish and the aero term moves it either side of that, with the ceiling
+         * lifted to match so a downforce car is not clipped into the same shape as the one
+         * below it. */
         const float tailTaper = clampf(
-            0.34f - 0.20f * l.sport01 + 0.18f * l.mass01
+            0.52f - 0.20f * l.sport01 + 0.18f * l.mass01
                   + 0.80f * rearAero + 0.20f * slab - 0.04f * drag01,
-            0.15f, 1.25f);
+            0.15f, 1.40f);
         const float waistDepth = 0.02f + 0.10f * l.sport01;
 
         for (int i = 0; i < CAR_HULL_STATIONS; i++) {
@@ -659,6 +665,124 @@ void car_visual_derive(const VehicleSpec *spec, CarVisual *out)
         const float stripeVal = clampf(val * 1.08f, 0.0f, 1.0f);
         out->stripeColor = hsv_to_color(stripeHue, stripeSat, stripeVal, 255);
     }
+}
+
+/* -------------------------------------------------------------------------- bake key --
+ *
+ * See car_visual.h for why this hashes CarVisual field by field rather than either the spec
+ * or the raw bytes of anything.
+ */
+static void key_f32(uint32_t *h, float value)
+{
+    /* The exact bit pattern, not a quantisation: a sub-pixel change still has to rebake,
+     * because the rasterizer may still round it into a different pixel. Normalise the two
+     * zeroes so +0 and -0 cannot produce different keys for the same picture. */
+    if (value == 0.0f) value = 0.0f;
+    uint32_t bits = 0u;
+    memcpy(&bits, &value, sizeof(bits));
+    for (int i = 0; i < 4; i++) {
+        *h ^= (bits >> (8 * i)) & 0xFFu;
+        *h *= 16777619u;
+    }
+}
+
+static void key_i32(uint32_t *h, int32_t value)
+{
+    for (int i = 0; i < 4; i++) {
+        *h ^= (uint32_t)((value >> (8 * i)) & 0xFF);
+        *h *= 16777619u;
+    }
+}
+
+static void key_colour(uint32_t *h, Color c)
+{
+    key_i32(h, (int32_t)c.r);
+    key_i32(h, (int32_t)c.g);
+    key_i32(h, (int32_t)c.b);
+    key_i32(h, (int32_t)c.a);
+}
+
+uint32_t car_visual_bake_key(const CarVisual *v)
+{
+    if (v == NULL) return 0u;
+    uint32_t h = 2166136261u;
+
+    for (int i = 0; i < CAR_HULL_STATIONS; i++) {
+        key_f32(&h, v->hull[i].xM);
+        key_f32(&h, v->hull[i].halfWidthM);
+    }
+    key_f32(&h, v->lengthM);
+    key_f32(&h, v->widthM);
+    key_f32(&h, v->wheelbaseM);
+    key_f32(&h, v->frontOverhangM);
+    key_f32(&h, v->rearOverhangM);
+
+    key_f32(&h, v->cabinCentreXM);
+    key_f32(&h, v->cabinLengthM);
+    key_f32(&h, v->cabinHalfWidthM);
+    key_f32(&h, v->windscreenXM);
+    key_f32(&h, v->backlightXM);
+    key_f32(&h, v->roofLengthM);
+    key_f32(&h, v->glassHalfWidthM);
+
+    for (int i = 0; i < WHEEL_COUNT; i++) {
+        const CarWheelVisual *w = &v->wheels[i];
+        key_f32(&h, w->centreM.x);
+        key_f32(&h, w->centreM.y);
+        key_f32(&h, w->diameterM);
+        key_f32(&h, w->widthM);
+        key_f32(&h, w->rimDiameterM);
+        key_f32(&h, w->rimWidthM);
+        key_f32(&h, w->sidewallHeightM);
+        key_f32(&h, w->discDiameterM);
+        key_f32(&h, w->staticAngleRad);
+        key_f32(&h, w->camberVisualCos);
+        key_f32(&h, w->pokeM);
+        key_f32(&h, w->archGapM);
+        key_i32(&h, w->spokeCount);
+    }
+    key_f32(&h, v->archFlareM);
+
+    key_f32(&h, v->wingSpanM);
+    key_f32(&h, v->wingChordM);
+    key_f32(&h, v->wingXM);
+    key_f32(&h, v->splitterProtrusionM);
+    key_f32(&h, v->splitterWidthM);
+    key_f32(&h, v->canardStrength);
+    key_f32(&h, v->mirrorOffsetM);
+    key_f32(&h, v->exhaustBoreM);
+    key_i32(&h, v->exhaustCount);
+    key_f32(&h, v->exhaustTransition);
+    key_i32(&h, v->hasCage ? 1 : 0);
+    key_i32(&h, v->hasMirrors ? 1 : 0);
+
+    key_f32(&h, v->hoodBulgeStrength);
+    key_f32(&h, v->pickupBedWeight);
+    key_f32(&h, v->vanWindowWeight);
+    key_i32(&h, v->sideWindowCount);
+    key_f32(&h, v->openWheelWeight);
+    key_f32(&h, v->raceDetailWeight);
+    key_i32(&h, v->hasTowHook ? 1 : 0);
+    key_i32(&h, v->hasHoodPins ? 1 : 0);
+    key_f32(&h, v->stripeWeight);
+    key_f32(&h, v->heightVisual);
+
+    /* Colour is part of the baked pixels even though it is excluded from distinctness, so a
+     * repaint has to rebake. */
+    key_colour(&h, v->body);
+    key_colour(&h, v->bodyShade);
+    key_colour(&h, v->cabin);
+    key_colour(&h, v->glass);
+    key_colour(&h, v->outline);
+    key_colour(&h, v->tire);
+    key_colour(&h, v->tireSidewall);
+    key_colour(&h, v->rim);
+    key_colour(&h, v->disc);
+    key_colour(&h, v->accent);
+    key_colour(&h, v->lamp);
+    key_colour(&h, v->stripeColor);
+
+    return h;
 }
 
 /* ------------------------------------------------------------------------- signature --
