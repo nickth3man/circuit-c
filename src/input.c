@@ -18,13 +18,15 @@ void input_clear_oneshots(Input *in)
     in->debugPressed     = false;
     in->shiftUpPressed   = false;
     in->shiftDownPressed = false;
+    in->toggleAutoPressed = false;
 }
 
 bool input_has_oneshot(const Input *in)
 {
     if (in == NULL) return false;
     return in->pausePressed || in->resetPressed || in->debugPressed ||
-           in->shiftUpPressed || in->shiftDownPressed;
+           in->shiftUpPressed || in->shiftDownPressed ||
+           in->toggleAutoPressed;
 }
 
 #if !defined(DRIFTY_HEADLESS)
@@ -52,6 +54,7 @@ void input_sample(Input *in)
     if (IsKeyPressed(KEY_F1)) in->debugPressed     = true;
     if (IsKeyPressed(KEY_E))  in->shiftUpPressed   = true;
     if (IsKeyPressed(KEY_Q))  in->shiftDownPressed = true;
+    if (IsKeyPressed(KEY_T))  in->toggleAutoPressed = true;
 }
 
 #endif /* !DRIFTY_HEADLESS */

@@ -34,6 +34,7 @@ typedef struct {
     bool debugPressed;
     bool shiftUpPressed;
     bool shiftDownPressed;
+    bool toggleAutoPressed;
 } Input;
 
 /* Zero every field. */

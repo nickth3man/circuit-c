@@ -453,7 +453,8 @@ static void draw_hud_clusters(const Game *game)
         DrawText("KM/H", (int)panel.x + 20 + MeasureText(kmhText, 46),
                  (int)panel.y + 40, 16, COL_TEXT_DIM);
 
-        DrawText(TextFormat("GEAR %s", gear_label(game->vehicle.selectedGear)),
+        const char *modeLabel = game->autoTrans.enabled ? "AUTO " : "";
+        DrawText(TextFormat("%sGEAR %s", modeLabel, gear_label(game->vehicle.selectedGear)),
                  (int)panel.x + 16, (int)panel.y + 66, 18, COL_TEXT);
 
         /* RPM bar: cool cyan, flipping to accent gold near the redline. */

@@ -15,6 +15,7 @@
 #include "dev_scenario.h"
 #include "dev_state.h"
 #include "audio.h"
+#include "auto_transmission.h"
 #include "collision.h"
 #include "physics.h"
 #include "profile.h"
@@ -110,6 +111,8 @@ GAME_API void game_reset_sim(Game *game)
 {
     if (game == NULL) return;
     vehicle_state_reset(&game->spec, &game->vehicle, &game->derived, &game->renderState);
+    game->autoTrans.driveState   = AUTO_DRIVE;
+    game->autoTrans.neutralTimer = 0.0f;
 }
 
 
@@ -248,15 +251,25 @@ static void apply_oneshots(Game *game, const Input *input)
         game->debugOverlay = !game->debugOverlay;
         game->sim.debugToggleCount++;
     }
-    if (input->shiftUpPressed) {
-        if (game->vehicle.selectedGear < game->spec.gearCount) {
-            game->vehicle.selectedGear++;
+    if (input->toggleAutoPressed) {
+        game->autoTrans.enabled = !game->autoTrans.enabled;
+        if (game->autoTrans.enabled) {
+            game->autoTrans.driveState   = AUTO_DRIVE;
+            game->autoTrans.neutralTimer = 0.0f;
+            game->vehicle.selectedGear   = 1;
         }
-        game->sim.shiftUpCount++;
     }
-    if (input->shiftDownPressed) {
-        if (game->vehicle.selectedGear > -1) game->vehicle.selectedGear--;
-        game->sim.shiftDownCount++;
+    if (!game->autoTrans.enabled) {
+        if (input->shiftUpPressed) {
+            if (game->vehicle.selectedGear < game->spec.gearCount) {
+                game->vehicle.selectedGear++;
+            }
+            game->sim.shiftUpCount++;
+        }
+        if (input->shiftDownPressed) {
+            if (game->vehicle.selectedGear > -1) game->vehicle.selectedGear--;
+            game->sim.shiftDownCount++;
+        }
     }
 }
 
@@ -267,6 +280,9 @@ GAME_API void game_init(Game *game)
     memset(&game->sim, 0, sizeof(game->sim));
     vehicle_spec_set_default(&game->spec);
     game_reset_sim(game);
+    game->autoTrans.enabled     = false;
+    game->autoTrans.driveState  = AUTO_DRIVE;
+    game->autoTrans.neutralTimer = 0.0f;
 #if defined(DRIFTY_HEADLESS)
     game->state = STATE_PLAYING;  /* headless: no menus, simulate immediately */
 #else
@@ -364,6 +380,10 @@ GAME_API void game_fixed_update(Game *game, float dt)
     particle_pool_update(&game->particles, dt);
 
     if (game->state == STATE_PLAYING) {
+        /* Auto transmission: override gear and remap throttle/brake */
+        auto_transmission_update(&game->autoTrans, &game->vehicle, &game->spec,
+                                  &game->derived, &tickInput, dt);
+
         DRIFTY_ZONE_BEGIN(physics, "Physics");
         /* Save start-of-tick position for checkpoint crossing (renderState->prev* was
          * already set by physics_fixed_update before integration). */

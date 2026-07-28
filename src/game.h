@@ -30,6 +30,7 @@
 #include "replay.h"
 #include "track.h"
 #include "vehicle.h"
+#include "auto_transmission.h"
 
 typedef enum {
     STATE_MENU = 0,
@@ -89,6 +90,9 @@ struct Game {
     int   reloadCount;
     float reloadFlashTimerS;
     bool  initialized;
+
+    /* Automatic transmission mode (toggle with T). */
+    AutoTransmission autoTrans;
 
     /* Development tooling: Physics Lab, scope history, trajectory, invariant monitor, and
      * the time controls the platform loop reads. Plain value data like everything else here,
