@@ -171,7 +171,8 @@ mk baselines        re-record baselines (explain it)   mk verify-fast     format
 mk verify           analysis + tests + regression      mk ci              the required CI set
 mk sanitize         ASan + UBSan (clang)               mk coverage        gcovr text/HTML/XML
 mk screenshots      deterministic scene captures       mk visual-test     compare to baselines
-mk profile          build with profiling enabled       mk benchmark       throughput
+mk gallery          the in-game vehicle corpus pages   mk profile         build with profiling
+mk benchmark        throughput
 mk params-doc       regenerate PARAMETERS.md           mk compile-commands  for clangd
 mk format           apply .clang-format                mk lint / mk analyze
 mk fuzz             build and briefly run the fuzzers  mk release
@@ -251,7 +252,46 @@ This gate is local rather than CI — see `tests/visual/README.md` for why.
 
 ---
 
-## 9. Fuzzing
+## 9. The vehicle corpus and gallery
+
+Appearance is derived from physics parameters alone — see
+[CAR_VISUAL.md](CAR_VISUAL.md) for the grammar and [CORPUS.md](CORPUS.md) for the fleet.
+
+The headless path needs no GPU, no window, and no `drifty.exe`, so it works on any machine
+and in CI:
+
+```bash
+./drifty_tests.exe --scenario car-visual                 # grammar gates
+./drifty_tests.exe --scenario corpus                     # fleet gates
+./drifty_tests.exe --dump-corpus-sheet artifacts/gallery # contact sheet + index.html
+./drifty_tests.exe --dump-corpus-index docs/CORPUS.md    # the corpus table
+./drifty_tests.exe --generate-corpus tuning/corpus       # export the fleet as tuning profiles
+```
+
+`artifacts/gallery/index.html` is the primary human acceptance check for the appearance
+system. Every cell is drawn at ONE metres-to-pixels scale — auto-fitting each car would erase
+the size axis, which is the most informative thing the sheet shows.
+
+The in-game path renders the same fleet through the production texture path:
+
+```bash
+mk gallery                    # all pages -> artifacts/gallery-ingame/page_N.png
+drifty.exe --gallery-page 3   # one page; bounded and self-exiting, like every capture here
+```
+
+The gallery is a human-review artifact and deliberately **not** a GPU regression baseline: a
+hundred cars behind an RMSE gate, on hardware that rasterizes differently per vendor, is a
+maintenance sinkhole with no CI value. The headless sheet and the `corpus` scenario are the
+gates that matter.
+
+When two corpus vehicles are too similar, the `corpus` scenario writes
+`artifacts/car_visual_failures/<pair>/` containing both rasters, a diff image, both specs as
+loadable tuning profiles, and a report naming the closest signature components. Suppressed by
+`--no-bundle`, like every other failure bundle here.
+
+---
+
+## 10. Fuzzing
 
 ```bash
 mk fuzz            # clang + libFuzzer, 20 seconds per target

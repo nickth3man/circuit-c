@@ -98,12 +98,13 @@ This terminates, writes CSV telemetry to `telemetry/`, and needs no window. It i
 feedback loop for equations and tuning; use hot reload for feel, camera, and presentation
 work. Run it from the repository root — the telemetry path is relative.
 
-`./drifty_tests.exe --list` prints 36 scenarios and the suite currently has 715 passing
-checks. Phase 3 adds focused acceleration-filter, load-transfer, resistance, acceleration
-load, braking load, skidpad sweep, step-steer, lift-off, transition, and catchable-drift
-coverage. Generated
-telemetry is written under `telemetry/`; `tests/baselines/` holds the reviewed baselines that
-`mk regression` compares against.
+`./drifty_tests.exe --list` prints the scenario table; the suite currently runs 54 scenarios
+and 1109 checks. Alongside the physics coverage — acceleration filter, load transfer,
+resistance, acceleration and braking load, skidpad sweep, step steer, lift-off, transition,
+catchable drift — the `car-visual` and `corpus` scenarios gate the vehicle appearance system
+(see [Vehicle appearance](#vehicle-appearance)). Generated telemetry is written under
+`telemetry/`; `tests/baselines/` holds the reviewed baselines that `mk regression` compares
+against.
 
 Other modes of the same executable:
 
@@ -144,6 +145,50 @@ only appear after a reload:
   `static Game game;` inside the game module.
 - Anything raylib tracks (textures, sounds, audio stream callbacks) is released in
   `game_pre_reload` and re-acquired in `game_post_reload`.
+
+## Vehicle appearance
+
+A car's appearance is a **pure, total, deterministic function of its physics parameters**.
+There is no hand-authored art for any vehicle. [docs/CAR_VISUAL.md](docs/CAR_VISUAL.md) is the
+full contract — what every drawn feature reads, where the render-only gains are and why, the
+raster layer order and pivots, and the scale chain. Read it before touching
+`src/car_visual.c`, `src/car_visual_raster.c`, `src/car_corpus.c`, or `draw_vehicle()`.
+
+These are the rules that a change must not break, and each one exists because breaking it
+would silently destroy a property a test is protecting:
+
+- **No geometric feature may be generated from a hash of raw spec data.** Byte-hashing would
+  trivially satisfy the distinctness test while destroying the property that test exists to
+  protect. Every geometric feature cites the parameters it reads. Colour is the single stated
+  exception: it is explicitly arbitrary, stable per car, and excluded from the distinctness
+  metric so that shape has to carry the result.
+- **No `body.type` enum, no per-archetype drawing branch, no per-car art asset.** A pickup, a
+  bus and an open-wheel car are regions of parameter space, not cases in a switch.
+- **No styling decision outside `src/car_visual.c`.** `render.c` stubs its whole draw path out
+  under `DRIFTY_HEADLESS`, so anything decided there is unreachable from `drifty_tests.exe`
+  and unverifiable. `car_visual.c` and `car_visual_raster.c` are raylib-*free* — they use the
+  `Color`/`Vector2` types and call no raylib function — which is what keeps them linkable into
+  the headless test binary.
+- **`CarVisual` is a stack local**, derived per bake. Never stored in `Game` or `DevState`.
+- **Cache keys are canonical field serialization**, never raw struct bytes and never `memcmp`:
+  both structs contain padding whose contents are unspecified. A hash may invalidate a cache
+  and may seed colour; it may never produce geometry.
+- **Float determinism holds only within one binary** (`game.dll` at `-O0`, `drifty_tests` at
+  `-O2`). Never compare a module-computed raster against a test-computed one, and do not add
+  `-ffast-math`.
+- **`resources/sprite_examples/` is reference, not assets.** Those sprites are there to show
+  how appearance maps from proportions. They are never shipped.
+
+The gates, all headless and all bounded:
+
+```bash
+./drifty_tests.exe --scenario car-visual   # purity, sensitivity, monotonicity, scale independence
+./drifty_tests.exe --scenario corpus       # validity, profile round-trip, all-pairs distinctness
+./drifty_tests.exe --dump-corpus-sheet artifacts/gallery   # then open index.html and look
+```
+
+`mk gallery` renders the same fleet through the production texture path. It is a human-review
+artifact, deliberately not a GPU regression baseline.
 
 ## Validation after build-system edits
 
