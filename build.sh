@@ -117,7 +117,7 @@ build_info_defines() {
 # -------------------------------------------------------------------------------- flags --
 
 CSTD="-std=c11"
-INCLUDES="-Isrc -Ithird_party/raygui"
+INCLUDES="-Isrc -Ithird_party -Ithird_party/raygui"
 WARNINGS="-Wall -Wextra -Wshadow -Wstrict-prototypes -Wmissing-prototypes -Wpointer-arith"
 DEBUG_FLAGS="-O0 -g"
 RELEASE_FLAGS="-O2 -DNDEBUG"
@@ -131,13 +131,13 @@ DEV_TOOL_DEFINES="-DDRIFTY_DEV_TOOLS"
 # `make profile` uses it. Values must not contain spaces (see the note above).
 EXTRA_DEFINES="${DRIFTY_EXTRA_DEFINES:-}"
 
-SHARED_SRCS="src/input.c src/math_utils.c src/dev_scenario.c src/profile.c"
-DEV_SRCS="src/dev_params.c src/dev_presets.c src/dev_replay.c src/dev_state.c src/failure_bundle.c"
+SHARED_SRCS="src/input.c src/math_utils.c src/dev_scenario.c src/profile.c src/car_visual.c src/car_visual_raster.c"
+DEV_SRCS="src/dev_params.c src/dev_presets.c src/dev_replay.c src/dev_state.c src/failure_bundle.c src/car_corpus.c"
 DEV_UI_SRCS="src/dev_lab.c"
 GAME_SRCS="src/game.c src/audio.c src/auto_transmission.c src/particle.c src/vehicle.c src/physics.c src/tire.c src/drivetrain.c src/surface.c src/track.c src/collision.c src/scoring.c src/render.c src/replay.c src/telemetry.c $DEV_SRCS"
 PLATFORM_SRCS="src/main.c src/timestep.c"
 HOTRELOAD_SRC="src/hotreload_windows.c"
-TEST_SRCS="tests/physics_tests.c src/timestep.c $GAME_SRCS $SHARED_SRCS"
+TEST_SRCS="tests/physics_tests.c tests/car_sheet.c src/timestep.c $GAME_SRCS $SHARED_SRCS"
 HOTRELOAD_HARNESS_SRCS="tests/hotreload_harness.c src/timestep.c $HOTRELOAD_SRC $SHARED_SRCS"
 
 MODULE="build/game.dll"
