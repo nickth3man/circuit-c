@@ -5268,18 +5268,119 @@ static float cv_signature_linf(const CarVisual *a, const CarVisual *b, int *wors
     return worst;
 }
 
+/* Issue #9: every float field finite; dimensions non-negative; latents in [0, 1]. */
+static bool cv_visual_fields_sane(const CarVisual *v)
+{
+    if (v == NULL) return false;
+
+#define CV_FIN(x) do { if (!isfinite((x))) return false; } while (0)
+#define CV_NN(x)  do { CV_FIN(x); if ((x) < 0.0f) return false; } while (0)
+#define CV_01(x)  do { CV_FIN(x); if ((x) < 0.0f || (x) > 1.0f) return false; } while (0)
+
+    for (int s = 0; s < CAR_HULL_STATIONS; s++) {
+        CV_FIN(v->hull[s].xM);
+        CV_NN(v->hull[s].halfWidthM);
+    }
+    CV_NN(v->lengthM);
+    CV_NN(v->widthM);
+    CV_NN(v->wheelbaseM);
+    CV_NN(v->frontOverhangM);
+    CV_NN(v->rearOverhangM);
+
+    CV_FIN(v->cabinCentreXM);
+    CV_NN(v->cabinLengthM);
+    CV_NN(v->cabinHalfWidthM);
+    CV_FIN(v->windscreenXM);
+    CV_FIN(v->backlightXM);
+
+    for (int i = 0; i < WHEEL_COUNT; i++) {
+        CV_FIN(v->wheels[i].centreM.x);
+        CV_FIN(v->wheels[i].centreM.y);
+        CV_NN(v->wheels[i].diameterM);
+        CV_NN(v->wheels[i].widthM);
+        CV_NN(v->wheels[i].rimDiameterM);
+        CV_NN(v->wheels[i].discDiameterM);
+        CV_FIN(v->wheels[i].staticAngleRad);
+        if (v->wheels[i].spokeCount < 0) return false;
+    }
+    CV_NN(v->archFlareM);
+
+    CV_NN(v->wingSpanM);
+    CV_NN(v->wingChordM);
+    CV_FIN(v->wingXM);
+    CV_NN(v->splitterProtrusionM);
+    CV_NN(v->splitterWidthM);
+    CV_NN(v->mirrorOffsetM);
+    CV_NN(v->exhaustBoreM);
+    if (v->exhaustCount < 0) return false;
+
+    CV_01(v->latents.mass01);
+    CV_01(v->latents.size01);
+    CV_01(v->latents.low01);
+    CV_01(v->latents.grip01);
+    CV_01(v->latents.balance01);
+    CV_01(v->latents.power01);
+    CV_01(v->latents.aero01);
+    CV_01(v->latents.sport01);
+    CV_01(v->latents.strip01);
+
+#undef CV_FIN
+#undef CV_NN
+#undef CV_01
+    return v->lengthM > 0.0f && v->widthM > 0.0f;
+}
+
 static void scenario_car_visual(void)
 {
     VehicleSpec spec;
     CarVisual a, b;
 
-    /* --- purity: same input, byte-identical output (derive memsets first, so padding is
-     * deterministic and memcmp is meaningful) --- */
+    /* --- purity: same input, byte-identical CarVisual / signature / raster --- */
     vehicle_spec_set_default(&spec);
     car_visual_derive(&spec, &a);
     car_visual_derive(&spec, &b);
     check(memcmp(&a, &b, sizeof(CarVisual)) == 0,
           "car_visual_derive is pure: identical specs give identical visuals");
+
+    {
+        float sa[64], sb[64];
+        const int n = car_visual_signature_count();
+        check(n > 0 && n <= (int)(sizeof(sa) / sizeof(sa[0])),
+              "signature component count is in range");
+        check(car_visual_signature(&a, sa, n) == n &&
+              car_visual_signature(&b, sb, n) == n,
+              "signature writes every component twice");
+        check(memcmp(sa, sb, (size_t)n * sizeof(float)) == 0,
+              "car_visual_signature is pure: identical visuals give identical signatures");
+    }
+
+    {
+        const CarRasterInfo info = car_raster_info(&a, CV_TEST_PX_PER_M, 2);
+        const size_t bytes = car_raster_bytes(info);
+        const size_t labelBytes = (size_t)info.width * (size_t)info.height;
+        unsigned char *ra = (unsigned char *)malloc(bytes);
+        unsigned char *rb = (unsigned char *)malloc(bytes);
+        unsigned char *la = (unsigned char *)malloc(labelBytes);
+        unsigned char *lb = (unsigned char *)malloc(labelBytes);
+        check(ra != NULL && rb != NULL && la != NULL && lb != NULL && bytes > 0,
+              "purity raster buffers allocated");
+        if (ra != NULL && rb != NULL && la != NULL && lb != NULL) {
+            check(car_raster_draw(&a, info, ra, bytes) &&
+                  car_raster_draw(&a, info, rb, bytes),
+                  "repeated RGBA rasters succeed");
+            check(memcmp(ra, rb, bytes) == 0,
+                  "car_raster_draw is pure: identical visuals give bit-identical RGBA");
+            check(car_raster_draw_labels(&a, info, la, labelBytes) &&
+                  car_raster_draw_labels(&a, info, lb, labelBytes),
+                  "repeated label rasters succeed");
+            check(memcmp(la, lb, labelBytes) == 0,
+                  "car_raster_draw_labels is pure: identical visuals give bit-identical labels");
+        }
+        free(ra);
+        free(rb);
+        free(la);
+        free(lb);
+    }
 
     /* --- the wheel centres ARE the simulation's wheel positions, not a lookalike --- */
     {
@@ -5315,23 +5416,18 @@ static void scenario_car_visual(void)
 
                 CarVisual v;
                 car_visual_derive(&probe, &v);
-                if (!isfinite(v.lengthM) || !isfinite(v.widthM) ||
-                    v.lengthM <= 0.0f || v.widthM <= 0.0f) {
+                if (!cv_visual_fields_sane(&v)) {
                     if (bad == 0) {
-                        printf("      first bad corner: %s = %g -> length %g width %g\n",
+                        printf("      first bad corner: %s = %g\n",
                                param->name,
-                               (double)(corner == 0 ? param->minimum : param->maximum),
-                               (double)v.lengthM, (double)v.widthM);
+                               (double)(corner == 0 ? param->minimum : param->maximum));
                     }
                     bad++;
-                    continue;
-                }
-                for (int s = 0; s < CAR_HULL_STATIONS; s++) {
-                    if (!isfinite(v.hull[s].halfWidthM) || v.hull[s].halfWidthM < 0.0f) bad++;
                 }
             }
         }
-        check(bad == 0, "every registry range corner produces finite, non-negative geometry");
+        check(bad == 0,
+              "every registry range corner produces finite, bounded CarVisual fields");
     }
 
     /* --- monotonicity: the obvious knobs move the obvious way. These are what stop a
