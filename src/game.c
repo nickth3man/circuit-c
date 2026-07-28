@@ -312,6 +312,15 @@ GAME_API void game_init(Game *game)
     replay_begin_recording(&game->replay, 0);
     dev_state_init(&game->dev);
 #if !defined(DRIFTY_HEADLESS)
+    /* Load the community gamepad mapping database so non-XInput controllers
+     * (DualSense, DualShock 4, Switch Pro, etc.) are recognized by raylib on
+     * Windows. The file is optional — if missing, built-in GLFW mappings
+     * (which cover XInput/Xbox controllers) still work. */
+    char *gamepadMappings = LoadFileText("gamecontrollerdb.txt");
+    if (gamepadMappings != NULL) {
+        SetGamepadMappings(gamepadMappings);
+        UnloadFileText(gamepadMappings);
+    }
     track_init(&game->track);
     audio_init();
 #endif
