@@ -59,20 +59,20 @@ void physics_update_steering(const VehicleSpec *spec, VehicleState *state,
         state->frontRoadWheelAngleRad + clampf(error, -maxChange, maxChange),
         -spec->maxRoadWheelAngleRad, spec->maxRoadWheelAngleRad);
     /* Ackermann steering: inner wheel steers more than outer. With ackermannPercent
-     * at the default 0, steerFL == steerFR == δ_c (parallel, neutral). */
-    const float δ_c = state->frontRoadWheelAngleRad;
-    float steerFL = δ_c, steerFR = δ_c;
-    if (fabsf(δ_c) > 1e-4f) {
-        const float R = spec->wheelbaseM / tanf(δ_c);
+     * at the default 0, steerFL == steerFR == deltaC (parallel, neutral). */
+    const float deltaC = state->frontRoadWheelAngleRad;
+    float steerFL = deltaC, steerFR = deltaC;
+    if (fabsf(deltaC) > 1e-4f) {
+        const float R = spec->wheelbaseM / tanf(deltaC);
         const float trackHalf = spec->trackWidthFrontM * 0.5f;
-        const float sign = (δ_c > 0.0f) ? 1.0f : -1.0f;
+        const float sign = (deltaC > 0.0f) ? 1.0f : -1.0f;
         const float deltaInner = atanf(spec->wheelbaseM / (R - sign * trackHalf));
         const float deltaOuter = atanf(spec->wheelbaseM / (R + sign * trackHalf));
         float deltaL, deltaR;
-        if (δ_c > 0.0f) { deltaL = deltaInner; deltaR = deltaOuter; }
+        if (deltaC > 0.0f) { deltaL = deltaInner; deltaR = deltaOuter; }
         else            { deltaL = deltaOuter; deltaR = deltaInner; }
-        steerFL = δ_c + spec->ackermannPercent * (deltaL - δ_c);
-        steerFR = δ_c + spec->ackermannPercent * (deltaR - δ_c);
+        steerFL = deltaC + spec->ackermannPercent * (deltaL - deltaC);
+        steerFR = deltaC + spec->ackermannPercent * (deltaR - deltaC);
     }
     state->wheels[WHEEL_FRONT_LEFT].steerAngleRad = steerFL;
     state->wheels[WHEEL_FRONT_RIGHT].steerAngleRad = steerFR;
@@ -452,9 +452,9 @@ bool physics_state_is_valid(const VehicleSpec *spec, const VehicleState *state,
      * from body velocity, so the stored aggregate dotted with body velocity is the right
      * check. Rolling resistance is computed per wheel from contact velocity (which differs
      * from CG velocity under yaw), then optionally clamped by limit_resistance_to_stop
-     * against body axes — so aggregate RR · body_velocity is not a valid dissipation check
+     * against body axes - so aggregate RR . body_velocity is not a valid dissipation check
      * (it fails near-zero CG speed with residual yaw). Recompute each wheel's pure RR and
-     * require RR · contact_velocity ≤ tolerance instead. */
+     * require RR . contact_velocity <= tolerance instead. */
     if (derived->aeroDragBodyN.x * state->velocityLongitudinalMps +
         derived->aeroDragBodyN.y * state->velocityLateralMps >
         RESISTANCE_POWER_TOLERANCE_W) return false;
@@ -607,8 +607,8 @@ void physics_fixed_update(const VehicleSpec *spec,
     /* --- 7. filtered previous-step longitudinal acceleration ----------------------------- */
 
     /* The load filter consumes the PREVIOUS step's solved body acceleration. Feeding it this
-     * step's value would make loads depend on forces that depend on loads — an algebraic
-     * loop with no solution — and a velocity finite difference would smuggle in the r*vy
+     * step's value would make loads depend on forces that depend on loads - an algebraic
+     * loop with no solution - and a velocity finite difference would smuggle in the r*vy
      * transport term, which pitches nothing. */
     derived->previousLongAccelMps2 = state->prevLongAccelMps2;
     state->filteredLongAccelMps2 = physics_filter_long_accel(
@@ -816,9 +816,9 @@ void physics_fixed_update(const VehicleSpec *spec,
             derived->rearBodyForceN.y += bodyForceN.y;
         }
 
-        /* Four-wheel yaw torque: M_z = Σ (px·Fy_body − py·Fx_body). The px·Fy_body term
-         * reproduces the existing axle yaw moment (front: +l_f·Fy, rear: −l_r·Fy); the
-         * −py·Fx_body term captures the longitudinal force's lever arm through the track
+        /* Four-wheel yaw torque: M_z = Σ (px.Fy_body − py.Fx_body). The px.Fy_body term
+         * reproduces the existing axle yaw moment (front: +l_f.Fy, rear: −l_r.Fy); the
+         * −py.Fx_body term captures the longitudinal force's lever arm through the track
          * width, which the centreline bicycle model omits. */
         derived->totalYawTorqueNm +=
             state->wheels[i].localPositionM.x * bodyForceN.y -
@@ -872,7 +872,7 @@ void physics_fixed_update(const VehicleSpec *spec,
      * causing the wheel integrator to un-lock the wheel to rolling speed. That
      * eliminates braking force from the tire; when the wheel lands fractionally above
      * rolling speed on the following tick, the residual positive slip produces a small
-     * propelling impulse — a 0.007 m/s speed increase in the launch-stop scenario.
+     * propelling impulse - a 0.007 m/s speed increase in the launch-stop scenario.
      *
      * The guard below is a physical invariant, not a hack: braking torque can only
      * oppose the direction of travel, never reverse it, and never increase the speed
@@ -914,8 +914,8 @@ void physics_fixed_update(const VehicleSpec *spec,
 
         /* Stiff-limit equilibrium treatment for the unbraked wheel.
          *
-         * The wheel-plus-tire subsystem's time constant is well under a millisecond —
-         * far below the fixed step — so under any steady sub-peak torque the physical
+         * The wheel-plus-tire subsystem's time constant is well under a millisecond -
+         * far below the fixed step - so under any steady sub-peak torque the physical
          * wheel reaches its balance slip within the tick. The explicit integrator cannot:
          * it either overshoots the balance point (a tick-scale limit cycle between engine
          * braking and tire reaction) or, when the start-of-step slip was zero, produces no
@@ -923,7 +923,7 @@ void physics_fixed_update(const VehicleSpec *spec,
          * returns as a phantom multi-kilonewton force one tick later.
          *
          * So when a stable equilibrium exists and the wheel is inside the pre-peak band
-         * around it — the region where the linearized dynamics converge within one tick —
+         * around it - the region where the linearized dynamics converge within one tick -
          * land on the equilibrium directly. Outside the band (deep wheelspin shedding
          * speed through a saturated curve) the multi-tick explicit dynamics are the right
          * answer and are kept. Torques at or beyond the curve's peak have no equilibrium
@@ -1012,7 +1012,7 @@ void physics_fixed_update(const VehicleSpec *spec,
             fmaxf(derived->maxFrictionUsage, state->wheels[i].frictionUsage);
     }
     derived->physicallySliding = derived->maxFrictionUsage >= 0.98f;
-    /* scoringDrift is owned by scoring_classify() in scoring.c — it is
+    /* scoringDrift is owned by scoring_classify() in scoring.c - it is
      * overwritten in game_fixed_update() after physics returns. Keeping it false
      * here as the safe default for any path that skips classification. */
     derived->scoringDrift = false;
