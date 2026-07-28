@@ -32,4 +32,21 @@ float car_sheet_default_px_per_m(void);
  * Returns false if the directory could not be created or any file could not be written. */
 bool car_sheet_write(const char *outDir, float pxPerM, int zoom);
 
+/* ------------------------------------------------------------- distinctness failures ----
+ *
+ * When two corpus vehicles are too similar, a pass/fail line is useless on its own: the whole
+ * point of the corpus is that a human can look at the pair and decide whether the grammar or
+ * the corpus is at fault. This writes everything needed to do that into
+ *
+ *     <outDir>/<idA>__<idB>/
+ *         car_a.png  car_b.png   the two cars, nose-up, at the comparison scale
+ *         diff.png                per-pixel label agreement: differing pixels highlighted
+ *         car_a.txt  car_b.txt    each spec as a tuning profile, loadable in the Physics Lab
+ *         report.txt              ids, pixel ratio, union/differing counts, L2, Linf, and the
+ *                                 three largest signature-component gaps by name
+ *
+ * pxPerM <= 0 selects car_sheet_default_px_per_m(). Returns false if anything could not be
+ * written; the caller reports that rather than losing the failure silently. */
+bool car_sheet_write_pair_failure(const char *outDir, int indexA, int indexB, float pxPerM);
+
 #endif /* DRIFTY_CAR_SHEET_H */

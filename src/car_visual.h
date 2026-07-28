@@ -16,7 +16,7 @@
  * it nor car_visual.c calls a raylib function, exactly like src/units.h. That is what keeps
  * drifty_tests linkable without a window.
  *
- * TAXONOMY OF A FEATURE. Every field below is produced by exactly one of three kinds of rule,
+ * TAXONOMY OF A FEATURE. Every field below is produced by exactly one of these kinds of rule,
  * and car_visual.c labels each one:
  *
  *   [identity]  The drawn value IS the physical value. Wheel centres, wheelbase, tire
@@ -25,18 +25,30 @@
  *   [rule]      A documented, deterministic styling mapping from named parameters — e.g. the
  *               greenhouse sits where the CG bias puts it. Not a law of physics, but it cites
  *               its inputs and is stable.
- *   [phase-2]   A constant standing in for a parameter that does not exist yet. It is the same
- *               for every car, so it adds no false variety. Phase 2 replaces it with a real
- *               field. Marked TODO(phase-2) at the site.
  *
  * NO BYTE HASHING FOR GEOMETRY. car_visual.c must not derive any geometric feature from a hash
  * of the spec. Hashing would trivially satisfy the distinctness test while destroying the
  * property that test exists to protect. Colour is the single, stated exception: it is
  * explicitly arbitrary (see car_visual_colour_seed) and is excluded from the signature.
+ * Livery stripe COLOUR may also use the colour-seed bits; stripe GEOMETRY (placement, span,
+ * pattern) is a deterministic function of stripeWeight and body extents. Both rules are
+ * documented inline.
  *
  * UNITS AND FRAME. Everything is in metres in the body frame: +X forward (nose), +Y left,
  * origin at the CG — the convention in docs/SPEC.md and src/units.h. Consumers apply their own
  * metres-to-pixels scale.
+ *
+ * PRESENTATION GAINS. Several real-world quantities are well below the ~7.6 cm / 1 px
+ * visibility floor at the canonical PIXELS_PER_METER * CAMERA_BASE_ZOOM scale (~13.2 px/m).
+ * They receive documented render-only amplification so they are visible:
+ *
+ *   CV_TOE_VISUAL_GAIN     static toe angle amplification (raw ~0.15° = 0.4 px,
+ *                          gained to ~1.2° → perceptible steering-geometry cue).
+ *   CV_CAMBER_VISUAL_GAIN  camber footprint-narrowing amplification (raw ~3 cm = 0.4 px,
+ *                          gained to ~12 cm apparent reduction, visible as stance).
+ *   CV_REST_ANGLE_GAIN     legacy Ackermann rest-angle amplification, 6.0×.
+ *
+ * These are applied ONLY in car_visual.c. No simulation quantity reads them.
  */
 #ifndef DRIFTY_CAR_VISUAL_H
 #define DRIFTY_CAR_VISUAL_H
@@ -47,6 +59,22 @@
 #include "raylib.h"   /* Vector2 and Color types only; no raylib call is made */
 
 #include "vehicle.h"
+
+/* ------------------------------------------------------------------ presentation gains --
+ *
+ * Render-only amplification for quantities below the one-pixel visibility floor. Every
+ * constant below includes a comment stating WHY it exists: the raw effect, its size in pixels
+ * at ~13.2 px/m, and the gained apparent size. These are not physics — no solver reads them.
+ */
+#define CV_TOE_VISUAL_GAIN     8.0f   /* raw static toe ~0.15° → 0.4 px swing at tire edge;
+                                         gained to ~1.2° → ~3 px, barely legible */
+#define CV_CAMBER_VISUAL_GAIN  4.0f   /* raw camber ~1.5° → 0.38 px footprint narrowing;
+                                         gained cos distortion → ~1.5 px, visible stance */
+#define CV_REST_ANGLE_GAIN     6.0f   /* legacy: pre-Phase-2 Ackermann rest-angle amplification;
+                                         kept for consistency until toe migration completes */
+/* car_visual.c defines two more of its own — CV_EXHAUST_VISUAL_GAIN for exhaust tip bore, and
+ * CV_MIN_CABIN_M for the shortest glasshouse the grammar will draw. They are internal to the
+ * grammar: no consumer needs them, so they are not part of this contract. */
 
 /* Longitudinal stations of the hull half-outline, tail (index 0) to nose (last). The outline
  * is mirrored across the centreline, so a car is always laterally symmetric. Nine stations is
@@ -61,12 +89,25 @@ typedef struct {
 
 typedef struct {
     Vector2 centreM;        /* [identity] equals VehicleState.wheels[i].localPositionM */
-    float   diameterM;      /* [identity] 2 * wheelRadiusM */
-    float   widthM;
-    float   rimDiameterM;
-    float   discDiameterM;
-    float   staticAngleRad; /* rest toe/steer cue, presentation-gained; never fed to physics */
-    int     spokeCount;
+    float   diameterM;      /* [identity] 2 * wheelRadius[Front|Rear]M; outer tread edge */
+    float   widthM;         /* [identity] tire section width in m; reads tireSectionWidthFrontMm etc. */
+    float   rimDiameterM;   /* [identity] 2× rim radius; reads tireRimDiameter[Front|Rear]In × 0.0254 */
+    float   rimWidthM;      /* [identity] rim barrel width; reads tireRimWidth[Front|Rear]In × 0.0254 */
+    float   sidewallHeightM;/* [identity] visible sidewall band: (diameterM - rimDiameterM)/2;
+                                        reads tireAspect[Front|Rear]Pct */
+    float   discDiameterM;  /* [rule] brake disc; reads brakeDiscRadius[Front|Rear]M directly */
+    float   staticAngleRad; /* [rule] rest toe × CV_TOE_VISUAL_GAIN; reads suspToe[Front|Rear]Rad */
+    float   camberVisualCos;/* [rule] cos(clamp(suspCamber × CV_CAMBER_VISUAL_GAIN));
+                                        scales drawn tire width for stance cue */
+    float   pokeM;          /* [identity] how far the tire's outer edge stands beyond the body
+                                        edge: trackWidth[Front|Rear]M/2 + tire width/2 -
+                                        widthOverallM/2. It does NOT read wheelOffsetEt*Mm:
+                                        with track width primary, the ET offset is already
+                                        folded into the track the hubs sit at, and reading it
+                                        again here would double-count it. */
+    float   archGapM;       /* [identity] wheel-arch clearance; reads rideHeight[Front|Rear]M
+                                        + suspTravel[Front|Rear]M */
+    int     spokeCount;     /* [rule] spoke count from wheelInertiaKgM2 */
 } CarWheelVisual;
 
 /* The normalised style axes. Derived first so that ~30 features move together instead of
@@ -99,22 +140,42 @@ typedef struct {
     float cabinHalfWidthM;
     float windscreenXM;     /* forward edge of the glass */
     float backlightXM;      /* rear edge of the glass */
+    /* The roof panel and glass band are DRAWN dimensions, so they are decided here rather
+     * than in the rasterizer — car_visual.c is the only place a styling decision may live,
+     * and a rule kept in car_visual_raster.c would be invisible to the signature and so to
+     * every test that reads it. Both read heightOverallM via heightVisual. */
+    float roofLengthM;      /* [rule] roof panel along X; reads cabinLengthM, heightVisual */
+    float glassHalfWidthM;  /* [rule] glass band half-width; reads cabinHalfWidthM, heightVisual */
 
     /* ---- wheels ---- */
     CarWheelVisual wheels[WHEEL_COUNT];
     float archFlareM;       /* how far the arch stands proud of the hull */
 
     /* ---- appendages; a zero magnitude means absent ---- */
-    float wingSpanM;
-    float wingChordM;
-    float wingXM;
-    float splitterProtrusionM;
-    float splitterWidthM;
+    float wingSpanM;        /* [rule] wing span; reads |aeroLiftCoefRear| × aeroRefAreaRearM2 */
+    float wingChordM;       /* [rule] wing chord from rear aero magnitude */
+    float wingXM;           /* [rule] wing longitudinal position near tail */
+    float splitterProtrusionM; /* [rule] splitter; reads |aeroLiftCoefFront| × aeroRefAreaFrontM2 */
+    float splitterWidthM;     /* [rule] splitter width from front aero magnitude */
+    float canardStrength;     /* [rule] 0..1; reads |aeroLiftCoefFront| × aeroRefAreaFrontM2 */
     float mirrorOffsetM;
-    float exhaustBoreM;
-    int   exhaustCount;
+    float exhaustBoreM;       /* [rule] exhaust bore; reads engineDisplacementL */
+    int   exhaustCount;       /* [rule] exhaust count 1..4; reads engineCylinders */
+    float exhaustTransition;  /* [rule] 0..1 smooth transition between count levels */
     bool  hasCage;
     bool  hasMirrors;
+
+    /* ---- emergent form weights: 0 = absent, 1 = fully expressed ---- */
+    float hoodBulgeStrength;  /* [rule] 0..1; reads engineDisplacementL, massEngineXM */
+    float pickupBedWeight;    /* [rule] 0..1; reads backlightXM vs tail position */
+    float vanWindowWeight;    /* [rule] 0..1; reads heightOverallM, cowlXM, backlightXM */
+    int   sideWindowCount;    /* [rule] 2..6 glass segments; reads heightOverallM, cowlXM, backlightXM */
+    float openWheelWeight;    /* [rule] 0..1; reads trackWidth[Front|Rear]M vs widthOverallM */
+    float raceDetailWeight;   /* [rule] 0..1; composite of low mass/size, high grip, strong aero */
+    bool  hasTowHook;         /* [rule] race detail marker; reads raceDetailWeight */
+    bool  hasHoodPins;        /* [rule] race detail marker; reads raceDetailWeight */
+    float stripeWeight;       /* [rule] 0..1; reads strip01 latent */
+    float heightVisual;       /* [rule] 0..1 body-height visual cue; reads heightOverallM */
 
     /* ---- palette; arbitrary but stable per spec, excluded from the signature ---- */
     Color body;
@@ -123,10 +184,12 @@ typedef struct {
     Color glass;
     Color outline;
     Color tire;
+    Color tireSidewall;     /* slightly different shade for sidewall vs tread ring */
     Color rim;
     Color disc;
     Color accent;
     Color lamp;
+    Color stripeColor;      /* [decorative] stripe colour from seed bits; geometry from stripeWeight */
 
     CarLatents latents;
 } CarVisual;

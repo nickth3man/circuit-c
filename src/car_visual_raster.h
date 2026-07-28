@@ -81,16 +81,25 @@ typedef enum {
     CAR_LABEL_CABIN,
     CAR_LABEL_GLASS,
     CAR_LABEL_TIRE,
+    CAR_LABEL_TIRE_SIDEWALL,  /* sidewall ring between tread and rim */
     CAR_LABEL_RIM,
     CAR_LABEL_DISC,
     CAR_LABEL_ARCH,
     CAR_LABEL_WING,
     CAR_LABEL_SPLITTER,
+    CAR_LABEL_CANARD,         /* small front-corner fins */
     CAR_LABEL_MIRROR,
     CAR_LABEL_EXHAUST,
+    CAR_LABEL_BED,            /* pickup bed floor and rails */
+    CAR_LABEL_HOOD_BULGE,     /* engine hood bulge */
+    CAR_LABEL_TOW_HOOK,       /* race-detail tow-hook marker */
+    CAR_LABEL_HOOD_PINS,      /* race-detail hood-pin markers */
     CAR_LABEL_LAMP,
     CAR_LABEL_CAGE,
+    CAR_LABEL_STRIPE,         /* livery stripes */
+    CAR_LABEL_HEADING,        /* L9 gameplay heading marker */
     CAR_LABEL_OUTLINE,
+    CAR_LABEL_SHADOW,         /* L0 shadow; excluded from distinctness */
     CAR_LABEL_COUNT
 } CarRasterLabel;
 

@@ -7,6 +7,7 @@
  */
 #include "car_sheet.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -15,6 +16,7 @@
 #include "car_visual.h"
 #include "car_visual_raster.h"
 #include "config.h"
+#include "dev_params.h"
 #include "telemetry.h"   /* telemetry_ensure_dir — the project's mkdir helper */
 #include "vehicle.h"
 
@@ -42,6 +44,10 @@
 #define SHEET_FONT_W     5
 #define SHEET_FONT_H     7
 #define SHEET_LABEL_H    22
+/* Characters a caption must be able to show. The cell is otherwise sized by the largest car
+ * in the corpus, which is narrow enough that ids and sweep values were being cut mid-word —
+ * and an unreadable caption defeats the point of a sheet a human is meant to judge. */
+#define SHEET_MIN_CHARS  30
 
 /* Opaque page / cell colours (RGBA). */
 static const unsigned char kPageBg[4]  = { 0x15, 0x18, 0x1d, 0xff };
@@ -281,7 +287,8 @@ bool car_sheet_write(const char *outDir, float pxPerM, int zoom)
         if (info.width  > artH) artH = info.width;
     }
 
-    const int cellW = artW;
+    const int minCellW = 4 + SHEET_MIN_CHARS * (SHEET_FONT_W + 1);
+    const int cellW = (artW > minCellW) ? artW : minCellW;
     const int cellH = artH + SHEET_LABEL_H;
     const int pageW = SHEET_MARGIN_PX * 2 + SHEET_COLS * cellW + (SHEET_COLS - 1) * SHEET_GAP_PX;
     const int pageH = SHEET_MARGIN_PX * 2 + SHEET_ROWS * cellH + (SHEET_ROWS - 1) * SHEET_GAP_PX;
@@ -359,15 +366,16 @@ bool car_sheet_write(const char *outDir, float pxPerM, int zoom)
 
         /* Nose-up: source height becomes displayed width. Centre inside the art area. */
         const int carW = info.height, carH = info.width;
-        const int ox = cellX + (artW - carW) / 2;
+        const int ox = cellX + (cellW - carW) / 2;
         const int oy = cellY + (artH - carH) / 2;
         blit_rgba(page, pageW, pageW, pageH, ox, oy, upright, carW, carH, carW);
 
+        /* The id already begins with its group, so printing the group again only ate
+         * characters the caption did not have to spare. */
+        (void)group;
         const int labelY0 = cellY + artH + 2;
         const int maxChars = (cellW - 4) / (SHEET_FONT_W + 1);
-        char line0[160];
-        snprintf(line0, sizeof(line0), "%s  %s", group, id);
-        draw_text(page, pageW, pageW, pageH, cellX + 2, labelY0, line0, maxChars, kGroupFg);
+        draw_text(page, pageW, pageW, pageH, cellX + 2, labelY0, id, maxChars, kGroupFg);
         draw_text(page, pageW, pageW, pageH, cellX + 2, labelY0 + SHEET_FONT_H + 2,
                   note, maxChars, kNoteFg);
 
@@ -399,6 +407,233 @@ bool car_sheet_write(const char *outDir, float pxPerM, int zoom)
     if (ok) {
         printf("CAR-SHEET: wrote %d vehicles across %d page(s) to %s (page_N.png + index.html)\n",
                count, pageCount, outDir);
+    }
+    return ok;
+}
+
+/* ---------------------------------------------------------- distinctness failure bundle -- */
+
+/* The canvas every corpus comparison happens on: one buffer big enough for the largest car,
+ * with body-space (0,0) at a fixed point, so a difference in position cannot masquerade as a
+ * difference in shape. Built the same way as the `corpus` scenario builds it, so the ratio in
+ * the report is the same number the assertion failed on. */
+static CarRasterInfo pair_shared_canvas(float pxPerM)
+{
+    float left = 1.0f, right = 1.0f, up = 1.0f, down = 1.0f;
+
+    for (int i = 0; i < car_corpus_count(); i++) {
+        VehicleSpec spec;
+        CarVisual visual;
+        if (!car_corpus_spec(i, &spec)) continue;
+        car_visual_derive(&spec, &visual);
+
+        const CarRasterInfo info = car_raster_info(&visual, pxPerM, 2);
+        const float l = info.originXPx;
+        const float r = (float)info.width - info.originXPx;
+        const float u = info.originYPx;
+        const float d = (float)info.height - info.originYPx;
+        if (l > left)  left  = l;
+        if (r > right) right = r;
+        if (u > up)    up    = u;
+        if (d > down)  down  = d;
+    }
+
+    CarRasterInfo shared;
+    memset(&shared, 0, sizeof(shared));
+    shared.pxPerM    = pxPerM;
+    shared.width     = (int)ceilf(left + right);
+    shared.height    = (int)ceilf(up + down);
+    shared.originXPx = left;
+    shared.originYPx = up;
+    return shared;
+}
+
+/* Rotate nose-up and write. Keeps every artifact in the same orientation as the contact
+ * sheet, so a failure bundle can be compared against it directly. */
+static bool write_upright_png(const char *path, const unsigned char *rgba, int w, int h)
+{
+    const size_t bytes = (size_t)w * (size_t)h * CAR_RASTER_BPP;
+    unsigned char *upright = (unsigned char *)malloc(bytes);
+    if (upright == NULL) return false;
+    bool ok = car_raster_rotate_nose_up(rgba, w, h, upright, bytes);
+    if (ok) {
+        ok = stbi_write_png(path, h, w, CAR_RASTER_BPP, upright, h * CAR_RASTER_BPP) != 0;
+    }
+    free(upright);
+    return ok;
+}
+
+static bool write_profile(const char *path, const VehicleSpec *spec)
+{
+    return dev_params_save(spec, path);
+}
+
+bool car_sheet_write_pair_failure(const char *outDir, int indexA, int indexB, float pxPerM)
+{
+    if (outDir == NULL || outDir[0] == '\0') return false;
+    if (indexA < 0 || indexB < 0) return false;
+    if (indexA >= car_corpus_count() || indexB >= car_corpus_count()) return false;
+    if (!(pxPerM > 0.0f)) pxPerM = car_sheet_default_px_per_m();
+
+    char idA[128], idB[128];
+    car_corpus_id(indexA, idA, sizeof(idA));
+    car_corpus_id(indexB, idB, sizeof(idB));
+
+    VehicleSpec specA, specB;
+    if (!car_corpus_spec(indexA, &specA) || !car_corpus_spec(indexB, &specB)) return false;
+
+    CarVisual visA, visB;
+    car_visual_derive(&specA, &visA);
+    car_visual_derive(&specB, &visB);
+
+    if (!telemetry_ensure_dir(outDir)) return false;
+    char dir[512];
+    snprintf(dir, sizeof(dir), "%s/%s__%s", outDir, idA, idB);
+    if (!telemetry_ensure_dir(dir)) return false;
+
+    const CarRasterInfo canvas = pair_shared_canvas(pxPerM);
+    const size_t pixels = (size_t)canvas.width * (size_t)canvas.height;
+    const size_t rgbaBytes = car_raster_bytes(canvas);
+    if (pixels == 0 || rgbaBytes == 0) return false;
+
+    unsigned char *rgbaA = (unsigned char *)malloc(rgbaBytes);
+    unsigned char *rgbaB = (unsigned char *)malloc(rgbaBytes);
+    unsigned char *rgbaD = (unsigned char *)malloc(rgbaBytes);
+    unsigned char *labA  = (unsigned char *)malloc(pixels);
+    unsigned char *labB  = (unsigned char *)malloc(pixels);
+    bool ok = (rgbaA != NULL && rgbaB != NULL && rgbaD != NULL && labA != NULL && labB != NULL);
+
+    if (ok) {
+        ok = car_raster_draw(&visA, canvas, rgbaA, rgbaBytes) &&
+             car_raster_draw(&visB, canvas, rgbaB, rgbaBytes) &&
+             car_raster_draw_labels(&visA, canvas, labA, pixels) &&
+             car_raster_draw_labels(&visB, canvas, labB, pixels);
+    }
+
+    size_t unionPx = 0, differing = 0;
+    if (ok) {
+        /* diff.png: shared silhouette dimmed, disagreeing pixels in warning red. Same rule as
+         * car_raster_difference so the picture and the number cannot disagree. */
+        for (size_t i = 0; i < pixels; i++) {
+            const unsigned char a = labA[i], b = labB[i];
+            unsigned char *p = rgbaD + i * CAR_RASTER_BPP;
+            if (a == CAR_LABEL_EMPTY && b == CAR_LABEL_EMPTY) {
+                p[0] = 0x15; p[1] = 0x18; p[2] = 0x1d; p[3] = 0xff;
+                continue;
+            }
+            unionPx++;
+            if (a != b) {
+                differing++;
+                p[0] = 0xe0; p[1] = 0x48; p[2] = 0x3c; p[3] = 0xff;
+            } else {
+                p[0] = 0x38; p[1] = 0x3e; p[2] = 0x48; p[3] = 0xff;
+            }
+        }
+    }
+
+    char path[640];
+    if (ok) {
+        snprintf(path, sizeof(path), "%s/car_a.png", dir);
+        ok = write_upright_png(path, rgbaA, canvas.width, canvas.height);
+    }
+    if (ok) {
+        snprintf(path, sizeof(path), "%s/car_b.png", dir);
+        ok = write_upright_png(path, rgbaB, canvas.width, canvas.height);
+    }
+    if (ok) {
+        snprintf(path, sizeof(path), "%s/diff.png", dir);
+        ok = write_upright_png(path, rgbaD, canvas.width, canvas.height);
+    }
+    if (ok) {
+        snprintf(path, sizeof(path), "%s/car_a.txt", dir);
+        ok = write_profile(path, &specA);
+    }
+    if (ok) {
+        snprintf(path, sizeof(path), "%s/car_b.txt", dir);
+        ok = write_profile(path, &specB);
+    }
+
+    if (ok) {
+        /* Signature metrics: L2, Linf, and the three components that differ most, by name. */
+        float sigA[64], sigB[64];
+        const int n = car_visual_signature_count();
+        const int cap = (int)(sizeof(sigA) / sizeof(sigA[0]));
+        float l2 = 0.0f, linf = 0.0f;
+        int top[3] = { -1, -1, -1 };
+
+        if (n > 0 && n <= cap &&
+            car_visual_signature(&visA, sigA, n) == n &&
+            car_visual_signature(&visB, sigB, n) == n) {
+            for (int i = 0; i < n; i++) {
+                const float d = (sigA[i] > sigB[i]) ? (sigA[i] - sigB[i]) : (sigB[i] - sigA[i]);
+                l2 += d * d;
+                if (d > linf) linf = d;
+                for (int k = 0; k < 3; k++) {
+                    const float best = (top[k] >= 0)
+                        ? ((sigA[top[k]] > sigB[top[k]]) ? (sigA[top[k]] - sigB[top[k]])
+                                                         : (sigB[top[k]] - sigA[top[k]]))
+                        : -1.0f;
+                    if (d > best) {
+                        for (int m = 2; m > k; m--) top[m] = top[m - 1];
+                        top[k] = i;
+                        break;
+                    }
+                }
+            }
+            l2 = (float)sqrt((double)l2);
+        }
+
+        snprintf(path, sizeof(path), "%s/report.txt", dir);
+        FILE *out = fopen(path, "wb");
+        if (out == NULL) {
+            ok = false;
+        } else {
+            char noteA[192], noteB[192];
+            car_corpus_describe(indexA, noteA, sizeof(noteA));
+            car_corpus_describe(indexB, noteB, sizeof(noteB));
+
+            fprintf(out, "corpus distinctness failure\n");
+            fprintf(out, "===========================\n\n");
+            fprintf(out, "car a : [%d] %s\n        %s\n", indexA, idA, noteA);
+            fprintf(out, "car b : [%d] %s\n        %s\n\n", indexB, idB, noteB);
+            fprintf(out, "scale            : %.3f px/m (%d x %d canvas)\n",
+                    (double)pxPerM, canvas.width, canvas.height);
+            fprintf(out, "union silhouette : %llu px\n", (unsigned long long)unionPx);
+            fprintf(out, "differing        : %llu px\n", (unsigned long long)differing);
+            fprintf(out, "pixel ratio      : %.4f\n",
+                    (unionPx > 0) ? (double)differing / (double)unionPx : 0.0);
+            fprintf(out, "signature L2     : %.4f\n", (double)l2);
+            fprintf(out, "signature Linf   : %.4f m\n\n", (double)linf);
+
+            fprintf(out, "largest signature gaps\n----------------------\n");
+            for (int k = 0; k < 3; k++) {
+                if (top[k] < 0) continue;
+                const float d = (sigA[top[k]] > sigB[top[k]]) ? (sigA[top[k]] - sigB[top[k]])
+                                                             : (sigB[top[k]] - sigA[top[k]]);
+                fprintf(out, "  %-24s %10.4f vs %10.4f   (gap %.4f)\n",
+                        car_visual_signature_component_name(top[k]),
+                        (double)sigA[top[k]], (double)sigB[top[k]], (double)d);
+            }
+
+            fprintf(out, "\nnon-default overrides — car a\n-----------------------------\n");
+            (void)dev_params_write_overrides(out, &specA);
+            fprintf(out, "\nnon-default overrides — car b\n-----------------------------\n");
+            (void)dev_params_write_overrides(out, &specB);
+
+            if (fclose(out) != 0) ok = false;
+        }
+    }
+
+    free(rgbaA);
+    free(rgbaB);
+    free(rgbaD);
+    free(labA);
+    free(labB);
+
+    if (ok) {
+        printf("CAR-SHEET: wrote distinctness failure bundle to %s\n", dir);
+    } else {
+        fprintf(stderr, "CAR-SHEET: could not write failure bundle to %s\n", dir);
     }
     return ok;
 }

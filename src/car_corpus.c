@@ -1,69 +1,976 @@
 /*
  * car_corpus.c — the demonstration fleet. See the header for the contract.
  *
- * Sweep bounds are read from the DevParameter registry rather than hardcoded, so widening a
- * parameter's range in Phase 2 automatically widens the sweep that demonstrates it, and the
- * two can never disagree.
+ * COMPOSITION (Phase 3):
+ *   17 archetypes  the stock baseline plus the 16 required hand-designed forms
+ *   40 sweeps      8 axes × 5 steps — one registry key varied at a time
+ *   43 sampled     deterministic Halton low-discrepancy sequence over a documented box
+ *   ───
+ *  100 vehicles
  *
- * Raylib-free. Lives in DEV_SRCS rather than SHARED_SRCS because it calls dev_preset_apply();
- * the hot-reload harness links SHARED_SRCS without the dev sources and does not need a corpus.
+ * Sweep bounds are read from the DevParameter registry rather than hardcoded, so widening a
+ * parameter's range in Phase 2 automatically widens the sweep that demonstrates it.
+ *
+ * Sampled generation uses a Halton sequence (bases 2,3,5,7,11,13,17,19,23,29,31,37) over
+ * 12 visually-active primary parameters. Candidates are filtered: spec validity, CarVisual
+ * derivation, raster bounds, and pairwise similarity against ALL already-accepted vehicles
+ * (rejection margin 1.5× the corpus scenario threshold). Generation is bounded at 4096
+ * candidates; if 44 cannot be reached, the sampled group is truncated.
+ *
+ * Raylib-free. Lives in DEV_SRCS rather than SHARED_SRCS because it calls vehicle_spec and
+ * raster functions that are linked into the test executable only.
  */
 #include "car_corpus.h"
 
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
+#include "car_visual.h"
+#include "car_visual_raster.h"
 #include "dev_params.h"
-#include "dev_presets.h"
+#include "vehicle.h"
 
-/* Steps per sweep axis. Fourteen steps across the three silhouette drivers that clear both
- * the signature and pixel distinctness floors yields 10 + 3*14 = 52 corpus vehicles. */
-#define SWEEP_STEPS 14
-
-/* The registry keys whose visual effect Phase 1 can honestly demonstrate. Each must name a
- * parameter that car_visual.c actually reads AND that visibly changes the rendering; the
- * `car-visual` scenario asserts the latter, which is what catches an axis going dead.
+/* --------------------------------------------------------------------------- archetypes --
  *
- * Deliberately NOT here:
- *   - brake.max_torque, wheel.inertia: disc/spoke cues derive, but at ~13 px/m the wheel
- *     interior is sub-pixel and sensitivity measured zero-pixel changes.
- *   - body.mass, body.drag_coefficient: latents / appendage smoothsteps only; intermediate
- *     steps stay within centimetres of the stock silhouette until a wing threshold snaps.
- *   - wheel.radius: identity-mapped and visible at the extremes, but after excluding a
- *     one-pixel window around stock the usable span cannot hold several distinct steps.
- *   - body.track_front, body.track_rear: signature L∞ clears 0.08 m between neighbours, but
- *     at gallery scale a ~15 cm track change only rewrites ~1.5% of silhouette pixels — below
- *     the 3% colour-blind pixel floor. They return once wheel width / offset expose more
- *     of the tire at the body edge (Phase 2).
+ * The stock baseline at index 0, then the 16 required forms (kei, compact, coupé, sedan,
+ * sports, supercar, muscle, GT3, rally, open-wheel, drift, pickup, van, bus, limousine, box
+ * truck) at indices 1..16. Each is a set of parameter overrides on the stock spec, and every
+ * value stays within its registry [minimum, maximum]. dev_params_apply_assignments handles
+ * migration aliases transparently — presets may use legacy keys like "body.mass" alongside
+ * primaries like "tire.section_width_front".
+ *
+ * Ordered for stability: the index of each archetype is part of the corpus API.
  */
-static const char *const kSweepKeys[] = {
-    "body.wheelbase",          /* length + axle span */
-    "body.front_overhang",     /* nose length without moving the CG */
-    "body.width_overall",      /* body width -> the whole silhouette */
+#define ARCHETYPE_COUNT 17
+
+/* Shorthand for one assignment. */
+#define A(key, val) { key, (float)(val) }
+
+/* ----------------------------------------------------------------- 0: Stock Baseline --
+ * The config.h defaults with no overrides. Always index 0. */
+static const char *const kArchName0  = "Stock Baseline";
+static const char *const kArchDesc0  = "the Drifty defaults; identical to a fresh spec";
+
+/* --------------------------------------------------------------------- 1: Kei Car ----
+ * Honda Beat spirit: 660 cc, 760 kg, mid-engine, narrow, tall-ish. */
+static const char *const kArchName1  = "Kei Car";
+static const char *const kArchDesc1  = "660 cc kei car: short, narrow, tall, tiny tires";
+static const DevParamAssignment kArch1[] = {
+    A("body.mass",                 760.0f),
+    A("body.wheelbase",             2.20f),
+    A("body.track_front",           1.30f),
+    A("body.track_rear",            1.30f),
+    A("body.width_overall",         1.40f),
+    A("body.height_overall",        1.55f),
+    A("body.front_overhang",        0.55f),
+    A("body.rear_overhang",         0.50f),
+    A("body.ride_height_front",     0.150f),
+    A("body.ride_height_rear",      0.155f),
+    A("mass.engine_x",              0.90f),   /* mid-front */
+    A("tire.section_width_front", 155.0f),
+    A("tire.section_width_rear",  155.0f),
+    A("tire.aspect_front",         65.0f),
+    A("tire.aspect_rear",          65.0f),
+    A("tire.rim_diameter_front",   13.0f),
+    A("tire.rim_diameter_rear",    13.0f),
+    A("engine.cylinders",           3.0f),
+    A("engine.displacement",        0.66f),
+    A("engine.redline_rpm",      8500.0f),
 };
 
-#define SWEEP_AXES ((int)(sizeof(kSweepKeys) / sizeof(kSweepKeys[0])))
+/* --------------------------------------------------------------------- 2: Compact -----
+ * Typical C-segment hatch: 1050 kg, FWD-ish proportions, 1.5L. */
+static const char *const kArchName2  = "Compact";
+static const char *const kArchDesc2  = "C-segment hatch: economical, modest stance";
+static const DevParamAssignment kArch2[] = {
+    A("body.mass",               1050.0f),
+    A("body.wheelbase",            2.40f),
+    A("body.track_front",          1.50f),
+    A("body.track_rear",           1.48f),
+    A("body.width_overall",        1.65f),
+    A("body.height_overall",       1.55f),
+    A("body.front_overhang",       0.80f),
+    A("body.rear_overhang",        0.65f),
+    A("body.ride_height_front",    0.140f),
+    A("body.ride_height_rear",     0.145f),
+    A("mass.engine_x",             1.40f),  /* front transverse */
+    A("tire.section_width_front", 185.0f),
+    A("tire.section_width_rear",  185.0f),
+    A("tire.aspect_front",        60.0f),
+    A("tire.aspect_rear",         60.0f),
+    A("tire.rim_diameter_front",  15.0f),
+    A("tire.rim_diameter_rear",   15.0f),
+    A("engine.cylinders",          4.0f),
+    A("engine.displacement",       1.5f),
+};
 
-static int archetype_count(void)
+/* --------------------------------------------------------------------- 3: Coupé ------
+ * Two-door sporting profile: low roof, fast backlight, wider stance. */
+static const char *const kArchName3  = "Coupe";
+static const char *const kArchDesc3  = "low-slung two-door: fast roofline, planted stance";
+static const DevParamAssignment kArch3[] = {
+    A("body.mass",               1350.0f),
+    A("body.wheelbase",            2.60f),
+    A("body.track_front",          1.60f),
+    A("body.track_rear",           1.58f),
+    A("body.width_overall",        1.78f),
+    A("body.height_overall",       1.32f),
+    A("body.front_overhang",       0.90f),
+    A("body.rear_overhang",        0.85f),
+    A("body.ride_height_front",    0.120f),
+    A("body.ride_height_rear",     0.125f),
+    A("body.cowl_x",               0.60f),
+    A("body.backlight_x",         -0.35f),  /* fast roofline */
+    A("mass.engine_x",             2.00f),  /* front-mid */
+    A("tire.section_width_front", 215.0f),
+    A("tire.section_width_rear",  225.0f),
+    A("tire.aspect_front",        45.0f),
+    A("tire.aspect_rear",         45.0f),
+    A("engine.cylinders",          6.0f),
+    A("engine.displacement",       2.5f),
+};
+
+/* --------------------------------------------------------------------- 4: Sedan -------
+ * Three-box D-segment: long wheelbase, tall greenhouse, balanced. */
+static const char *const kArchName4  = "Sedan";
+static const char *const kArchDesc4  = "D-segment three-box: roomy greenhouse, balanced stance";
+static const DevParamAssignment kArch4[] = {
+    A("body.mass",               1550.0f),
+    A("body.wheelbase",            2.85f),
+    A("body.track_front",          1.62f),
+    A("body.track_rear",           1.60f),
+    A("body.width_overall",        1.82f),
+    A("body.height_overall",       1.52f),
+    A("body.front_overhang",       0.90f),
+    A("body.rear_overhang",        1.05f),
+    A("body.ride_height_front",    0.140f),
+    A("body.ride_height_rear",     0.140f),
+    A("body.cowl_x",               0.70f),
+    A("body.backlight_x",         -0.55f),
+    A("mass.engine_x",             1.60f),  /* front */
+    A("tire.section_width_front", 215.0f),
+    A("tire.section_width_rear",  215.0f),
+    A("tire.aspect_front",        55.0f),
+    A("tire.aspect_rear",         55.0f),
+    A("engine.cylinders",          4.0f),
+    A("engine.displacement",       2.0f),
+};
+
+/* ------------------------------------------------------------------ 5: Sports Car ---
+ * Mid-engine two-seater: 1100 kg, balanced, 3.0L flat-six, wide tires. */
+static const char *const kArchName5  = "Sports Car";
+static const char *const kArchDesc5  = "mid-engine two-seater: light, low, balanced grip";
+static const DevParamAssignment kArch5[] = {
+    A("body.mass",               1100.0f),
+    A("body.wheelbase",            2.55f),
+    A("body.track_front",          1.60f),
+    A("body.track_rear",           1.62f),
+    A("body.width_overall",        1.82f),
+    A("body.height_overall",       1.22f),
+    A("body.front_overhang",       0.85f),
+    A("body.rear_overhang",        0.70f),
+    A("body.ride_height_front",    0.110f),
+    A("body.ride_height_rear",     0.115f),
+    A("body.cowl_x",               0.40f),
+    A("body.backlight_x",         -0.40f),
+    A("mass.engine_x",             0.20f),  /* mid */
+    A("tire.section_width_front", 235.0f),
+    A("tire.section_width_rear",  265.0f),
+    A("tire.aspect_front",        40.0f),
+    A("tire.aspect_rear",         35.0f),
+    A("tire.rim_diameter_front",  18.0f),
+    A("tire.rim_diameter_rear",   19.0f),
+    A("engine.cylinders",          6.0f),
+    A("engine.displacement",       3.0f),
+    A("engine.redline_rpm",      8000.0f),
+};
+
+/* ------------------------------------------------------------------- 6: Supercar -----
+ * Mid-engine exotic: very low, very wide, huge tires, strong rear aero, V12. */
+static const char *const kArchName6  = "Supercar";
+static const char *const kArchDesc6  = "mid-engine exotic: extreme low/wide, giant tires, V12 aero";
+static const DevParamAssignment kArch6[] = {
+    A("body.mass",               1450.0f),
+    A("body.wheelbase",            2.75f),
+    A("body.track_front",          1.75f),
+    A("body.track_rear",           1.72f),
+    A("body.width_overall",        2.05f),
+    A("body.height_overall",       1.12f),
+    A("body.front_overhang",       1.00f),
+    A("body.rear_overhang",        0.90f),
+    A("body.ride_height_front",    0.080f),
+    A("body.ride_height_rear",     0.085f),
+    A("body.cowl_x",               0.30f),
+    A("body.backlight_x",         -0.55f),
+    A("mass.engine_x",            -0.50f),  /* mid-rear */
+    A("tire.section_width_front", 255.0f),
+    A("tire.section_width_rear",  325.0f),
+    A("tire.aspect_front",        35.0f),
+    A("tire.aspect_rear",         30.0f),
+    A("tire.rim_diameter_front",  19.0f),
+    A("tire.rim_diameter_rear",   20.0f),
+    A("aero.lift_rear",          -2.50f),  /* strong rear downforce → big wing */
+    A("aero.lift_front",         -1.50f),  /* significant front aero */
+    A("aero.ref_area_rear",       1.20f),
+    A("aero.ref_area_front",      0.80f),
+    A("engine.cylinders",        12.0f),
+    A("engine.displacement",      6.0f),
+    A("engine.redline_rpm",     9000.0f),
+};
+
+/* ---------------------------------------------------------------- 7: Muscle Car ----
+ * American V8 coupe: long hood, wide rear tires, heavy, 6.2L. */
+static const char *const kArchName7  = "Muscle Car";
+static const char *const kArchDesc7  = "American V8: long hood, wide rear tires, heavy torque";
+static const DevParamAssignment kArch7[] = {
+    A("body.mass",               1700.0f),
+    A("body.wheelbase",            2.85f),
+    A("body.track_front",          1.62f),
+    A("body.track_rear",           1.68f),  /* wider rear — drag-strip stance */
+    A("body.width_overall",        1.95f),
+    A("body.height_overall",       1.42f),
+    A("body.front_overhang",       0.85f),
+    A("body.rear_overhang",        1.10f),
+    A("body.ride_height_front",    0.135f),
+    A("body.ride_height_rear",     0.140f),
+    A("body.cowl_x",               0.60f),
+    A("body.backlight_x",         -0.30f),  /* fastback */
+    A("mass.engine_x",             2.80f),  /* engine far forward → long hood */
+    A("tire.section_width_front", 235.0f),
+    A("tire.section_width_rear",  295.0f),  /* fat rears */
+    A("tire.aspect_front",        45.0f),
+    A("tire.aspect_rear",         40.0f),
+    A("tire.rim_diameter_rear",   18.0f),
+    A("engine.cylinders",          8.0f),
+    A("engine.displacement",       6.2f),
+    A("engine.redline_rpm",      6800.0f),
+};
+
+/* ---------------------------------------------------------------- 8: GT3 Race Car ---
+ * Circuit racer: low, wide, strong aero both ends, 8-cyl, low ride height. */
+static const char *const kArchName8  = "GT3 Race Car";
+static const char *const kArchDesc8  = "circuit racer: extreme aero, low ride height, wide tires";
+static const DevParamAssignment kArch8[] = {
+    A("body.mass",               1250.0f),
+    A("body.wheelbase",            2.80f),
+    A("body.track_front",          1.70f),
+    A("body.track_rear",           1.68f),
+    A("body.width_overall",        2.00f),
+    A("body.height_overall",       1.25f),
+    A("body.front_overhang",       1.00f),
+    A("body.rear_overhang",        0.90f),
+    A("body.ride_height_front",    0.060f),
+    A("body.ride_height_rear",     0.065f),
+    A("body.cowl_x",               0.30f),
+    A("body.backlight_x",         -0.60f),
+    A("mass.engine_x",            -0.40f),  /* mid-rear */
+    A("tire.section_width_front", 275.0f),
+    A("tire.section_width_rear",  305.0f),
+    A("tire.aspect_front",        35.0f),
+    A("tire.aspect_rear",         30.0f),
+    A("tire.rim_diameter_front",  18.0f),
+    A("tire.rim_diameter_rear",   18.0f),
+    A("aero.lift_rear",          -2.80f),
+    A("aero.lift_front",         -1.80f),
+    A("aero.ref_area_rear",       1.50f),
+    A("aero.ref_area_front",      1.00f),
+    A("engine.cylinders",          8.0f),
+    A("engine.displacement",       5.5f),
+    A("engine.redline_rpm",      8500.0f),
+};
+
+/* ----------------------------------------------------------------- 9: Rally Car -----
+ * Gravel stage: high ride height, long travel, modest tires, turbo 4. */
+static const char *const kArchName9  = "Rally Car";
+static const char *const kArchDesc9  = "gravel stage: high ride, long travel, turbo 4-cyl";
+static const DevParamAssignment kArch9[] = {
+    A("body.mass",               1050.0f),
+    A("body.wheelbase",            2.50f),
+    A("body.track_front",          1.55f),
+    A("body.track_rear",           1.55f),
+    A("body.width_overall",        1.75f),
+    A("body.height_overall",       1.60f),
+    A("body.front_overhang",       0.70f),
+    A("body.rear_overhang",        0.75f),
+    A("body.ride_height_front",    0.220f),
+    A("body.ride_height_rear",     0.230f),
+    A("body.cowl_x",               0.55f),
+    A("body.backlight_x",         -0.40f),
+    A("mass.engine_x",             1.00f),  /* front-mid */
+    A("susp.travel_front",         0.200f),
+    A("susp.travel_rear",          0.210f),
+    A("tire.section_width_front", 195.0f),
+    A("tire.section_width_rear",  195.0f),
+    A("tire.aspect_front",        60.0f),
+    A("tire.aspect_rear",         60.0f),
+    A("tire.rim_diameter_front",  15.0f),
+    A("tire.rim_diameter_rear",   15.0f),
+    A("aero.lift_rear",          -0.80f),
+    A("aero.ref_area_rear",       0.70f),
+    A("engine.cylinders",          4.0f),
+    A("engine.displacement",       2.0f),
+    A("engine.redline_rpm",      8000.0f),
+};
+
+/* -------------------------------------------------------------- 10: Open-Wheel / F1 --
+ * Formula-car stance: track >> body width, extremely low, long, light. VISUAL DEMO ONLY
+ * (drives poorly — narrow body / wide track gives unstable collision geometry). */
+static const char *const kArchName10 = "Open-Wheel";
+static const char *const kArchDesc10 = "F1 stance: track far wider than body - VISUAL DEMO ONLY";
+static const DevParamAssignment kArch10[] = {
+    A("body.mass",                600.0f),
+    A("body.wheelbase",            3.20f),
+    A("body.track_front",          1.95f),
+    A("body.track_rear",           1.90f),
+    A("body.width_overall",        1.40f),  /* narrow body → openWheelWeight fires */
+    A("body.height_overall",       0.95f),
+    A("body.front_overhang",       0.50f),
+    A("body.rear_overhang",        0.50f),
+    A("body.ride_height_front",    0.040f),
+    A("body.ride_height_rear",     0.045f),
+    A("body.cowl_x",               0.10f),
+    A("body.backlight_x",         -0.60f),
+    A("mass.engine_x",            -0.20f),  /* mid-rear */
+    A("tire.section_width_front", 305.0f),
+    A("tire.section_width_rear",  355.0f),
+    A("tire.aspect_front",        35.0f),
+    A("tire.aspect_rear",         30.0f),
+    A("tire.rim_diameter_front",  13.0f),
+    A("tire.rim_diameter_rear",   13.0f),
+    A("aero.lift_rear",          -2.00f),
+    A("aero.lift_front",         -1.50f),
+    A("aero.ref_area_rear",       1.00f),
+    A("engine.cylinders",          6.0f),
+    A("engine.displacement",       1.6f),
+    A("engine.redline_rpm",     10000.0f),
+};
+
+/* -------------------------------------------------------------- 11: Drift Car ------
+ * Competition drift: extreme steering lock, locked diff, rear tire stagger. */
+static const char *const kArchName11 = "Drift Car";
+static const char *const kArchDesc11 = "competition drift: 65° lock, locked diff, rear stagger";
+static const DevParamAssignment kArch11[] = {
+    A("body.mass",               1300.0f),
+    A("body.wheelbase",            2.65f),
+    A("body.track_front",          1.60f),
+    A("body.track_rear",           1.58f),
+    A("body.width_overall",        1.82f),
+    A("body.height_overall",       1.35f),
+    A("body.front_overhang",       0.95f),
+    A("body.rear_overhang",        0.85f),
+    A("body.ride_height_front",    0.090f),
+    A("body.ride_height_rear",     0.095f),
+    A("body.cowl_x",               0.50f),
+    A("body.backlight_x",         -0.35f),
+    A("mass.engine_x",             1.50f),  /* front */
+    A("steer.max_angle",           1.13f),  /* 65° — the Wisefab number */
+    A("steer.ackermann_percent",   0.25f),  /* mild positive */
+    A("susp.camber_front",        -0.040f), /* visible negative camber */
+    A("susp.camber_rear",         -0.030f),
+    A("susp.toe_front",            0.010f),
+    A("susp.toe_rear",            -0.005f),
+    A("tire.section_width_front", 235.0f),
+    A("tire.section_width_rear",  265.0f),
+    A("tire.aspect_front",        40.0f),
+    A("tire.aspect_rear",         35.0f),
+    A("engine.cylinders",          8.0f),
+    A("engine.displacement",       5.0f),
+    A("engine.redline_rpm",      8000.0f),
+};
+
+/* ------------------------------------------------------------------- 12: Pickup ------
+ * Light-duty truck: early backlight → short cabin → long bed (pickupBedWeight fires). */
+static const char *const kArchName12 = "Pickup";
+static const char *const kArchDesc12 = "light truck: short cabin, long bed, high ride height";
+static const DevParamAssignment kArch12[] = {
+    A("body.mass",               2200.0f),
+    A("body.wheelbase",            3.30f),
+    A("body.track_front",          1.70f),
+    A("body.track_rear",           1.68f),
+    A("body.width_overall",        1.95f),
+    A("body.height_overall",       1.85f),
+    A("body.front_overhang",       0.85f),
+    A("body.rear_overhang",        1.35f),  /* long bed behind axle */
+    A("body.ride_height_front",    0.200f),
+    A("body.ride_height_rear",     0.220f),
+    A("body.cowl_x",               0.90f),  /* windscreen far forward */
+    A("body.backlight_x",          0.20f),  /* backlight ends early → bed */
+    A("mass.engine_x",             2.50f),  /* engine well forward */
+    A("tire.section_width_front", 245.0f),
+    A("tire.section_width_rear",  245.0f),
+    A("tire.aspect_front",        70.0f),
+    A("tire.aspect_rear",         70.0f),
+    A("tire.rim_diameter_front",  17.0f),
+    A("tire.rim_diameter_rear",   17.0f),
+    A("engine.cylinders",          8.0f),
+    A("engine.displacement",       5.0f),
+};
+
+/* ---------------------------------------------------------------------- 13: Van ------
+ * Cargo/commercial van: tall, long greenhouse, side windows fire. */
+static const char *const kArchName13 = "Van";
+static const char *const kArchDesc13 = "cargo van: tall box, long greenhouse, side windows";
+static const DevParamAssignment kArch13[] = {
+    A("body.mass",               2100.0f),
+    A("body.wheelbase",            3.10f),
+    A("body.track_front",          1.62f),
+    A("body.track_rear",           1.60f),
+    A("body.width_overall",        1.95f),
+    A("body.height_overall",       2.20f),  /* tall */
+    A("body.front_overhang",       0.80f),
+    A("body.rear_overhang",        0.80f),
+    A("body.ride_height_front",    0.170f),
+    A("body.ride_height_rear",     0.175f),
+    A("body.cowl_x",               1.10f),  /* windscreen well forward */
+    A("body.backlight_x",         -0.70f), /* greenhouse stretches far rearward */
+    A("mass.engine_x",             1.00f),
+    A("tire.section_width_front", 215.0f),
+    A("tire.section_width_rear",  215.0f),
+    A("tire.aspect_front",        65.0f),
+    A("tire.aspect_rear",         65.0f),
+    A("tire.rim_diameter_front",  16.0f),
+    A("tire.rim_diameter_rear",   16.0f),
+    A("engine.cylinders",          6.0f),
+    A("engine.displacement",       3.5f),
+};
+
+/* ---------------------------------------------------------------------- 14: Bus ------
+ * City bus: extremely long, very tall, very heavy, long greenhouse. VISUAL DEMO ONLY. */
+static const char *const kArchName14 = "Bus";
+static const char *const kArchDesc14 = "city bus: extreme length and height - VISUAL DEMO ONLY";
+static const DevParamAssignment kArch14[] = {
+    /* 8 t, not the ~12 t of a real city bus: vehicle_spec_is_valid() caps the derived
+     * tireLoadRefPerWheelN at 20 kN, i.e. mass * g / 4 <= 20000 => mass <= 8155 kg. The bus
+     * exists here for its silhouette, and mass is not a visual driver above mass01's 8 t
+     * ceiling, so the model limit is respected rather than the validator widened. */
+    A("body.mass",               8000.0f),
+    A("body.wheelbase",            6.00f),
+    A("body.track_front",          2.00f),
+    A("body.track_rear",           2.00f),
+    A("body.width_overall",        2.40f),
+    A("body.height_overall",       2.80f),
+    A("body.front_overhang",       1.50f),
+    A("body.rear_overhang",        2.00f),
+    A("body.ride_height_front",    0.250f),
+    A("body.ride_height_rear",     0.250f),
+    A("body.cowl_x",               2.00f),  /* driver sits at the very front */
+    A("body.backlight_x",         -1.80f), /* glass nearly to the tail */
+    A("mass.engine_x",            -1.50f), /* rear-engine bus */
+    A("tire.section_width_front", 275.0f),
+    A("tire.section_width_rear",  275.0f),
+    A("tire.aspect_front",        80.0f),
+    A("tire.aspect_rear",         80.0f),
+    A("engine.cylinders",          6.0f),
+    A("engine.displacement",       8.0f),
+};
+
+/* ---------------------------------------------------------------- 15: Limousine -----
+ * Stretch sedan: very long wheelbase, long greenhouse, moderate height. */
+static const char *const kArchName15 = "Limousine";
+static const char *const kArchDesc15 = "stretch sedan: long wheelbase, long greenhouse";
+static const DevParamAssignment kArch15[] = {
+    A("body.mass",               2500.0f),
+    A("body.wheelbase",            3.80f),
+    A("body.track_front",          1.65f),
+    A("body.track_rear",           1.63f),
+    A("body.width_overall",        1.90f),
+    A("body.height_overall",       1.55f),
+    A("body.front_overhang",       1.00f),
+    A("body.rear_overhang",        1.20f),
+    A("body.ride_height_front",    0.140f),
+    A("body.ride_height_rear",     0.140f),
+    A("body.cowl_x",               0.80f),
+    A("body.backlight_x",         -1.00f), /* long greenhouse */
+    A("mass.engine_x",             2.00f),
+    A("tire.section_width_front", 235.0f),
+    A("tire.section_width_rear",  235.0f),
+    A("tire.aspect_front",        55.0f),
+    A("tire.aspect_rear",         55.0f),
+    A("engine.cylinders",          8.0f),
+    A("engine.displacement",       4.5f),
+};
+
+/* ---------------------------------------------------------------- 16: Box Truck -----
+ * Commercial box truck: tall, boxy, heavy, long greenhouse. VISUAL DEMO ONLY. */
+static const char *const kArchName16 = "Box Truck";
+static const char *const kArchDesc16 = "commercial box truck: tall, boxy, heavy - VISUAL DEMO ONLY";
+static const DevParamAssignment kArch16[] = {
+    A("body.mass",               7500.0f),
+    A("body.wheelbase",            4.50f),
+    A("body.track_front",          1.80f),
+    A("body.track_rear",           1.80f),
+    A("body.width_overall",        2.20f),
+    A("body.height_overall",       2.70f),
+    A("body.front_overhang",       1.00f),
+    A("body.rear_overhang",        2.00f),
+    A("body.ride_height_front",    0.230f),
+    A("body.ride_height_rear",     0.230f),
+    A("body.cowl_x",               1.60f),  /* cab-forward box truck */
+    A("body.backlight_x",         -1.50f), /* greenhouse nearly to cargo box end */
+    A("mass.engine_x",             0.50f),  /* cab-under engine */
+    A("tire.section_width_front", 255.0f),
+    A("tire.section_width_rear",  255.0f),
+    A("tire.aspect_front",        80.0f),
+    A("tire.aspect_rear",         80.0f),
+    A("engine.cylinders",          6.0f),
+    A("engine.displacement",       8.0f),
+};
+
+/* ---- archetype table ---- */
+typedef struct {
+    const char *name;
+    const char *description;
+    const DevParamAssignment *overrides;
+    int overrideCount;
+} ArchetypeDef;
+
+static const ArchetypeDef kArchetypes[ARCHETYPE_COUNT] = {
+    { kArchName0,  kArchDesc0,  NULL,       0 },
+    { kArchName1,  kArchDesc1,  kArch1,     (int)(sizeof(kArch1)  / sizeof(kArch1[0])) },
+    { kArchName2,  kArchDesc2,  kArch2,     (int)(sizeof(kArch2)  / sizeof(kArch2[0])) },
+    { kArchName3,  kArchDesc3,  kArch3,     (int)(sizeof(kArch3)  / sizeof(kArch3[0])) },
+    { kArchName4,  kArchDesc4,  kArch4,     (int)(sizeof(kArch4)  / sizeof(kArch4[0])) },
+    { kArchName5,  kArchDesc5,  kArch5,     (int)(sizeof(kArch5)  / sizeof(kArch5[0])) },
+    { kArchName6,  kArchDesc6,  kArch6,     (int)(sizeof(kArch6)  / sizeof(kArch6[0])) },
+    { kArchName7,  kArchDesc7,  kArch7,     (int)(sizeof(kArch7)  / sizeof(kArch7[0])) },
+    { kArchName8,  kArchDesc8,  kArch8,     (int)(sizeof(kArch8)  / sizeof(kArch8[0])) },
+    { kArchName9,  kArchDesc9,  kArch9,     (int)(sizeof(kArch9)  / sizeof(kArch9[0])) },
+    { kArchName10, kArchDesc10, kArch10,    (int)(sizeof(kArch10) / sizeof(kArch10[0])) },
+    { kArchName11, kArchDesc11, kArch11,    (int)(sizeof(kArch11) / sizeof(kArch11[0])) },
+    { kArchName12, kArchDesc12, kArch12,    (int)(sizeof(kArch12) / sizeof(kArch12[0])) },
+    { kArchName13, kArchDesc13, kArch13,    (int)(sizeof(kArch13) / sizeof(kArch13[0])) },
+    { kArchName14, kArchDesc14, kArch14,    (int)(sizeof(kArch14) / sizeof(kArch14[0])) },
+    { kArchName15, kArchDesc15, kArch15,    (int)(sizeof(kArch15) / sizeof(kArch15[0])) },
+    { kArchName16, kArchDesc16, kArch16,    (int)(sizeof(kArch16) / sizeof(kArch16[0])) },
+};
+
+/* ------------------------------------------------------------------------------ sweeps --
+ *
+ * Eight axes, five steps each = 40 vehicles. Each sweep varies EXACTLY ONE registry key;
+ * all other parameters stay at stock. The varied key is documented beside each axis.
+ */
+#define SWEEP_AXES   8
+#define SWEEP_STEPS  5
+
+/* One sweep axis. A row is five cars that differ in this key and in nothing else. */
+typedef struct {
+    const char *key;    /* the ONE registry key this row varies */
+    const char *note;   /* the visual dimension the row demonstrates */
+} SweepAxis;
+
+/* WHY TIRE ASPECT RATIO IS NOT ONE OF THESE AXES.
+ *
+ * plans/ISSUE.md lists tire aspect ratio among the sweep categories it recommends, and it is
+ * not here. That is a measured decision, not an omission.
+ *
+ * Every PAIR of corpus vehicles has to clear three floors at once: >= 3% of union-silhouette
+ * pixels differing, signature L2 >= 0.25, and signature L-infinity >= 0.08 m. Adjacent steps
+ * of a five-step sweep are the tightest pairs in the whole fleet, so a sweep axis has to move
+ * roughly a fifth of its range past all three floors, four times over.
+ *
+ * A tire's drawn diameter is rim + 2 * section * aspect, and aspect touches essentially
+ * nothing else: it moves the tire diameter, the sidewall band inside it, and the arch drawn
+ * around it — two of four wheels, on a shape seen from above. On the stock 225/45R17 the
+ * registry's whole 25%..80% span moves the diameter by 2 * 0.225 * 0.55 = 0.2475 m, i.e.
+ * 0.062 m per step: below the 0.08 m one-pixel floor before anything else is considered.
+ * Widening the registry to close that would need ~80 points of aspect (25..105), which is not
+ * a tire that exists.
+ *
+ * Building the row on a wide-tire, open-wheel base does clear L-infinity — a 355 mm section
+ * gives 0.098 m per step — and was tried. It still fails the other two floors, and this is
+ * arithmetic rather than a tuning problem: the pixel metric is a FRACTION of a shared
+ * silhouette, and L2 is dominated by how MANY components move. Aspect ratio moves two. Even
+ * with the body shrunk to the registry's minimum in every dimension, the measured figures
+ * were 2.1% of pixels and L2 = 0.107 against floors of 3% and 0.25.
+ *
+ * So the axis is covered where it can be honest: `tire.aspect_front` and `tire.aspect_rear`
+ * are both designated visual drivers in the `car-visual` sensitivity table, perturbed across
+ * their full declared range — a 45% change in tire diameter, which clears the sensitivity
+ * floors comfortably and is plainly visible on the contact sheet. What it cannot do is carry
+ * five mutually distinct cars, and asserting otherwise would mean lowering a corpus-wide
+ * threshold to accommodate one row.
+ */
+static const SweepAxis kSweepAxes[SWEEP_AXES] = {
+    { "mass.engine_x",       "engine station: CG, layout read, hood bulge" },
+    { "body.wheelbase",      "axle span and the body length that follows it" },
+    { "body.width_overall",  "silhouette width and fender flare" },
+    { "body.height_overall", "roof share of the plan area, glass, side windows" },
+    { "body.front_overhang", "nose length ahead of the front axle" },
+    { "body.track_front",    "front stance: track against body width" },
+    { "aero.lift_rear",      "rear aero: tail taper and the wing on it" },
+    { "body.backlight_x",    "greenhouse rear edge: cabin, deck and bed proportion" },
+};
+
+/* ---- sweep value computation ----
+ *
+ * Even spacing over [min, max] is wrong when the stock default sits inside the interval: a
+ * step landing on the default would reproduce the stock baseline exactly. Map steps through
+ * the complement of an exclusion window around the default so every step is at least one
+ * visible tick away from stock, the sequence stays monotonic, and neighbouring steps cannot
+ * collapse onto the same value.
+ */
+static float sweep_compute_value(const DevParameter *param, int step, int totalSteps)
 {
-    return dev_preset_count();
+
+    const float span = param->maximum - param->minimum;
+    const float stepSpan = (totalSteps > 1) ? (span / (float)(totalSteps - 1)) : span;
+    /* Minimum exclusion around stock: half a grid step, but never less than 0.08 m for
+     * metre-valued drivers (one screen pixel at ~13.2 px/m). For dimensionless keys like
+     * aero coefficients, use at least 10% of the span. */
+    const float metreExclude = fmaxf(0.5f * fabsf(stepSpan), 0.08f);
+    const float dimExclude = fmaxf(0.5f * fabsf(stepSpan), 0.10f * span);
+    const float exclude = fmaxf(metreExclude, dimExclude);
+
+    const float leftHi  = param->defaultValue - exclude;
+    const float rightLo = param->defaultValue + exclude;
+    const float leftLen  = fmaxf(0.0f, leftHi - param->minimum);
+    const float rightLen = fmaxf(0.0f, param->maximum - rightLo);
+    const float usable = leftLen + rightLen;
+
+    float value;
+    if (!(usable > 0.0f)) {
+        /* Degenerate registry range; fall back to plain endpoints. */
+        const float t = (totalSteps > 1) ? ((float)step / (float)(totalSteps - 1)) : 0.0f;
+        value = param->minimum + span * t;
+    } else {
+        const float t = (totalSteps > 1) ? ((float)step / (float)(totalSteps - 1)) : 0.0f;
+        const float pos = t * usable;
+        if (pos <= leftLen) {
+            value = param->minimum + fminf(pos, leftLen);
+        } else {
+            value = rightLo + fminf(pos - leftLen, rightLen);
+        }
+    }
+    return value;
 }
 
-static int sweep_count(void)
+/* Build the spec for one sweep slot: the stock car with a single key moved. */
+static void sweep_build_spec(int axis, int step, VehicleSpec *out)
 {
-    return SWEEP_AXES * SWEEP_STEPS;
+    vehicle_spec_set_default(out);
+    if (axis < 0 || axis >= SWEEP_AXES) return;
+
+    const DevParameter *param = dev_param_find(kSweepAxes[axis].key);
+    if (param == NULL) return;
+    (void)dev_param_set(out, param, sweep_compute_value(param, step, SWEEP_STEPS));
 }
+
+/* ---- sampled generation ----
+ *
+ * 43 vehicles generated from a Halton low-discrepancy sequence over a documented parameter
+ * box. Candidates are filtered: must pass vehicle_spec_is_valid(), car_visual_derive(),
+ * raster-bounds check, and be sufficiently distinct from ALL already-accepted vehicles
+ * (archetypes + sweeps + previously-accepted sampled).
+ *
+ * HALTON BOX. Twelve primary parameters are varied independently using Halton bases
+ * 2,3,5,7,11,13,17,19,23,29,31,37. The box bounds are chosen within the registry range
+ * to span the plausible passenger-vehicle space while avoiding degenerate combinations:
+ *
+ *   Index  Base  Registry key            Box min   Box max   Registry range
+ *   ─────  ────  ──────────────────────  ────────  ────────  ──────────────
+ *     0      2   body.wheelbase            2.000     5.500    1.80 – 7.00
+ *     1      3   body.track_front          1.100     2.300    1.00 – 2.60
+ *     2      5   body.width_overall        1.300     2.400    1.20 – 2.60
+ *     3      7   body.height_overall       1.100     2.800    1.00 – 3.20
+ *     4     11   body.front_overhang       0.300     1.800    0.20 – 2.50
+ *     5     13   body.rear_overhang        0.300     1.800    0.20 – 2.50
+ *     6     17   mass.engine_x            -2.500     3.000   -4.00 – 4.00
+ *     7     19   body.cowl_x              -1.500     1.500   -2.00 – 2.00
+ *     8     23   body.backlight_x         -1.500     1.500   -2.00 – 2.00
+ *     9     29   tire.section_width_front 155.000   325.000  145.00 – 355.00
+ *    10     31   tire.aspect_front         30.000    70.000   25.00 – 80.00
+ *    11     37   aero.lift_rear           -2.000     0.500   -3.00 – 1.00
+ */
+#define SAMPLED_COUNT   43
+#define HALTON_DIMS     12
+#define MAX_CANDIDATES  4096
+
+/* Rejection thresholds: 1.5× the corpus scenario distinctness floor. */
+#define SAMPLED_REJECT_PIXEL   (1.5f * 0.030f)   /* 0.045 */
+#define SAMPLED_REJECT_LINF    (1.5f * 0.080f)   /* 0.120 */
+
+static const int kHaltonBases[HALTON_DIMS] = { 2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37 };
+static const char *const kHaltonKeys[HALTON_DIMS] = {
+    "body.wheelbase", "body.track_front", "body.width_overall",
+    "body.height_overall", "body.front_overhang", "body.rear_overhang",
+    "mass.engine_x", "body.cowl_x", "body.backlight_x",
+    "tire.section_width_front", "tire.aspect_front", "aero.lift_rear",
+};
+static const float kHaltonBoxMin[HALTON_DIMS] = {
+    2.000f, 1.100f, 1.300f, 1.100f, 0.300f, 0.300f,
+    -2.500f, -1.500f, -1.500f, 155.000f, 30.000f, -2.000f,
+};
+static const float kHaltonBoxMax[HALTON_DIMS] = {
+    5.500f, 2.300f, 2.400f, 2.800f, 1.800f, 1.800f,
+    3.000f, 1.500f, 1.500f, 325.000f, 70.000f, 0.500f,
+};
+
+/* Cached sampled specs. Populated on first access. */
+static VehicleSpec g_sampledSpecs[SAMPLED_COUNT];
+static int g_sampledAccepted = -1;  /* -1 = not generated yet */
+
+/* ---- Halton sequence ---- */
+static float halton(int index, int base)
+{
+    float result = 0.0f;
+    float f = 1.0f / (float)base;
+    int i = index;
+    while (i > 0) {
+        result += f * (float)(i % base);
+        i /= base;
+        f /= (float)base;
+    }
+    return result;
+}
+
+/* Map a Halton point [0,1] into the box range [boxMin, boxMax]. */
+static float halton_to_box(float t, float boxMin, float boxMax)
+{
+    return boxMin + t * (boxMax - boxMin);
+}
+
+/* Build a label map for a spec on the given canvas. Returns true on success. */
+static bool build_label_map(const VehicleSpec *spec, const CarRasterInfo *canvas,
+                            unsigned char *labels, size_t bytes)
+{
+    CarVisual visual;
+    car_visual_derive(spec, &visual);
+    return car_raster_draw_labels(&visual, *canvas, labels, bytes);
+}
+
+/* Pre-compute canvas info from archetypes + sweeps, with generous margin. */
+static CarRasterInfo compute_canvas(void)
+{
+    const float pxPerM = 13.2f;  /* PIXELS_PER_METER * CAMERA_BASE_ZOOM ≈ 13.2 */
+    float left = 1.0f, right = 1.0f, up = 1.0f, down = 1.0f;
+
+    for (int i = 0; i < ARCHETYPE_COUNT + SWEEP_AXES * SWEEP_STEPS; i++) {
+        VehicleSpec spec;
+        vehicle_spec_set_default(&spec);
+
+        if (i < ARCHETYPE_COUNT) {
+            const ArchetypeDef *def = &kArchetypes[i];
+            if (def->overrides != NULL) {
+                dev_params_apply_assignments(&spec, def->overrides, def->overrideCount,
+                                             NULL, NULL);
+            }
+        } else {
+            const int si = i - ARCHETYPE_COUNT;
+            sweep_build_spec(si / SWEEP_STEPS, si % SWEEP_STEPS, &spec);
+        }
+
+        CarVisual visual;
+        car_visual_derive(&spec, &visual);
+        const CarRasterInfo info = car_raster_info(&visual, pxPerM, 2);
+        const float l = info.originXPx;
+        const float r = (float)info.width - info.originXPx;
+        const float u = info.originYPx;
+        const float d = (float)info.height - info.originYPx;
+        if (l > left)   left  = l;
+        if (r > right)  right = r;
+        if (u > up)     up    = u;
+        if (d > down)   down  = d;
+    }
+
+    /* Add 2.5 m margin on each side for sampled vehicles. */
+    const float marginPx = 2.5f * pxPerM;
+    CarRasterInfo shared;
+    memset(&shared, 0, sizeof(shared));
+    shared.pxPerM    = pxPerM;
+    shared.width     = (int)ceilf(left + right + 2.0f * marginPx);
+    shared.height    = (int)ceilf(up + down + 2.0f * marginPx);
+    shared.originXPx = left + marginPx;
+    shared.originYPx = up + marginPx;
+    return shared;
+}
+
+/* Generate every sampled vehicle. Called once on first access. Returns true when the full
+ * SAMPLED_COUNT was reached; false means generation ran out of candidates and truncated,
+ * which car_corpus_spec() reports rather than papering over. */
+static bool generate_sampled(void)
+{
+    if (g_sampledAccepted >= 0) return (g_sampledAccepted == SAMPLED_COUNT);
+
+    g_sampledAccepted = 0;
+
+    /* Phase 1: compute canvas, rasterize archetypes + sweeps for comparison. */
+    const CarRasterInfo canvas = compute_canvas();
+    const size_t pixels = (size_t)canvas.width * (size_t)canvas.height;
+    if (pixels == 0) return false;
+
+    const int baseVehicles = ARCHETYPE_COUNT + SWEEP_AXES * SWEEP_STEPS;
+    /* Store label maps for all accepted vehicles (grows as sampled are accepted). */
+    const int maxAccepted = baseVehicles + SAMPLED_COUNT;  /* 17 + 40 + 43 = 100 */
+    unsigned char **acceptedLabels =
+        (unsigned char **)malloc((size_t)maxAccepted * sizeof(unsigned char *));
+    VehicleSpec *acceptedSpecs =
+        (VehicleSpec *)malloc((size_t)maxAccepted * sizeof(VehicleSpec));
+    if (acceptedLabels == NULL || acceptedSpecs == NULL) {
+        free(acceptedLabels);
+        free(acceptedSpecs);
+        return false;
+    }
+
+    int acceptedCount = 0;
+
+    /* Build and store archetypes. */
+    for (int i = 0; i < ARCHETYPE_COUNT; i++) {
+        VehicleSpec spec;
+        vehicle_spec_set_default(&spec);
+        const ArchetypeDef *def = &kArchetypes[i];
+        if (def->overrides != NULL) {
+            dev_params_apply_assignments(&spec, def->overrides, def->overrideCount,
+                                         NULL, NULL);
+        }
+        acceptedLabels[acceptedCount] =
+            (unsigned char *)calloc(pixels, 1);
+        if (acceptedLabels[acceptedCount] == NULL ||
+            !build_label_map(&spec, &canvas, acceptedLabels[acceptedCount], pixels)) {
+            for (int j = 0; j <= acceptedCount; j++) free(acceptedLabels[j]);
+            free(acceptedLabels);
+            free(acceptedSpecs);
+            return false;
+        }
+        acceptedSpecs[acceptedCount] = spec;
+        acceptedCount++;
+    }
+
+    /* Build and store sweeps. */
+    for (int si = 0; si < SWEEP_AXES * SWEEP_STEPS; si++) {
+        VehicleSpec spec;
+        sweep_build_spec(si / SWEEP_STEPS, si % SWEEP_STEPS, &spec);
+        acceptedLabels[acceptedCount] =
+            (unsigned char *)calloc(pixels, 1);
+        if (acceptedLabels[acceptedCount] == NULL ||
+            !build_label_map(&spec, &canvas, acceptedLabels[acceptedCount], pixels)) {
+            for (int j = 0; j <= acceptedCount; j++) free(acceptedLabels[j]);
+            free(acceptedLabels);
+            free(acceptedSpecs);
+            return false;
+        }
+        acceptedSpecs[acceptedCount] = spec;
+        acceptedCount++;
+    }
+
+    /* Phase 2: iterate Halton candidates. */
+    int candidatesTried = 0;
+    for (int seed = 1; seed <= MAX_CANDIDATES && g_sampledAccepted < SAMPLED_COUNT; seed++) {
+        candidatesTried++;
+
+        /* Build candidate spec from Halton point. */
+        VehicleSpec candidate;
+        vehicle_spec_set_default(&candidate);
+        for (int d = 0; d < HALTON_DIMS; d++) {
+            const float t = halton(seed, kHaltonBases[d]);
+            const float val = halton_to_box(t, kHaltonBoxMin[d], kHaltonBoxMax[d]);
+            const DevParameter *param = dev_param_find(kHaltonKeys[d]);
+            if (param != NULL) {
+                dev_param_set(&candidate, param, val);
+            }
+        }
+
+        /* Validate. */
+        if (!vehicle_spec_is_valid(&candidate)) continue;
+
+        /* Derive visual and check raster. */
+        CarVisual candVis;
+        car_visual_derive(&candidate, &candVis);
+        const CarRasterInfo candInfo = car_raster_info(&candVis, canvas.pxPerM, 0);
+        if (candInfo.width <= 0 || candInfo.height <= 0) continue;
+
+        /* Rasterize candidate. */
+        unsigned char *candLabels = (unsigned char *)calloc(pixels, 1);
+        if (candLabels == NULL) continue;
+        if (!car_raster_draw_labels(&candVis, canvas, candLabels, pixels)) {
+            free(candLabels);
+            continue;
+        }
+
+        /* Compute candidate signature. */
+        float candSig[64];
+        const int sigN = car_visual_signature_count();
+        if (sigN <= 0 || sigN > (int)(sizeof(candSig) / sizeof(candSig[0]))) {
+            free(candLabels);
+            continue;
+        }
+        if (car_visual_signature(&candVis, candSig, sigN) != sigN) {
+            free(candLabels);
+            continue;
+        }
+
+        /* Check against all already-accepted vehicles. */
+        bool tooSimilar = false;
+        for (int a = 0; a < acceptedCount && !tooSimilar; a++) {
+            /* Pixel label-map difference. */
+            const float pixDiff = car_raster_difference(candLabels, acceptedLabels[a],
+                                                        canvas.width, canvas.height);
+            if (pixDiff < SAMPLED_REJECT_PIXEL) {
+                tooSimilar = true;
+                break;
+            }
+
+            /* Signature Linf. */
+            CarVisual accVis;
+            car_visual_derive(&acceptedSpecs[a], &accVis);
+            float accSig[64];
+            if (car_visual_signature(&accVis, accSig, sigN) == sigN) {
+                float worst = 0.0f;
+                for (int k = 0; k < sigN; k++) {
+                    const float d = fabsf(candSig[k] - accSig[k]);
+                    if (d > worst) worst = d;
+                }
+                if (worst < SAMPLED_REJECT_LINF) {
+                    tooSimilar = true;
+                    break;
+                }
+            }
+        }
+
+        if (tooSimilar) {
+            free(candLabels);
+            continue;
+        }
+
+        /* Accepted! */
+        g_sampledSpecs[g_sampledAccepted] = candidate;
+        acceptedLabels[acceptedCount] = candLabels;
+        acceptedSpecs[acceptedCount] = candidate;
+        acceptedCount++;
+        g_sampledAccepted++;
+    }
+
+    /* Cleanup. */
+    for (int j = 0; j < acceptedCount; j++) free(acceptedLabels[j]);
+    free(acceptedLabels);
+    free(acceptedSpecs);
+
+    if (g_sampledAccepted < SAMPLED_COUNT) {
+        fprintf(stderr,
+                "car_corpus: sampled generation reached %d/%d vehicles"
+                " (%d candidates tried, max %d)\n",
+                g_sampledAccepted, SAMPLED_COUNT, candidatesTried, MAX_CANDIDATES);
+    }
+    return (g_sampledAccepted == SAMPLED_COUNT);
+}
+
+/* -------------------------------------------------------------------- public API ---- */
+
+static int archetype_count(void) { return ARCHETYPE_COUNT; }
+static int sweep_count(void)     { return SWEEP_AXES * SWEEP_STEPS; }
+static int sampled_count(void)   { return SAMPLED_COUNT; }
 
 int car_corpus_count(void)
 {
-    return archetype_count() + sweep_count();
+    return archetype_count() + sweep_count() + sampled_count();
 }
 
 CarCorpusGroup car_corpus_group(int index)
 {
     if (index < archetype_count()) return CAR_CORPUS_ARCHETYPE;
-    return CAR_CORPUS_SWEEP;
+    if (index < archetype_count() + sweep_count()) return CAR_CORPUS_SWEEP;
+    return CAR_CORPUS_SAMPLED;
 }
 
 const char *car_corpus_group_name(CarCorpusGroup group)
@@ -76,11 +983,12 @@ const char *car_corpus_group_name(CarCorpusGroup group)
     }
 }
 
-/* Decompose a sweep index into its axis and step. Returns false for archetype indices. */
+/* Decompose a sweep index into axis and step. */
 static bool sweep_slot(int index, int *axisOut, int *stepOut)
 {
     const int base = archetype_count();
-    if (index < base || index >= car_corpus_count()) return false;
+    const int end  = base + sweep_count();
+    if (index < base || index >= end) return false;
     const int offset = index - base;
     if (axisOut != NULL) *axisOut = offset / SWEEP_STEPS;
     if (stepOut != NULL) *stepOut = offset % SWEEP_STEPS;
@@ -92,61 +1000,7 @@ const char *car_corpus_sweep_key(int index)
     int axis = 0;
     if (!sweep_slot(index, &axis, NULL)) return NULL;
     if (axis < 0 || axis >= SWEEP_AXES) return NULL;
-    return kSweepKeys[axis];
-}
-
-/* The value this sweep step sets.
- *
- * Even spacing over [min, max] is wrong when the stock default sits inside the interval:
- * the midpoint step of body.cg_to_rear reproduced VEH_CG_TO_REAR_M exactly and made
- * sweep_body_cg_to_rear_2 bit-identical to archetype_00_stock_baseline. Near-default
- * interior ticks on track / half_width / wheel.radius were only centimetres from stock and
- * failed the pairwise distinctness floor even though the grammar reads those fields.
- *
- * Map the step index through the complement of an exclusion window around the default so
- * every step is at least one visible metre-scale tick away from stock, the sequence stays
- * monotonic, and neighbouring steps cannot collapse onto the same patched value. This is a
- * corpus sampling correction — cgToRearM (and the other keys) already drive geometry in
- * car_visual.c. */
-static bool sweep_value(int index, const DevParameter **paramOut, float *valueOut)
-{
-    int axis = 0, step = 0;
-    if (!sweep_slot(index, &axis, &step)) return false;
-
-    const DevParameter *param = dev_param_find(kSweepKeys[axis]);
-    if (param == NULL) return false;
-
-    const float span = param->maximum - param->minimum;
-    const float stepSpan = (SWEEP_STEPS > 1) ? (span / (float)(SWEEP_STEPS - 1)) : span;
-    /* Half a grid step, but never less than ~one visible pixel (0.08 m) for metre-valued
-     * drivers. wheel.radius is also in metres; excluding 0.08 m of radius clears 0.16 m of
-     * drawn diameter, which is above the signature L∞ floor. */
-    const float exclude = fmaxf(0.5f * fabsf(stepSpan), 0.08f);
-
-    const float leftHi = param->defaultValue - exclude;
-    const float rightLo = param->defaultValue + exclude;
-    const float leftLen = fmaxf(0.0f, leftHi - param->minimum);
-    const float rightLen = fmaxf(0.0f, param->maximum - rightLo);
-    const float usable = leftLen + rightLen;
-
-    float value;
-    if (!(usable > 0.0f)) {
-        /* Degenerate registry range; fall back to plain endpoints. */
-        const float t = (SWEEP_STEPS > 1) ? ((float)step / (float)(SWEEP_STEPS - 1)) : 0.0f;
-        value = param->minimum + span * t;
-    } else {
-        const float t = (SWEEP_STEPS > 1) ? ((float)step / (float)(SWEEP_STEPS - 1)) : 0.0f;
-        const float pos = t * usable;
-        if (pos <= leftLen) {
-            value = param->minimum + fminf(pos, leftLen);
-        } else {
-            value = rightLo + fminf(pos - leftLen, rightLen);
-        }
-    }
-
-    if (paramOut != NULL) *paramOut = param;
-    if (valueOut != NULL) *valueOut = value;
-    return true;
+    return kSweepAxes[axis].key;
 }
 
 bool car_corpus_spec(int index, VehicleSpec *out)
@@ -155,22 +1009,41 @@ bool car_corpus_spec(int index, VehicleSpec *out)
 
     vehicle_spec_set_default(out);
 
+    /* Archetypes. */
     if (index < archetype_count()) {
-        /* dev_preset_apply resets to stock first, so this is order-independent. */
-        (void)dev_preset_apply(out, index);
+        const ArchetypeDef *def = &kArchetypes[index];
+        if (def->overrides != NULL && def->overrideCount > 0) {
+            (void)dev_params_apply_assignments(out, def->overrides, def->overrideCount,
+                                               NULL, NULL);
+        }
         return true;
     }
 
-    const DevParameter *param = NULL;
-    float value = 0.0f;
-    if (!sweep_value(index, &param, &value)) return false;
+    /* Sweeps. */
+    int base = archetype_count();
+    if (index < base + sweep_count()) {
+        int axis = 0, step = 0;
+        if (!sweep_slot(index, &axis, &step)) return false;
+        sweep_build_spec(axis, step, out);
+        return true;
+    }
 
-    /* dev_param_set clamps to the declared range and refreshes derived fields. */
-    (void)dev_param_set(out, param, value);
+    /* Sampled. Lazy-generation on first access. */
+    if (!generate_sampled()) {
+        /* Generation truncated; only the available specs are valid. */
+        const int sampledIdx = index - archetype_count() - sweep_count();
+        if (sampledIdx < 0 || sampledIdx >= g_sampledAccepted) return false;
+        *out = g_sampledSpecs[sampledIdx];
+        return true;
+    }
+
+    const int sampledIdx = index - archetype_count() - sweep_count();
+    if (sampledIdx < 0 || sampledIdx >= SAMPLED_COUNT) return false;
+    *out = g_sampledSpecs[sampledIdx];
     return true;
 }
 
-/* Lower-case, replace anything awkward with '_', so an id is safe as a filename. */
+/* Lower-case, replace anything awkward with '_'. */
 static void slugify(const char *src, char *buf, size_t cap)
 {
     if (buf == NULL || cap == 0) return;
@@ -196,18 +1069,26 @@ void car_corpus_id(int index, char *buf, size_t cap)
     if (index < 0 || index >= car_corpus_count()) return;
 
     if (index < archetype_count()) {
-        const DevPreset *preset = dev_preset_at(index);
+        const ArchetypeDef *def = &kArchetypes[index];
         char slug[48];
-        slugify(preset != NULL ? preset->name : "unknown", slug, sizeof(slug));
+        slugify(def->name, slug, sizeof(slug));
         snprintf(buf, cap, "archetype_%02d_%s", index, slug);
         return;
     }
 
-    int axis = 0, step = 0;
-    (void)sweep_slot(index, &axis, &step);
-    char slug[48];
-    slugify(kSweepKeys[axis], slug, sizeof(slug));
-    snprintf(buf, cap, "sweep_%s_%d", slug, step);
+    int base = archetype_count();
+    if (index < base + sweep_count()) {
+        int axis = 0, step = 0;
+        (void)sweep_slot(index, &axis, &step);
+        char slug[48];
+        slugify(kSweepAxes[axis].key, slug, sizeof(slug));
+        snprintf(buf, cap, "sweep_%s_%d", slug, step);
+        return;
+    }
+
+    /* Sampled. */
+    const int sampledIdx = index - base - sweep_count();
+    snprintf(buf, cap, "sampled_%02d", sampledIdx);
 }
 
 void car_corpus_describe(int index, char *buf, size_t cap)
@@ -216,22 +1097,37 @@ void car_corpus_describe(int index, char *buf, size_t cap)
     buf[0] = '\0';
     if (index < 0 || index >= car_corpus_count()) return;
 
+    /* Archetypes. */
     if (index < archetype_count()) {
-        const DevPreset *preset = dev_preset_at(index);
-        snprintf(buf, cap, "%s — %s",
-                 preset != NULL ? preset->name : "?",
-                 preset != NULL ? preset->description : "");
+        const ArchetypeDef *def = &kArchetypes[index];
+        snprintf(buf, cap, "%s - %s", def->name, def->description);
         return;
     }
 
-    int step = 0;
-    const DevParameter *param = NULL;
-    float value = 0.0f;
-    (void)sweep_slot(index, NULL, &step);
-    if (!sweep_value(index, &param, &value) || param == NULL) return;
+    int base = archetype_count();
 
-    snprintf(buf, cap, "%s = %.3f %s (step %d/%d)",
-             param->name, (double)value,
-             (param->unit != NULL && param->unit[0] != '\0') ? param->unit : "",
-             step + 1, SWEEP_STEPS);
+    /* Sweeps. */
+    if (index < base + sweep_count()) {
+        int step = 0;
+        const DevParameter *param = NULL;
+        (void)sweep_slot(index, NULL, &step);
+
+        VehicleSpec spec;
+        if (!car_corpus_spec(index, &spec)) return;
+
+        const char *key = car_corpus_sweep_key(index);
+        param = (key != NULL) ? dev_param_find(key) : NULL;
+        if (param == NULL) return;
+
+        const float value = dev_param_get(&spec, param);
+        snprintf(buf, cap, "%s = %.3f %s (step %d/%d)",
+                 param->name, (double)value,
+                 (param->unit != NULL && param->unit[0] != '\0') ? param->unit : "",
+                 step + 1, SWEEP_STEPS);
+        return;
+    }
+
+    /* Sampled. */
+    const int sampledIdx = index - base - sweep_count();
+    snprintf(buf, cap, "sampled_%02d - Halton seed %d", sampledIdx, sampledIdx);
 }
