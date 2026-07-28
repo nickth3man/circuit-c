@@ -13,6 +13,7 @@ body.drag_coefficient    = 0.320000     # (default 0.320000)
 body.frontal_area        = 1.900000     # m^2 (default 1.900000)
 body.rolling_resistance  = 0.015000     # (default 0.015000)
 body.load_filter_rate    = 20.000000    # Hz (default 20.000000)
+body.roll_stiffness_front = 0.500000     # (default 0.500000)
 
 # --- Wheels ---
 wheel.radius             = 0.310000     # m (default 0.310000)
@@ -22,6 +23,7 @@ wheel.inertia            = 1.200000     # kg*m^2 (default 1.200000)
 steer.max_angle          = 0.700000     # rad (default 0.700000)
 steer.rate               = 5.000000     # rad/s (default 5.000000)
 steer.return_rate        = 7.000000     # rad/s (default 7.000000)
+steer.ackermann_percent  = 0.000000     # (default 0.000000)
 
 # --- Tires ---
 tire.lat_front.b         = 10.000000    # (default 10.000000)
@@ -33,6 +35,9 @@ tire.lat_rear.mu         = 1.200000     # (default 1.200000)
 tire.long.b              = 12.000000    # (default 12.000000)
 tire.long.c              = 1.550000     # (default 1.550000)
 tire.long.mu_scale       = 1.000000     # (default 1.000000)
+tire.relaxation_length   = 0.000000     # m (default 0.000000)
+tire.load_sensitivity_k  = 0.000000     # (default 0.000000)
+tire.load_ref_per_wheel  = 2940.000000  # N (default 2940.000000)
 
 # --- Drivetrain ---
 drive.gear1              = 3.550000     # (default 3.550000)
@@ -53,8 +58,16 @@ engine.torque_p4         = 250.000000   # N*m (default 250.000000)
 engine.torque_p5         = 230.000000   # N*m (default 230.000000)
 engine.torque_p6         = 195.000000   # N*m (default 195.000000)
 engine.braking_torque    = 35.000000    # N*m (default 35.000000)
+drive.diff_mode          = 0.000000     # (default 0.000000)
+drive.diff_bias_ratio    = 2.000000     # (default 2.000000)
+drive.diff_preload       = 60.000000    # N*m (default 60.000000)
 
 # --- Brakes ---
 brake.max_torque         = 3000.000000  # N*m (default 3000.000000)
 brake.bias_front         = 0.620000     # (default 0.620000)
 brake.handbrake_torque   = 1800.000000  # N*m (default 1800.000000)
+
+# --- Collision ---
+collision.half_width     = 0.850000     # m (default 0.850000)
+collision.restitution    = 0.300000     # (default 0.300000)
+collision.friction       = 0.500000     # (default 0.500000)

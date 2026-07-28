@@ -27,6 +27,7 @@
 
 #include "config.h"
 #include "dev_params.h"
+#include "dev_presets.h"
 #include "dev_replay.h"
 #include "dev_scenario.h"
 #include "dev_state.h"
@@ -59,6 +60,8 @@
  * anything the UI happens to need this frame.
  */
 static bool  g_scenarioDropdownOpen = false;
+static bool  g_presetDropdownOpen   = false;
+static int   g_activePreset         = 0;     /* last-applied preset index */
 static bool  g_profileNameEditing   = false;
 static char  g_profileName[32]      = "default";
 static char  g_activeProfile[32]    = "default";
@@ -369,9 +372,13 @@ static void draw_scope(DevState *dev)
     {
         const Rectangle bar = { x, y, SCOPE_WIDTH, 18.0f };
         for (int p = 0; p < DEV_SCOPE_PRESET_COUNT; p++) {
-            bool active = (dev->scopePreset == p);
-            if (GuiToggle(column(bar, p, DEV_SCOPE_PRESET_COUNT, 4.0f),
-                          dev_scope_preset_name((DevScopePreset)p), &active) && active) {
+            const bool wasActive = (dev->scopePreset == p);
+            bool active = wasActive;
+            /* raygui's GuiToggle returns 0 unconditionally — it only flips *active — so the
+             * standard pattern is to detect a 0->1 edge on the local bool. */
+            GuiToggle(column(bar, p, DEV_SCOPE_PRESET_COUNT, 4.0f),
+                      dev_scope_preset_name((DevScopePreset)p), &active);
+            if (active && !wasActive) {
                 dev->scopePreset = p;
             }
         }
@@ -696,16 +703,34 @@ static void draw_lab_panel(struct Game *game)
         const Rectangle groupRow = row(&cursor, 18.0f);
         for (int i = 0; i < perRow && base + i < groupCount; i++) {
             const int groupIndex = base + i;
-            bool active = (dev->activeGroup == groupIndex);
-            if (GuiToggle(column(groupRow, i, perRow, 4.0f),
-                          dev_params_group_name(groupIndex), &active) && active) {
+            const bool wasActive = (dev->activeGroup == groupIndex);
+            bool active = wasActive;
+            /* raygui's GuiToggle returns 0 unconditionally — it only flips *active — so the
+             * standard pattern is to detect a 0->1 edge on the local bool. */
+            GuiToggle(column(groupRow, i, perRow, 4.0f),
+                      dev_params_group_name(groupIndex), &active);
+            if (active && !wasActive) {
                 dev->activeGroup = groupIndex;
             }
         }
     }
 
+    /* Presets. A dropdown of hardcoded driving profiles (see dev_presets.c) plus an
+     * apply button. The dropdown rectangle is reserved here and drawn last, the same
+     * pattern as the scenario dropdown, so the open list is not painted over. */
+    GuiLine(row(&cursor, 12.0f), "presets");
+    const Rectangle presetRow = row(&cursor, ROW_HEIGHT);
+    const Rectangle presetDropdown = column(presetRow, 0, 2, 4.0f);
+    if (GuiButton(column(presetRow, 1, 2, 4.0f), "apply")) {
+        const int applied = dev_preset_apply(&game->spec, g_activePreset);
+        const DevPreset *preset = dev_preset_at(g_activePreset);
+        dev_state_set_status(dev, false, "%s — %d params set, press R to reset",
+                             preset != NULL ? preset->name : "?", applied);
+    }
+
     /* Parameter list. The remaining vertical space belongs to it, minus the footer rows. */
-    const float footerHeight = 3.0f * (ROW_HEIGHT + ROW_GAP) + 46.0f + 36.0f;
+    const float footerHeight = 3.0f * (ROW_HEIGHT + ROW_GAP) + 46.0f + 36.0f
+                             + (12.0f + ROW_GAP) + (ROW_HEIGHT + ROW_GAP); /* presets block */
     const float listHeight = fmaxf(80.0f, panel.y + panel.height - cursor.y - footerHeight);
     const Rectangle listBounds = { cursor.x, cursor.y, cursor.width, listHeight };
     cursor.y += listHeight + ROW_GAP;
@@ -811,7 +836,8 @@ static void draw_lab_panel(struct Game *game)
                  (Color){ 150, 210, 170, 255 });
     }
 
-    /* The dropdown, last. */
+    /* The dropdowns, last so their open lists are not painted over. The two are kept
+     * mutually exclusive so the scenario list and the preset list can never overlap. */
     char scenarioList[512];
     scenarioList[0] = '\0';
     for (int i = 0; i < dev_scenario_count(); i++) {
@@ -822,6 +848,20 @@ static void draw_lab_panel(struct Game *game)
     if (GuiDropdownBox(scenarioDropdown, scenarioList, &dev->scenario,
                        g_scenarioDropdownOpen)) {
         g_scenarioDropdownOpen = !g_scenarioDropdownOpen;
+        if (g_scenarioDropdownOpen) g_presetDropdownOpen = false;
+    }
+
+    char presetList[256];
+    presetList[0] = '\0';
+    for (int i = 0; i < dev_preset_count(); i++) {
+        if (i > 0) strncat(presetList, ";", sizeof(presetList) - strlen(presetList) - 1u);
+        strncat(presetList, dev_preset_at(i)->name,
+                sizeof(presetList) - strlen(presetList) - 1u);
+    }
+    if (GuiDropdownBox(presetDropdown, presetList, &g_activePreset,
+                       g_presetDropdownOpen)) {
+        g_presetDropdownOpen = !g_presetDropdownOpen;
+        if (g_presetDropdownOpen) g_scenarioDropdownOpen = false;
     }
 }
 
