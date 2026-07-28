@@ -72,6 +72,10 @@ __pycache__/
 # Ad-hoc verification / scratch logs (output of `mk verify` redirected to a file)
 mk_verify*.log
 
+# Tooling
+.clangd
+opencode.json
+
 # BEGIN oh-my-opencode-slim clonedeps
 .slim/*
 # END oh-my-opencode-slim clonedeps
