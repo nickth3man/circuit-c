@@ -5240,6 +5240,34 @@ static void scenario_state_machine(void)
  * pixel at CV_TEST_PX_PER_M, so "one visible pixel somewhere" is a literal reading of it. */
 #define CV_MIN_LINF        0.080f
 
+/* Companion floor on the whole diagnostic vector. Two cars that differ a little in many
+ * features are as distinguishable as two that differ a lot in one, and L2 is what says so. */
+#define CV_MIN_L2          0.250f
+
+/* The sensitivity floor is deliberately lower than the pairwise one, and the two ask
+ * different questions.
+ *
+ * CV_MIN_PIXEL_DIFF separates two DIFFERENT VEHICLES inside a hundred-car fleet: it has to be
+ * high enough that "these are the same car" is never the honest reading.
+ *
+ * The sensitivity test asks something weaker and more specific — is this key wired to the
+ * picture at all? A mis-wired or deleted rule scores 0.0000, not 0.0200, so the floor only
+ * has to be clear of quantisation noise. The real anti-cheat here is the companion
+ * CV_MIN_LINF assertion, which additionally demands the change reach a NAMED feature by at
+ * least one screen pixel — a pixel count alone cannot say that.
+ *
+ * The number matters because the plan's own fidelity budget is binding: at ~13.2 px/m a stock
+ * car is ~1100 silhouette pixels, so 1.5% is ~17 px. Tire aspect ratio swung across its whole
+ * 25%..80% registry range repaints ~2.5% of the car — unmistakable on the contact sheet, a
+ * 45% change in tire diameter — yet would fail a 3% bar simply because two of four wheels are
+ * a small share of a car seen from above. Failing that would be the test lying, not the
+ * grammar. */
+#define CV_MIN_SENSITIVITY_DIFF  0.015f
+
+/* Where a distinctness failure writes its inspectable bundle. Suppressed by --no-bundle,
+ * like every other failure bundle in this suite. */
+#define CV_FAILURE_DIR     "artifacts/car_visual_failures"
+
 /* Every car is rasterized into ONE canvas with the CG at a fixed point, so label maps are
  * directly comparable and an alignment difference cannot masquerade as a shape difference. */
 static CarRasterInfo cv_shared_canvas(float pxPerM)
@@ -5298,6 +5326,23 @@ static float cv_signature_linf(const CarVisual *a, const CarVisual *b, int *wors
     }
     if (worstOut != NULL) *worstOut = worstIndex;
     return worst;
+}
+
+/* Euclidean distance between two signature vectors, in the same "visible metres" currency. */
+static float cv_signature_l2(const CarVisual *a, const CarVisual *b)
+{
+    float sa[64], sb[64];
+    const int n = car_visual_signature_count();
+    if (n > (int)(sizeof(sa) / sizeof(sa[0]))) return 0.0f;
+    if (car_visual_signature(a, sa, n) != n) return 0.0f;
+    if (car_visual_signature(b, sb, n) != n) return 0.0f;
+
+    float sum = 0.0f;
+    for (int i = 0; i < n; i++) {
+        const float d = sa[i] - sb[i];
+        sum += d * d;
+    }
+    return sqrtf(sum);
 }
 
 /* Issue #9: every float field finite; dimensions non-negative; latents in [0, 1]. */
@@ -5523,11 +5568,113 @@ static void scenario_car_visual(void)
         car_visual_derive(&hi, &vhi);
         check(vhi.wheels[0].discDiameterM > vlo.wheels[0].discDiameterM,
               "more brake torque draws a larger disc");
+
+        /* Moving the engine rearward moves the CG rearward, and everything drawn is measured
+         * from the CG. So the front axle ends up further AHEAD of the origin, and the cabin
+         * with it — the body-frame shift is the honest consequence, not a bug. What must not
+         * happen is the hood bulge growing on a car whose engine is now behind the driver. */
+        vehicle_spec_set_default(&lo);
+        hi = lo;
+        lo.massEngineXM = 1.60f;   /* nose-forward */
+        hi.massEngineXM = -1.20f;  /* behind the driver */
+        vehicle_spec_refresh_derived(&lo);
+        vehicle_spec_refresh_derived(&hi);
+        car_visual_derive(&lo, &vlo);
+        car_visual_derive(&hi, &vhi);
+        check(hi.cgToFrontM > lo.cgToFrontM &&
+              vhi.wheels[WHEEL_FRONT_LEFT].centreM.x > vlo.wheels[WHEEL_FRONT_LEFT].centreM.x,
+              "a rearward engine puts the CG back, so the front axle is drawn further ahead");
+        check(vhi.hoodBulgeStrength < vlo.hoodBulgeStrength,
+              "a rear-mounted engine does not bulge the hood the way a front one does");
+
+        /* More rear downforce demand must not shrink the wing. */
+        vehicle_spec_set_default(&lo);
+        hi = lo;
+        lo.aeroLiftCoefRear = -0.60f;
+        hi.aeroLiftCoefRear = -2.60f;
+        car_visual_derive(&lo, &vlo);
+        car_visual_derive(&hi, &vhi);
+        check(vhi.wingSpanM >= vlo.wingSpanM && vhi.wingChordM >= vlo.wingChordM,
+              "more rear downforce demand does not reduce the wing");
+        check(vhi.wingSpanM > vlo.wingSpanM,
+              "and a large increase actually grows it");
+
+        /* Terminating the greenhouse earlier must not shorten the deck behind it. */
+        vehicle_spec_set_default(&lo);
+        hi = lo;
+        lo.backlightXM = -0.20f;   /* glass runs well back */
+        hi.backlightXM = -1.40f;   /* glass stops early, long open rear */
+        vehicle_spec_refresh_derived(&lo);
+        vehicle_spec_refresh_derived(&hi);
+        car_visual_derive(&lo, &vlo);
+        car_visual_derive(&hi, &vhi);
+        check(vhi.backlightXM < vlo.backlightXM,
+              "an earlier backlight station draws the rear glass further forward");
+        check(vhi.pickupBedWeight <= vlo.pickupBedWeight + 1e-6f,
+              "and does not increase the share of the body read as a bed");
+
+        /* More ride height must not reduce the arch clearance above the tire. */
+        vehicle_spec_set_default(&lo);
+        hi = lo;
+        lo.rideHeightFrontM = 0.06f;
+        hi.rideHeightFrontM = 0.32f;
+        car_visual_derive(&lo, &vlo);
+        car_visual_derive(&hi, &vhi);
+        check(vhi.wheels[WHEEL_FRONT_LEFT].archGapM > vlo.wheels[WHEEL_FRONT_LEFT].archGapM,
+              "a higher ride height draws more wheel-arch clearance");
+
+        /* A taller body must not shrink the roof it is supposed to be roofing. */
+        vehicle_spec_set_default(&lo);
+        hi = lo;
+        lo.heightOverallM = 1.10f;
+        hi.heightOverallM = 2.90f;
+        vehicle_spec_refresh_derived(&lo);
+        vehicle_spec_refresh_derived(&hi);
+        car_visual_derive(&lo, &vlo);
+        car_visual_derive(&hi, &vhi);
+        check(vhi.cabinHalfWidthM > vlo.cabinHalfWidthM,
+              "a taller body roofs over more of its own plan area");
     }
 
-    /* --- sensitivity: every sweep axis must actually move the picture. A dead rule is
-     * invisible on a contact sheet but fails here. --- */
+    /* --- sensitivity ------------------------------------------------------------------
+     *
+     * The designated visual drivers, each perturbed across its whole declared registry range
+     * from the canonical stock spec. Both metrics must move: the pixel metric proves the
+     * change reaches the picture, the L-infinity metric proves it reaches a NAMED feature and
+     * by at least one screen pixel. A rule that was deleted, mis-wired, or shadowed by a
+     * fallback branch scores 0.0000 here and cannot hide.
+     *
+     * These are exactly the twenty keys plans/ISSUE.md designates, minus one. `wheel.offset`
+     * is deliberately absent: with body.track_* primary, an ET offset is already folded into
+     * the track the hubs sit at, so a grammar that read it again would be double-counting a
+     * quantity it has already consumed. car_visual.h states that where the field is
+     * described. --- */
     {
+        static const char *const kVisualDrivers[] = {
+            "body.wheelbase",             /* axle span, and the body length that follows it   */
+            "body.front_overhang",        /* nose length                                      */
+            "body.rear_overhang",         /* tail length                                      */
+            "body.width_overall",         /* silhouette width and fender flare                */
+            "body.height_overall",        /* roof share of the plan area, glass band, windows */
+            "body.cowl_x",                /* windscreen station                               */
+            "body.backlight_x",           /* rear glass station, and the deck/bed behind it   */
+            "body.track_front",           /* front stance                                     */
+            "body.track_rear",            /* rear stance                                      */
+            "body.ride_height_front",     /* front arch clearance                             */
+            "mass.engine_x",              /* CG, hood bulge, and the whole layout read        */
+            "mass.driver_x",              /* the glasshouse has to contain the driver         */
+            "tire.section_width_front",   /* front tire width and diameter                    */
+            "tire.section_width_rear",    /* rear tire width and diameter                     */
+            "tire.aspect_front",          /* front sidewall and overall diameter              */
+            "tire.aspect_rear",           /* rear sidewall and overall diameter               */
+            "tire.rim_diameter_front",    /* front rim, and the tire wrapped around it        */
+            "tire.rim_diameter_rear",     /* rear rim                                         */
+            "aero.lift_rear",             /* tail taper and the wing on it                    */
+            "engine.cylinders",           /* exhaust count                                    */
+        };
+        const int driverCount = (int)(sizeof(kVisualDrivers) / sizeof(kVisualDrivers[0]));
+        check(driverCount >= 20, "at least twenty designated visual drivers (%d)", driverCount);
+
         const CarRasterInfo canvas = cv_shared_canvas(CV_TEST_PX_PER_M);
         const size_t pixels = (size_t)canvas.width * (size_t)canvas.height;
         unsigned char *la = (unsigned char *)malloc(pixels);
@@ -5535,16 +5682,15 @@ static void scenario_car_visual(void)
         check(la != NULL && lb != NULL && pixels > 0, "sensitivity canvas allocated");
 
         if (la != NULL && lb != NULL) {
-            int dead = 0;
-            for (int p = 0; p < dev_params_count(); p++) {
-                const DevParameter *param = dev_param_at(p);
-                /* Only the keys the corpus advertises as visual drivers. */
-                bool isDriver = false;
-                for (int i = 0; i < car_corpus_count(); i++) {
-                    const char *key = car_corpus_sweep_key(i);
-                    if (key != NULL && strcmp(key, param->name) == 0) { isDriver = true; break; }
+            int dead = 0, missing = 0;
+            for (int d = 0; d < driverCount; d++) {
+                const DevParameter *param = dev_param_find(kVisualDrivers[d]);
+                if (param == NULL) {
+                    printf("      designated visual driver not in the registry: %s\n",
+                           kVisualDrivers[d]);
+                    missing++;
+                    continue;
                 }
-                if (!isDriver) continue;
 
                 VehicleSpec lo, hi;
                 vehicle_spec_set_default(&lo);
@@ -5552,37 +5698,120 @@ static void scenario_car_visual(void)
                 dev_param_set(&lo, param, param->minimum);
                 dev_param_set(&hi, param, param->maximum);
 
+                CarVisual vlo, vhi;
+                car_visual_derive(&lo, &vlo);
+                car_visual_derive(&hi, &vhi);
+
                 cv_labels_for_spec(&lo, canvas, la, pixels);
                 cv_labels_for_spec(&hi, canvas, lb, pixels);
                 const float diff = car_raster_difference(la, lb, canvas.width, canvas.height);
-                if (diff < CV_MIN_PIXEL_DIFF) {
-                    printf("      dead visual axis: %s (min..max moves only %.4f of pixels)\n",
-                           param->name, (double)diff);
+
+                int worstComponent = 0;
+                const float linf = cv_signature_linf(&vlo, &vhi, &worstComponent);
+
+                if (diff < CV_MIN_SENSITIVITY_DIFF || linf < CV_MIN_LINF) {
+                    printf("      dead visual axis: %s over [%g, %g] moves %.4f of pixels"
+                           " and %.4f m in '%s'\n",
+                           param->name, (double)param->minimum, (double)param->maximum,
+                           (double)diff, (double)linf,
+                           car_visual_signature_component_name(worstComponent));
                     dead++;
                 }
             }
-            check(dead == 0, "every advertised visual-driver parameter changes the rendering");
+            check(missing == 0, "every designated visual driver exists in the registry");
+            check(dead == 0, "every designated visual driver moves both the pixels and a"
+                             " named feature");
         }
         free(la);
         free(lb);
     }
 
-    /* --- the raster scales with the requested resolution, mirroring scenario_renderscale --- */
+    /* --- scale independence: the grammar is metres, the raster is pixels, and only the
+     * second one may notice a change of scale. Mirrors scenario_renderscale. --- */
     {
-        CarVisual v;
+        CarVisual v16, v32;
         vehicle_spec_set_default(&spec);
-        car_visual_derive(&spec, &v);
-        const CarRasterInfo one = car_raster_info(&v, 16.0f, 0);
-        const CarRasterInfo two = car_raster_info(&v, 32.0f, 0);
+        car_visual_derive(&spec, &v16);
+
+        const CarRasterInfo one = car_raster_info(&v16, 16.0f, 0);
+        const CarRasterInfo two = car_raster_info(&v16, 32.0f, 0);
         check(two.width >= one.width * 2 - 3 && two.width <= one.width * 2 + 3,
               "doubling the raster scale doubles the sprite width");
+        check(two.height >= one.height * 2 - 3 && two.height <= one.height * 2 + 3,
+              "doubling the raster scale doubles the sprite height");
+
+        /* car_visual_derive takes no scale at all, so this cannot regress by accident — but
+         * it is exactly the property a future "just scale it in the grammar" shortcut would
+         * break, and it costs one derive to pin down. */
+        car_visual_derive(&spec, &v32);
+        check(memcmp(&v16, &v32, sizeof(CarVisual)) == 0,
+              "CarVisual is identical regardless of the scale anything is rasterized at");
+
+        float s16[64], s32[64];
+        const int n = car_visual_signature_count();
+        if (car_visual_signature(&v16, s16, n) == n &&
+            car_visual_signature(&v32, s32, n) == n) {
+            check(memcmp(s16, s32, (size_t)n * sizeof(float)) == 0,
+                  "the diagnostic signature is independent of raster scale");
+        }
+        check(fabsf(v16.lengthM - (spec.cgToFrontM + spec.frontOverhangM +
+                                   spec.cgToRearM + spec.rearOverhangM)) < 1e-6f,
+              "drawn length stays a physical quantity, in metres");
     }
+}
+
+/* Every primary (non-derived) registry key that differs between two specs. Derived rows are
+ * skipped because they are consequences, not choices: a sweep of body.wheelbase legitimately
+ * moves cgToFront, yaw inertia and frontal area with it. */
+static int cv_primary_diff_count(const VehicleSpec *a, const VehicleSpec *b,
+                                 const char **firstName)
+{
+    int diffs = 0;
+    for (int p = 0; p < dev_params_count(); p++) {
+        const DevParameter *param = dev_param_at(p);
+        if (param->derived) continue;
+        const float va = dev_param_get(a, param);
+        const float vb = dev_param_get(b, param);
+        const float tol = (param->step > 0.0f) ? (0.25f * param->step) : 1e-5f;
+        if (fabsf(va - vb) > tol) {
+            if (diffs == 0 && firstName != NULL) *firstName = param->name;
+            diffs++;
+        }
+    }
+    return diffs;
 }
 
 static void scenario_corpus(void)
 {
     const int count = car_corpus_count();
     check(count >= 50, "the corpus holds at least 50 vehicles (have %d)", count);
+    check(count >= 90 && count <= 110,
+          "the completed corpus is approximately 100 vehicles (have %d)", count);
+
+    /* --- the corpus is a pure function of the index: asking twice gives the same fleet ---
+     * The sampled group is generated lazily by rejection sampling, which is exactly the kind
+     * of code that grows an order dependency by accident. */
+    {
+        int unstable = 0;
+        for (int i = 0; i < count; i++) {
+            VehicleSpec first, again;
+            if (!car_corpus_spec(i, &first)) { unstable++; continue; }
+            /* Ask for a later entry in between, so a cache that keyed on "last index" would
+             * be caught rather than flattered. */
+            VehicleSpec scratch;
+            (void)car_corpus_spec((i + 37) % count, &scratch);
+            if (!car_corpus_spec(i, &again)) { unstable++; continue; }
+            if (memcmp(&first, &again, sizeof(VehicleSpec)) != 0) {
+                if (unstable == 0) {
+                    char id[128];
+                    car_corpus_id(i, id, sizeof(id));
+                    printf("      corpus entry is not deterministic: %s\n", id);
+                }
+                unstable++;
+            }
+        }
+        check(unstable == 0, "every corpus entry is deterministic and order-independent");
+    }
 
     /* --- every entry is a valid, renderable car --- */
     {
@@ -5667,6 +5896,124 @@ static void scenario_corpus(void)
               "every sweep step differs from stock and from neighbouring steps on its axis");
     }
 
+    /* --- a sweep row varies EXACTLY ONE primary key ---
+     * This is the whole claim the sweep artifact makes. Comparing consecutive steps of the
+     * same axis is the direct test of it: whatever base a row is drawn on, only the axis key
+     * may move between its cars. */
+    {
+        int multiKey = 0;
+        for (int i = 1; i < count; i++) {
+            if (car_corpus_group(i) != CAR_CORPUS_SWEEP) continue;
+            if (car_corpus_group(i - 1) != CAR_CORPUS_SWEEP) continue;
+            const char *key = car_corpus_sweep_key(i);
+            const char *prevKey = car_corpus_sweep_key(i - 1);
+            if (key == NULL || prevKey == NULL || strcmp(key, prevKey) != 0) continue;
+
+            VehicleSpec cur, prev;
+            if (!car_corpus_spec(i, &cur) || !car_corpus_spec(i - 1, &prev)) {
+                multiKey++;
+                continue;
+            }
+            const char *firstDiff = NULL;
+            const int diffs = cv_primary_diff_count(&prev, &cur, &firstDiff);
+            if (diffs != 1 || firstDiff == NULL || strcmp(firstDiff, key) != 0) {
+                if (multiKey == 0) {
+                    char id[128];
+                    car_corpus_id(i, id, sizeof(id));
+                    printf("      sweep step varies %d primary key(s), first '%s',"
+                           " expected only '%s' (%s)\n",
+                           diffs, (firstDiff != NULL) ? firstDiff : "-", key, id);
+                }
+                multiKey++;
+            }
+        }
+        check(multiKey == 0, "each sweep row varies exactly one primary registry key");
+    }
+
+    /* --- the fleet actually spans the range the widened registry paid for ---
+     * A corpus of a hundred mid-size saloons would pass every distinctness assertion and
+     * still fail the point of the exercise. These bounds are the reference sheet's extremes:
+     * a kei car at one end, a bus or box truck at the other. */
+    {
+        float minMass = 1e9f, maxMass = -1e9f;
+        float minWb = 1e9f, maxWb = -1e9f;
+        float minWidth = 1e9f, maxWidth = -1e9f;
+        float minHeight = 1e9f, maxHeight = -1e9f;
+
+        for (int i = 0; i < count; i++) {
+            VehicleSpec spec;
+            if (!car_corpus_spec(i, &spec)) continue;
+            if (spec.massKg < minMass) minMass = spec.massKg;
+            if (spec.massKg > maxMass) maxMass = spec.massKg;
+            if (spec.wheelbaseM < minWb) minWb = spec.wheelbaseM;
+            if (spec.wheelbaseM > maxWb) maxWb = spec.wheelbaseM;
+            if (spec.widthOverallM < minWidth) minWidth = spec.widthOverallM;
+            if (spec.widthOverallM > maxWidth) maxWidth = spec.widthOverallM;
+            if (spec.heightOverallM < minHeight) minHeight = spec.heightOverallM;
+            if (spec.heightOverallM > maxHeight) maxHeight = spec.heightOverallM;
+        }
+
+        check(minMass <= 800.0f && maxMass >= 6000.0f,
+              "corpus mass spans kei to heavy commercial (%.0f .. %.0f kg)",
+              (double)minMass, (double)maxMass);
+        check(minWb <= 2.30f && maxWb >= 5.00f,
+              "corpus wheelbase spans kei to bus (%.2f .. %.2f m)",
+              (double)minWb, (double)maxWb);
+        check(minWidth <= 1.40f && maxWidth >= 2.20f,
+              "corpus width spans narrow to commercial (%.2f .. %.2f m)",
+              (double)minWidth, (double)maxWidth);
+        check(minHeight <= 1.20f && maxHeight >= 2.60f,
+              "corpus height spans supercar to box truck (%.2f .. %.2f m)",
+              (double)minHeight, (double)maxHeight);
+    }
+
+    /* --- the checked-in profiles are still the fleet the code generates ---
+     * tuning/corpus/ is an export for humans to read and diff, not a second source of truth.
+     * That only stays true if it is asserted: without this the files rot silently and the
+     * next reader trusts a stale one. Regenerate with
+     *     drifty_tests --generate-corpus tuning/corpus                                     */
+    {
+        int missing = 0, mismatched = 0;
+        const char *firstMissing = NULL;
+        static char firstMissingBuf[512];
+
+        for (int i = 0; i < count; i++) {
+            VehicleSpec expected, loaded;
+            char id[128], path[512];
+            if (!car_corpus_spec(i, &expected)) continue;
+            car_corpus_id(i, id, sizeof(id));
+            snprintf(path, sizeof(path), "tuning/corpus/%s/%s.txt",
+                     car_corpus_group_name(car_corpus_group(i)), id);
+
+            vehicle_spec_set_default(&loaded);
+            if (!dev_params_load(&loaded, path, NULL, NULL, NULL)) {
+                if (missing == 0) {
+                    snprintf(firstMissingBuf, sizeof(firstMissingBuf), "%s", path);
+                    firstMissing = firstMissingBuf;
+                }
+                missing++;
+                continue;
+            }
+
+            const char *firstDiff = NULL;
+            if (cv_primary_diff_count(&expected, &loaded, &firstDiff) != 0) {
+                if (mismatched == 0) {
+                    printf("      exported profile does not round-trip: %s (first '%s')\n",
+                           path, (firstDiff != NULL) ? firstDiff : "?");
+                }
+                mismatched++;
+            }
+        }
+
+        if (missing > 0) {
+            printf("      %d corpus profile(s) missing, first '%s' —"
+                   " run: drifty_tests --generate-corpus tuning/corpus\n",
+                   missing, (firstMissing != NULL) ? firstMissing : "?");
+        }
+        check(missing == 0, "every corpus vehicle has a checked-in tuning profile");
+        check(mismatched == 0, "every checked-in corpus profile round-trips to its spec");
+    }
+
     /* --- all-pairs distinctness on the colour-blind label maps --- */
     {
         const CarRasterInfo canvas = cv_shared_canvas(CV_TEST_PX_PER_M);
@@ -5712,23 +6059,46 @@ static void scenario_corpus(void)
                            " largest feature gap %.4f m in '%s'\n",
                            ida, idb, (double)worstDiff, (double)linf,
                            car_visual_signature_component_name(worstComponent));
+                    /* A pass/fail line cannot say WHY two cars look alike. The bundle can:
+                     * both rasters, the diff, both specs as loadable profiles, and the
+                     * signature components that came closest. */
+                    if (g_bundlesEnabled) {
+                        (void)car_sheet_write_pair_failure(CV_FAILURE_DIR, worstA, worstB,
+                                                           CV_TEST_PX_PER_M);
+                    }
                 }
                 check(worstDiff >= CV_MIN_PIXEL_DIFF,
                       "every corpus pair differs in >= %.1f%% of pixels (closest %.2f%%)",
                       (double)(CV_MIN_PIXEL_DIFF * 100.0f), (double)(worstDiff * 100.0f));
 
                 /* The diagnostic vector must agree that the closest pair is separable, so a
-                 * failure can always name a feature rather than only a pixel count. */
-                float worstLinf = 1e9f;
+                 * failure can always name a feature rather than only a pixel count. L-infinity
+                 * asks for one clearly different feature; L2 asks that the cars are not merely
+                 * a rounding error apart across the whole vector. */
+                float worstLinf = 1e9f, worstL2 = 1e9f;
+                int l2A = -1, l2B = -1;
                 for (int i = 0; i < count; i++) {
                     for (int j = i + 1; j < count; j++) {
                         const float linf = cv_signature_linf(&visuals[i], &visuals[j], NULL);
                         if (linf < worstLinf) worstLinf = linf;
+                        const float l2 = cv_signature_l2(&visuals[i], &visuals[j]);
+                        if (l2 < worstL2) { worstL2 = l2; l2A = i; l2B = j; }
                     }
                 }
                 check(worstLinf >= CV_MIN_LINF,
                       "every corpus pair differs by >= %.3f m in some feature (closest %.4f m)",
                       (double)CV_MIN_LINF, (double)worstLinf);
+
+                if (worstL2 < CV_MIN_L2 && l2A >= 0) {
+                    char ida[128], idb[128];
+                    car_corpus_id(l2A, ida, sizeof(ida));
+                    car_corpus_id(l2B, idb, sizeof(idb));
+                    printf("      closest signature pair '%s' vs '%s': L2 %.4f\n",
+                           ida, idb, (double)worstL2);
+                }
+                check(worstL2 >= CV_MIN_L2,
+                      "every corpus pair differs by L2 >= %.2f across the signature"
+                      " (closest %.4f)", (double)CV_MIN_L2, (double)worstL2);
             }
         }
         free(maps);
