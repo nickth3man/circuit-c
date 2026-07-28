@@ -76,6 +76,14 @@ mk_verify*.log
 .clangd
 opencode.json
 
+# Local vehicle-visual planning notes (not project documentation)
+ISSUE.md
+SPRITE_OVERHAUL.md
+
+# Reference sprite packs used only for human visual comparison during the
+# vehicle-appearance work. Not game assets; issue #7 forbids redistributing them.
+/resources/sprite_examples/
+
 # BEGIN oh-my-opencode-slim clonedeps
 .slim/*
 # END oh-my-opencode-slim clonedeps
