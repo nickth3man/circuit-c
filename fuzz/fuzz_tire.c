@@ -51,16 +51,15 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
     /* sin(C * atan(B * 0)) is exactly zero for every B and C. */
     if (tire_normalized_curve(stiffness, shape, 0.0f) != 0.0f) abort();
 
-    const float lateralForceN = tire_lateral_force_n(slipAngle, load, stiffness, shape,
-                                                     friction);
-    const float longitudinalForceN = tire_longitudinal_force_n(slipRatio, load, stiffness,
-                                                               shape, friction);
+    const float lateralForceN =
+        tire_lateral_force_n(slipAngle, load, stiffness, shape, friction);
+    const float longitudinalForceN =
+        tire_longitudinal_force_n(slipRatio, load, stiffness, shape, friction);
     if (!isfinite(lateralForceN) || !isfinite(longitudinalForceN)) abort();
 
-    const float slip = tire_slip_ratio(bounded_float(data + 0, -400.0f, 400.0f),
-                                       bounded_float(data + 4, 0.01f, 1.0f),
-                                       bounded_float(data + 8, -150.0f, 150.0f),
-                                       SLIP_SPEED_EPSILON_MPS, SLIP_RATIO_CLAMP);
+    const float slip = tire_slip_ratio(
+        bounded_float(data + 0, -400.0f, 400.0f), bounded_float(data + 4, 0.01f, 1.0f),
+        bounded_float(data + 8, -150.0f, 150.0f), SLIP_SPEED_EPSILON_MPS, SLIP_RATIO_CLAMP);
     if (!isfinite(slip) || fabsf(slip) > SLIP_RATIO_CLAMP + 1e-4f) abort();
 
     /* The friction ellipse: the limited pair must sit inside it, and the reported usage must
@@ -70,9 +69,8 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
     float limitedLongitudinalN = 0.0f;
     float limitedLateralN = 0.0f;
     float usage = -1.0f;
-    tire_apply_combined_limit(longitudinalForceN, lateralForceN,
-                              longitudinalLimitN, lateralLimitN,
-                              &limitedLongitudinalN, &limitedLateralN, &usage);
+    tire_apply_combined_limit(longitudinalForceN, lateralForceN, longitudinalLimitN,
+                              lateralLimitN, &limitedLongitudinalN, &limitedLateralN, &usage);
 
     if (!isfinite(limitedLongitudinalN) || !isfinite(limitedLateralN) || !isfinite(usage)) {
         abort();

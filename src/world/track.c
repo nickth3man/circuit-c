@@ -12,8 +12,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-
-
 /* --------------- straight-line helpers ---------------------------------------------------- */
 
 /* Squared distance from point p to the finite line segment a→b. */
@@ -47,11 +45,14 @@ static float nearest_centerline_distance_sq(const TrackNode *nodes, int count, V
                                             int *closestIdx)
 {
     float best = 1e30f;
-    int   bestIdx = 0;
+    int bestIdx = 0;
     for (int i = 0; i < count; i++) {
         const int j = (i + 1) % count;
         const float dSq = point_to_segment_sq(point, nodes[i].centerM, nodes[j].centerM);
-        if (dSq < best) { best = dSq; bestIdx = i; }
+        if (dSq < best) {
+            best = dSq;
+            bestIdx = i;
+        }
     }
     if (closestIdx != NULL) *closestIdx = bestIdx;
     return best;
@@ -68,24 +69,29 @@ void track_init(Track *track)
     /* Parking lot: 200m x 150m open rectangle centred at origin. */
     track->isParkingLot = true;
     track->lotMinXM = -100.0f;
-    track->lotMaxXM =  100.0f;
-    track->lotMinYM =  -75.0f;
-    track->lotMaxYM =   75.0f;
+    track->lotMaxXM = 100.0f;
+    track->lotMinYM = -75.0f;
+    track->lotMaxYM = 75.0f;
 
-    /* Perimeter centreline for collision barriers. 4 sides in clockwise order:
+/* Perimeter centreline for collision barriers. 4 sides in clockwise order:
      * bottom (L→R), right (B→T), top (R→L), left (T→B), plus a closing node. */
-    #define LOT_NODES 5
-    track->count  = LOT_NODES;
-    track->nodes  = (TrackNode *)calloc((size_t)track->count, sizeof(TrackNode));
+#define LOT_NODES 5
+    track->count = LOT_NODES;
+    track->nodes = (TrackNode *)calloc((size_t)track->count, sizeof(TrackNode));
     if (!track->nodes) return;
 
-    const float hw = 4.0f;  /* wide enough so inner/outer barriers don't sandwich the car */
+    const float hw = 4.0f; /* wide enough so inner/outer barriers don't sandwich the car */
     int i = 0;
-    track->nodes[i++] = (TrackNode){ { track->lotMinXM, track->lotMinYM }, hw, SURFACE_ASPHALT };
-    track->nodes[i++] = (TrackNode){ { track->lotMaxXM, track->lotMinYM }, hw, SURFACE_ASPHALT };
-    track->nodes[i++] = (TrackNode){ { track->lotMaxXM, track->lotMaxYM }, hw, SURFACE_ASPHALT };
-    track->nodes[i++] = (TrackNode){ { track->lotMinXM, track->lotMaxYM }, hw, SURFACE_ASPHALT };
-    track->nodes[i++] = (TrackNode){ { track->lotMinXM, track->lotMinYM }, hw, SURFACE_ASPHALT };
+    track->nodes[i++] =
+        (TrackNode){ { track->lotMinXM, track->lotMinYM }, hw, SURFACE_ASPHALT };
+    track->nodes[i++] =
+        (TrackNode){ { track->lotMaxXM, track->lotMinYM }, hw, SURFACE_ASPHALT };
+    track->nodes[i++] =
+        (TrackNode){ { track->lotMaxXM, track->lotMaxYM }, hw, SURFACE_ASPHALT };
+    track->nodes[i++] =
+        (TrackNode){ { track->lotMinXM, track->lotMaxYM }, hw, SURFACE_ASPHALT };
+    track->nodes[i++] =
+        (TrackNode){ { track->lotMinXM, track->lotMinYM }, hw, SURFACE_ASPHALT };
 
     track->offTrackSurfaceId = SURFACE_GRASS;
     track->nextCheckpoint = 0;
@@ -120,12 +126,12 @@ SurfaceId Track_SurfaceAt(const Track *track, Vector2 pointM)
         if (pointM.x >= track->lotMinXM && pointM.x <= track->lotMaxXM &&
             pointM.y >= track->lotMinYM && pointM.y <= track->lotMaxYM)
             return SURFACE_ASPHALT;
-        return track->offTrackSurfaceId;  /* grass */
+        return track->offTrackSurfaceId; /* grass */
     }
 
     int closestIdx = 0;
-    const float dSq = nearest_centerline_distance_sq(track->nodes, track->count, pointM,
-                                                     &closestIdx);
+    const float dSq =
+        nearest_centerline_distance_sq(track->nodes, track->count, pointM, &closestIdx);
     const TrackNode *seg = &track->nodes[closestIdx];
 
     if (dSq <= seg->halfWidthM * seg->halfWidthM) {
@@ -150,8 +156,7 @@ static float cross_z(Vector2 a, Vector2 b)
 /* Orientation test: > 0 if points a,b,c are counterclockwise. */
 static float orient(Vector2 a, Vector2 b, Vector2 c)
 {
-    return cross_z((Vector2){ b.x - a.x, b.y - a.y },
-                   (Vector2){ c.x - a.x, c.y - a.y });
+    return cross_z((Vector2){ b.x - a.x, b.y - a.y }, (Vector2){ c.x - a.x, c.y - a.y });
 }
 
 /* Standard segment-segment intersection test (including endpoints). */
@@ -220,10 +225,8 @@ bool track_update_checkpoints(Track *track, Vector2 prevPosM, Vector2 currPosM)
     const Vector2 perp = { -forward.y, forward.x };
 
     /* Gate endpoints span from centre ± halfWidth * perp. */
-    const Vector2 gateA = { node->centerM.x + perp.x * hw,
-                             node->centerM.y + perp.y * hw };
-    const Vector2 gateB = { node->centerM.x - perp.x * hw,
-                             node->centerM.y - perp.y * hw };
+    const Vector2 gateA = { node->centerM.x + perp.x * hw, node->centerM.y + perp.y * hw };
+    const Vector2 gateB = { node->centerM.x - perp.x * hw, node->centerM.y - perp.y * hw };
 
     /* Forward-only: the car's motion direction must have a positive component along the
      * track's forward direction so reverse driving cannot advance checkpoints. */

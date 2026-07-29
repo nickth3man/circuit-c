@@ -47,7 +47,7 @@ int car_corpus_count(void);
 bool car_corpus_spec(int index, VehicleSpec *out);
 
 CarCorpusGroup car_corpus_group(int index);
-const char    *car_corpus_group_name(CarCorpusGroup group);
+const char *car_corpus_group_name(CarCorpusGroup group);
 
 /* A stable, filesystem-safe identifier, e.g. "sweep_wheel_radius_2". Formatted into the
  * caller's buffer rather than returned as a pointer so there is no shared static state. */
@@ -73,7 +73,7 @@ const char *car_corpus_sweep_key(int index);
  * car_corpus_sweep_probe() writes the stock spec with `key` moved to the value step `step`
  * would take, using the same exclusion window as the real generator, and returns false for an
  * unknown key or an out-of-range step. */
-int  car_corpus_sweep_steps(void);
+int car_corpus_sweep_steps(void);
 bool car_corpus_sweep_probe(const char *key, int step, VehicleSpec *out);
 
 #endif /* DRIFTY_CAR_CORPUS_H */

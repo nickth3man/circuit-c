@@ -16,9 +16,9 @@
 
 #include "core/math_utils.h"
 
-static int  g_checks   = 0;
-static int  g_failures = 0;
-static bool g_verbose  = false;
+static int g_checks = 0;
+static int g_failures = 0;
+static bool g_verbose = false;
 
 /*
  * Failure-bundle context.
@@ -28,12 +28,12 @@ static bool g_verbose  = false;
  * artifacts/failure-<scenario>-<timestamp>/ from whatever was registered, so the failure
  * arrives with its input timeline and tunables attached instead of as a line of text.
  */
-static char        g_firstFailureText[512];
+static char g_firstFailureText[512];
 static const Game *g_bundleGame = NULL;
-static char        g_bundleTelemetryPath[256];
-static bool        g_bundleHasTelemetry = false;
-static uint32_t    g_bundleSeed = 0u;
-static bool        g_bundlesEnabled = true;
+static char g_bundleTelemetryPath[256];
+static bool g_bundleHasTelemetry = false;
+static uint32_t g_bundleSeed = 0u;
+static bool g_bundlesEnabled = true;
 
 /* The path is copied, not referenced: the runner writes the bundle after the scenario
  * function has returned, when a caller's stack buffer no longer exists. */
@@ -90,16 +90,16 @@ void check(bool ok, const char *fmt, ...)
 void check_near(double actual, double expected, double tolerance, const char *what)
 {
     const double delta = fabs(actual - expected);
-    check(delta <= tolerance, "%s (got %.9g, expected %.9g, |delta| %.3g > %.3g)",
-          what, actual, expected, delta, tolerance);
+    check(delta <= tolerance, "%s (got %.9g, expected %.9g, |delta| %.3g > %.3g)", what, actual,
+          expected, delta, tolerance);
 }
 
 /* Angular comparison that treats -PI and +PI as equal. */
 void check_near_angle(float actual, float expected, float tolerance, const char *what)
 {
     const float delta = fabsf(wrap_angle(actual - expected));
-    check(delta <= tolerance, "%s (got %.9g rad, expected %.9g rad, |delta| %.3g)",
-          what, (double)actual, (double)expected, (double)delta);
+    check(delta <= tolerance, "%s (got %.9g rad, expected %.9g rad, |delta| %.3g)", what,
+          (double)actual, (double)expected, (double)delta);
 }
 
 Game *alloc_game(void)
@@ -130,12 +130,12 @@ bool test_harness_bundles_enabled(void)
 TestHarnessSnapshot test_harness_snapshot(void)
 {
     TestHarnessSnapshot snapshot;
-    snapshot.checks              = g_checks;
-    snapshot.failures            = g_failures;
-    snapshot.firstFailureText    = g_firstFailureText;
-    snapshot.bundleGame          = g_bundleGame;
+    snapshot.checks = g_checks;
+    snapshot.failures = g_failures;
+    snapshot.firstFailureText = g_firstFailureText;
+    snapshot.bundleGame = g_bundleGame;
     snapshot.bundleTelemetryPath = g_bundleTelemetryPath;
-    snapshot.bundleHasTelemetry  = g_bundleHasTelemetry;
-    snapshot.bundleSeed          = g_bundleSeed;
+    snapshot.bundleHasTelemetry = g_bundleHasTelemetry;
+    snapshot.bundleSeed = g_bundleSeed;
     return snapshot;
 }

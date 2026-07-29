@@ -14,10 +14,11 @@ static float signf_nonzero(float value)
 
 float drivetrain_engine_torque_at_rpm(const VehicleSpec *spec, float engineRpm)
 {
-    if (spec == NULL || !(isfinite(spec->engineIdleRpm) &&
-                          isfinite(spec->engineRedlineRpm) &&
-                          spec->engineRedlineRpm > spec->engineIdleRpm) ||
-        !isfinite(engineRpm)) return 0.0f;
+    if (spec == NULL ||
+        !(isfinite(spec->engineIdleRpm) && isfinite(spec->engineRedlineRpm) &&
+          spec->engineRedlineRpm > spec->engineIdleRpm) ||
+        !isfinite(engineRpm))
+        return 0.0f;
 
     const float clampedRpm = clampf(engineRpm, spec->engineIdleRpm, spec->engineRedlineRpm);
     const float position = (clampedRpm - spec->engineIdleRpm) /
@@ -28,15 +29,15 @@ float drivetrain_engine_torque_at_rpm(const VehicleSpec *spec, float engineRpm)
     if (lower >= ENGINE_CURVE_POINTS - 1) {
         return spec->engineTorqueCurveNm[ENGINE_CURVE_POINTS - 1];
     }
-    return lerpf(spec->engineTorqueCurveNm[lower],
-                 spec->engineTorqueCurveNm[lower + 1],
+    return lerpf(spec->engineTorqueCurveNm[lower], spec->engineTorqueCurveNm[lower + 1],
                  position - (float)lower);
 }
 
 float drivetrain_total_gear_ratio(const VehicleSpec *spec, int selectedGear)
 {
     if (spec == NULL || spec->gearCount <= 0 || spec->gearCount > MAX_GEARS ||
-        !isfinite(spec->finalDriveRatio) || !(spec->finalDriveRatio > 0.0f)) return 0.0f;
+        !isfinite(spec->finalDriveRatio) || !(spec->finalDriveRatio > 0.0f))
+        return 0.0f;
     if (selectedGear == 0) return 0.0f;
     if (selectedGear == -1) {
         if (!(isfinite(spec->reverseGearRatio) && spec->reverseGearRatio > 0.0f)) return 0.0f;
@@ -52,20 +53,16 @@ float drivetrain_engine_rpm(const VehicleSpec *spec, int selectedGear,
     if (spec == NULL || !isfinite(rearAngularVelocityRadS)) return 0.0f;
     const float totalGear = drivetrain_total_gear_ratio(spec, selectedGear);
     if (totalGear == 0.0f) return spec->engineIdleRpm;
-    const float rpm = fabsf(rearAngularVelocityRadS) * fabsf(totalGear) *
-                      60.0f / DRIFTY_TWO_PI;
+    const float rpm = fabsf(rearAngularVelocityRadS) * fabsf(totalGear) * 60.0f / DRIFTY_TWO_PI;
     return clampf(rpm, spec->engineIdleRpm, spec->engineRedlineRpm);
 }
 
-DrivetrainTorques drivetrain_calculate_torques(const VehicleSpec *spec,
-                                               int selectedGear,
+DrivetrainTorques drivetrain_calculate_torques(const VehicleSpec *spec, int selectedGear,
                                                float rearOmegaLeftRadS,
                                                float rearOmegaRightRadS,
                                                float rearTireReactionTorqueLeftNm,
                                                float rearTireReactionTorqueRightNm,
-                                               float throttle,
-                                               float brake,
-                                               float handbrake)
+                                               float throttle, float brake, float handbrake)
 {
     DrivetrainTorques out;
     memset(&out, 0, sizeof(out));
@@ -79,13 +76,12 @@ DrivetrainTorques drivetrain_calculate_torques(const VehicleSpec *spec,
 
     /* Engine RPM is derived from the average rear omega for consistency across all diff
      * modes (the engine is connected to the differential, not individual wheels). */
-    const float rearAngularVelocityRadS =
-        0.5f * (rearOmegaLeftRadS + rearOmegaRightRadS);
+    const float rearAngularVelocityRadS = 0.5f * (rearOmegaLeftRadS + rearOmegaRightRadS);
     out.totalGearRatio = drivetrain_total_gear_ratio(spec, selectedGear);
     const float rpm = drivetrain_engine_rpm(spec, selectedGear, rearAngularVelocityRadS);
     const float curveTorqueNm = drivetrain_engine_torque_at_rpm(spec, rpm);
 
-    /* The simple engine model has no clutch state. Suppressing closed-throttle engine
+/* The simple engine model has no clutch state. Suppressing closed-throttle engine
      * braking while the axle is stationary prevents idle torque from launching the car
      * backwards; once rotating, the documented signed gear ratio makes it oppose motion.
      *
@@ -96,39 +92,39 @@ DrivetrainTorques drivetrain_calculate_torques(const VehicleSpec *spec,
      * exciting a two-tick limit cycle between engine braking and tire reaction. The fade
      * is linear from zero at idle to full at ENGINE_BRAKING_FADE_RPM_SPAN above it, using
      * the UNCLAMPED driveline rpm so the fade engages exactly where the idle clamp does. */
-    #define ENGINE_BRAKING_FADE_RPM_SPAN 300.0f
+#define ENGINE_BRAKING_FADE_RPM_SPAN 300.0f
     float engineBrakingScale = 0.0f;
     if (fabsf(rearAngularVelocityRadS) > 1e-4f && out.totalGearRatio != 0.0f) {
-        const float rawRpm = fabsf(rearAngularVelocityRadS) * fabsf(out.totalGearRatio) *
-                             60.0f / DRIFTY_TWO_PI;
-        engineBrakingScale = clampf((rawRpm - spec->engineIdleRpm) /
-                                    ENGINE_BRAKING_FADE_RPM_SPAN, 0.0f, 1.0f);
+        const float rawRpm =
+            fabsf(rearAngularVelocityRadS) * fabsf(out.totalGearRatio) * 60.0f / DRIFTY_TWO_PI;
+        engineBrakingScale =
+            clampf((rawRpm - spec->engineIdleRpm) / ENGINE_BRAKING_FADE_RPM_SPAN, 0.0f, 1.0f);
     }
     const float engineBrakingNm =
         engineBrakingScale * (1.0f - throttle) * spec->engineBrakingTorqueNm;
     out.engineTorqueNm = throttle * curveTorqueNm - engineBrakingNm;
-    out.drivelineTorqueNm = out.engineTorqueNm * out.totalGearRatio *
-                            spec->drivetrainEfficiency;
+    out.drivelineTorqueNm =
+        out.engineTorqueNm * out.totalGearRatio * spec->drivetrainEfficiency;
 
     /* Baseline: equal torque split (LOCKED and OPEN). */
-    float driveTL = out.drivelineTorqueNm * 0.5f;
-    float driveTR = out.drivelineTorqueNm * 0.5f;
+    const float halfDrivelineTorqueNm = out.drivelineTorqueNm * 0.5f;
+    float driveTL = halfDrivelineTorqueNm;
+    float driveTR = halfDrivelineTorqueNm;
 
     if (diffMode == DIFF_LSD) {
         /* Torque-biasing clutch: the LSD transfers torque from the faster wheel to the
          * slower wheel, limited by the grip of the wheel with less traction. */
         const float dOmega = rearOmegaLeftRadS - rearOmegaRightRadS;
         if (fabsf(dOmega) > DIFF_OMEGA_EPSILON_RAD_S) {
-            const float gripTorqueMin =
-                fminf(fabsf(rearTireReactionTorqueLeftNm),
-                      fabsf(rearTireReactionTorqueRightNm));
+            const float gripTorqueMin = fminf(fabsf(rearTireReactionTorqueLeftNm),
+                                              fabsf(rearTireReactionTorqueRightNm));
             const float capacity = spec->differentialPreloadNm +
-                (spec->differentialBiasRatio - 1.0f) * gripTorqueMin;
+                                   (spec->differentialBiasRatio - 1.0f) * gripTorqueMin;
             const float dT = fminf(capacity, fabsf(out.drivelineTorqueNm * 0.5f));
-            if (dOmega > 0.0f) {  /* left faster → bias torque to right */
+            if (dOmega > 0.0f) { /* left faster → bias torque to right */
                 driveTL -= dT;
                 driveTR += dT;
-            } else {              /* right faster → bias torque to left */
+            } else { /* right faster → bias torque to left */
                 driveTL += dT;
                 driveTR -= dT;
             }
@@ -138,10 +134,9 @@ DrivetrainTorques drivetrain_calculate_torques(const VehicleSpec *spec,
     out.driveTorqueNm[WHEEL_REAR_LEFT] = driveTL;
     out.driveTorqueNm[WHEEL_REAR_RIGHT] = driveTR;
 
-    const float frontServiceTotalNm = brake * spec->maxBrakeTorqueNm *
-                                      spec->brakeBiasFront;
-    const float rearServiceTotalNm = brake * spec->maxBrakeTorqueNm *
-                                     (1.0f - spec->brakeBiasFront);
+    const float frontServiceTotalNm = brake * spec->maxBrakeTorqueNm * spec->brakeBiasFront;
+    const float rearServiceTotalNm =
+        brake * spec->maxBrakeTorqueNm * (1.0f - spec->brakeBiasFront);
     out.serviceBrakeTorqueNm[WHEEL_FRONT_LEFT] = frontServiceTotalNm * 0.5f;
     out.serviceBrakeTorqueNm[WHEEL_FRONT_RIGHT] = frontServiceTotalNm * 0.5f;
     out.serviceBrakeTorqueNm[WHEEL_REAR_LEFT] = rearServiceTotalNm * 0.5f;
@@ -151,32 +146,24 @@ DrivetrainTorques drivetrain_calculate_torques(const VehicleSpec *spec,
     return out;
 }
 
-float drivetrain_integrate_wheel(float angularVelocityRadS,
-                                 float wheelLongitudinalVelocityMps,
-                                 float driveTorqueNm,
-                                 float serviceBrakeTorqueNm,
-                                 float handbrakeTorqueNm,
-                                 float tireLongitudinalForceN,
-                                 float wheelRadiusM,
-                                 float wheelInertiaKgM2,
-                                 float dt,
+float drivetrain_integrate_wheel(float angularVelocityRadS, float wheelLongitudinalVelocityMps,
+                                 float driveTorqueNm, float serviceBrakeTorqueNm,
+                                 float handbrakeTorqueNm, float tireLongitudinalForceN,
+                                 float wheelRadiusM, float wheelInertiaKgM2, float dt,
                                  bool *locked)
 {
     if (locked != NULL) *locked = false;
-    if (!(isfinite(angularVelocityRadS) &&
-          isfinite(wheelLongitudinalVelocityMps) &&
+    if (!(isfinite(angularVelocityRadS) && isfinite(wheelLongitudinalVelocityMps) &&
           isfinite(driveTorqueNm) && isfinite(serviceBrakeTorqueNm) &&
           isfinite(handbrakeTorqueNm) && isfinite(tireLongitudinalForceN) &&
-          isfinite(wheelRadiusM) && wheelRadiusM > 0.0f &&
-          isfinite(wheelInertiaKgM2) && wheelInertiaKgM2 > 0.0f &&
-          isfinite(dt) && dt > 0.0f)) return 0.0f;
+          isfinite(wheelRadiusM) && wheelRadiusM > 0.0f && isfinite(wheelInertiaKgM2) &&
+          wheelInertiaKgM2 > 0.0f && isfinite(dt) && dt > 0.0f))
+        return 0.0f;
 
-    const float brakeMagnitudeNm = fmaxf(serviceBrakeTorqueNm, 0.0f) +
-                                   fmaxf(handbrakeTorqueNm, 0.0f);
-    if (brakeMagnitudeNm > 0.0f &&
-        fabsf(angularVelocityRadS) <= 1e-4f &&
-        fabsf(wheelLongitudinalVelocityMps) <= 1e-4f &&
-        fabsf(driveTorqueNm) <= 1e-4f &&
+    const float brakeMagnitudeNm =
+        fmaxf(serviceBrakeTorqueNm, 0.0f) + fmaxf(handbrakeTorqueNm, 0.0f);
+    if (brakeMagnitudeNm > 0.0f && fabsf(angularVelocityRadS) <= 1e-4f &&
+        fabsf(wheelLongitudinalVelocityMps) <= 1e-4f && fabsf(driveTorqueNm) <= 1e-4f &&
         fabsf(tireLongitudinalForceN) <= 1e-4f) {
         if (locked != NULL) *locked = true;
         return 0.0f;
@@ -184,12 +171,9 @@ float drivetrain_integrate_wheel(float angularVelocityRadS,
     float brakeDirection = signf_nonzero(angularVelocityRadS);
     if (brakeDirection == 0.0f) brakeDirection = signf_nonzero(wheelLongitudinalVelocityMps);
 
-    const float nonBrakeTorqueNm = driveTorqueNm -
-                                   tireLongitudinalForceN * wheelRadiusM;
-    const float netTorqueNm = nonBrakeTorqueNm -
-                              brakeMagnitudeNm * brakeDirection;
-    float next = angularVelocityRadS +
-                 netTorqueNm / wheelInertiaKgM2 * dt;
+    const float nonBrakeTorqueNm = driveTorqueNm - tireLongitudinalForceN * wheelRadiusM;
+    const float netTorqueNm = nonBrakeTorqueNm - brakeMagnitudeNm * brakeDirection;
+    float next = angularVelocityRadS + netTorqueNm / wheelInertiaKgM2 * dt;
 
     if (brakeMagnitudeNm > 0.0f && brakeDirection != 0.0f &&
         driveTorqueNm * brakeDirection <= brakeMagnitudeNm &&
@@ -205,8 +189,7 @@ float drivetrain_integrate_wheel(float angularVelocityRadS,
             next = rollingOmega;
         }
     }
-    if (brakeMagnitudeNm == 0.0f &&
-        driveTorqueNm * angularVelocityRadS < 0.0f &&
+    if (brakeMagnitudeNm == 0.0f && driveTorqueNm * angularVelocityRadS < 0.0f &&
         angularVelocityRadS * next < 0.0f) {
         next = 0.0f;
     }
@@ -245,8 +228,8 @@ float drivetrain_integrate_wheel(float angularVelocityRadS,
      * speed and lock it, and drive torque may still break it loose into wheelspin.
      */
     const float rollingOmega = wheelLongitudinalVelocityMps / wheelRadiusM;
-    const bool driveCanSpinUp = (rollingOmega >= 0.0f) ? (driveTorqueNm > 0.0f)
-                                                       : (driveTorqueNm < 0.0f);
+    const bool driveCanSpinUp =
+        (rollingOmega >= 0.0f) ? (driveTorqueNm > 0.0f) : (driveTorqueNm < 0.0f);
     if (!driveCanSpinUp) {
         if (rollingOmega >= 0.0f) {
             next = fminf(next, fmaxf(angularVelocityRadS, rollingOmega));
@@ -257,21 +240,18 @@ float drivetrain_integrate_wheel(float angularVelocityRadS,
     return isfinite(next) ? next : 0.0f;
 }
 
-bool drivetrain_wheel_equilibrium_omega(float driveTorqueNm,
-                                        float wheelLongitudinalVelocityMps,
-                                        float wheelRadiusM,
-                                        float longitudinalLimitN,
+bool drivetrain_wheel_equilibrium_omega(float driveTorqueNm, float wheelLongitudinalVelocityMps,
+                                        float wheelRadiusM, float longitudinalLimitN,
                                         float tireBLong, float tireCLong,
-                                        float slipSpeedEpsilonMps,
-                                        float *equilibriumOmegaRadS)
+                                        float slipSpeedEpsilonMps, float *equilibriumOmegaRadS)
 {
     if (equilibriumOmegaRadS != NULL) *equilibriumOmegaRadS = 0.0f;
     if (!(isfinite(driveTorqueNm) && isfinite(wheelLongitudinalVelocityMps) &&
-          isfinite(wheelRadiusM) && wheelRadiusM > 0.0f &&
-          isfinite(longitudinalLimitN) && longitudinalLimitN > 0.0f &&
-          isfinite(tireBLong) && tireBLong > 0.0f &&
-          isfinite(tireCLong) && tireCLong > 0.0f &&
-          isfinite(slipSpeedEpsilonMps) && slipSpeedEpsilonMps > 0.0f)) return false;
+          isfinite(wheelRadiusM) && wheelRadiusM > 0.0f && isfinite(longitudinalLimitN) &&
+          longitudinalLimitN > 0.0f && isfinite(tireBLong) && tireBLong > 0.0f &&
+          isfinite(tireCLong) && tireCLong > 0.0f && isfinite(slipSpeedEpsilonMps) &&
+          slipSpeedEpsilonMps > 0.0f))
+        return false;
 
     const float normalized = driveTorqueNm / (wheelRadiusM * longitudinalLimitN);
     /* At or beyond the curve's peak there is no stable balance point: the reaction falls as

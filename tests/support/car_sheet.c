@@ -17,42 +17,42 @@
 #include "render/car_visual_raster.h"
 #include "core/config.h"
 #include "dev/dev_params.h"
-#include "game/telemetry.h"   /* telemetry_ensure_dir — the project's mkdir helper */
+#include "game/telemetry.h" /* telemetry_ensure_dir — the project's mkdir helper */
 #include "physics/vehicle.h"
 
 /* stb triggers a handful of the project's stricter warnings. It is vendored verbatim and is
  * not ours to fix (third_party/README.md), so the diagnostics are silenced for this include
  * only, not for the file. */
 #if defined(__GNUC__)
-#  pragma GCC diagnostic push
-#  pragma GCC diagnostic ignored "-Wmissing-prototypes"
-#  pragma GCC diagnostic ignored "-Wsign-compare"
-#  pragma GCC diagnostic ignored "-Wshadow"
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmissing-prototypes"
+#pragma GCC diagnostic ignored "-Wsign-compare"
+#pragma GCC diagnostic ignored "-Wshadow"
 #endif
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #define STBI_WRITE_NO_STDIO_DEPRECATION
 #include "stb/stb_image_write.h"
 #if defined(__GNUC__)
-#  pragma GCC diagnostic pop
+#pragma GCC diagnostic pop
 #endif
 
-#define SHEET_PAD_PX     2
-#define SHEET_COLS       5
-#define SHEET_ROWS       4
-#define SHEET_GAP_PX     6
-#define SHEET_MARGIN_PX  10
-#define SHEET_FONT_W     5
-#define SHEET_FONT_H     7
-#define SHEET_LABEL_H    22
+#define SHEET_PAD_PX 2
+#define SHEET_COLS 5
+#define SHEET_ROWS 4
+#define SHEET_GAP_PX 6
+#define SHEET_MARGIN_PX 10
+#define SHEET_FONT_W 5
+#define SHEET_FONT_H 7
+#define SHEET_LABEL_H 22
 /* Characters a caption must be able to show. The cell is otherwise sized by the largest car
  * in the corpus, which is narrow enough that ids and sweep values were being cut mid-word —
  * and an unreadable caption defeats the point of a sheet a human is meant to judge. */
-#define SHEET_MIN_CHARS  30
+#define SHEET_MIN_CHARS 30
 
 /* Opaque page / cell colours (RGBA). */
-static const unsigned char kPageBg[4]  = { 0x15, 0x18, 0x1d, 0xff };
-static const unsigned char kCellBg[4]  = { 0x1d, 0x21, 0x28, 0xff };
-static const unsigned char kNoteFg[4]  = { 0x98, 0xa0, 0xae, 0xff };
+static const unsigned char kPageBg[4] = { 0x15, 0x18, 0x1d, 0xff };
+static const unsigned char kCellBg[4] = { 0x1d, 0x21, 0x28, 0xff };
+static const unsigned char kNoteFg[4] = { 0x98, 0xa0, 0xae, 0xff };
 static const unsigned char kGroupFg[4] = { 0x6e, 0xcd, 0xeb, 0xff };
 
 float car_sheet_default_px_per_m(void)
@@ -64,101 +64,101 @@ float car_sheet_default_px_per_m(void)
 /* Minimal 5x7 glyphs for printable ASCII. Each glyph is five column bytes; bit 0 is the top
  * row. Missing code points render as a hollow box so a bad caption cannot silently vanish. */
 static const unsigned char kFont5x7[95][5] = {
-    /* 32 space */ {0x00,0x00,0x00,0x00,0x00},
-    /* 33 !     */ {0x00,0x00,0x5F,0x00,0x00},
-    /* 34 "     */ {0x00,0x07,0x00,0x07,0x00},
-    /* 35 #     */ {0x14,0x7F,0x14,0x7F,0x14},
-    /* 36 $     */ {0x24,0x2A,0x7F,0x2A,0x12},
-    /* 37 %     */ {0x23,0x13,0x08,0x64,0x62},
-    /* 38 &     */ {0x36,0x49,0x55,0x22,0x50},
-    /* 39 '     */ {0x00,0x05,0x03,0x00,0x00},
-    /* 40 (     */ {0x00,0x1C,0x22,0x41,0x00},
-    /* 41 )     */ {0x00,0x41,0x22,0x1C,0x00},
-    /* 42 *     */ {0x14,0x08,0x3E,0x08,0x14},
-    /* 43 +     */ {0x08,0x08,0x3E,0x08,0x08},
-    /* 44 ,     */ {0x00,0x50,0x30,0x00,0x00},
-    /* 45 -     */ {0x08,0x08,0x08,0x08,0x08},
-    /* 46 .     */ {0x00,0x60,0x60,0x00,0x00},
-    /* 47 /     */ {0x20,0x10,0x08,0x04,0x02},
-    /* 48 0     */ {0x3E,0x51,0x49,0x45,0x3E},
-    /* 49 1     */ {0x00,0x42,0x7F,0x40,0x00},
-    /* 50 2     */ {0x42,0x61,0x51,0x49,0x46},
-    /* 51 3     */ {0x21,0x41,0x45,0x4B,0x31},
-    /* 52 4     */ {0x18,0x14,0x12,0x7F,0x10},
-    /* 53 5     */ {0x27,0x45,0x45,0x45,0x39},
-    /* 54 6     */ {0x3C,0x4A,0x49,0x49,0x30},
-    /* 55 7     */ {0x01,0x71,0x09,0x05,0x03},
-    /* 56 8     */ {0x36,0x49,0x49,0x49,0x36},
-    /* 57 9     */ {0x06,0x49,0x49,0x29,0x1E},
-    /* 58 :     */ {0x00,0x36,0x36,0x00,0x00},
-    /* 59 ;     */ {0x00,0x56,0x36,0x00,0x00},
-    /* 60 <     */ {0x08,0x14,0x22,0x41,0x00},
-    /* 61 =     */ {0x14,0x14,0x14,0x14,0x14},
-    /* 62 >     */ {0x00,0x41,0x22,0x14,0x08},
-    /* 63 ?     */ {0x02,0x01,0x51,0x09,0x06},
-    /* 64 @     */ {0x32,0x49,0x79,0x41,0x3E},
-    /* 65 A     */ {0x7E,0x11,0x11,0x11,0x7E},
-    /* 66 B     */ {0x7F,0x49,0x49,0x49,0x36},
-    /* 67 C     */ {0x3E,0x41,0x41,0x41,0x22},
-    /* 68 D     */ {0x7F,0x41,0x41,0x22,0x1C},
-    /* 69 E     */ {0x7F,0x49,0x49,0x49,0x41},
-    /* 70 F     */ {0x7F,0x09,0x09,0x09,0x01},
-    /* 71 G     */ {0x3E,0x41,0x49,0x49,0x7A},
-    /* 72 H     */ {0x7F,0x08,0x08,0x08,0x7F},
-    /* 73 I     */ {0x00,0x41,0x7F,0x41,0x00},
-    /* 74 J     */ {0x20,0x40,0x41,0x3F,0x01},
-    /* 75 K     */ {0x7F,0x08,0x14,0x22,0x41},
-    /* 76 L     */ {0x7F,0x40,0x40,0x40,0x40},
-    /* 77 M     */ {0x7F,0x02,0x0C,0x02,0x7F},
-    /* 78 N     */ {0x7F,0x04,0x08,0x10,0x7F},
-    /* 79 O     */ {0x3E,0x41,0x41,0x41,0x3E},
-    /* 80 P     */ {0x7F,0x09,0x09,0x09,0x06},
-    /* 81 Q     */ {0x3E,0x41,0x51,0x21,0x5E},
-    /* 82 R     */ {0x7F,0x09,0x19,0x29,0x46},
-    /* 83 S     */ {0x46,0x49,0x49,0x49,0x31},
-    /* 84 T     */ {0x01,0x01,0x7F,0x01,0x01},
-    /* 85 U     */ {0x3F,0x40,0x40,0x40,0x3F},
-    /* 86 V     */ {0x1F,0x20,0x40,0x20,0x1F},
-    /* 87 W     */ {0x3F,0x40,0x38,0x40,0x3F},
-    /* 88 X     */ {0x63,0x14,0x08,0x14,0x63},
-    /* 89 Y     */ {0x07,0x08,0x70,0x08,0x07},
-    /* 90 Z     */ {0x61,0x51,0x49,0x45,0x43},
-    /* 91 [     */ {0x00,0x7F,0x41,0x41,0x00},
-    /* 92 \     */ {0x02,0x04,0x08,0x10,0x20},
-    /* 93 ]     */ {0x00,0x41,0x41,0x7F,0x00},
-    /* 94 ^     */ {0x04,0x02,0x01,0x02,0x04},
-    /* 95 _     */ {0x40,0x40,0x40,0x40,0x40},
-    /* 96 `     */ {0x00,0x01,0x02,0x04,0x00},
-    /* 97 a     */ {0x20,0x54,0x54,0x54,0x78},
-    /* 98 b     */ {0x7F,0x48,0x44,0x44,0x38},
-    /* 99 c     */ {0x38,0x44,0x44,0x44,0x20},
-    /* 100 d    */ {0x38,0x44,0x44,0x48,0x7F},
-    /* 101 e    */ {0x38,0x54,0x54,0x54,0x18},
-    /* 102 f    */ {0x08,0x7E,0x09,0x01,0x02},
-    /* 103 g    */ {0x0C,0x52,0x52,0x52,0x3E},
-    /* 104 h    */ {0x7F,0x08,0x04,0x04,0x78},
-    /* 105 i    */ {0x00,0x44,0x7D,0x40,0x00},
-    /* 106 j    */ {0x20,0x40,0x44,0x3D,0x00},
-    /* 107 k    */ {0x7F,0x10,0x28,0x44,0x00},
-    /* 108 l    */ {0x00,0x41,0x7F,0x40,0x00},
-    /* 109 m    */ {0x7C,0x04,0x18,0x04,0x78},
-    /* 110 n    */ {0x7C,0x08,0x04,0x04,0x78},
-    /* 111 o    */ {0x38,0x44,0x44,0x44,0x38},
-    /* 112 p    */ {0x7C,0x14,0x14,0x14,0x08},
-    /* 113 q    */ {0x08,0x14,0x14,0x18,0x7C},
-    /* 114 r    */ {0x7C,0x08,0x04,0x04,0x08},
-    /* 115 s    */ {0x48,0x54,0x54,0x54,0x24},
-    /* 116 t    */ {0x04,0x3F,0x44,0x40,0x20},
-    /* 117 u    */ {0x3C,0x40,0x40,0x20,0x7C},
-    /* 118 v    */ {0x1C,0x20,0x40,0x20,0x1C},
-    /* 119 w    */ {0x3C,0x40,0x30,0x40,0x3C},
-    /* 120 x    */ {0x44,0x28,0x10,0x28,0x44},
-    /* 121 y    */ {0x0C,0x50,0x50,0x50,0x3C},
-    /* 122 z    */ {0x44,0x64,0x54,0x4C,0x44},
-    /* 123 {    */ {0x00,0x08,0x36,0x41,0x00},
-    /* 124 |    */ {0x00,0x00,0x7F,0x00,0x00},
-    /* 125 }    */ {0x00,0x41,0x36,0x08,0x00},
-    /* 126 ~    */ {0x08,0x04,0x08,0x10,0x08},
+    /* 32 space */ { 0x00, 0x00, 0x00, 0x00, 0x00 },
+    /* 33 !     */ { 0x00, 0x00, 0x5F, 0x00, 0x00 },
+    /* 34 "     */ { 0x00, 0x07, 0x00, 0x07, 0x00 },
+    /* 35 #     */ { 0x14, 0x7F, 0x14, 0x7F, 0x14 },
+    /* 36 $     */ { 0x24, 0x2A, 0x7F, 0x2A, 0x12 },
+    /* 37 %     */ { 0x23, 0x13, 0x08, 0x64, 0x62 },
+    /* 38 &     */ { 0x36, 0x49, 0x55, 0x22, 0x50 },
+    /* 39 '     */ { 0x00, 0x05, 0x03, 0x00, 0x00 },
+    /* 40 (     */ { 0x00, 0x1C, 0x22, 0x41, 0x00 },
+    /* 41 )     */ { 0x00, 0x41, 0x22, 0x1C, 0x00 },
+    /* 42 *     */ { 0x14, 0x08, 0x3E, 0x08, 0x14 },
+    /* 43 +     */ { 0x08, 0x08, 0x3E, 0x08, 0x08 },
+    /* 44 ,     */ { 0x00, 0x50, 0x30, 0x00, 0x00 },
+    /* 45 -     */ { 0x08, 0x08, 0x08, 0x08, 0x08 },
+    /* 46 .     */ { 0x00, 0x60, 0x60, 0x00, 0x00 },
+    /* 47 /     */ { 0x20, 0x10, 0x08, 0x04, 0x02 },
+    /* 48 0     */ { 0x3E, 0x51, 0x49, 0x45, 0x3E },
+    /* 49 1     */ { 0x00, 0x42, 0x7F, 0x40, 0x00 },
+    /* 50 2     */ { 0x42, 0x61, 0x51, 0x49, 0x46 },
+    /* 51 3     */ { 0x21, 0x41, 0x45, 0x4B, 0x31 },
+    /* 52 4     */ { 0x18, 0x14, 0x12, 0x7F, 0x10 },
+    /* 53 5     */ { 0x27, 0x45, 0x45, 0x45, 0x39 },
+    /* 54 6     */ { 0x3C, 0x4A, 0x49, 0x49, 0x30 },
+    /* 55 7     */ { 0x01, 0x71, 0x09, 0x05, 0x03 },
+    /* 56 8     */ { 0x36, 0x49, 0x49, 0x49, 0x36 },
+    /* 57 9     */ { 0x06, 0x49, 0x49, 0x29, 0x1E },
+    /* 58 :     */ { 0x00, 0x36, 0x36, 0x00, 0x00 },
+    /* 59 ;     */ { 0x00, 0x56, 0x36, 0x00, 0x00 },
+    /* 60 <     */ { 0x08, 0x14, 0x22, 0x41, 0x00 },
+    /* 61 =     */ { 0x14, 0x14, 0x14, 0x14, 0x14 },
+    /* 62 >     */ { 0x00, 0x41, 0x22, 0x14, 0x08 },
+    /* 63 ?     */ { 0x02, 0x01, 0x51, 0x09, 0x06 },
+    /* 64 @     */ { 0x32, 0x49, 0x79, 0x41, 0x3E },
+    /* 65 A     */ { 0x7E, 0x11, 0x11, 0x11, 0x7E },
+    /* 66 B     */ { 0x7F, 0x49, 0x49, 0x49, 0x36 },
+    /* 67 C     */ { 0x3E, 0x41, 0x41, 0x41, 0x22 },
+    /* 68 D     */ { 0x7F, 0x41, 0x41, 0x22, 0x1C },
+    /* 69 E     */ { 0x7F, 0x49, 0x49, 0x49, 0x41 },
+    /* 70 F     */ { 0x7F, 0x09, 0x09, 0x09, 0x01 },
+    /* 71 G     */ { 0x3E, 0x41, 0x49, 0x49, 0x7A },
+    /* 72 H     */ { 0x7F, 0x08, 0x08, 0x08, 0x7F },
+    /* 73 I     */ { 0x00, 0x41, 0x7F, 0x41, 0x00 },
+    /* 74 J     */ { 0x20, 0x40, 0x41, 0x3F, 0x01 },
+    /* 75 K     */ { 0x7F, 0x08, 0x14, 0x22, 0x41 },
+    /* 76 L     */ { 0x7F, 0x40, 0x40, 0x40, 0x40 },
+    /* 77 M     */ { 0x7F, 0x02, 0x0C, 0x02, 0x7F },
+    /* 78 N     */ { 0x7F, 0x04, 0x08, 0x10, 0x7F },
+    /* 79 O     */ { 0x3E, 0x41, 0x41, 0x41, 0x3E },
+    /* 80 P     */ { 0x7F, 0x09, 0x09, 0x09, 0x06 },
+    /* 81 Q     */ { 0x3E, 0x41, 0x51, 0x21, 0x5E },
+    /* 82 R     */ { 0x7F, 0x09, 0x19, 0x29, 0x46 },
+    /* 83 S     */ { 0x46, 0x49, 0x49, 0x49, 0x31 },
+    /* 84 T     */ { 0x01, 0x01, 0x7F, 0x01, 0x01 },
+    /* 85 U     */ { 0x3F, 0x40, 0x40, 0x40, 0x3F },
+    /* 86 V     */ { 0x1F, 0x20, 0x40, 0x20, 0x1F },
+    /* 87 W     */ { 0x3F, 0x40, 0x38, 0x40, 0x3F },
+    /* 88 X     */ { 0x63, 0x14, 0x08, 0x14, 0x63 },
+    /* 89 Y     */ { 0x07, 0x08, 0x70, 0x08, 0x07 },
+    /* 90 Z     */ { 0x61, 0x51, 0x49, 0x45, 0x43 },
+    /* 91 [     */ { 0x00, 0x7F, 0x41, 0x41, 0x00 },
+    /* 92 \     */ { 0x02, 0x04, 0x08, 0x10, 0x20 },
+    /* 93 ]     */ { 0x00, 0x41, 0x41, 0x7F, 0x00 },
+    /* 94 ^     */ { 0x04, 0x02, 0x01, 0x02, 0x04 },
+    /* 95 _     */ { 0x40, 0x40, 0x40, 0x40, 0x40 },
+    /* 96 `     */ { 0x00, 0x01, 0x02, 0x04, 0x00 },
+    /* 97 a     */ { 0x20, 0x54, 0x54, 0x54, 0x78 },
+    /* 98 b     */ { 0x7F, 0x48, 0x44, 0x44, 0x38 },
+    /* 99 c     */ { 0x38, 0x44, 0x44, 0x44, 0x20 },
+    /* 100 d    */ { 0x38, 0x44, 0x44, 0x48, 0x7F },
+    /* 101 e    */ { 0x38, 0x54, 0x54, 0x54, 0x18 },
+    /* 102 f    */ { 0x08, 0x7E, 0x09, 0x01, 0x02 },
+    /* 103 g    */ { 0x0C, 0x52, 0x52, 0x52, 0x3E },
+    /* 104 h    */ { 0x7F, 0x08, 0x04, 0x04, 0x78 },
+    /* 105 i    */ { 0x00, 0x44, 0x7D, 0x40, 0x00 },
+    /* 106 j    */ { 0x20, 0x40, 0x44, 0x3D, 0x00 },
+    /* 107 k    */ { 0x7F, 0x10, 0x28, 0x44, 0x00 },
+    /* 108 l    */ { 0x00, 0x41, 0x7F, 0x40, 0x00 },
+    /* 109 m    */ { 0x7C, 0x04, 0x18, 0x04, 0x78 },
+    /* 110 n    */ { 0x7C, 0x08, 0x04, 0x04, 0x78 },
+    /* 111 o    */ { 0x38, 0x44, 0x44, 0x44, 0x38 },
+    /* 112 p    */ { 0x7C, 0x14, 0x14, 0x14, 0x08 },
+    /* 113 q    */ { 0x08, 0x14, 0x14, 0x18, 0x7C },
+    /* 114 r    */ { 0x7C, 0x08, 0x04, 0x04, 0x08 },
+    /* 115 s    */ { 0x48, 0x54, 0x54, 0x54, 0x24 },
+    /* 116 t    */ { 0x04, 0x3F, 0x44, 0x40, 0x20 },
+    /* 117 u    */ { 0x3C, 0x40, 0x40, 0x20, 0x7C },
+    /* 118 v    */ { 0x1C, 0x20, 0x40, 0x20, 0x1C },
+    /* 119 w    */ { 0x3C, 0x40, 0x30, 0x40, 0x3C },
+    /* 120 x    */ { 0x44, 0x28, 0x10, 0x28, 0x44 },
+    /* 121 y    */ { 0x0C, 0x50, 0x50, 0x50, 0x3C },
+    /* 122 z    */ { 0x44, 0x64, 0x54, 0x4C, 0x44 },
+    /* 123 {    */ { 0x00, 0x08, 0x36, 0x41, 0x00 },
+    /* 124 |    */ { 0x00, 0x00, 0x7F, 0x00, 0x00 },
+    /* 125 }    */ { 0x00, 0x41, 0x36, 0x08, 0x00 },
+    /* 126 ~    */ { 0x08, 0x04, 0x08, 0x10, 0x08 },
 };
 
 static void put_px(unsigned char *rgba, int stride, int x, int y, int w, int h,
@@ -172,8 +172,8 @@ static void put_px(unsigned char *rgba, int stride, int x, int y, int w, int h,
     p[3] = color[3];
 }
 
-static void fill_rect(unsigned char *rgba, int stride, int w, int h,
-                      int x0, int y0, int rw, int rh, const unsigned char color[4])
+static void fill_rect(unsigned char *rgba, int stride, int w, int h, int x0, int y0, int rw,
+                      int rh, const unsigned char color[4])
 {
     for (int y = y0; y < y0 + rh; y++) {
         for (int x = x0; x < x0 + rw; x++) {
@@ -182,8 +182,7 @@ static void fill_rect(unsigned char *rgba, int stride, int w, int h,
     }
 }
 
-static void blit_rgba(unsigned char *dst, int dstStride, int dstW, int dstH,
-                      int dx, int dy,
+static void blit_rgba(unsigned char *dst, int dstStride, int dstW, int dstH, int dx, int dy,
                       const unsigned char *src, int srcW, int srcH, int srcStride)
 {
     for (int y = 0; y < srcH; y++) {
@@ -192,9 +191,11 @@ static void blit_rgba(unsigned char *dst, int dstStride, int dstW, int dstH,
         for (int x = 0; x < srcW; x++) {
             const int tx = dx + x;
             if (tx < 0 || tx >= dstW) continue;
-            const unsigned char *s = src + ((size_t)y * (size_t)srcStride + (size_t)x) * CAR_RASTER_BPP;
+            const unsigned char *s =
+                src + ((size_t)y * (size_t)srcStride + (size_t)x) * CAR_RASTER_BPP;
             if (s[3] == 0) continue;
-            unsigned char *d = dst + ((size_t)ty * (size_t)dstStride + (size_t)tx) * CAR_RASTER_BPP;
+            unsigned char *d =
+                dst + ((size_t)ty * (size_t)dstStride + (size_t)tx) * CAR_RASTER_BPP;
             /* Source cars are drawn on a cleared buffer; overwrite rather than blend. */
             d[0] = s[0];
             d[1] = s[1];
@@ -204,12 +205,12 @@ static void blit_rgba(unsigned char *dst, int dstStride, int dstW, int dstH,
     }
 }
 
-static void draw_char(unsigned char *rgba, int stride, int w, int h,
-                      int x, int y, char c, const unsigned char color[4])
+static void draw_char(unsigned char *rgba, int stride, int w, int h, int x, int y, char c,
+                      const unsigned char color[4])
 {
     const unsigned char *glyph;
     if (c < 32 || c > 126) {
-        static const unsigned char box[5] = {0x7F, 0x41, 0x41, 0x41, 0x7F};
+        static const unsigned char box[5] = { 0x7F, 0x41, 0x41, 0x41, 0x7F };
         glyph = box;
     } else {
         glyph = kFont5x7[c - 32];
@@ -224,9 +225,8 @@ static void draw_char(unsigned char *rgba, int stride, int w, int h,
     }
 }
 
-static void draw_text(unsigned char *rgba, int stride, int w, int h,
-                      int x, int y, const char *text, int maxChars,
-                      const unsigned char color[4])
+static void draw_text(unsigned char *rgba, int stride, int w, int h, int x, int y,
+                      const char *text, int maxChars, const unsigned char color[4])
 {
     int drawn = 0;
     for (const char *p = text; p != NULL && *p != '\0' && drawn < maxChars; p++, drawn++) {
@@ -234,10 +234,11 @@ static void draw_text(unsigned char *rgba, int stride, int w, int h,
     }
 }
 
-static void write_index(FILE *out, int pageCount, int zoom, float pxPerM,
-                        int pageW, int pageH, int count)
+static void write_index(FILE *out, int pageCount, int zoom, float pxPerM, int pageW, int pageH,
+                        int count)
 {
-    fprintf(out,
+    fprintf(
+        out,
         "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n"
         "<title>Drifty — vehicle corpus</title>\n<style>\n"
         "  body { background:#15181d; color:#e8eaee; font:14px/1.5 system-ui,sans-serif;"
@@ -255,9 +256,10 @@ static void write_index(FILE *out, int pageCount, int zoom, float pxPerM,
         count, (double)pxPerM, zoom);
 
     for (int p = 1; p <= pageCount; p++) {
-        fprintf(out, "<h2>Page %d / %d</h2>\n"
-                     "<img class=\"page\" src=\"page_%d.png\" width=\"%d\" height=\"%d\""
-                     " alt=\"corpus contact sheet page %d\">\n",
+        fprintf(out,
+                "<h2>Page %d / %d</h2>\n"
+                "<img class=\"page\" src=\"page_%d.png\" width=\"%d\" height=\"%d\""
+                " alt=\"corpus contact sheet page %d\">\n",
                 p, pageCount, p, pageW * zoom, pageH * zoom, p);
     }
     fputs("</body>\n</html>\n", out);
@@ -284,14 +286,16 @@ bool car_sheet_write(const char *outDir, float pxPerM, int zoom)
         const CarRasterInfo info = car_raster_info(&visual, pxPerM, SHEET_PAD_PX);
         /* Rotated nose-up, so width and height swap. */
         if (info.height > artW) artW = info.height;
-        if (info.width  > artH) artH = info.width;
+        if (info.width > artH) artH = info.width;
     }
 
     const int minCellW = 4 + SHEET_MIN_CHARS * (SHEET_FONT_W + 1);
     const int cellW = (artW > minCellW) ? artW : minCellW;
     const int cellH = artH + SHEET_LABEL_H;
-    const int pageW = SHEET_MARGIN_PX * 2 + SHEET_COLS * cellW + (SHEET_COLS - 1) * SHEET_GAP_PX;
-    const int pageH = SHEET_MARGIN_PX * 2 + SHEET_ROWS * cellH + (SHEET_ROWS - 1) * SHEET_GAP_PX;
+    const int pageW =
+        SHEET_MARGIN_PX * 2 + SHEET_COLS * cellW + (SHEET_COLS - 1) * SHEET_GAP_PX;
+    const int pageH =
+        SHEET_MARGIN_PX * 2 + SHEET_ROWS * cellH + (SHEET_ROWS - 1) * SHEET_GAP_PX;
     const int perPage = SHEET_COLS * SHEET_ROWS;
     const int pageCount = (count + perPage - 1) / perPage;
 
@@ -330,7 +334,10 @@ bool car_sheet_write(const char *outDir, float pxPerM, int zoom)
         VehicleSpec spec;
         CarVisual visual;
         char id[128], note[192];
-        if (!car_corpus_spec(i, &spec)) { ok = false; break; }
+        if (!car_corpus_spec(i, &spec)) {
+            ok = false;
+            break;
+        }
         car_visual_derive(&spec, &visual);
         car_corpus_id(i, id, sizeof(id));
         car_corpus_describe(i, note, sizeof(note));
@@ -376,8 +383,8 @@ bool car_sheet_write(const char *outDir, float pxPerM, int zoom)
         const int labelY0 = cellY + artH + 2;
         const int maxChars = (cellW - 4) / (SHEET_FONT_W + 1);
         draw_text(page, pageW, pageW, pageH, cellX + 2, labelY0, id, maxChars, kGroupFg);
-        draw_text(page, pageW, pageW, pageH, cellX + 2, labelY0 + SHEET_FONT_H + 2,
-                  note, maxChars, kNoteFg);
+        draw_text(page, pageW, pageW, pageH, cellX + 2, labelY0 + SHEET_FONT_H + 2, note,
+                  maxChars, kNoteFg);
 
         free(body);
         free(upright);
@@ -405,8 +412,9 @@ bool car_sheet_write(const char *outDir, float pxPerM, int zoom)
     free(page);
 
     if (ok) {
-        printf("CAR-SHEET: wrote %d vehicles across %d page(s) to %s (page_N.png + index.html)\n",
-               count, pageCount, outDir);
+        printf(
+            "CAR-SHEET: wrote %d vehicles across %d page(s) to %s (page_N.png + index.html)\n",
+            count, pageCount, outDir);
     }
     return ok;
 }
@@ -432,17 +440,17 @@ static CarRasterInfo pair_shared_canvas(float pxPerM)
         const float r = (float)info.width - info.originXPx;
         const float u = info.originYPx;
         const float d = (float)info.height - info.originYPx;
-        if (l > left)  left  = l;
+        if (l > left) left = l;
         if (r > right) right = r;
-        if (u > up)    up    = u;
-        if (d > down)  down  = d;
+        if (u > up) up = u;
+        if (d > down) down = d;
     }
 
     CarRasterInfo shared;
     memset(&shared, 0, sizeof(shared));
-    shared.pxPerM    = pxPerM;
-    shared.width     = (int)ceilf(left + right);
-    shared.height    = (int)ceilf(up + down);
+    shared.pxPerM = pxPerM;
+    shared.width = (int)ceilf(left + right);
+    shared.height = (int)ceilf(up + down);
     shared.originXPx = left;
     shared.originYPx = up;
     return shared;
@@ -475,31 +483,31 @@ static bool write_profile(const char *path, const VehicleSpec *spec)
  * human can see at a glance which pixels the grammar assigned to what. Indexed by
  * CarRasterLabel; a compile-time count check keeps this honest when a label is added. */
 static const unsigned char kLabelColour[CAR_LABEL_COUNT][3] = {
-    { 0x15, 0x18, 0x1d },  /* EMPTY        */
-    { 0x4d, 0x9b, 0xe6 },  /* BODY         */
-    { 0x2c, 0x5f, 0x94 },  /* BODY_SHADE   */
-    { 0x8f, 0x6a, 0xd8 },  /* CABIN        */
-    { 0xc9, 0xa8, 0xff },  /* GLASS        */
-    { 0x3a, 0x3f, 0x48 },  /* TIRE         */
-    { 0x5a, 0x60, 0x6b },  /* TIRE_SIDEWALL*/
-    { 0xb9, 0xc0, 0xcc },  /* RIM          */
-    { 0xe8, 0xee, 0xf6 },  /* DISC         */
-    { 0xe0, 0x7b, 0x39 },  /* ARCH         */
-    { 0x36, 0xc9, 0x8f },  /* WING         */
-    { 0x1f, 0x9c, 0x6e },  /* SPLITTER     */
-    { 0x7a, 0xe0, 0xb8 },  /* CANARD       */
-    { 0xf0, 0xd0, 0x4a },  /* MIRROR       */
-    { 0x9a, 0x5a, 0x2a },  /* EXHAUST      */
-    { 0xa0, 0x88, 0x60 },  /* BED          */
-    { 0xd8, 0x5c, 0x8a },  /* HOOD_BULGE   */
-    { 0xff, 0x4d, 0x4d },  /* TOW_HOOK     */
-    { 0xff, 0x9d, 0x9d },  /* HOOD_PINS    */
-    { 0xff, 0xf0, 0x9c },  /* LAMP         */
-    { 0x6e, 0xcd, 0xeb },  /* CAGE         */
-    { 0xff, 0xff, 0xff },  /* STRIPE       */
-    { 0x00, 0xd0, 0xff },  /* HEADING      */
-    { 0x20, 0x24, 0x2c },  /* OUTLINE      */
-    { 0x0d, 0x0f, 0x12 },  /* SHADOW       */
+    { 0x15, 0x18, 0x1d }, /* EMPTY        */
+    { 0x4d, 0x9b, 0xe6 }, /* BODY         */
+    { 0x2c, 0x5f, 0x94 }, /* BODY_SHADE   */
+    { 0x8f, 0x6a, 0xd8 }, /* CABIN        */
+    { 0xc9, 0xa8, 0xff }, /* GLASS        */
+    { 0x3a, 0x3f, 0x48 }, /* TIRE         */
+    { 0x5a, 0x60, 0x6b }, /* TIRE_SIDEWALL*/
+    { 0xb9, 0xc0, 0xcc }, /* RIM          */
+    { 0xe8, 0xee, 0xf6 }, /* DISC         */
+    { 0xe0, 0x7b, 0x39 }, /* ARCH         */
+    { 0x36, 0xc9, 0x8f }, /* WING         */
+    { 0x1f, 0x9c, 0x6e }, /* SPLITTER     */
+    { 0x7a, 0xe0, 0xb8 }, /* CANARD       */
+    { 0xf0, 0xd0, 0x4a }, /* MIRROR       */
+    { 0x9a, 0x5a, 0x2a }, /* EXHAUST      */
+    { 0xa0, 0x88, 0x60 }, /* BED          */
+    { 0xd8, 0x5c, 0x8a }, /* HOOD_BULGE   */
+    { 0xff, 0x4d, 0x4d }, /* TOW_HOOK     */
+    { 0xff, 0x9d, 0x9d }, /* HOOD_PINS    */
+    { 0xff, 0xf0, 0x9c }, /* LAMP         */
+    { 0x6e, 0xcd, 0xeb }, /* CAGE         */
+    { 0xff, 0xff, 0xff }, /* STRIPE       */
+    { 0x00, 0xd0, 0xff }, /* HEADING      */
+    { 0x20, 0x24, 0x2c }, /* OUTLINE      */
+    { 0x0d, 0x0f, 0x12 }, /* SHADOW       */
 };
 
 /* JSON string escaping for the few characters a corpus id or description can actually contain.
@@ -510,8 +518,12 @@ static void json_escape(const char *in, char *out, size_t cap)
     size_t o = 0;
     for (size_t i = 0; in[i] != '\0' && o + 2 < cap; i++) {
         const char c = in[i];
-        if (c == '"' || c == '\\') out[o++] = '\\';
-        else if (c < 0x20) { out[o++] = ' '; continue; }
+        if (c == '"' || c == '\\')
+            out[o++] = '\\';
+        else if (c < 0x20) {
+            out[o++] = ' ';
+            continue;
+        }
         out[o++] = c;
     }
     out[o] = '\0';
@@ -558,10 +570,10 @@ bool car_sheet_write_cards(const char *outDir, float pxPerM)
 
     fprintf(json, "{\n  \"pxPerM\": %.4f,\n  \"labelNames\": [", pxPerM);
     static const char *kLabelName[CAR_LABEL_COUNT] = {
-        "empty", "body", "body_shade", "cabin", "glass", "tire", "tire_sidewall", "rim",
-        "disc", "arch", "wing", "splitter", "canard", "mirror", "exhaust", "bed",
-        "hood_bulge", "tow_hook", "hood_pins", "lamp", "cage", "stripe", "heading",
-        "outline", "shadow"
+        "empty",   "body",    "body_shade", "cabin",    "glass",     "tire",   "tire_sidewall",
+        "rim",     "disc",    "arch",       "wing",     "splitter",  "canard", "mirror",
+        "exhaust", "bed",     "hood_bulge", "tow_hook", "hood_pins", "lamp",   "cage",
+        "stripe",  "heading", "outline",    "shadow"
     };
     for (int i = 0; i < CAR_LABEL_COUNT; i++) {
         fprintf(json, "%s\"%s\"", (i ? ", " : ""), kLabelName[i]);
@@ -590,9 +602,12 @@ bool car_sheet_write_cards(const char *outDir, float pxPerM)
         const CarRasterInfo info = car_raster_info(&v, pxPerM, 2);
         const size_t pixels = (size_t)info.width * (size_t)info.height;
         const size_t rgbaBytes = car_raster_bytes(info);
-        if (pixels == 0 || rgbaBytes == 0) { ok = false; break; }
+        if (pixels == 0 || rgbaBytes == 0) {
+            ok = false;
+            break;
+        }
 
-        unsigned char *rgba   = (unsigned char *)malloc(rgbaBytes);
+        unsigned char *rgba = (unsigned char *)malloc(rgbaBytes);
         unsigned char *labels = (unsigned char *)malloc(pixels);
         unsigned char *labRgba = (unsigned char *)malloc(rgbaBytes);
         ok = (rgba != NULL && labels != NULL && labRgba != NULL) &&
@@ -650,9 +665,10 @@ bool car_sheet_write_cards(const char *outDir, float pxPerM)
             fprintf(json, "      \"index\": %d, \"id\": \"%s\", \"group\": \"%s\",\n", i, idEsc,
                     car_corpus_group_name(car_corpus_group(i)));
             fprintf(json, "      \"note\": \"%s\",\n", noteEsc);
-            fprintf(json, "      \"png\": \"%s.png\", \"labelPng\": \"%s_labels.png\",\n", idEsc,
-                    idEsc);
-            fprintf(json, "      \"widthPx\": %d, \"heightPx\": %d,\n", info.height, info.width);
+            fprintf(json, "      \"png\": \"%s.png\", \"labelPng\": \"%s_labels.png\",\n",
+                    idEsc, idEsc);
+            fprintf(json, "      \"widthPx\": %d, \"heightPx\": %d,\n", info.height,
+                    info.width);
             fprintf(json, "      \"cgXPx\": %.4f, \"cgYPx\": %.4f,\n", cgXPx, cgYPx);
             fprintf(json,
                     "      \"latents\": {\"mass01\":%.5f,\"size01\":%.5f,\"low01\":%.5f,"
@@ -699,7 +715,9 @@ bool car_sheet_write_cards(const char *outDir, float pxPerM)
     fprintf(json, "\n  ]\n}\n");
     if (fclose(json) != 0) ok = false;
 
-    if (ok) printf("CAR-CARDS: wrote %d vehicles to %s (cards.json + 2 PNGs each)\n", count, outDir);
+    if (ok)
+        printf("CAR-CARDS: wrote %d vehicles to %s (cards.json + 2 PNGs each)\n", count,
+               outDir);
     return ok;
 }
 
@@ -734,8 +752,8 @@ bool car_sheet_write_pair_failure(const char *outDir, int indexA, int indexB, fl
     unsigned char *rgbaA = (unsigned char *)malloc(rgbaBytes);
     unsigned char *rgbaB = (unsigned char *)malloc(rgbaBytes);
     unsigned char *rgbaD = (unsigned char *)malloc(rgbaBytes);
-    unsigned char *labA  = (unsigned char *)malloc(pixels);
-    unsigned char *labB  = (unsigned char *)malloc(pixels);
+    unsigned char *labA = (unsigned char *)malloc(pixels);
+    unsigned char *labB = (unsigned char *)malloc(pixels);
     bool ok = (rgbaA != NULL && rgbaB != NULL && rgbaD != NULL && labA != NULL && labB != NULL);
 
     if (ok) {
@@ -753,15 +771,24 @@ bool car_sheet_write_pair_failure(const char *outDir, int indexA, int indexB, fl
             const unsigned char a = labA[i], b = labB[i];
             unsigned char *p = rgbaD + i * CAR_RASTER_BPP;
             if (a == CAR_LABEL_EMPTY && b == CAR_LABEL_EMPTY) {
-                p[0] = 0x15; p[1] = 0x18; p[2] = 0x1d; p[3] = 0xff;
+                p[0] = 0x15;
+                p[1] = 0x18;
+                p[2] = 0x1d;
+                p[3] = 0xff;
                 continue;
             }
             unionPx++;
             if (a != b) {
                 differing++;
-                p[0] = 0xe0; p[1] = 0x48; p[2] = 0x3c; p[3] = 0xff;
+                p[0] = 0xe0;
+                p[1] = 0x48;
+                p[2] = 0x3c;
+                p[3] = 0xff;
             } else {
-                p[0] = 0x38; p[1] = 0x3e; p[2] = 0x48; p[3] = 0xff;
+                p[0] = 0x38;
+                p[1] = 0x3e;
+                p[2] = 0x48;
+                p[3] = 0xff;
             }
         }
     }
@@ -796,18 +823,17 @@ bool car_sheet_write_pair_failure(const char *outDir, int indexA, int indexB, fl
         float l2 = 0.0f, linf = 0.0f;
         int top[3] = { -1, -1, -1 };
 
-        if (n > 0 && n <= cap &&
-            car_visual_signature(&visA, sigA, n) == n &&
+        if (n > 0 && n <= cap && car_visual_signature(&visA, sigA, n) == n &&
             car_visual_signature(&visB, sigB, n) == n) {
             for (int i = 0; i < n; i++) {
                 const float d = (sigA[i] > sigB[i]) ? (sigA[i] - sigB[i]) : (sigB[i] - sigA[i]);
                 l2 += d * d;
                 if (d > linf) linf = d;
                 for (int k = 0; k < 3; k++) {
-                    const float best = (top[k] >= 0)
-                        ? ((sigA[top[k]] > sigB[top[k]]) ? (sigA[top[k]] - sigB[top[k]])
-                                                         : (sigB[top[k]] - sigA[top[k]]))
-                        : -1.0f;
+                    const float best = (top[k] >= 0) ? ((sigA[top[k]] > sigB[top[k]])
+                                                            ? (sigA[top[k]] - sigB[top[k]])
+                                                            : (sigB[top[k]] - sigA[top[k]]))
+                                                     : -1.0f;
                     if (d > best) {
                         for (int m = 2; m > k; m--) top[m] = top[m - 1];
                         top[k] = i;
@@ -831,8 +857,8 @@ bool car_sheet_write_pair_failure(const char *outDir, int indexA, int indexB, fl
             fprintf(out, "===========================\n\n");
             fprintf(out, "car a : [%d] %s\n        %s\n", indexA, idA, noteA);
             fprintf(out, "car b : [%d] %s\n        %s\n\n", indexB, idB, noteB);
-            fprintf(out, "scale            : %.3f px/m (%d x %d canvas)\n",
-                    (double)pxPerM, canvas.width, canvas.height);
+            fprintf(out, "scale            : %.3f px/m (%d x %d canvas)\n", (double)pxPerM,
+                    canvas.width, canvas.height);
             fprintf(out, "union silhouette : %llu px\n", (unsigned long long)unionPx);
             fprintf(out, "differing        : %llu px\n", (unsigned long long)differing);
             fprintf(out, "pixel ratio      : %.4f\n",
@@ -844,10 +870,10 @@ bool car_sheet_write_pair_failure(const char *outDir, int indexA, int indexB, fl
             for (int k = 0; k < 3; k++) {
                 if (top[k] < 0) continue;
                 const float d = (sigA[top[k]] > sigB[top[k]]) ? (sigA[top[k]] - sigB[top[k]])
-                                                             : (sigB[top[k]] - sigA[top[k]]);
+                                                              : (sigB[top[k]] - sigA[top[k]]);
                 fprintf(out, "  %-24s %10.4f vs %10.4f   (gap %.4f)\n",
-                        car_visual_signature_component_name(top[k]),
-                        (double)sigA[top[k]], (double)sigB[top[k]], (double)d);
+                        car_visual_signature_component_name(top[k]), (double)sigA[top[k]],
+                        (double)sigB[top[k]], (double)d);
             }
 
             fprintf(out, "\nnon-default overrides — car a\n-----------------------------\n");

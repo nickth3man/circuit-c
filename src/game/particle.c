@@ -33,21 +33,21 @@ void particle_pool_update(ParticlePool *pool, float dt)
     }
 }
 
-void particle_spawn(ParticlePool *pool, Vector2 worldPosM, Vector2 worldVelMps,
-                    float sizeM, Color color)
+void particle_spawn(ParticlePool *pool, Vector2 worldPosM, Vector2 worldVelMps, float sizeM,
+                    Color color)
 {
     if (pool == NULL) return;
 
     const int idx = pool->cursor;
     Particle *p = &pool->particles[idx];
 
-    p->positionM   = worldPosM;
+    p->positionM = worldPosM;
     p->velocityMps = worldVelMps;
-    p->lifeS       = PARTICLE_LIFE_S;
-    p->maxLifeS    = PARTICLE_LIFE_S;
-    p->sizeM       = sizeM;
-    p->color       = color;
-    p->active      = true;
+    p->lifeS = PARTICLE_LIFE_S;
+    p->maxLifeS = PARTICLE_LIFE_S;
+    p->sizeM = sizeM;
+    p->color = color;
+    p->active = true;
 
     pool->cursor = (idx + 1) % MAX_PARTICLES;
 }

@@ -17,7 +17,7 @@
  *   9. Free the old module and delete its copy.
  *
  * The linker creates its output file before filling it, so a poll can otherwise catch a
- * zero-length DLL. build.sh links to build/game_tmp.dll and renames, which makes the swap
+ * zero-length DLL. build.sh links to build/dev/game_tmp.tmp and renames, which makes the swap
  * atomic; the CopyFile step here also fails cleanly if the file is still locked by the
  * linker, and the modification time is deliberately NOT recorded in that case so the next
  * frame retries.
@@ -27,8 +27,8 @@
 #include "raylib.h"
 
 #define WIN32_LEAN_AND_MEAN
-#define NOGDI       /* wingdi.h declares Rectangle(), which collides with raylib's type */
-#define NOUSER      /* winuser.h declares CloseWindow/ShowCursor/DrawText/LoadImage */
+#define NOGDI  /* wingdi.h declares Rectangle(), which collides with raylib's type */
+#define NOUSER /* winuser.h declares CloseWindow/ShowCursor/DrawText/LoadImage */
 #define NOMINMAX
 #include <windows.h>
 #undef near
@@ -46,20 +46,20 @@ GAME_ENTRY_POINTS
 
 typedef struct {
     HMODULE handle;
-    char    loadedPath[MAX_PATH];
+    char loadedPath[MAX_PATH];
 
-    #define ENTRY(name, ...) name##_t *name;
+#define ENTRY(name, ...) name##_t *name;
     GAME_ENTRY_POINTS
-    #undef ENTRY
+#undef ENTRY
 } GameModule;
 
 static GameModule g_active;
-static long       g_lastModTime = 0;
-static long       g_lastFailedModTime = 0;   /* so a broken build logs once, not every frame */
-static int        g_loadCounter = 0;
+static long g_lastModTime = 0;
+static long g_lastFailedModTime = 0; /* so a broken build logs once, not every frame */
+static int g_loadCounter = 0;
 
 #define MODULE_COPY_PREFIX "build/dev/game_load_"
-#define MODULE_COPY_GLOB   "build\\dev\\game_load_*.dll"
+#define MODULE_COPY_GLOB "build\\dev\\game_load_*.dll"
 
 /* Delete leftovers from a previous run that ended without unloading cleanly. */
 static void sweep_stale_copies(void)
@@ -70,9 +70,9 @@ static void sweep_stale_copies(void)
 
     do {
         /* FindFirstFileA reports the bare file name, so the directory is put back here. */
-        char path[MAX_PATH + 16];   /* room for the "build/dev/" prefix and the terminator */
+        char path[MAX_PATH + 16]; /* room for the "build/dev/" prefix and the terminator */
         snprintf(path, sizeof(path), "build/dev/%s", find.cFileName);
-        DeleteFileA(path);      /* still-locked copies simply survive; harmless */
+        DeleteFileA(path); /* still-locked copies simply survive; harmless */
     } while (FindNextFileA(search, &find));
 
     FindClose(search);
@@ -101,8 +101,8 @@ static bool load_candidate(GameModule *out, bool logFailures)
     memset(&candidate, 0, sizeof(candidate));
 
     g_loadCounter++;
-    snprintf(candidate.loadedPath, sizeof(candidate.loadedPath),
-             MODULE_COPY_PREFIX "%d.dll", g_loadCounter);
+    snprintf(candidate.loadedPath, sizeof(candidate.loadedPath), MODULE_COPY_PREFIX "%d.dll",
+             g_loadCounter);
 
     if (!CopyFileA(GAME_MODULE_NAME, candidate.loadedPath, FALSE)) {
         if (logFailures) {
@@ -122,18 +122,18 @@ static bool load_candidate(GameModule *out, bool logFailures)
         return false;
     }
 
-    #define ENTRY(name, ...)                                                          \
-        candidate.name = (name##_t *)(void *)GetProcAddress(candidate.handle, #name); \
-        if (candidate.name == NULL) {                                                 \
-            if (logFailures) {                                                        \
-                TRACELOG(LOG_ERROR, "HOTRELOAD: missing symbol %s in %s",              \
-                         #name, candidate.loadedPath);                                \
-            }                                                                         \
-            unload_module(&candidate);                                                \
-            return false;                                                             \
-        }
+#define ENTRY(name, ...)                                                          \
+    candidate.name = (name##_t *)(void *)GetProcAddress(candidate.handle, #name); \
+    if (candidate.name == NULL) {                                                 \
+        if (logFailures) {                                                        \
+            TRACELOG(LOG_ERROR, "HOTRELOAD: missing symbol %s in %s", #name,      \
+                     candidate.loadedPath);                                       \
+        }                                                                         \
+        unload_module(&candidate);                                                \
+        return false;                                                             \
+    }
     GAME_ENTRY_POINTS
-    #undef ENTRY
+#undef ENTRY
 
     *out = candidate;
     return true;
@@ -142,9 +142,9 @@ static bool load_candidate(GameModule *out, bool logFailures)
 /* Copy a validated table into the globals the rest of the platform calls through. */
 static void publish(const GameModule *module)
 {
-    #define ENTRY(name, ...) name = module->name;
+#define ENTRY(name, ...) name = module->name;
     GAME_ENTRY_POINTS
-    #undef ENTRY
+#undef ENTRY
 }
 
 bool Game_LoadModule(void)
@@ -205,9 +205,9 @@ void Game_UnloadModule(void)
 {
     unload_module(&g_active);
 
-    #define ENTRY(name, ...) name = NULL;
+#define ENTRY(name, ...) name = NULL;
     GAME_ENTRY_POINTS
-    #undef ENTRY
+#undef ENTRY
 }
 
 #else

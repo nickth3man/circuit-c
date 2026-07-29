@@ -26,14 +26,14 @@
 
 typedef struct {
     const char *name;
-    uint64_t    totalNs;
-    uint64_t    worstNs;
-    uint64_t    calls;
+    uint64_t totalNs;
+    uint64_t worstNs;
+    uint64_t calls;
 } ProfileZone;
 
 static ProfileZone g_zones[PROFILE_MAX_ZONES];
-static int         g_zoneCount = 0;
-static uint64_t    g_frames = 0;
+static int g_zoneCount = 0;
+static uint64_t g_frames = 0;
 
 uint64_t profile_now_ns(void)
 {
@@ -87,8 +87,8 @@ void profile_report(FILE *out)
     for (int i = 0; i < g_zoneCount; i++) {
         const ProfileZone *zone = &g_zones[i];
         const double totalMs = (double)zone->totalNs / 1.0e6;
-        const double meanUs = (zone->calls > 0)
-                            ? (double)zone->totalNs / (double)zone->calls / 1.0e3 : 0.0;
+        const double meanUs =
+            (zone->calls > 0) ? (double)zone->totalNs / (double)zone->calls / 1.0e3 : 0.0;
         fprintf(out, "%-24s %10llu %12.3f %12.3f %12.3f\n", zone->name,
                 (unsigned long long)zone->calls, totalMs, meanUs,
                 (double)zone->worstNs / 1.0e3);

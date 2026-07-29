@@ -24,21 +24,21 @@ typedef struct {
     float throttle;
     float brake;
     float handbrake;
-    bool  pause;
-    bool  reset;
-    bool  debug;
-    bool  shiftUp;
-    bool  shiftDown;
+    bool pause;
+    bool reset;
+    bool debug;
+    bool shiftUp;
+    bool shiftDown;
     float frameTimeS;
 } ScriptFrame;
 
 void script_build(ScriptFrame *frames, int count);
 void fixed_update_adapter(void *ctx, float dt);
 void apply_live_input(Game *game, const ScriptFrame *f);
-uint32_t run_recording(Game *game, const ScriptFrame *frames, int count,
-                       float pixelsPerMeter, TelemetryWriter *writer);
-uint32_t run_playback(Game *game, const ReplayBuffer *timeline,
-                      const ScriptFrame *frames, int count, float pixelsPerMeter);
+uint32_t run_recording(Game *game, const ScriptFrame *frames, int count, float pixelsPerMeter,
+                       TelemetryWriter *writer);
+uint32_t run_playback(Game *game, const ReplayBuffer *timeline, const ScriptFrame *frames,
+                      int count, float pixelsPerMeter);
 
 /* Put the vehicle at a steady speed with every wheel already rolling at it. */
 void set_vehicle_rolling_speed(Game *game, float velocityLongitudinalMps);

@@ -43,7 +43,7 @@ body:
       label: Exact reproduction steps
       description: Commands, key presses, scenario name, and tick if you know it.
       placeholder: |
-        1. ./build.sh --tests && ./drifty_tests.exe --scenario handbrake
+        1. ./build.sh --tests && ./build/tests/drifty_tests.exe --scenario handbrake
         2. ...
     validations:
       required: true

@@ -36,7 +36,7 @@
 #endif
 
 #define FNV1A_OFFSET_BASIS 2166136261u
-#define FNV1A_PRIME        16777619u
+#define FNV1A_PRIME 16777619u
 
 static uint32_t hash_bytes(uint32_t h, const void *data, size_t length)
 {
@@ -111,10 +111,9 @@ GAME_API void game_reset_sim(Game *game)
 {
     if (game == NULL) return;
     vehicle_state_reset(&game->spec, &game->vehicle, &game->derived, &game->renderState);
-    game->autoTrans.driveState   = AUTO_DRIVE;
+    game->autoTrans.driveState = AUTO_DRIVE;
     game->autoTrans.neutralTimer = 0.0f;
 }
-
 
 /* -------------------------------------------------------------------------------------
  * High-score persistence (Phase 6). Uses standard C file I/O so it works in both the
@@ -184,11 +183,9 @@ static void persistence_save_score(const Game *game)
     /* bestScore is const in this function — the caller updates it. */
 
 #if !defined(DRIFTY_HEADLESS)
-    TRACELOG(LOG_INFO, "GAME: saved new high score %.0f to %s",
-             game->driftScore, path);
+    TRACELOG(LOG_INFO, "GAME: saved new high score %.0f to %s", game->driftScore, path);
 #endif
 }
-
 
 static void apply_oneshots(Game *game, const Input *input)
 {
@@ -202,12 +199,8 @@ static void apply_oneshots(Game *game, const Input *input)
                 game->comboMultiplier = 1.0f;
                 game->comboTimerS = 0.0f;
                 break;
-            case STATE_PLAYING:
-                game->state = STATE_PAUSED;
-                break;
-            case STATE_PAUSED:
-                game->state = STATE_PLAYING;
-                break;
+            case STATE_PLAYING: game->state = STATE_PAUSED; break;
+            case STATE_PAUSED: game->state = STATE_PLAYING; break;
             case STATE_RESULTS:
                 game_reset_sim(game);
                 game->driftScore = 0.0f;
@@ -216,8 +209,7 @@ static void apply_oneshots(Game *game, const Input *input)
                 game->comboTimerS = 0.0f;
                 game->state = STATE_PLAYING;
                 break;
-            default:
-                break;
+            default: break;
         }
         game->sim.pauseToggleCount++;
     }
@@ -239,11 +231,8 @@ static void apply_oneshots(Game *game, const Input *input)
                 game->comboTimerS = 0.0f;
                 game->state = STATE_PLAYING;
                 break;
-            case STATE_RESULTS:
-                game->state = STATE_MENU;
-                break;
-            default:
-                break;
+            case STATE_RESULTS: game->state = STATE_MENU; break;
+            default: break;
         }
         game->sim.resetCount++;
     }
@@ -254,9 +243,9 @@ static void apply_oneshots(Game *game, const Input *input)
     if (input->toggleAutoPressed) {
         game->autoTrans.enabled = !game->autoTrans.enabled;
         if (game->autoTrans.enabled) {
-            game->autoTrans.driveState   = AUTO_DRIVE;
+            game->autoTrans.driveState = AUTO_DRIVE;
             game->autoTrans.neutralTimer = 0.0f;
-            game->vehicle.selectedGear   = 1;
+            game->vehicle.selectedGear = 1;
         }
     }
     if (!game->autoTrans.enabled) {
@@ -280,11 +269,11 @@ GAME_API void game_init(Game *game)
     memset(&game->sim, 0, sizeof(game->sim));
     vehicle_spec_set_default(&game->spec);
     game_reset_sim(game);
-    game->autoTrans.enabled     = false;
-    game->autoTrans.driveState  = AUTO_DRIVE;
+    game->autoTrans.enabled = false;
+    game->autoTrans.driveState = AUTO_DRIVE;
     game->autoTrans.neutralTimer = 0.0f;
 #if defined(DRIFTY_HEADLESS)
-    game->state = STATE_PLAYING;  /* headless: no menus, simulate immediately */
+    game->state = STATE_PLAYING; /* headless: no menus, simulate immediately */
 #else
     game->state = STATE_MENU;
 #endif
@@ -303,12 +292,10 @@ GAME_API void game_init(Game *game)
     persistence_load_score(game);
     particle_pool_init(&game->particles);
     game->renderPixelsPerMeter = PIXELS_PER_METER;
-    game->camera = (Camera2D){
-        .offset = { SCREEN_W * 0.5f, SCREEN_H * 0.5f },
-        .target = { 0.0f, 0.0f },
-        .rotation = 0.0f,
-        .zoom = CAMERA_BASE_ZOOM
-    };
+    game->camera = (Camera2D){ .offset = { SCREEN_W * 0.5f, SCREEN_H * 0.5f },
+                               .target = { 0.0f, 0.0f },
+                               .rotation = 0.0f,
+                               .zoom = CAMERA_BASE_ZOOM };
     replay_begin_recording(&game->replay, 0);
     dev_state_init(&game->dev);
 #if !defined(DRIFTY_HEADLESS)
@@ -327,7 +314,9 @@ GAME_API void game_init(Game *game)
     game->stateChecksum = game_state_checksum(game);
     game->initialized = true;
 #if !defined(DRIFTY_HEADLESS)
-    TRACELOG(LOG_INFO, "GAME: initialised (Phase 6 presentation backbone — particles, camera, state machine)");
+    TRACELOG(
+        LOG_INFO,
+        "GAME: initialised (Phase 6 presentation backbone — particles, camera, state machine)");
 #endif
 }
 
@@ -341,8 +330,7 @@ GAME_API void game_pre_reload(Game *game)
      * resources held in the render module's statics, and a handle from the outgoing module
      * is a dangling GPU name in the incoming one. */
     render_pre_reload();
-    TRACELOG(LOG_INFO, "GAME: pre-reload (tick %llu)",
-             (unsigned long long)game->sim.tick);
+    TRACELOG(LOG_INFO, "GAME: pre-reload (tick %llu)", (unsigned long long)game->sim.tick);
 #endif
 }
 
@@ -359,8 +347,8 @@ GAME_API void game_post_reload(Game *game)
 #if !defined(DRIFTY_HEADLESS)
     audio_post_reload();
     render_post_reload();
-    TRACELOG(LOG_INFO, "GAME: post-reload #%d (tick %llu, checksum %08x)",
-             game->reloadCount, (unsigned long long)game->sim.tick, game->stateChecksum);
+    TRACELOG(LOG_INFO, "GAME: post-reload #%d (tick %llu, checksum %08x)", game->reloadCount,
+             (unsigned long long)game->sim.tick, game->stateChecksum);
 #endif
 }
 
@@ -372,8 +360,10 @@ GAME_API void game_fixed_update(Game *game, float dt)
     input_zero(&tickInput);
     bool fromPlayback = false;
     if (game->replay.mode == REPLAY_MODE_PLAYBACK) {
-        if (replay_next(&game->replay, &tickInput)) fromPlayback = true;
-        else replay_stop(&game->replay);
+        if (replay_next(&game->replay, &tickInput))
+            fromPlayback = true;
+        else
+            replay_stop(&game->replay);
     }
     if (!fromPlayback) tickInput = game->input;
 
@@ -381,8 +371,8 @@ GAME_API void game_fixed_update(Game *game, float dt)
      * replaying a timeline: playback must never be second-guessed. The substituted input is
      * recorded like any other, so the scenario itself is replayable. */
     if (!fromPlayback && game->dev.scenarioRunning) {
-        dev_scenario_input(game->dev.scenario,
-                           game->sim.tick - game->dev.scenarioStartTick, &tickInput);
+        dev_scenario_input(game->dev.scenario, game->sim.tick - game->dev.scenarioStartTick,
+                           &tickInput);
     }
 
     input_clear_oneshots(&game->input);
@@ -395,8 +385,8 @@ GAME_API void game_fixed_update(Game *game, float dt)
 
     if (game->state == STATE_PLAYING) {
         /* Auto transmission: override gear and remap throttle/brake */
-        auto_transmission_update(&game->autoTrans, &game->vehicle, &game->spec,
-                                  &game->derived, &tickInput, dt);
+        auto_transmission_update(&game->autoTrans, &game->vehicle, &game->spec, &game->derived,
+                                 &tickInput, dt);
 
         DRIFTY_ZONE_BEGIN(physics, "Physics");
         /* Save start-of-tick position for checkpoint crossing (renderState->prev* was
@@ -412,19 +402,18 @@ GAME_API void game_fixed_update(Game *game, float dt)
          * per-wheel surfaceId are not overwritten. */
         if (game->track.nodes != NULL && game->track.count > 0) {
             for (int i = 0; i < WHEEL_COUNT; i++) {
-                const Vector2 worldContact = physics_wheel_world_position(
-                    &game->vehicle, (WheelId)i);
+                const Vector2 worldContact =
+                    physics_wheel_world_position(&game->vehicle, (WheelId)i);
                 game->vehicle.wheels[i].surfaceId = Track_SurfaceAt(&game->track, worldContact);
             }
         }
-        physics_fixed_update(&game->spec, &game->vehicle, &game->derived,
-                             &game->renderState, &tickInput, dt);
+        physics_fixed_update(&game->spec, &game->vehicle, &game->derived, &game->renderState,
+                             &tickInput, dt);
         DRIFTY_ZONE_END(physics);
 
         /* Checkpoint crossing: check if the car crossed the next gate this tick. */
         if (game->track.nodes != NULL && game->track.count > 0) {
-            track_update_checkpoints(&game->track, startPosM,
-                                     game->renderState.currPositionM);
+            track_update_checkpoints(&game->track, startPosM, game->renderState.currPositionM);
             game->track.lapTimerS += dt;
         }
 
@@ -437,21 +426,17 @@ GAME_API void game_fixed_update(Game *game, float dt)
         /* Collision with track barriers. */
         if (game->track.nodes != NULL && game->track.count > 0) {
             float oldLockout = game->crashLockoutTimerS;
-            collision_resolve_track(&game->spec, &game->vehicle,
-                                    &game->renderState, &game->track,
-                                    &game->crashLockoutTimerS);
+            collision_resolve_track(&game->spec, &game->vehicle, &game->renderState,
+                                    &game->track, &game->crashLockoutTimerS);
             if (game->crashLockoutTimerS > oldLockout) {
                 audio_play_collision_thud();
             }
         }
 
         /* Audio: per-tick engine pitch and tyre screech (after physics, before scoring). */
-        audio_update(game->vehicle.engineRpm,
-                     game->spec.engineIdleRpm,
-                     game->spec.engineRedlineRpm,
-                     game->derived.physicallySliding,
-                     game->derived.speedMps,
-                     dt);
+        audio_update(game->vehicle.engineRpm, game->spec.engineIdleRpm,
+                     game->spec.engineRedlineRpm, game->derived.physicallySliding,
+                     game->derived.speedMps, dt);
 
         /* Phase 6 drift scoring: classify, then accumulate. These mutate only the
          * presentation fields (driftScore, driftTimeS, comboMultiplier, etc.) which are
@@ -488,8 +473,10 @@ GAME_API void game_fixed_update(Game *game, float dt)
 
                 for (int s = 0; s < 2; s++) {
                     /* Deterministic spread that varies per-tick for visual variety. */
-                    const float hashX = (float)((int)(game->sim.tick * 7  + s * 13 + w * 31) & 0xFF);
-                    const float hashY = (float)((int)(game->sim.tick * 11 + s * 17 + w * 23) & 0xFF);
+                    const float hashX =
+                        (float)((int)(game->sim.tick * 7 + s * 13 + w * 31) & 0xFF);
+                    const float hashY =
+                        (float)((int)(game->sim.tick * 11 + s * 17 + w * 23) & 0xFF);
                     const float spreadX = (hashX / 255.0f - 0.5f) * 1.2f;
                     const float spreadY = (hashY / 255.0f - 0.5f) * 1.2f + 0.6f;
                     const Vector2 vel = { baseBackX + spreadX, baseBackY + spreadY };

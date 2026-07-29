@@ -18,8 +18,7 @@
  * Classification
  * ------------------------------------------------------------------------------------- */
 
-bool scoring_classify(const VehicleState *state,
-                      VehicleDerived *derived,
+bool scoring_classify(const VehicleState *state, VehicleDerived *derived,
                       float crashLockoutTimerS)
 {
     if (state == NULL || derived == NULL) {
@@ -49,13 +48,11 @@ bool scoring_classify(const VehicleState *state,
     const bool notInLockout = crashLockoutTimerS <= 0.0f;
 
     /* Condition 8: at least one rear wheel is on a scoring surface (asphalt). */
-    const bool onScoringSurface =
-        state->wheels[WHEEL_REAR_LEFT].surfaceId == SURFACE_ASPHALT ||
-        state->wheels[WHEEL_REAR_RIGHT].surfaceId == SURFACE_ASPHALT;
+    const bool onScoringSurface = state->wheels[WHEEL_REAR_LEFT].surfaceId == SURFACE_ASPHALT ||
+                                  state->wheels[WHEEL_REAR_RIGHT].surfaceId == SURFACE_ASPHALT;
 
-    const bool drift = movingForward && fastEnough && sideslipEnough &&
-                       rearSlipEnough && yawEnough && notSpun &&
-                       notInLockout && onScoringSurface;
+    const bool drift = movingForward && fastEnough && sideslipEnough && rearSlipEnough &&
+                       yawEnough && notSpun && notInLockout && onScoringSurface;
 
     derived->scoringDrift = drift;
     return drift;
@@ -74,16 +71,14 @@ void scoring_update(struct Game *game, float dt)
         const float speedMps = game->derived.speedMps;
 
         /* angleFactor: 0 at MIN_DRIFT_ANGLE_RAD, 1 at SPIN_CUTOFF_RAD. */
-        const float angleFactor = clampf(
-            (bodySideslipRad - MIN_DRIFT_ANGLE_RAD) /
-                (SPIN_CUTOFF_RAD - MIN_DRIFT_ANGLE_RAD),
-            0.0f, 1.0f);
+        const float angleFactor = clampf((bodySideslipRad - MIN_DRIFT_ANGLE_RAD) /
+                                             (SPIN_CUTOFF_RAD - MIN_DRIFT_ANGLE_RAD),
+                                         0.0f, 1.0f);
 
         /* speedFactor: 0 at MIN_DRIFT_SPEED_MPS, 1 at SCORE_SPEED_REF_MPS. */
-        const float speedFactor = clampf(
-            (speedMps - MIN_DRIFT_SPEED_MPS) /
-                (SCORE_SPEED_REF_MPS - MIN_DRIFT_SPEED_MPS),
-            0.0f, 1.0f);
+        const float speedFactor = clampf((speedMps - MIN_DRIFT_SPEED_MPS) /
+                                             (SCORE_SPEED_REF_MPS - MIN_DRIFT_SPEED_MPS),
+                                         0.0f, 1.0f);
 
         /* lineFactor is a placeholder for racing-line quality; always 1.0 for now. */
         const float lineFactor = 1.0f;
@@ -96,8 +91,7 @@ void scoring_update(struct Game *game, float dt)
         /* Combo multiplier rises over time, capped at 4.0. */
         game->comboMultiplier = clampf(1.0f + game->driftTimeS * 0.5f, 1.0f, 4.0f);
 
-        game->driftScore += SCORE_BASE_RATE * angleFactor *
-                            speedFactor * lineFactor *
+        game->driftScore += SCORE_BASE_RATE * angleFactor * speedFactor * lineFactor *
                             game->comboMultiplier * dt;
         game->driftScore = fminf(game->driftScore, (float)MAX_VALID_SCORE);
     } else {

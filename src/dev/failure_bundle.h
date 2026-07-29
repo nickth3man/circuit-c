@@ -25,25 +25,25 @@
 #include "physics/vehicle.h"
 
 typedef struct {
-    const char *scenario;         /* required; used in the directory name */
-    const char *failureText;      /* the failing check message, may be multi-line */
-    const char *telemetryPath;    /* CSV copied into the bundle, or NULL */
-    const char *screenshotPath;   /* PNG copied into the bundle, or NULL (headless runs) */
-    const ReplayBuffer *replay;   /* timeline written as replay.bin, or NULL */
-    const VehicleSpec  *spec;     /* tunables snapshot, or NULL */
-    const char *activeProfile;    /* profile label recorded in config and summary */
+    const char *scenario;       /* required; used in the directory name */
+    const char *failureText;    /* the failing check message, may be multi-line */
+    const char *telemetryPath;  /* CSV copied into the bundle, or NULL */
+    const char *screenshotPath; /* PNG copied into the bundle, or NULL (headless runs) */
+    const ReplayBuffer *replay; /* timeline written as replay.bin, or NULL */
+    const VehicleSpec *spec;    /* tunables snapshot, or NULL */
+    const char *activeProfile;  /* profile label recorded in config and summary */
     uint64_t failingTick;
     uint32_t checksum;
     uint32_t seed;
-    int      checksRun;
-    int      checksFailed;
+    int checksRun;
+    int checksFailed;
 } FailureBundle;
 
 /* Create <rootDir>/failure-<scenario>-<YYYYmmdd-HHMMSS>/ and fill it. rootDir and its parent
  * are created if missing. On success, dirOut receives the bundle path (when non-NULL).
  * Returns false if the directory could not be created; individual files that fail to write
  * are reported on stderr and noted in summary.json rather than aborting the bundle. */
-bool failure_bundle_write(const char *rootDir, const FailureBundle *bundle,
-                          char *dirOut, size_t dirCapacity);
+bool failure_bundle_write(const char *rootDir, const FailureBundle *bundle, char *dirOut,
+                          size_t dirCapacity);
 
 #endif /* DRIFTY_FAILURE_BUNDLE_H */

@@ -54,6 +54,11 @@ $requiredPackages = @(
     'mingw-w64-ucrt-x86_64-raylib',
     'mingw-w64-ucrt-x86_64-pkgconf',
     'mingw-w64-ucrt-x86_64-binutils',
+    'mingw-w64-ucrt-x86_64-clang',
+    'mingw-w64-ucrt-x86_64-compiler-rt',
+    'mingw-w64-ucrt-x86_64-clang-tools-extra',
+    'mingw-w64-ucrt-x86_64-cppcheck',
+    'mingw-w64-ucrt-x86_64-gcovr',
     'make'
 )
 
@@ -112,6 +117,18 @@ $ok = (Assert-Tool 'pkg-config' $pkgConfig {
 
 $objdump = Join-Path $ucrtBin 'objdump.exe'
 $ok = (Assert-Tool 'objdump' $objdump { & $objdump --version | Select-Object -First 1 | ForEach-Object { Write-Host "         $_" } }) -and $ok
+
+$clang = Join-Path $ucrtBin 'clang.exe'
+$ok = (Assert-Tool 'clang' $clang { & $clang --version | Select-Object -First 1 | ForEach-Object { Write-Host "         $_" } }) -and $ok
+
+$clangFormat = Join-Path $ucrtBin 'clang-format.exe'
+$ok = (Assert-Tool 'clang-format' $clangFormat { & $clangFormat --version | Select-Object -First 1 | ForEach-Object { Write-Host "         $_" } }) -and $ok
+
+$cppcheck = Join-Path $ucrtBin 'cppcheck.exe'
+$ok = (Assert-Tool 'cppcheck' $cppcheck { & $cppcheck --version | Select-Object -First 1 | ForEach-Object { Write-Host "         $_" } }) -and $ok
+
+$gcovr = Join-Path $ucrtBin 'gcovr.exe'
+$ok = (Assert-Tool 'gcovr' $gcovr { & $gcovr --version | Select-Object -First 1 | ForEach-Object { Write-Host "         $_" } }) -and $ok
 
 # raylib via pkg-config inside a real UCRT64 environment
 $raylibScriptPath = Join-Path $env:TEMP ("drifty_raylib_check_{0}.sh" -f [guid]::NewGuid().ToString('N'))

@@ -25,10 +25,10 @@ typedef struct {
 typedef struct {
     float staticFrontN;
     float staticRearN;
-    float transferN;         /* positive moves load rearward */
+    float transferN; /* positive moves load rearward */
     float unclampedFrontN;
     float unclampedRearN;
-    float frontN;            /* floored at MIN_NORMAL_LOAD_N */
+    float frontN; /* floored at MIN_NORMAL_LOAD_N */
     float rearN;
 } AxleLoads;
 
@@ -39,36 +39,29 @@ void physics_static_axle_loads(const VehicleSpec *spec, float *frontLoadN, float
 /* One step of the first-order load-transfer filter, in isolation.
  *   filtered += (previous - filtered) * (1 - exp(-rateHz * dt))
  * Returns `filtered` unchanged for a non-positive dt or a non-finite input. */
-float physics_filter_long_accel(float filteredMps2, float previousMps2,
-                                float rateHz, float dt);
+float physics_filter_long_accel(float filteredMps2, float previousMps2, float rateHz, float dt);
 
 /* Static-plus-dynamic axle loads for a given filtered longitudinal acceleration. */
 AxleLoads physics_axle_loads(const VehicleSpec *spec, float filteredLongAccelMps2);
 
 /* Aerodynamic drag in the body frame, opposing the full velocity vector. *magnitudeN
  * receives the scalar 0.5*rho*Cd*A*v^2 when non-NULL. */
-Vector2 physics_aero_drag_body_n(const VehicleSpec *spec,
-                                 float velocityLongitudinalMps, float velocityLateralMps,
-                                 float *magnitudeN);
+Vector2 physics_aero_drag_body_n(const VehicleSpec *spec, float velocityLongitudinalMps,
+                                 float velocityLateralMps, float *magnitudeN);
 
 /* Rolling resistance for one wheel, opposing its contact-point velocity. Returns the body-
  * frame force; *magnitudeN receives its length. Zero at rest, with no direction invented. */
-Vector2 physics_rolling_resistance_body_n(float rollingResistanceCoefficient,
-                                          float normalLoadN, Vector2 contactVelocityMps,
-                                          float *magnitudeN);
-void physics_update_steering(const VehicleSpec *spec, VehicleState *state,
-                             float steerInput, float dt);
+Vector2 physics_rolling_resistance_body_n(float rollingResistanceCoefficient, float normalLoadN,
+                                          Vector2 contactVelocityMps, float *magnitudeN);
+void physics_update_steering(const VehicleSpec *spec, VehicleState *state, float steerInput,
+                             float dt);
 void physics_axle_slip_angles(const VehicleSpec *spec, const VehicleState *state,
                               float *frontSlipAngleRad, float *rearSlipAngleRad);
 Vector2 physics_rotate_wheel_force_to_body(Vector2 wheelForceN, float steerAngleRad);
 float physics_low_speed_blend(float velocityLongitudinalMps);
 bool physics_state_is_valid(const VehicleSpec *spec, const VehicleState *state,
                             const VehicleDerived *derived);
-void physics_fixed_update(const VehicleSpec *spec,
-                          VehicleState *state,
-                          VehicleDerived *derived,
-                          VehicleRenderState *renderState,
-                          const Input *input,
-                          float dt);
+void physics_fixed_update(const VehicleSpec *spec, VehicleState *state, VehicleDerived *derived,
+                          VehicleRenderState *renderState, const Input *input, float dt);
 
 #endif /* DRIFTY_PHYSICS_H */

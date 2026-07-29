@@ -39,13 +39,14 @@
  * Eight axes, five steps each = 40 vehicles. Each sweep varies EXACTLY ONE registry key;
  * all other parameters stay at stock. The varied key is documented beside each axis.
  */
-#define SWEEP_AXES   8
-#define SWEEP_STEPS  5
+#define SWEEP_AXES 8
+#define SWEEP_STEPS 5
 
 /* One sweep axis. A row is five cars that differ in this key and in nothing else. */
 typedef struct {
-    const char *key;    /* the ONE registry key this row varies */
-    const char *note;   /* the visual dimension the row demonstrates */
+    const char *key; /* the ONE registry key this row varies */
+    // cppcheck-suppress unusedStructMember
+    const char *note; /* the visual dimension the row demonstrates */
 } SweepAxis;
 
 /* WHY TIRE ASPECT RATIO IS NOT ONE OF THESE AXES.
@@ -82,14 +83,14 @@ typedef struct {
  * threshold to accommodate one row.
  */
 static const SweepAxis kSweepAxes[SWEEP_AXES] = {
-    { "mass.engine_x",       "engine station: CG, layout read, hood bulge" },
-    { "body.wheelbase",      "axle span and the body length that follows it" },
-    { "body.width_overall",  "silhouette width and fender flare" },
+    { "mass.engine_x", "engine station: CG, layout read, hood bulge" },
+    { "body.wheelbase", "axle span and the body length that follows it" },
+    { "body.width_overall", "silhouette width and fender flare" },
     { "body.height_overall", "roof share of the plan area, glass, side windows" },
     { "body.front_overhang", "nose length ahead of the front axle" },
-    { "body.track_front",    "front stance: track against body width" },
-    { "body.shoulder_x",     "station of maximum width: where the body is widest" },
-    { "body.rear_overhang",  "tail length behind the rear axle" },
+    { "body.track_front", "front stance: track against body width" },
+    { "body.shoulder_x", "station of maximum width: where the body is widest" },
+    { "body.rear_overhang", "tail length behind the rear axle" },
 };
 
 /* WHY body.backlight_x LEFT THIS TABLE, AND WHY body.bed_length DID NOT REPLACE IT.
@@ -177,7 +178,6 @@ static const SweepAxis kSweepAxes[SWEEP_AXES] = {
  */
 static float sweep_compute_value(const DevParameter *param, int step, int totalSteps)
 {
-
     const float span = param->maximum - param->minimum;
     const float stepSpan = (totalSteps > 1) ? (span / (float)(totalSteps - 1)) : span;
     /* Minimum exclusion around stock: half a grid step, but never less than 0.08 m for
@@ -187,9 +187,9 @@ static float sweep_compute_value(const DevParameter *param, int step, int totalS
     const float dimExclude = fmaxf(0.5f * fabsf(stepSpan), 0.10f * span);
     const float exclude = fmaxf(metreExclude, dimExclude);
 
-    const float leftHi  = param->defaultValue - exclude;
+    const float leftHi = param->defaultValue - exclude;
     const float rightLo = param->defaultValue + exclude;
-    const float leftLen  = fmaxf(0.0f, leftHi - param->minimum);
+    const float leftLen = fmaxf(0.0f, leftHi - param->minimum);
     const float rightLen = fmaxf(0.0f, param->maximum - rightLo);
     const float usable = leftLen + rightLen;
 
@@ -224,7 +224,10 @@ static void sweep_build_spec(int axis, int step, VehicleSpec *out)
 /* Build the spec a sweep row WOULD use for a key that is not on the axis table. Shares
  * sweep_compute_value with the real generator, so a measurement cannot flatter a candidate by
  * spacing its steps differently from the fleet that would ship. */
-int car_corpus_sweep_steps(void) { return SWEEP_STEPS; }
+int car_corpus_sweep_steps(void)
+{
+    return SWEEP_STEPS;
+}
 
 bool car_corpus_sweep_probe(const char *key, int step, VehicleSpec *out)
 {
@@ -264,33 +267,35 @@ bool car_corpus_sweep_probe(const char *key, int step, VehicleSpec *out)
  *    10     31   tire.aspect_front         30.000    70.000   25.00 – 80.00
  *    11     37   aero.lift_rear           -2.000     0.500   -3.00 – 1.00
  */
-#define SAMPLED_COUNT   43
-#define HALTON_DIMS     12
-#define MAX_CANDIDATES  4096
+#define SAMPLED_COUNT 43
+#define HALTON_DIMS 12
+#define MAX_CANDIDATES 4096
 
 /* Rejection thresholds: 1.5× the corpus scenario distinctness floor. */
-#define SAMPLED_REJECT_PIXEL   (1.5f * 0.030f)   /* 0.045 */
-#define SAMPLED_REJECT_LINF    (1.5f * 0.080f)   /* 0.120 */
+#define SAMPLED_REJECT_PIXEL (1.5f * 0.030f) /* 0.045 */
+#define SAMPLED_REJECT_LINF (1.5f * 0.080f)  /* 0.120 */
 
 static const int kHaltonBases[HALTON_DIMS] = { 2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37 };
 static const char *const kHaltonKeys[HALTON_DIMS] = {
-    "body.wheelbase", "body.track_front", "body.width_overall",
-    "body.height_overall", "body.front_overhang", "body.rear_overhang",
-    "mass.engine_x", "body.cowl_x", "body.backlight_x",
-    "tire.section_width_front", "tire.aspect_front", "aero.lift_rear",
+    "body.wheelbase",      "body.track_front",
+    "body.width_overall",  "body.height_overall",
+    "body.front_overhang", "body.rear_overhang",
+    "mass.engine_x",       "body.cowl_x",
+    "body.backlight_x",    "tire.section_width_front",
+    "tire.aspect_front",   "aero.lift_rear",
 };
 static const float kHaltonBoxMin[HALTON_DIMS] = {
-    2.000f, 1.100f, 1.300f, 1.100f, 0.300f, 0.300f,
+    2.000f,  1.100f,  1.300f,  1.100f,   0.300f,  0.300f,
     -2.500f, -1.500f, -1.500f, 155.000f, 30.000f, -2.000f,
 };
 static const float kHaltonBoxMax[HALTON_DIMS] = {
-    5.500f, 2.300f, 2.400f, 2.800f, 1.800f, 1.800f,
+    5.500f, 2.300f, 2.400f, 2.800f,   1.800f,  1.800f,
     3.000f, 1.500f, 1.500f, 325.000f, 70.000f, 0.500f,
 };
 
 /* Cached sampled specs. Populated on first access. */
 static VehicleSpec g_sampledSpecs[SAMPLED_COUNT];
-static int g_sampledAccepted = -1;  /* -1 = not generated yet */
+static int g_sampledAccepted = -1; /* -1 = not generated yet */
 
 /* ---- Halton sequence ---- */
 static float halton(int index, int base)
@@ -324,7 +329,7 @@ static bool build_label_map(const VehicleSpec *spec, const CarRasterInfo *canvas
 /* Pre-compute canvas info from archetypes + sweeps, with generous margin. */
 static CarRasterInfo compute_canvas(void)
 {
-    const float pxPerM = 13.2f;  /* PIXELS_PER_METER * CAMERA_BASE_ZOOM ≈ 13.2 */
+    const float pxPerM = 13.2f; /* PIXELS_PER_METER * CAMERA_BASE_ZOOM ≈ 13.2 */
     float left = 1.0f, right = 1.0f, up = 1.0f, down = 1.0f;
 
     for (int i = 0; i < car_corpus_archetype_count() + SWEEP_AXES * SWEEP_STEPS; i++) {
@@ -345,19 +350,19 @@ static CarRasterInfo compute_canvas(void)
         const float r = (float)info.width - info.originXPx;
         const float u = info.originYPx;
         const float d = (float)info.height - info.originYPx;
-        if (l > left)   left  = l;
-        if (r > right)  right = r;
-        if (u > up)     up    = u;
-        if (d > down)   down  = d;
+        if (l > left) left = l;
+        if (r > right) right = r;
+        if (u > up) up = u;
+        if (d > down) down = d;
     }
 
     /* Add 2.5 m margin on each side for sampled vehicles. */
     const float marginPx = 2.5f * pxPerM;
     CarRasterInfo shared;
     memset(&shared, 0, sizeof(shared));
-    shared.pxPerM    = pxPerM;
-    shared.width     = (int)ceilf(left + right + 2.0f * marginPx);
-    shared.height    = (int)ceilf(up + down + 2.0f * marginPx);
+    shared.pxPerM = pxPerM;
+    shared.width = (int)ceilf(left + right + 2.0f * marginPx);
+    shared.height = (int)ceilf(up + down + 2.0f * marginPx);
     shared.originXPx = left + marginPx;
     shared.originYPx = up + marginPx;
     return shared;
@@ -379,7 +384,7 @@ static bool generate_sampled(void)
 
     const int baseVehicles = car_corpus_archetype_count() + SWEEP_AXES * SWEEP_STEPS;
     /* Store label maps for all accepted vehicles (grows as sampled are accepted). */
-    const int maxAccepted = baseVehicles + SAMPLED_COUNT;  /* 17 + 40 + 43 = 100 */
+    const int maxAccepted = baseVehicles + SAMPLED_COUNT; /* 17 + 40 + 43 = 100 */
     unsigned char **acceptedLabels =
         (unsigned char **)malloc((size_t)maxAccepted * sizeof(unsigned char *));
     VehicleSpec *acceptedSpecs =
@@ -396,8 +401,7 @@ static bool generate_sampled(void)
     for (int i = 0; i < car_corpus_archetype_count(); i++) {
         VehicleSpec spec;
         if (!car_corpus_archetype_build(i, &spec)) return false;
-        acceptedLabels[acceptedCount] =
-            (unsigned char *)calloc(pixels, 1);
+        acceptedLabels[acceptedCount] = (unsigned char *)calloc(pixels, 1);
         if (acceptedLabels[acceptedCount] == NULL ||
             !build_label_map(&spec, &canvas, acceptedLabels[acceptedCount], pixels)) {
             for (int j = 0; j <= acceptedCount; j++) free(acceptedLabels[j]);
@@ -413,8 +417,7 @@ static bool generate_sampled(void)
     for (int si = 0; si < SWEEP_AXES * SWEEP_STEPS; si++) {
         VehicleSpec spec;
         sweep_build_spec(si / SWEEP_STEPS, si % SWEEP_STEPS, &spec);
-        acceptedLabels[acceptedCount] =
-            (unsigned char *)calloc(pixels, 1);
+        acceptedLabels[acceptedCount] = (unsigned char *)calloc(pixels, 1);
         if (acceptedLabels[acceptedCount] == NULL ||
             !build_label_map(&spec, &canvas, acceptedLabels[acceptedCount], pixels)) {
             for (int j = 0; j <= acceptedCount; j++) free(acceptedLabels[j]);
@@ -529,9 +532,18 @@ static bool generate_sampled(void)
 
 /* -------------------------------------------------------------------- public API ---- */
 
-static int archetype_count(void) { return car_corpus_archetype_count(); }
-static int sweep_count(void)     { return SWEEP_AXES * SWEEP_STEPS; }
-static int sampled_count(void)   { return SAMPLED_COUNT; }
+static int archetype_count(void)
+{
+    return car_corpus_archetype_count();
+}
+static int sweep_count(void)
+{
+    return SWEEP_AXES * SWEEP_STEPS;
+}
+static int sampled_count(void)
+{
+    return SAMPLED_COUNT;
+}
 
 int car_corpus_count(void)
 {
@@ -549,9 +561,9 @@ const char *car_corpus_group_name(CarCorpusGroup group)
 {
     switch (group) {
         case CAR_CORPUS_ARCHETYPE: return "archetype";
-        case CAR_CORPUS_SWEEP:     return "sweep";
-        case CAR_CORPUS_SAMPLED:   return "sampled";
-        default:                   return "?";
+        case CAR_CORPUS_SWEEP: return "sweep";
+        case CAR_CORPUS_SAMPLED: return "sampled";
+        default: return "?";
     }
 }
 
@@ -559,7 +571,7 @@ const char *car_corpus_group_name(CarCorpusGroup group)
 static bool sweep_slot(int index, int *axisOut, int *stepOut)
 {
     const int base = archetype_count();
-    const int end  = base + sweep_count();
+    const int end = base + sweep_count();
     if (index < base || index >= end) return false;
     const int offset = index - base;
     if (axisOut != NULL) *axisOut = offset / SWEEP_STEPS;
@@ -686,10 +698,9 @@ void car_corpus_describe(int index, char *buf, size_t cap)
         if (param == NULL) return;
 
         const float value = dev_param_get(&spec, param);
-        snprintf(buf, cap, "%s = %.3f %s (step %d/%d)",
-                 param->name, (double)value,
-                 (param->unit != NULL && param->unit[0] != '\0') ? param->unit : "",
-                 step + 1, SWEEP_STEPS);
+        snprintf(buf, cap, "%s = %.3f %s (step %d/%d)", param->name, (double)value,
+                 (param->unit != NULL && param->unit[0] != '\0') ? param->unit : "", step + 1,
+                 SWEEP_STEPS);
         return;
     }
 

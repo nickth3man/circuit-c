@@ -29,24 +29,24 @@ CarRasterInfo test_car_shared_canvas(float pxPerM)
         const float r = (float)info.width - info.originXPx;
         const float u = info.originYPx;
         const float d = (float)info.height - info.originYPx;
-        if (l > left)  left  = l;
+        if (l > left) left = l;
         if (r > right) right = r;
-        if (u > up)    up    = u;
-        if (d > down)  down  = d;
+        if (u > up) up = u;
+        if (d > down) down = d;
     }
 
     CarRasterInfo shared;
     memset(&shared, 0, sizeof(shared));
-    shared.pxPerM    = pxPerM;
-    shared.width     = (int)ceilf(left + right);
-    shared.height    = (int)ceilf(up + down);
+    shared.pxPerM = pxPerM;
+    shared.width = (int)ceilf(left + right);
+    shared.height = (int)ceilf(up + down);
     shared.originXPx = left;
     shared.originYPx = up;
     return shared;
 }
 
 bool test_car_labels_for_spec(const VehicleSpec *spec, CarRasterInfo canvas,
-                               unsigned char *labels, size_t bytes)
+                              unsigned char *labels, size_t bytes)
 {
     CarVisual visual;
     car_visual_derive(spec, &visual);
@@ -66,7 +66,10 @@ float test_car_signature_linf(const CarVisual *a, const CarVisual *b, int *worst
     int worstIndex = 0;
     for (int i = 0; i < n; i++) {
         const float d = fabsf(sa[i] - sb[i]);
-        if (d > worst) { worst = d; worstIndex = i; }
+        if (d > worst) {
+            worst = d;
+            worstIndex = i;
+        }
     }
     if (worstOut != NULL) *worstOut = worstIndex;
     return worst;
@@ -93,7 +96,7 @@ float test_car_signature_l2(const CarVisual *a, const CarVisual *b)
  * skipped because they are consequences, not choices: a sweep of body.wheelbase legitimately
  * moves cgToFront, yaw inertia and frontal area with it. */
 int test_car_primary_diff_count(const VehicleSpec *a, const VehicleSpec *b,
-                                 const char **firstName)
+                                const char **firstName)
 {
     int diffs = 0;
     for (int p = 0; p < dev_params_count(); p++) {

@@ -25,9 +25,9 @@
 typedef void (*TimestepFixedUpdateFn)(void *ctx, float dt);
 
 typedef struct {
-    int   substeps;             /* fixed updates executed this frame, 0 .. MAX_PHYSICS_STEPS */
-    bool  droppedBacklog;       /* excess accumulator was discarded this frame */
-    float interpolationAlpha;   /* leftover accumulator / FIXED_DT_S, in [0, 1] */
+    int substeps;             /* fixed updates executed this frame, 0 .. MAX_PHYSICS_STEPS */
+    bool droppedBacklog;      /* excess accumulator was discarded this frame */
+    float interpolationAlpha; /* leftover accumulator / FIXED_DT_S, in [0, 1] */
 } TimestepResult;
 
 /*
@@ -44,10 +44,7 @@ typedef struct {
  * in which case the accumulator is still drained and counted; that is what lets a test
  * measure pacing on its own.
  */
-TimestepResult timestep_advance(float *accumulatorS,
-                                int *backlogDrops,
-                                float frameTimeS,
-                                TimestepFixedUpdateFn fixedUpdate,
-                                void *ctx);
+TimestepResult timestep_advance(float *accumulatorS, int *backlogDrops, float frameTimeS,
+                                TimestepFixedUpdateFn fixedUpdate, void *ctx);
 
 #endif /* DRIFTY_TIMESTEP_H */

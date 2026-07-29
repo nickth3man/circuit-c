@@ -16,7 +16,7 @@ void dev_state_init(DevState *dev)
     memset(dev, 0, sizeof(*dev));
 
     dev->timeScale = 1.0f;
-    dev->scenario = 0;                 /* "free" */
+    dev->scenario = 0; /* "free" */
     dev->showForces = true;
     dev->showVelocity = true;
     dev->showSlip = true;
@@ -78,38 +78,33 @@ void dev_state_set_status(DevState *dev, bool isError, const char *format, ...)
 /* ------------------------------------------------------------------------------- scope -- */
 
 static const char *const g_scopeNames[DEV_SCOPE_COUNT] = {
-    "body sideslip", "yaw rate", "steering", "throttle",
-    "front slip angle", "rear slip angle", "friction usage", "speed",
-    "filtered ax", "solved ax", "front load", "rear load", "load transfer",
-    "aero drag", "rolling resistance", "front usage", "rear usage"
+    "body sideslip",   "yaw rate",       "steering",      "throttle",    "front slip angle",
+    "rear slip angle", "friction usage", "speed",         "filtered ax", "solved ax",
+    "front load",      "rear load",      "load transfer", "aero drag",   "rolling resistance",
+    "front usage",     "rear usage"
 };
 
 static const char *const g_scopeUnits[DEV_SCOPE_COUNT] = {
-    "rad", "rad/s", "", "", "rad", "rad", "", "m/s",
-    "m/s^2", "m/s^2", "N", "N", "N", "N", "N", "", ""
+    "rad",   "rad/s", "",  "",  "rad", "rad", "", "m/s", "m/s^2",
+    "m/s^2", "N",     "N", "N", "N",   "N",   "", ""
 };
 
-static const DevScopeChannel
-g_scopePresets[DEV_SCOPE_PRESET_COUNT][DEV_SCOPE_VISIBLE] = {
-    [DEV_SCOPE_PRESET_HANDLING] = {
-        DEV_SCOPE_SIDESLIP, DEV_SCOPE_YAW_RATE, DEV_SCOPE_STEER, DEV_SCOPE_THROTTLE,
-        DEV_SCOPE_FRONT_SLIP, DEV_SCOPE_REAR_SLIP, DEV_SCOPE_FRICTION, DEV_SCOPE_SPEED
-    },
-    [DEV_SCOPE_PRESET_LOAD] = {
-        DEV_SCOPE_SOLVED_ACCEL, DEV_SCOPE_FILTERED_ACCEL, DEV_SCOPE_FRONT_LOAD,
-        DEV_SCOPE_REAR_LOAD, DEV_SCOPE_LOAD_TRANSFER, DEV_SCOPE_AERO_DRAG,
-        DEV_SCOPE_ROLLING, DEV_SCOPE_SPEED
-    },
-    [DEV_SCOPE_PRESET_GRIP] = {
-        DEV_SCOPE_FRONT_SLIP, DEV_SCOPE_REAR_SLIP, DEV_SCOPE_FRONT_USAGE,
-        DEV_SCOPE_REAR_USAGE, DEV_SCOPE_FRONT_LOAD, DEV_SCOPE_REAR_LOAD,
-        DEV_SCOPE_SIDESLIP, DEV_SCOPE_YAW_RATE
-    },
+static const DevScopeChannel g_scopePresets[DEV_SCOPE_PRESET_COUNT][DEV_SCOPE_VISIBLE] = {
+    [DEV_SCOPE_PRESET_HANDLING] = { DEV_SCOPE_SIDESLIP, DEV_SCOPE_YAW_RATE, DEV_SCOPE_STEER,
+                                    DEV_SCOPE_THROTTLE, DEV_SCOPE_FRONT_SLIP,
+                                    DEV_SCOPE_REAR_SLIP, DEV_SCOPE_FRICTION, DEV_SCOPE_SPEED },
+    [DEV_SCOPE_PRESET_LOAD] = { DEV_SCOPE_SOLVED_ACCEL, DEV_SCOPE_FILTERED_ACCEL,
+                                DEV_SCOPE_FRONT_LOAD, DEV_SCOPE_REAR_LOAD,
+                                DEV_SCOPE_LOAD_TRANSFER, DEV_SCOPE_AERO_DRAG, DEV_SCOPE_ROLLING,
+                                DEV_SCOPE_SPEED },
+    [DEV_SCOPE_PRESET_GRIP] = { DEV_SCOPE_FRONT_SLIP, DEV_SCOPE_REAR_SLIP,
+                                DEV_SCOPE_FRONT_USAGE, DEV_SCOPE_REAR_USAGE,
+                                DEV_SCOPE_FRONT_LOAD, DEV_SCOPE_REAR_LOAD, DEV_SCOPE_SIDESLIP,
+                                DEV_SCOPE_YAW_RATE },
 };
 
-static const char *const g_scopePresetNames[DEV_SCOPE_PRESET_COUNT] = {
-    "handling", "load", "grip"
-};
+static const char *const g_scopePresetNames[DEV_SCOPE_PRESET_COUNT] = { "handling", "load",
+                                                                        "grip" };
 
 const char *dev_scope_preset_name(DevScopePreset preset)
 {
@@ -125,7 +120,7 @@ DevScopeChannel dev_scope_preset_channel(DevScopePreset preset, int slot)
 }
 
 static const char *const g_markerNames[DEV_MARKER_KIND_COUNT] = {
-    "throttle", "lift", "brake", "handbrake", "steer reversal",
+    "throttle",   "lift",          "brake",     "handbrake", "steer reversal",
     "saturation", "peak transfer", "invariant", "recovery"
 };
 
@@ -183,7 +178,7 @@ float dev_state_ghost_scope_value(const DevState *dev, DevScopeChannel channel, 
 {
     if (dev == NULL || channel < 0 || channel >= DEV_SCOPE_COUNT) return 0.0f;
     if (index < 0 || index >= dev->ghostScopeCount) return 0.0f;
-    return dev->ghostScope[channel][index];   /* already stored oldest-first */
+    return dev->ghostScope[channel][index]; /* already stored oldest-first */
 }
 
 /* -------------------------------------------------------------------------- invariants -- */
@@ -200,8 +195,8 @@ static bool evaluate_invariants(const Game *game, char *text, size_t capacity)
         return false;
     }
     if (!isfinite(v->positionM.x) || !isfinite(v->positionM.y)) {
-        snprintf(text, capacity, "position is not finite (%.3f, %.3f)",
-                 (double)v->positionM.x, (double)v->positionM.y);
+        snprintf(text, capacity, "position is not finite (%.3f, %.3f)", (double)v->positionM.x,
+                 (double)v->positionM.y);
         return false;
     }
     if (d->speedMps > MAX_SAFE_SPEED_MPS) {
@@ -217,14 +212,14 @@ static bool evaluate_invariants(const Game *game, char *text, size_t capacity)
     for (int i = 0; i < WHEEL_COUNT; i++) {
         const WheelState *wheel = &v->wheels[i];
         if (wheel->normalLoadN < 0.0f) {
-            snprintf(text, capacity, "wheel %d carries a negative normal load (%.1f N)",
-                     i, (double)wheel->normalLoadN);
+            snprintf(text, capacity, "wheel %d carries a negative normal load (%.1f N)", i,
+                     (double)wheel->normalLoadN);
             return false;
         }
         if (wheel->frictionUsage > 1.0f + FRICTION_TOLERANCE) {
             snprintf(text, capacity,
-                     "wheel %d uses %.4f of its friction budget (limit 1 + %.3f)",
-                     i, (double)wheel->frictionUsage, (double)FRICTION_TOLERANCE);
+                     "wheel %d uses %.4f of its friction budget (limit 1 + %.3f)", i,
+                     (double)wheel->frictionUsage, (double)FRICTION_TOLERANCE);
             return false;
         }
     }
@@ -235,9 +230,11 @@ static bool evaluate_invariants(const Game *game, char *text, size_t capacity)
     const float weightN = game->spec.massKg * GRAVITY_MPS2;
     if (!isfinite(d->filteredLongAccelMps2) || !isfinite(d->previousLongAccelMps2) ||
         !isfinite(d->solvedLongAccelMps2)) {
-        snprintf(text, capacity, "load-filter acceleration is not finite (prev %.3f, "
-                 "filtered %.3f, solved %.3f)", (double)d->previousLongAccelMps2,
-                 (double)d->filteredLongAccelMps2, (double)d->solvedLongAccelMps2);
+        snprintf(text, capacity,
+                 "load-filter acceleration is not finite (prev %.3f, "
+                 "filtered %.3f, solved %.3f)",
+                 (double)d->previousLongAccelMps2, (double)d->filteredLongAccelMps2,
+                 (double)d->solvedLongAccelMps2);
         return false;
     }
     if (fabsf((d->unclampedFrontLoadN + d->unclampedRearLoadN) - weightN) > 1.0f) {
@@ -251,7 +248,8 @@ static bool evaluate_invariants(const Game *game, char *text, size_t capacity)
         return false;
     }
     if (d->aeroDragBodyN.x * v->velocityLongitudinalMps +
-        d->aeroDragBodyN.y * v->velocityLateralMps > RESISTANCE_POWER_TOLERANCE_W) {
+            d->aeroDragBodyN.y * v->velocityLateralMps >
+        RESISTANCE_POWER_TOLERANCE_W) {
         snprintf(text, capacity, "aerodynamic drag is adding energy (%.4f W)",
                  (double)(d->aeroDragBodyN.x * v->velocityLongitudinalMps +
                           d->aeroDragBodyN.y * v->velocityLateralMps));
@@ -273,11 +271,11 @@ static void push_marker(DevState *dev, DevMarkerKind kind, uint64_t tick, float 
 
 /* Thresholds are display heuristics, not physics: they decide when a line is drawn on the
  * inspector's timeline, and nothing reads them back into the simulation. */
-#define MARKER_CONTROL_THRESHOLD  0.50f
-#define MARKER_STEER_THRESHOLD    0.05f
-#define MARKER_SATURATION_USAGE   0.99f
-#define MARKER_SLIDE_ENTER_RAD    0.35f
-#define MARKER_SLIDE_EXIT_RAD     0.10f
+#define MARKER_CONTROL_THRESHOLD 0.50f
+#define MARKER_STEER_THRESHOLD 0.05f
+#define MARKER_SATURATION_USAGE 0.99f
+#define MARKER_SLIDE_ENTER_RAD 0.35f
+#define MARKER_SLIDE_EXIT_RAD 0.10f
 #define MARKER_RECOVERY_SPEED_MPS 3.00f
 
 static void record_markers(struct Game *game, const Input *appliedInput)
@@ -290,10 +288,12 @@ static void record_markers(struct Game *game, const Input *appliedInput)
     const float handbrake = (appliedInput != NULL) ? appliedInput->handbrake : 0.0f;
     const float steer = (appliedInput != NULL) ? appliedInput->steer : 0.0f;
 
-    if (throttle >= MARKER_CONTROL_THRESHOLD && dev->markerPrevThrottle < MARKER_CONTROL_THRESHOLD) {
+    if (throttle >= MARKER_CONTROL_THRESHOLD &&
+        dev->markerPrevThrottle < MARKER_CONTROL_THRESHOLD) {
         push_marker(dev, DEV_MARKER_THROTTLE_ON, tick, throttle);
     }
-    if (throttle < MARKER_CONTROL_THRESHOLD && dev->markerPrevThrottle >= MARKER_CONTROL_THRESHOLD) {
+    if (throttle < MARKER_CONTROL_THRESHOLD &&
+        dev->markerPrevThrottle >= MARKER_CONTROL_THRESHOLD) {
         push_marker(dev, DEV_MARKER_THROTTLE_LIFT, tick, throttle);
     }
     if (brake >= MARKER_CONTROL_THRESHOLD && dev->markerPrevBrake < MARKER_CONTROL_THRESHOLD) {
@@ -404,8 +404,7 @@ void dev_state_record(struct Game *game, const Input *appliedInput)
                 dev->scenarioRunning = false;
                 dev->paused = true;
                 dev_state_set_status(dev, false, "scenario '%s' finished at tick %llu",
-                                     scenario->name,
-                                     (unsigned long long)game->sim.tick);
+                                     scenario->name, (unsigned long long)game->sim.tick);
             }
         }
     }

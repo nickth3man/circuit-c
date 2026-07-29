@@ -49,8 +49,14 @@
 
 #define MAX_POLY_POINTS (2 * CAR_HULL_STATIONS + 8)
 
-static float maxf(float a, float b) { return (a > b) ? a : b; }
-static float minf(float a, float b) { return (a < b) ? a : b; }
+static float maxf(float a, float b)
+{
+    return (a > b) ? a : b;
+}
+static float minf(float a, float b)
+{
+    return (a < b) ? a : b;
+}
 
 /* Where a fill writes. Either channel may be NULL. */
 typedef struct {
@@ -73,7 +79,10 @@ static void put_px(const RasterTarget *t, int x, int y, Color c, unsigned char l
     if (t->rgba != NULL) {
         unsigned char *p = t->rgba + index * CAR_RASTER_BPP;
         if (c.a >= 255) {
-            p[0] = c.r; p[1] = c.g; p[2] = c.b; p[3] = 255;
+            p[0] = c.r;
+            p[1] = c.g;
+            p[2] = c.b;
+            p[3] = 255;
         } else if (c.a > 0) {
             /* Straight-alpha source-over. */
             const float sa = (float)c.a / 255.0f;
@@ -83,8 +92,8 @@ static void put_px(const RasterTarget *t, int x, int y, Color c, unsigned char l
                 for (int k = 0; k < 3; k++) {
                     const float sc = (k == 0) ? (float)c.r : (k == 1) ? (float)c.g : (float)c.b;
                     const float dc = (float)p[k];
-                    p[k] = (unsigned char)clampf((sc * sa + dc * da * (1.0f - sa)) / oa,
-                                                 0.0f, 255.0f);
+                    p[k] = (unsigned char)clampf((sc * sa + dc * da * (1.0f - sa)) / oa, 0.0f,
+                                                 255.0f);
                 }
                 p[3] = (unsigned char)clampf(oa * 255.0f, 0.0f, 255.0f);
             }
@@ -108,11 +117,12 @@ static Vector2 to_px(const RasterTarget *t, float xM, float yM)
 }
 
 /* Even-odd scanline fill. Handles convex and mildly concave outlines alike. */
-static void fill_polygon_px(const RasterTarget *t, const Vector2 *pts, int count,
-                            Color c, unsigned char label)
+static void fill_polygon_px(const RasterTarget *t, const Vector2 *pts, int count, Color c,
+                            unsigned char label)
 {
     if (pts == NULL || count < 3) return;
 
+    // cppcheck-suppress duplicateAssignExpression
     float minY = pts[0].y;
     float maxY = pts[0].y;
     for (int i = 1; i < count; i++) {
@@ -145,7 +155,10 @@ static void fill_polygon_px(const RasterTarget *t, const Vector2 *pts, int count
         for (int i = 1; i < n; i++) {
             const float key = xs[i];
             int k = i - 1;
-            while (k >= 0 && xs[k] > key) { xs[k + 1] = xs[k]; k--; }
+            while (k >= 0 && xs[k] > key) {
+                xs[k + 1] = xs[k];
+                k--;
+            }
             xs[k + 1] = key;
         }
 
@@ -160,9 +173,8 @@ static void fill_polygon_px(const RasterTarget *t, const Vector2 *pts, int count
 }
 
 /* An oriented rectangle in body space: centre, length along its own +X, width across. */
-static void fill_oriented_rect(const RasterTarget *t, float cxM, float cyM,
-                               float lengthM, float widthM, float angleRad,
-                               Color c, unsigned char label)
+static void fill_oriented_rect(const RasterTarget *t, float cxM, float cyM, float lengthM,
+                               float widthM, float angleRad, Color c, unsigned char label)
 {
     if (!(lengthM > 0.0f) || !(widthM > 0.0f)) return;
     const float hl = 0.5f * lengthM, hw = 0.5f * widthM;
@@ -177,8 +189,8 @@ static void fill_oriented_rect(const RasterTarget *t, float cxM, float cyM,
     fill_polygon_px(t, pts, 4, c, label);
 }
 
-static void fill_disc(const RasterTarget *t, float cxM, float cyM, float diameterM,
-                      Color c, unsigned char label)
+static void fill_disc(const RasterTarget *t, float cxM, float cyM, float diameterM, Color c,
+                      unsigned char label)
 {
     if (!(diameterM > 0.0f)) return;
     const Vector2 centre = to_px(t, cxM, cyM);
@@ -244,7 +256,7 @@ CarRasterInfo car_raster_info(const CarVisual *visual, float pxPerM, int padPx)
     float minX = 0.0f, maxX = 0.0f, minY = 0.0f, maxY = 0.0f;
 
     for (int i = 0; i < CAR_HULL_STATIONS; i++) {
-        grow(&minX, &maxX, &minY, &maxY, visual->hull[i].xM,  visual->hull[i].halfWidthM);
+        grow(&minX, &maxX, &minY, &maxY, visual->hull[i].xM, visual->hull[i].halfWidthM);
         grow(&minX, &maxX, &minY, &maxY, visual->hull[i].xM, -visual->hull[i].halfWidthM);
     }
 
@@ -257,15 +269,15 @@ CarRasterInfo car_raster_info(const CarVisual *visual, float pxPerM, int padPx)
     }
 
     if (visual->wingSpanM > 0.0f) {
-        grow(&minX, &maxX, &minY, &maxY,
-             visual->wingXM - 0.5f * visual->wingChordM, +0.5f * visual->wingSpanM);
-        grow(&minX, &maxX, &minY, &maxY,
-             visual->wingXM + 0.5f * visual->wingChordM, -0.5f * visual->wingSpanM);
+        grow(&minX, &maxX, &minY, &maxY, visual->wingXM - 0.5f * visual->wingChordM,
+             +0.5f * visual->wingSpanM);
+        grow(&minX, &maxX, &minY, &maxY, visual->wingXM + 0.5f * visual->wingChordM,
+             -0.5f * visual->wingSpanM);
     }
     if (visual->splitterProtrusionM > 0.0f) {
         const float noseX = visual->hull[CAR_HULL_STATIONS - 1].xM;
-        grow(&minX, &maxX, &minY, &maxY,
-             noseX + visual->splitterProtrusionM, +0.5f * visual->splitterWidthM);
+        grow(&minX, &maxX, &minY, &maxY, noseX + visual->splitterProtrusionM,
+             +0.5f * visual->splitterWidthM);
         grow(&minX, &maxX, &minY, &maxY, noseX, -0.5f * visual->splitterWidthM);
     }
     if (visual->mirrorOffsetM > 0.0f) {
@@ -276,31 +288,31 @@ CarRasterInfo car_raster_info(const CarVisual *visual, float pxPerM, int padPx)
     if (visual->canardStrength > 0.01f) {
         const float noseX = visual->hull[CAR_HULL_STATIONS - 1].xM;
         const float canardLen = 0.10f + 0.15f * visual->canardStrength;
-        grow(&minX, &maxX, &minY, &maxY, noseX + canardLen * 0.5f,
-             visual->widthM * 0.48f);
-        grow(&minX, &maxX, &minY, &maxY, noseX + canardLen * 0.5f,
-             -visual->widthM * 0.48f);
+        grow(&minX, &maxX, &minY, &maxY, noseX + canardLen * 0.5f, visual->widthM * 0.48f);
+        grow(&minX, &maxX, &minY, &maxY, noseX + canardLen * 0.5f, -visual->widthM * 0.48f);
     }
 
     /* One extra pixel of body space for the dark outline drawn under the hull.
      * Plus extra for the L0 shadow offset. */
     const float outlineM = 1.0f / pxPerM;
     const float shadowOffsetM = 0.12f;
-    minX -= outlineM; maxX += outlineM + shadowOffsetM;
-    minY -= outlineM + 0.08f; maxY += outlineM + 0.08f;
+    minX -= outlineM;
+    maxX += outlineM + shadowOffsetM;
+    minY -= outlineM + 0.08f;
+    maxY += outlineM + 0.08f;
 
     info.pxPerM = pxPerM;
-    info.width  = (int)ceilf((maxX - minX) * pxPerM) + 2 * padPx;
+    info.width = (int)ceilf((maxX - minX) * pxPerM) + 2 * padPx;
     info.height = (int)ceilf((maxY - minY) * pxPerM) + 2 * padPx;
-    if (info.width  < 1) info.width  = 1;
+    if (info.width < 1) info.width = 1;
     if (info.height < 1) info.height = 1;
     info.originXPx = (float)padPx - minX * pxPerM;
     info.originYPx = (float)padPx + maxY * pxPerM;
     return info;
 }
 
-CarRasterInfo car_raster_part_info(const CarVisual *visual, CarRasterPart part,
-                                   int wheelIndex, float pxPerM, int padPx)
+CarRasterInfo car_raster_part_info(const CarVisual *visual, CarRasterPart part, int wheelIndex,
+                                   float pxPerM, int padPx)
 {
     if (part != CAR_RASTER_PART_WHEEL) {
         /* BODY shares the car's bounds with ALL: the wheel arches are body geometry and
@@ -321,9 +333,9 @@ CarRasterInfo car_raster_part_info(const CarVisual *visual, CarRasterPart part,
     const float halfWid = 0.5f * maxf(w->widthM, w->rimWidthM);
 
     info.pxPerM = pxPerM;
-    info.width  = (int)ceilf(2.0f * halfLen * pxPerM) + 2 * padPx;
+    info.width = (int)ceilf(2.0f * halfLen * pxPerM) + 2 * padPx;
     info.height = (int)ceilf(2.0f * halfWid * pxPerM) + 2 * padPx;
-    if (info.width  < 1) info.width  = 1;
+    if (info.width < 1) info.width = 1;
     if (info.height < 1) info.height = 1;
     info.originXPx = 0.5f * (float)info.width;
     info.originYPx = 0.5f * (float)info.height;
@@ -341,14 +353,13 @@ size_t car_raster_bytes(CarRasterInfo info)
 /* The tire stack: tread, sidewall, rim, disc, outside in. Drawn about (cxM, cyM) at
  * `angleRad`, which is what lets the same code serve the in-place wheel of a contact sheet
  * and the standalone, steerable wheel sprite the game composites. */
-static void draw_wheel_stack(const RasterTarget *t, const CarVisual *v,
-                             const CarWheelVisual *w,
+static void draw_wheel_stack(const RasterTarget *t, const CarVisual *v, const CarWheelVisual *w,
                              float cxM, float cyM, float angleRad)
 {
     const float visualWidth = w->widthM * w->camberVisualCos;
 
-    fill_oriented_rect(t, cxM, cyM, w->diameterM, visualWidth, angleRad,
-                       v->tire, CAR_LABEL_TIRE);
+    fill_oriented_rect(t, cxM, cyM, w->diameterM, visualWidth, angleRad, v->tire,
+                       CAR_LABEL_TIRE);
 
     /* Sidewall ring — between tread and rim. Slightly different shade from tread.
      * Only drawn when the sidewall is thick enough to read (> 0.5 px). */
@@ -359,14 +370,13 @@ static void draw_wheel_stack(const RasterTarget *t, const CarVisual *v,
          * tire is — two moving edges instead of one, which is the difference between the
          * profile reading at 13 px/m and not reading at all. */
         const float swDia = w->rimDiameterM + 2.0f * w->sidewallHeightM * 0.70f;
-        fill_oriented_rect(t, cxM, cyM, swDia, visualWidth * 0.88f, angleRad,
-                           v->tireSidewall, CAR_LABEL_TIRE_SIDEWALL);
+        fill_oriented_rect(t, cxM, cyM, swDia, visualWidth * 0.88f, angleRad, v->tireSidewall,
+                           CAR_LABEL_TIRE_SIDEWALL);
     }
 
     /* Rim barrel. Width reflects the actual rim width from the designation. */
-    fill_oriented_rect(t, cxM, cyM, w->rimDiameterM,
-                       maxf(w->rimWidthM, visualWidth * 0.55f), angleRad,
-                       v->rim, CAR_LABEL_RIM);
+    fill_oriented_rect(t, cxM, cyM, w->rimDiameterM, maxf(w->rimWidthM, visualWidth * 0.55f),
+                       angleRad, v->rim, CAR_LABEL_RIM);
 
     /* Brake disc — centre of the rim. */
     if (w->discDiameterM > 0.0f && w->discDiameterM < w->rimDiameterM) {
@@ -375,7 +385,8 @@ static void draw_wheel_stack(const RasterTarget *t, const CarVisual *v,
     }
 }
 
-static void render(const CarVisual *v, RasterTarget *t, CarRasterPart part, int wheelIndex)
+static void render(const CarVisual *v, const RasterTarget *t, CarRasterPart part,
+                   int wheelIndex)
 {
     if (part == CAR_RASTER_PART_WHEEL) {
         if (wheelIndex < 0 || wheelIndex >= WHEEL_COUNT) return;
@@ -406,8 +417,7 @@ static void render(const CarVisual *v, RasterTarget *t, CarRasterPart part, int 
         const float shadowOffY = 0.04f; /* shadow offset leftward */
         const float shadowLen = v->lengthM + 0.08f;
         const float shadowWid = v->widthM * 0.92f;
-        fill_oriented_rect(t, 0.0f - shadowOffX, 0.0f - shadowOffY,
-                           shadowLen, shadowWid, 0.0f,
+        fill_oriented_rect(t, 0.0f - shadowOffX, 0.0f - shadowOffY, shadowLen, shadowWid, 0.0f,
                            shadowColor, CAR_LABEL_SHADOW);
     }
 
@@ -430,10 +440,8 @@ static void render(const CarVisual *v, RasterTarget *t, CarRasterPart part, int 
      *
      * Taller bodies (heightVisual high) get a proportionally larger roof panel. */
     if (v->cabinLengthM > 0.0f) {
-        fill_oriented_rect(t, v->cabinCentreXM, 0.0f,
-                           v->roofLengthM,
-                           2.0f * v->cabinHalfWidthM, 0.0f,
-                           v->cabin, CAR_LABEL_CABIN);
+        fill_oriented_rect(t, v->cabinCentreXM, 0.0f, v->roofLengthM, 2.0f * v->cabinHalfWidthM,
+                           0.0f, v->cabin, CAR_LABEL_CABIN);
     }
 
     /* ============================================================= L4: glass =====
@@ -443,8 +451,8 @@ static void render(const CarVisual *v, RasterTarget *t, CarRasterPart part, int 
      * along the greenhouse with sideWindowCount segments.
      * The glass band's half-width is decided by the grammar (v->glassHalfWidthM), not here. */
     if (v->cabinLengthM > 0.0f) {
-        const float glassWidthFrac = (v->cabinHalfWidthM > 1e-6f)
-            ? (v->glassHalfWidthM / v->cabinHalfWidthM) : 0.0f;
+        const float glassWidthFrac =
+            (v->cabinHalfWidthM > 1e-6f) ? (v->glassHalfWidthM / v->cabinHalfWidthM) : 0.0f;
 
         if (v->vanWindowWeight > 0.05f && v->sideWindowCount >= 2) {
             /* Segmented side-window band: N glass panes separated by slim pillars. */
@@ -454,20 +462,20 @@ static void render(const CarVisual *v, RasterTarget *t, CarRasterPart part, int 
                 const float segX = v->backlightXM + segLen * (0.5f + (float)s);
                 const float glassLen = segLen - pillarM;
                 if (glassLen > 0.0f) {
-                    fill_oriented_rect(t, segX, 0.0f,
-                                       glassLen, 2.0f * v->cabinHalfWidthM * glassWidthFrac,
-                                       0.0f, v->glass, CAR_LABEL_GLASS);
+                    fill_oriented_rect(t, segX, 0.0f, glassLen,
+                                       2.0f * v->cabinHalfWidthM * glassWidthFrac, 0.0f,
+                                       v->glass, CAR_LABEL_GLASS);
                 }
             }
         } else {
             /* Two glass bands: windscreen forward, backlight rear. */
             const float bandLen = 0.26f * v->cabinLengthM;
-            fill_oriented_rect(t, v->windscreenXM - 0.5f * bandLen, 0.0f,
-                               bandLen, 2.0f * v->cabinHalfWidthM * glassWidthFrac,
-                               0.0f, v->glass, CAR_LABEL_GLASS);
-            fill_oriented_rect(t, v->backlightXM + 0.5f * bandLen, 0.0f,
-                               bandLen, 2.0f * v->cabinHalfWidthM * (glassWidthFrac - 0.06f),
-                               0.0f, v->glass, CAR_LABEL_GLASS);
+            fill_oriented_rect(t, v->windscreenXM - 0.5f * bandLen, 0.0f, bandLen,
+                               2.0f * v->cabinHalfWidthM * glassWidthFrac, 0.0f, v->glass,
+                               CAR_LABEL_GLASS);
+            fill_oriented_rect(t, v->backlightXM + 0.5f * bandLen, 0.0f, bandLen,
+                               2.0f * v->cabinHalfWidthM * (glassWidthFrac - 0.06f), 0.0f,
+                               v->glass, CAR_LABEL_GLASS);
         }
     }
 
@@ -475,8 +483,8 @@ static void render(const CarVisual *v, RasterTarget *t, CarRasterPart part, int 
     if (v->hasCage && v->cabinLengthM > 0.0f) {
         fill_oriented_rect(t, v->cabinCentreXM, 0.0f, v->cabinLengthM, 2.0f * onePx, 0.0f,
                            v->outline, CAR_LABEL_CAGE);
-        fill_oriented_rect(t, v->cabinCentreXM, 0.0f, 2.0f * onePx,
-                           2.0f * v->cabinHalfWidthM, 0.0f, v->outline, CAR_LABEL_CAGE);
+        fill_oriented_rect(t, v->cabinCentreXM, 0.0f, 2.0f * onePx, 2.0f * v->cabinHalfWidthM,
+                           0.0f, v->outline, CAR_LABEL_CAGE);
     }
 
     /* ========================================================= L5: lights ===== */
@@ -486,12 +494,11 @@ static void render(const CarVisual *v, RasterTarget *t, CarRasterPart part, int 
         const float tailHalf = v->hull[0].halfWidthM;
         for (int s = -1; s <= 1; s += 2) {
             /* Headlights: warm white at the nose. */
-            fill_oriented_rect(t, noseX - 0.5f * lampLen, (float)s * noseHalf * 0.55f,
-                               lampLen, lampWid, 0.0f, v->lamp, CAR_LABEL_LAMP);
+            fill_oriented_rect(t, noseX - 0.5f * lampLen, (float)s * noseHalf * 0.55f, lampLen,
+                               lampWid, 0.0f, v->lamp, CAR_LABEL_LAMP);
             /* Tail/brake lights: red at the tail. */
-            fill_oriented_rect(t, tailX + 0.5f * lampLen, (float)s * tailHalf * 0.55f,
-                               lampLen, lampWid, 0.0f, (Color){ 200, 48, 40, 255 },
-                               CAR_LABEL_LAMP);
+            fill_oriented_rect(t, tailX + 0.5f * lampLen, (float)s * tailHalf * 0.55f, lampLen,
+                               lampWid, 0.0f, (Color){ 200, 48, 40, 255 }, CAR_LABEL_LAMP);
         }
     }
 
@@ -539,16 +546,14 @@ static void render(const CarVisual *v, RasterTarget *t, CarRasterPart part, int 
 
             if (declaredFlareM > 0.0f) {
                 fill_oriented_rect(t, w->centreM.x,
-                                   w->centreM.y
-                                       + outboard * (0.5f * w->widthM + 0.5f * declaredFlareM),
-                                   archDia, declaredFlareM, 0.0f,
-                                   v->bodyShade, CAR_LABEL_ARCH);
+                                   w->centreM.y +
+                                       outboard * (0.5f * w->widthM + 0.5f * declaredFlareM),
+                                   archDia, declaredFlareM, 0.0f, v->bodyShade, CAR_LABEL_ARCH);
             }
 
             fill_oriented_rect(t, w->centreM.x,
                                w->centreM.y - outboard * (0.5f * w->widthM + 0.5f * archBandM),
-                               archDia, archBandM, 0.0f,
-                               v->bodyShade, CAR_LABEL_ARCH);
+                               archDia, archBandM, 0.0f, v->bodyShade, CAR_LABEL_ARCH);
         }
 
         if (withTires) {
@@ -561,15 +566,15 @@ static void render(const CarVisual *v, RasterTarget *t, CarRasterPart part, int 
     /* L7a: splitter — a dark lip ahead of the bumper, not an accent-coloured appendage. */
     if (v->splitterProtrusionM > 0.0f) {
         fill_oriented_rect(t, noseX + 0.5f * v->splitterProtrusionM - onePx, 0.0f,
-                           v->splitterProtrusionM + 2.0f * onePx, v->splitterWidthM,
-                           0.0f, v->outline, CAR_LABEL_SPLITTER);
+                           v->splitterProtrusionM + 2.0f * onePx, v->splitterWidthM, 0.0f,
+                           v->outline, CAR_LABEL_SPLITTER);
     }
 
     /* L7b: wing over the deck. Two-tone: accent colour with a dark centre strip so it
      * reads as a wing profile, not a coloured rectangle. */
     if (v->wingSpanM > 0.0f) {
-        fill_oriented_rect(t, v->wingXM, 0.0f, v->wingChordM, v->wingSpanM, 0.0f,
-                           v->accent, CAR_LABEL_WING);
+        fill_oriented_rect(t, v->wingXM, 0.0f, v->wingChordM, v->wingSpanM, 0.0f, v->accent,
+                           CAR_LABEL_WING);
         fill_oriented_rect(t, v->wingXM, 0.0f, v->wingChordM * 0.34f, v->wingSpanM, 0.0f,
                            v->outline, CAR_LABEL_WING);
     }
@@ -581,17 +586,16 @@ static void render(const CarVisual *v, RasterTarget *t, CarRasterPart part, int 
         const float canardWid = v->canardStrength * 0.05f + onePx;
         const float canardY = v->widthM * 0.44f;
         for (int s = -1; s <= 1; s += 2) {
-            fill_oriented_rect(t, noseX - canardLen * 0.25f, (float)s * canardY,
-                               canardLen, canardWid, (float)s * 0.35f,
-                               v->accent, CAR_LABEL_CANARD);
+            fill_oriented_rect(t, noseX - canardLen * 0.25f, (float)s * canardY, canardLen,
+                               canardWid, (float)s * 0.35f, v->accent, CAR_LABEL_CANARD);
         }
     }
 
     /* L7d: mirrors on their stalks. */
     if (v->hasMirrors && v->mirrorOffsetM > 0.0f) {
         for (int s = -1; s <= 1; s += 2) {
-            fill_oriented_rect(t, v->windscreenXM, (float)s * v->mirrorOffsetM,
-                               0.14f, 0.10f, 0.0f, v->bodyShade, CAR_LABEL_MIRROR);
+            fill_oriented_rect(t, v->windscreenXM, (float)s * v->mirrorOffsetM, 0.14f, 0.10f,
+                               0.0f, v->bodyShade, CAR_LABEL_MIRROR);
         }
     }
 
@@ -614,15 +618,12 @@ static void render(const CarVisual *v, RasterTarget *t, CarRasterPart part, int 
         const float bedWid = v->widthM * 0.78f * v->pickupBedWeight;
         if (bedLen > 0.0f && bedWid > 0.0f) {
             /* Bed floor: darker rectangle covering the rear body. */
-            fill_oriented_rect(t, bedEndX + 0.5f * bedLen, 0.0f,
-                               bedLen, bedWid, 0.0f,
-                               v->cabin, CAR_LABEL_BED);
+            fill_oriented_rect(t, bedEndX + 0.5f * bedLen, 0.0f, bedLen, bedWid, 0.0f, v->cabin,
+                               CAR_LABEL_BED);
             /* Bed rails: thin outline strips at the bed edges. */
             for (int s = -1; s <= 1; s += 2) {
-                fill_oriented_rect(t, bedEndX + 0.5f * bedLen,
-                                   (float)s * bedWid * 0.50f,
-                                   bedLen, onePx * 1.5f, 0.0f,
-                                   v->outline, CAR_LABEL_BED);
+                fill_oriented_rect(t, bedEndX + 0.5f * bedLen, (float)s * bedWid * 0.50f,
+                                   bedLen, onePx * 1.5f, 0.0f, v->outline, CAR_LABEL_BED);
             }
         }
     }
@@ -634,12 +635,10 @@ static void render(const CarVisual *v, RasterTarget *t, CarRasterPart part, int 
         const float hoodLen = maxf(noseX - v->windscreenXM, 0.4f);
         const float bulgeW = v->cabinHalfWidthM * 0.38f * v->hoodBulgeStrength;
         /* Slightly lighter than cabin to read as a raised surface. */
-        const Color bulgeColor = (Color){
-            (unsigned char)minf((int)v->cabin.r + 25, 255),
-            (unsigned char)minf((int)v->cabin.g + 25, 255),
-            (unsigned char)minf((int)v->cabin.b + 25, 255), 255 };
-        fill_oriented_rect(t, hoodCentreX, 0.0f,
-                           hoodLen * 0.65f, bulgeW * 2.0f, 0.0f,
+        const Color bulgeColor = (Color){ (unsigned char)minf((int)v->cabin.r + 25, 255),
+                                          (unsigned char)minf((int)v->cabin.g + 25, 255),
+                                          (unsigned char)minf((int)v->cabin.b + 25, 255), 255 };
+        fill_oriented_rect(t, hoodCentreX, 0.0f, hoodLen * 0.65f, bulgeW * 2.0f, 0.0f,
                            bulgeColor, CAR_LABEL_HOOD_BULGE);
     }
 
@@ -669,8 +668,7 @@ static void render(const CarVisual *v, RasterTarget *t, CarRasterPart part, int 
         const float stripeGap = v->widthM * 0.10f * v->stripeWeight;
         /* Two stripes offset from centreline. */
         for (int s = -1; s <= 1; s += 2) {
-            fill_oriented_rect(t, 0.0f, (float)s * stripeGap,
-                               stripeLen, stripeW, 0.0f,
+            fill_oriented_rect(t, 0.0f, (float)s * stripeGap, stripeLen, stripeW, 0.0f,
                                v->stripeColor, CAR_LABEL_STRIPE);
         }
     }
@@ -686,9 +684,9 @@ static void render(const CarVisual *v, RasterTarget *t, CarRasterPart part, int 
         const float tipLen = 0.12f;
         const float baseWid = 0.10f;
         const Vector2 tip = to_px(t, noseX + tipLen, 0.0f);
-        const Vector2 lb  = to_px(t, noseX - 0.04f, +baseWid);
-        const Vector2 rb  = to_px(t, noseX - 0.04f, -baseWid);
-        Vector2 pts[3] = { tip, lb, rb };
+        const Vector2 lb = to_px(t, noseX - 0.04f, +baseWid);
+        const Vector2 rb = to_px(t, noseX - 0.04f, -baseWid);
+        const Vector2 pts[3] = { tip, lb, rb };
         fill_polygon_px(t, pts, 3, v->heading, CAR_LABEL_HEADING);
     }
 }
@@ -713,8 +711,8 @@ bool car_raster_draw_part(const CarVisual *visual, CarRasterPart part, int wheel
     memset(&t, 0, sizeof(t));
     if (rgba == NULL || bytes < car_raster_bytes(info)) return false;
     if (!prepare(visual, info, &t)) return false;
-    if (part == CAR_RASTER_PART_WHEEL &&
-        (wheelIndex < 0 || wheelIndex >= WHEEL_COUNT)) return false;
+    if (part == CAR_RASTER_PART_WHEEL && (wheelIndex < 0 || wheelIndex >= WHEEL_COUNT))
+        return false;
 
     memset(rgba, 0, car_raster_bytes(info));
     t.rgba = rgba;
@@ -723,14 +721,14 @@ bool car_raster_draw_part(const CarVisual *visual, CarRasterPart part, int wheel
     return true;
 }
 
-bool car_raster_draw(const CarVisual *visual, CarRasterInfo info,
-                     unsigned char *rgba, size_t bytes)
+bool car_raster_draw(const CarVisual *visual, CarRasterInfo info, unsigned char *rgba,
+                     size_t bytes)
 {
     return car_raster_draw_part(visual, CAR_RASTER_PART_ALL, 0, info, rgba, bytes);
 }
 
-bool car_raster_draw_labels(const CarVisual *visual, CarRasterInfo info,
-                            unsigned char *labels, size_t bytes)
+bool car_raster_draw_labels(const CarVisual *visual, CarRasterInfo info, unsigned char *labels,
+                            size_t bytes)
 {
     RasterTarget t;
     memset(&t, 0, sizeof(t));
@@ -745,8 +743,8 @@ bool car_raster_draw_labels(const CarVisual *visual, CarRasterInfo info,
     return true;
 }
 
-bool car_raster_rotate_nose_up(const unsigned char *src, int srcW, int srcH,
-                               unsigned char *dst, size_t dstBytes)
+bool car_raster_rotate_nose_up(const unsigned char *src, int srcW, int srcH, unsigned char *dst,
+                               size_t dstBytes)
 {
     if (src == NULL || dst == NULL || srcW <= 0 || srcH <= 0) return false;
     const size_t need = (size_t)srcW * (size_t)srcH * CAR_RASTER_BPP;

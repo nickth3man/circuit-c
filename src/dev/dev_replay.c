@@ -21,19 +21,19 @@
  *             u8 oneshotBits, 3 bytes of zero padding.
  */
 #define DEV_REPLAY_HEADER_BYTES 64
-#define DEV_REPLAY_FRAME_BYTES  20
+#define DEV_REPLAY_FRAME_BYTES 20
 
 const char *dev_replay_event_name(DevReplayEventKind kind)
 {
     switch (kind) {
-        case DEV_REPLAY_EVENT_THROTTLE:       return "throttle";
-        case DEV_REPLAY_EVENT_BRAKE:          return "brake";
-        case DEV_REPLAY_EVENT_HANDBRAKE:      return "handbrake";
-        case DEV_REPLAY_EVENT_SHIFT_UP:       return "shift up";
-        case DEV_REPLAY_EVENT_SHIFT_DOWN:     return "shift down";
-        case DEV_REPLAY_EVENT_RESET:          return "reset";
+        case DEV_REPLAY_EVENT_THROTTLE: return "throttle";
+        case DEV_REPLAY_EVENT_BRAKE: return "brake";
+        case DEV_REPLAY_EVENT_HANDBRAKE: return "handbrake";
+        case DEV_REPLAY_EVENT_SHIFT_UP: return "shift up";
+        case DEV_REPLAY_EVENT_SHIFT_DOWN: return "shift down";
+        case DEV_REPLAY_EVENT_RESET: return "reset";
         case DEV_REPLAY_EVENT_STEER_REVERSAL: return "steer reversal";
-        case DEV_REPLAY_EVENT_COUNT:          break;
+        case DEV_REPLAY_EVENT_COUNT: break;
     }
     return "?";
 }
@@ -62,8 +62,8 @@ static bool write_f32(FILE *file, float value)
     return fwrite(&value, sizeof(value), 1, file) == 1;
 }
 
-bool dev_replay_save(const ReplayBuffer *rb, const char *path,
-                     const char *label, uint32_t seed, uint32_t finalChecksum)
+bool dev_replay_save(const ReplayBuffer *rb, const char *path, const char *label, uint32_t seed,
+                     uint32_t finalChecksum)
 {
     if (rb == NULL || path == NULL) return false;
 
@@ -105,9 +105,9 @@ bool dev_replay_save(const ReplayBuffer *rb, const char *path,
 
 typedef struct {
     const unsigned char *data;
-    size_t               length;
-    size_t               cursor;
-    bool                 failed;
+    size_t length;
+    size_t cursor;
+    bool failed;
 } Reader;
 
 static void read_bytes(Reader *reader, void *out, size_t count)
@@ -161,11 +161,11 @@ bool dev_replay_parse(const void *data, size_t length, ReplayBuffer *rb, DevRepl
 
     DevReplayInfo header;
     memset(&header, 0, sizeof(header));
-    header.version    = read_u32(&reader);
-    header.fixedHz    = read_u32(&reader);
+    header.version = read_u32(&reader);
+    header.fixedHz = read_u32(&reader);
     header.frameCount = read_u32(&reader);
-    header.firstTick  = read_u64(&reader);
-    header.seed       = read_u32(&reader);
+    header.firstTick = read_u64(&reader);
+    header.seed = read_u32(&reader);
     header.finalChecksum = read_u32(&reader);
     read_bytes(&reader, header.label, DEV_REPLAY_LABEL_CHARS);
     if (reader.failed) return false;
@@ -185,22 +185,22 @@ bool dev_replay_parse(const void *data, size_t length, ReplayBuffer *rb, DevRepl
     for (uint32_t i = 0; i < header.frameCount; i++) {
         ReplayFrame frame;
         memset(&frame, 0, sizeof(frame));
-        frame.steer     = sanitize(read_f32(&reader), -1.0f, 1.0f);
-        frame.throttle  = sanitize(read_f32(&reader), 0.0f, 1.0f);
-        frame.brake     = sanitize(read_f32(&reader), 0.0f, 1.0f);
+        frame.steer = sanitize(read_f32(&reader), -1.0f, 1.0f);
+        frame.throttle = sanitize(read_f32(&reader), 0.0f, 1.0f);
+        frame.brake = sanitize(read_f32(&reader), 0.0f, 1.0f);
         frame.handbrake = sanitize(read_f32(&reader), 0.0f, 1.0f);
         read_bytes(&reader, &frame.oneshotBits, 1);
-        reader.cursor += 3u;  /* padding; bounds already guaranteed by `needed` */
+        reader.cursor += 3u; /* padding; bounds already guaranteed by `needed` */
         if (reader.failed) return false;
         rb->frames[i] = frame;
     }
 
-    rb->head            = 0;
-    rb->count           = (int)header.frameCount;
-    rb->playbackCursor  = 0;
-    rb->firstTick       = header.firstTick;
+    rb->head = 0;
+    rb->count = (int)header.frameCount;
+    rb->playbackCursor = 0;
+    rb->firstTick = header.firstTick;
     rb->overwrittenTicks = 0;
-    rb->mode            = REPLAY_MODE_IDLE;
+    rb->mode = REPLAY_MODE_IDLE;
 
     if (info != NULL) *info = header;
     return true;
@@ -213,14 +213,15 @@ bool dev_replay_load(ReplayBuffer *rb, const char *path, DevReplayInfo *info)
     FILE *file = fopen(path, "rb");
     if (file == NULL) return false;
 
-    static const size_t maxBytes = (size_t)DEV_REPLAY_HEADER_BYTES +
-                                   (size_t)REPLAY_CAPACITY_TICKS * (size_t)DEV_REPLAY_FRAME_BYTES;
+    static const size_t maxBytes =
+        (size_t)DEV_REPLAY_HEADER_BYTES +
+        (size_t)REPLAY_CAPACITY_TICKS * (size_t)DEV_REPLAY_FRAME_BYTES;
 
     /* The format has a hard upper bound, so the whole file fits in one fixed buffer and
      * nothing is allocated. It is module-static rather than stack-resident only to keep the
      * frame small; it is never referenced from Game, so hot reload is unaffected. */
-    static unsigned char buffer[DEV_REPLAY_HEADER_BYTES +
-                                REPLAY_CAPACITY_TICKS * DEV_REPLAY_FRAME_BYTES];
+    static unsigned char
+        buffer[DEV_REPLAY_HEADER_BYTES + REPLAY_CAPACITY_TICKS * DEV_REPLAY_FRAME_BYTES];
     const size_t read = fread(buffer, 1, maxBytes, file);
     const bool tooLarge = (fgetc(file) != EOF);
     fclose(file);
@@ -248,31 +249,34 @@ int dev_replay_collect_events(const ReplayBuffer *rb, DevReplayEvent *out, int c
         const ReplayFrame *frame = dev_replay_frame_at(rb, i);
         const uint64_t tick = rb->firstTick + (uint64_t)i;
 
-        struct { bool fired; DevReplayEventKind kind; float value; } candidates[] = {
-            { crossed(previous.throttle, frame->throttle, 0.5f),
-              DEV_REPLAY_EVENT_THROTTLE, frame->throttle },
-            { crossed(previous.brake, frame->brake, 0.5f),
-              DEV_REPLAY_EVENT_BRAKE, frame->brake },
-            { crossed(previous.handbrake, frame->handbrake, 0.5f),
-              DEV_REPLAY_EVENT_HANDBRAKE, frame->handbrake },
-            { (frame->oneshotBits & REPLAY_BIT_SHIFT_UP) != 0u,
-              DEV_REPLAY_EVENT_SHIFT_UP, 0.0f },
-            { (frame->oneshotBits & REPLAY_BIT_SHIFT_DOWN) != 0u,
-              DEV_REPLAY_EVENT_SHIFT_DOWN, 0.0f },
-            { (frame->oneshotBits & REPLAY_BIT_RESET) != 0u,
-              DEV_REPLAY_EVENT_RESET, 0.0f },
+        struct {
+            bool fired;
+            DevReplayEventKind kind;
+            float value;
+        } candidates[] = {
+            { crossed(previous.throttle, frame->throttle, 0.5f), DEV_REPLAY_EVENT_THROTTLE,
+              frame->throttle },
+            { crossed(previous.brake, frame->brake, 0.5f), DEV_REPLAY_EVENT_BRAKE,
+              frame->brake },
+            { crossed(previous.handbrake, frame->handbrake, 0.5f), DEV_REPLAY_EVENT_HANDBRAKE,
+              frame->handbrake },
+            { (frame->oneshotBits & REPLAY_BIT_SHIFT_UP) != 0u, DEV_REPLAY_EVENT_SHIFT_UP,
+              0.0f },
+            { (frame->oneshotBits & REPLAY_BIT_SHIFT_DOWN) != 0u, DEV_REPLAY_EVENT_SHIFT_DOWN,
+              0.0f },
+            { (frame->oneshotBits & REPLAY_BIT_RESET) != 0u, DEV_REPLAY_EVENT_RESET, 0.0f },
             /* A reversal is a sign change with real intent on both sides, not the noise
              * around centre that a controller produces while holding straight. */
             { (previous.steer > 0.2f && frame->steer < -0.2f) ||
-              (previous.steer < -0.2f && frame->steer > 0.2f),
+                  (previous.steer < -0.2f && frame->steer > 0.2f),
               DEV_REPLAY_EVENT_STEER_REVERSAL, frame->steer },
         };
 
         for (size_t c = 0; c < sizeof(candidates) / sizeof(candidates[0]); c++) {
             if (!candidates[c].fired || written >= capacity) continue;
-            out[written].tick  = tick;
+            out[written].tick = tick;
             out[written].index = i;
-            out[written].kind  = candidates[c].kind;
+            out[written].kind = candidates[c].kind;
             out[written].value = candidates[c].value;
             written++;
         }

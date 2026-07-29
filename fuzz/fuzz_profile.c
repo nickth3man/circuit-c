@@ -32,8 +32,8 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
     int unknown = 0;
     int rejected = 0;
 
-    const bool ok = dev_params_apply_text(&spec, (const char *)data, size,
-                                          &applied, &unknown, &rejected);
+    const bool ok =
+        dev_params_apply_text(&spec, (const char *)data, size, &applied, &unknown, &rejected);
 
     if (ok) {
         /* Accepting an input means promising the result is usable. */

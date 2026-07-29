@@ -25,23 +25,23 @@
 
 #include "game/replay.h"
 
-#define DEV_REPLAY_MAGIC        0x4C505244u  /* 'DRPL' little-endian */
-#define DEV_REPLAY_VERSION      1u
-#define DEV_REPLAY_LABEL_CHARS  32
+#define DEV_REPLAY_MAGIC 0x4C505244u /* 'DRPL' little-endian */
+#define DEV_REPLAY_VERSION 1u
+#define DEV_REPLAY_LABEL_CHARS 32
 
 /* Everything about a timeline except the frames themselves. */
 typedef struct {
     uint32_t version;
-    uint32_t fixedHz;           /* ticks per second the timeline was recorded at */
-    uint64_t firstTick;         /* absolute fixed tick of frame 0 */
+    uint32_t fixedHz;   /* ticks per second the timeline was recorded at */
+    uint64_t firstTick; /* absolute fixed tick of frame 0 */
     uint32_t frameCount;
-    uint32_t seed;              /* scenario seed, 0 when not seeded */
-    uint32_t finalChecksum;     /* game_state_checksum at the end of the recording */
-    char     label[DEV_REPLAY_LABEL_CHARS];
+    uint32_t seed;          /* scenario seed, 0 when not seeded */
+    uint32_t finalChecksum; /* game_state_checksum at the end of the recording */
+    char label[DEV_REPLAY_LABEL_CHARS];
 } DevReplayInfo;
 
 typedef enum {
-    DEV_REPLAY_EVENT_THROTTLE = 0,  /* throttle crossed the half-open threshold */
+    DEV_REPLAY_EVENT_THROTTLE = 0, /* throttle crossed the half-open threshold */
     DEV_REPLAY_EVENT_BRAKE,
     DEV_REPLAY_EVENT_HANDBRAKE,
     DEV_REPLAY_EVENT_SHIFT_UP,
@@ -52,17 +52,17 @@ typedef enum {
 } DevReplayEventKind;
 
 typedef struct {
-    uint64_t           tick;    /* absolute fixed tick */
-    int                index;   /* frame index within the retained window */
+    uint64_t tick; /* absolute fixed tick */
+    int index;     /* frame index within the retained window */
     DevReplayEventKind kind;
-    float              value;   /* the new value that triggered the marker */
+    float value; /* the new value that triggered the marker */
 } DevReplayEvent;
 
 const char *dev_replay_event_name(DevReplayEventKind kind);
 
 /* Write the retained window of rb to path. label may be NULL. */
-bool dev_replay_save(const ReplayBuffer *rb, const char *path,
-                     const char *label, uint32_t seed, uint32_t finalChecksum);
+bool dev_replay_save(const ReplayBuffer *rb, const char *path, const char *label, uint32_t seed,
+                     uint32_t finalChecksum);
 
 /* Read a timeline. On success rb holds the frames in REPLAY_MODE_IDLE, ready for
  * replay_begin_playback(). info may be NULL. rb is untouched on failure. */

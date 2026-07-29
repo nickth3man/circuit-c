@@ -28,7 +28,8 @@
 
 static void print_usage(const char *argv0)
 {
-    printf("usage: %s [--scenario NAME] [--list] [-v] [--no-bundle] [--artifacts DIR]\n", argv0);
+    printf("usage: %s [--scenario NAME] [--list] [-v] [--no-bundle] [--artifacts DIR]\n",
+           argv0);
     printf("       %s --dump-params [PATH]     write the parameter table as Markdown\n", argv0);
     printf("       %s --benchmark [TICKS]      fixed-update throughput, no telemetry\n", argv0);
     printf("       %s --verify-failure-bundle [DIR]  create, inspect, and clean a fixture\n",
@@ -50,11 +51,8 @@ int main(int argc, char **argv)
 {
     /* The declaration order here IS the run order, and it is the only thing that decides it. */
     const TestScenarioGroup groups[] = {
-        test_core_scenarios(),
-        test_appearance_scenarios(),
-        test_physics_scenarios(),
-        test_handling_scenarios(),
-        test_gameplay_scenarios(),
+        test_core_scenarios(),     test_appearance_scenarios(), test_physics_scenarios(),
+        test_handling_scenarios(), test_gameplay_scenarios(),
     };
     const size_t groupCount = sizeof(groups) / sizeof(groups[0]);
 
@@ -79,32 +77,33 @@ int main(int argc, char **argv)
         }
         if (strcmp(argv[i], "--generate-corpus") == 0) {
             return test_generate_corpus((i + 1 < argc && argv[i + 1][0] != '-') ? argv[i + 1]
-                                                                               : NULL);
+                                                                                : NULL);
         }
         if (strcmp(argv[i], "--dump-corpus-index") == 0) {
-            return test_dump_corpus_index((i + 1 < argc && argv[i + 1][0] != '-')
-                                              ? argv[i + 1] : NULL);
+            return test_dump_corpus_index((i + 1 < argc && argv[i + 1][0] != '-') ? argv[i + 1]
+                                                                                  : NULL);
         }
         if (strcmp(argv[i], "--measure-sweep") == 0) {
             return test_measure_sweep((i + 1 < argc) ? argv[i + 1] : NULL);
         }
         if (strcmp(argv[i], "--dump-corpus-cards") == 0) {
             const char *dir = (i + 1 < argc && argv[i + 1][0] != '-')
-                                  ? argv[i + 1] : "artifacts/corpus-cards";
+                                  ? argv[i + 1]
+                                  : "artifacts/corpus-cards";
             return test_dump_corpus_cards(dir);
         }
         if (strcmp(argv[i], "--dump-corpus-metrics") == 0) {
-            return test_dump_corpus_metrics((i + 1 < argc && argv[i + 1][0] != '-')
-                                                ? argv[i + 1] : NULL);
+            return test_dump_corpus_metrics(
+                (i + 1 < argc && argv[i + 1][0] != '-') ? argv[i + 1] : NULL);
         }
         if (strcmp(argv[i], "--dump-corpus-sheet") == 0) {
-            const char *dir = (i + 1 < argc && argv[i + 1][0] != '-')
-                                  ? argv[i + 1] : "artifacts/gallery";
+            const char *dir =
+                (i + 1 < argc && argv[i + 1][0] != '-') ? argv[i + 1] : "artifacts/gallery";
             return test_dump_corpus_sheet(dir);
         }
         if (strcmp(argv[i], "--verify-failure-bundle") == 0) {
-            return test_verify_failure_bundle((i + 1 < argc && argv[i + 1][0] != '-')
-                                                  ? argv[i + 1] : NULL);
+            return test_verify_failure_bundle(
+                (i + 1 < argc && argv[i + 1][0] != '-') ? argv[i + 1] : NULL);
         }
         if (strcmp(argv[i], "--no-bundle") == 0) {
             test_harness_set_bundles_enabled(false);
@@ -156,7 +155,7 @@ int main(int argc, char **argv)
             scenario->run();
 
             const TestHarnessSnapshot after = test_harness_snapshot();
-            const int scenarioChecks   = after.checks - before.checks;
+            const int scenarioChecks = after.checks - before.checks;
             const int scenarioFailures = after.failures - before.failures;
             printf("  -> %d checks, %d failed\n", scenarioChecks, scenarioFailures);
 
@@ -165,14 +164,15 @@ int main(int argc, char **argv)
                 memset(&bundle, 0, sizeof(bundle));
                 bundle.scenario = scenario->name;
                 bundle.failureText = after.firstFailureText;
-                bundle.telemetryPath = after.bundleHasTelemetry ? after.bundleTelemetryPath
-                                                                : NULL;
+                bundle.telemetryPath =
+                    after.bundleHasTelemetry ? after.bundleTelemetryPath : NULL;
                 bundle.replay = (after.bundleGame != NULL) ? &after.bundleGame->replay : NULL;
                 bundle.spec = (after.bundleGame != NULL) ? &after.bundleGame->spec : NULL;
                 bundle.activeProfile = "Default";
-                bundle.failingTick = (after.bundleGame != NULL) ? after.bundleGame->sim.tick : 0u;
-                bundle.checksum = (after.bundleGame != NULL) ? after.bundleGame->stateChecksum
-                                                             : 0u;
+                bundle.failingTick =
+                    (after.bundleGame != NULL) ? after.bundleGame->sim.tick : 0u;
+                bundle.checksum =
+                    (after.bundleGame != NULL) ? after.bundleGame->stateChecksum : 0u;
                 bundle.seed = after.bundleSeed;
                 bundle.checksRun = scenarioChecks;
                 bundle.checksFailed = scenarioFailures;

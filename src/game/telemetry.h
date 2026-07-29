@@ -26,7 +26,7 @@
 /* Stable Phase 2 telemetry schema. */
 typedef struct {
     uint64_t tick;
-    double   timeS;
+    double timeS;
     float positionXM;
     float positionYM;
     float headingRad;
@@ -66,8 +66,8 @@ typedef struct {
     float yawTorqueNm;
     float bodySideslipRad;
     float lowSpeedBlend;
-    int      substepCount;
-    int      backlogDrops;
+    int substepCount;
+    int backlogDrops;
     uint32_t stateChecksum;
 
     /* Phase 3: load transfer, the acceleration filter, and separated resistance. */
@@ -96,8 +96,8 @@ typedef struct {
 
 typedef struct {
     FILE *file;
-    long  rowCount;
-    bool  failed;       /* set once any write fails; further writes are refused */
+    long rowCount;
+    bool failed; /* set once any write fails; further writes are refused */
 } TelemetryWriter;
 
 /* Create dirPath if it does not exist. Returns false if it could not be created and does

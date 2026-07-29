@@ -20,25 +20,17 @@ float drivetrain_total_gear_ratio(const VehicleSpec *spec, int selectedGear);
 float drivetrain_engine_rpm(const VehicleSpec *spec, int selectedGear,
                             float rearAngularVelocityRadS);
 
-DrivetrainTorques drivetrain_calculate_torques(const VehicleSpec *spec,
-                                               int selectedGear,
+DrivetrainTorques drivetrain_calculate_torques(const VehicleSpec *spec, int selectedGear,
                                                float rearOmegaLeftRadS,
                                                float rearOmegaRightRadS,
                                                float rearTireReactionTorqueLeftNm,
                                                float rearTireReactionTorqueRightNm,
-                                               float throttle,
-                                               float brake,
-                                               float handbrake);
+                                               float throttle, float brake, float handbrake);
 
-float drivetrain_integrate_wheel(float angularVelocityRadS,
-                                 float wheelLongitudinalVelocityMps,
-                                 float driveTorqueNm,
-                                 float serviceBrakeTorqueNm,
-                                 float handbrakeTorqueNm,
-                                 float tireLongitudinalForceN,
-                                 float wheelRadiusM,
-                                 float wheelInertiaKgM2,
-                                 float dt,
+float drivetrain_integrate_wheel(float angularVelocityRadS, float wheelLongitudinalVelocityMps,
+                                 float driveTorqueNm, float serviceBrakeTorqueNm,
+                                 float handbrakeTorqueNm, float tireLongitudinalForceN,
+                                 float wheelRadiusM, float wheelInertiaKgM2, float dt,
                                  bool *locked);
 
 /*
@@ -53,12 +45,9 @@ float drivetrain_integrate_wheel(float angularVelocityRadS,
  *     k_eq      = tan(asin(normalized) / C) / B
  *     omega_eq  = (wheel_vx + k_eq * max(|wheel_vx|, slipSpeedEpsilonMps)) / R
  */
-bool drivetrain_wheel_equilibrium_omega(float driveTorqueNm,
-                                        float wheelLongitudinalVelocityMps,
-                                        float wheelRadiusM,
-                                        float longitudinalLimitN,
+bool drivetrain_wheel_equilibrium_omega(float driveTorqueNm, float wheelLongitudinalVelocityMps,
+                                        float wheelRadiusM, float longitudinalLimitN,
                                         float tireBLong, float tireCLong,
-                                        float slipSpeedEpsilonMps,
-                                        float *equilibriumOmegaRadS);
+                                        float slipSpeedEpsilonMps, float *equilibriumOmegaRadS);
 
 #endif /* DRIFTY_DRIVETRAIN_H */

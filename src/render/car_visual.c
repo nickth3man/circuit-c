@@ -56,7 +56,7 @@
 /* Shortest glasshouse the grammar will draw. A windscreen and a rear glass need somewhere to
  * sit even when the two declared stations coincide, and a zero-length cabin would make the
  * roof, glass and side-window layers degenerate. 0.35 m is ~4.6 px at ~13.2 px/m. */
-#define CV_MIN_CABIN_M         0.35f
+#define CV_MIN_CABIN_M 0.35f
 
 /* ---------------------------------------------------------------------------- helpers -- */
 
@@ -67,7 +67,10 @@ static float u01(float v, float lo, float hi)
     return clampf((v - lo) / (hi - lo), 0.0f, 1.0f);
 }
 
-static float maxf(float a, float b) { return (a > b) ? a : b; }
+static float maxf(float a, float b)
+{
+    return (a > b) ? a : b;
+}
 
 /* ------------------------------------------------------------------- aero conventions --
  *
@@ -123,22 +126,33 @@ static Color hsv_to_color(float h, float s, float v, unsigned char a)
     const float m = v - c;
     float r = 0.0f, g = 0.0f, b = 0.0f;
 
-    if      (h <  60.0f) { r = c; g = x; }
-    else if (h < 120.0f) { r = x; g = c; }
-    else if (h < 180.0f) { g = c; b = x; }
-    else if (h < 240.0f) { g = x; b = c; }
-    else if (h < 300.0f) { r = x; b = c; }
-    else                 { r = c; b = x; }
+    if (h < 60.0f) {
+        r = c;
+        g = x;
+    } else if (h < 120.0f) {
+        r = x;
+        g = c;
+    } else if (h < 180.0f) {
+        g = c;
+        b = x;
+    } else if (h < 240.0f) {
+        g = x;
+        b = c;
+    } else if (h < 300.0f) {
+        r = x;
+        b = c;
+    } else {
+        r = c;
+        b = x;
+    }
 
     return (Color){ to_u8(r + m), to_u8(g + m), to_u8(b + m), a };
 }
 
 static Color shade(Color c, float factor)
 {
-    return (Color){ to_u8((float)c.r / 255.0f * factor),
-                    to_u8((float)c.g / 255.0f * factor),
-                    to_u8((float)c.b / 255.0f * factor),
-                    c.a };
+    return (Color){ to_u8((float)c.r / 255.0f * factor), to_u8((float)c.g / 255.0f * factor),
+                    to_u8((float)c.b / 255.0f * factor), c.a };
 }
 
 /* ------------------------------------------------------------------------ colour seed --
@@ -208,17 +222,18 @@ CarLatents car_visual_latents(const VehicleSpec *spec)
     const float mass = maxf(spec->massKg, 1.0f);
     const float tractive = peak_engine_torque(spec) * maxf(spec->finalDriveRatio, 0.1f) / mass;
 
-    l.mass01    = u01(spec->massKg, 500.0f, 8000.0f);
-    l.size01    = u01(wheelbase, 1.60f, 6.50f);
-    l.low01     = 1.0f - u01(spec->cgHeightM, 0.10f, 2.00f);
-    l.grip01    = u01(muMax, 0.40f, 2.50f);
+    l.mass01 = u01(spec->massKg, 500.0f, 8000.0f);
+    l.size01 = u01(wheelbase, 1.60f, 6.50f);
+    l.low01 = 1.0f - u01(spec->cgHeightM, 0.10f, 2.00f);
+    l.grip01 = u01(muMax, 0.40f, 2.50f);
     l.balance01 = u01(spec->tireMuLatFront - spec->tireMuLatRear, -0.20f, 0.45f);
-    l.power01   = u01(tractive, 0.20f, 4.00f);
-    l.aero01    = u01(spec->dragCoefficient * spec->frontalAreaM2, 0.20f, 4.50f);
-    l.sport01   = clampf(0.35f * l.grip01 + 0.30f * l.low01 + 0.35f * l.power01, 0.0f, 1.0f);
+    l.power01 = u01(tractive, 0.20f, 4.00f);
+    l.aero01 = u01(spec->dragCoefficient * spec->frontalAreaM2, 0.20f, 4.50f);
+    l.sport01 = clampf(0.35f * l.grip01 + 0.30f * l.low01 + 0.35f * l.power01, 0.0f, 1.0f);
     /* Light for its size reads as a stripped racecar; heavy for its size reads as a road car. */
-    l.strip01   = clampf(l.sport01 * (1.0f - u01(spec->massKg / maxf(wheelbase, 0.1f),
-                                                 200.0f, 1200.0f)), 0.0f, 1.0f);
+    l.strip01 =
+        clampf(l.sport01 * (1.0f - u01(spec->massKg / maxf(wheelbase, 0.1f), 200.0f, 1200.0f)),
+               0.0f, 1.0f);
     return l;
 }
 
@@ -240,8 +255,8 @@ CarLatents car_visual_latents(const VehicleSpec *spec)
  * parallel. The two exponents differ because the two ends are not the same shape — a boot lid
  * closes abruptly (Kamm tail, small exponent) and a bonnet tapers over a longer run (larger
  * exponent) — and that difference is what makes the silhouette tell nose from tail at all. */
-#define CV_HULL_TAIL_SHAPE 0.40f  /* tail section: closes hard in its first stations */
-#define CV_HULL_NOSE_SHAPE 0.60f  /* nose section: tapers over a longer run than the tail */
+#define CV_HULL_TAIL_SHAPE 0.40f /* tail section: closes hard in its first stations */
+#define CV_HULL_NOSE_SHAPE 0.60f /* nose section: tapers over a longer run than the tail */
 
 static float hull_profile(float t, float tShoulder, float tailFrac, float noseFrac,
                           float waistDepth)
@@ -283,7 +298,7 @@ void car_visual_derive(const VehicleSpec *spec, CarVisual *out)
 
     /* [identity] overhangs from the Phase 2 geometry primaries. */
     out->frontOverhangM = spec->frontOverhangM;
-    out->rearOverhangM  = spec->rearOverhangM;
+    out->rearOverhangM = spec->rearOverhangM;
 
     const float noseX = spec->cgToFrontM + out->frontOverhangM;
     const float tailX = -(spec->cgToRearM + out->rearOverhangM);
@@ -347,13 +362,19 @@ void car_visual_derive(const VehicleSpec *spec, CarVisual *out)
             lo = tailX;
             hi = noseX;
         } else {
-            if (lo < tailX) { hi += tailX - lo; lo = tailX; }
-            if (hi > noseX) { lo -= hi - noseX; hi = noseX; }
+            if (lo < tailX) {
+                hi += tailX - lo;
+                lo = tailX;
+            }
+            if (hi > noseX) {
+                lo -= hi - noseX;
+                hi = noseX;
+            }
         }
 
-        out->backlightXM   = lo;
-        out->windscreenXM  = hi;
-        out->cabinLengthM  = hi - lo;
+        out->backlightXM = lo;
+        out->windscreenXM = hi;
+        out->cabinLengthM = hi - lo;
         out->cabinCentreXM = 0.5f * (lo + hi);
 
         /* [rule] How much of the plan area the roof covers is the strongest top-down cue for
@@ -388,11 +409,13 @@ void car_visual_derive(const VehicleSpec *spec, CarVisual *out)
         const float massSize = spec->massKg / maxf(out->lengthM, 0.1f);
         const float massSize01 = u01(massSize, 200.0f, 1500.0f);
         /* Downforce, not aero magnitude: a lifting road-car body is not a race cue. */
-        const float downforce = maxf(aero_downforce(spec->aeroLiftCoefFront, spec->aeroRefAreaFrontM2),
-                                     aero_downforce(spec->aeroLiftCoefRear, spec->aeroRefAreaRearM2));
+        const float downforce =
+            maxf(aero_downforce(spec->aeroLiftCoefFront, spec->aeroRefAreaFrontM2),
+                 aero_downforce(spec->aeroLiftCoefRear, spec->aeroRefAreaRearM2));
         const float aero01 = u01(downforce, 0.0f, 3.0f);
-        out->raceDetailWeight = clampf(0.30f * (1.0f - massSize01) + 0.30f * l.grip01
-                                       + 0.20f * aero01 + 0.20f * l.strip01, 0.0f, 1.0f);
+        out->raceDetailWeight = clampf(0.30f * (1.0f - massSize01) + 0.30f * l.grip01 +
+                                           0.20f * aero01 + 0.20f * l.strip01,
+                                       0.0f, 1.0f);
     }
 
     /* [rule] stripe weight from the strip01 latent. Transitions smoothly — a 0.001 change
@@ -454,8 +477,8 @@ void car_visual_derive(const VehicleSpec *spec, CarVisual *out)
         const float shoulderX = layout_to_body_x(spec, spec->shoulderXM);
         out->shoulderXM = shoulderX;
         const float tShoulder = (out->lengthM > 1e-6f)
-            ? clampf((shoulderX - tailX) / out->lengthM, 0.02f, 0.98f)
-            : 0.5f;
+                                    ? clampf((shoulderX - tailX) / out->lengthM, 0.02f, 0.98f)
+                                    : 0.5f;
 
         /* [rule] sport01 owns only the interior waist now; endpoints and shoulder are identity. */
         const float waistDepth = 0.02f + 0.10f * l.sport01;
@@ -463,7 +486,8 @@ void car_visual_derive(const VehicleSpec *spec, CarVisual *out)
         for (int i = 0; i < CAR_HULL_STATIONS; i++) {
             const float t = (float)i / (float)(CAR_HULL_STATIONS - 1);
             out->hull[i].xM = lerpf(tailX, noseX, t);
-            out->hull[i].halfWidthM = halfW * hull_profile(t, tShoulder, tailFrac, noseFrac, waistDepth);
+            out->hull[i].halfWidthM =
+                halfW * hull_profile(t, tShoulder, tailFrac, noseFrac, waistDepth);
         }
 
         /* [rule] Open-wheel cars have a narrower body centre section so the wheels read as
@@ -502,16 +526,21 @@ void car_visual_derive(const VehicleSpec *spec, CarVisual *out)
 
     /* [rule] spoke count from wheel inertia. */
     const float inertia = spec->wheelInertiaKgM2;
-    const int spokes = (inertia < 0.70f) ? 10 : (inertia < 1.00f) ? 8
-                     : (inertia < 1.40f) ?  6 : (inertia < 2.00f) ? 5 : 4;
+    const int spokes = (inertia < 0.70f)   ? 10
+                       : (inertia < 1.00f) ? 8
+                       : (inertia < 1.40f) ? 6
+                       : (inertia < 2.00f) ? 5
+                                           : 4;
 
     /* [rule] static toe angle at rest × CV_TOE_VISUAL_GAIN. Reads suspToeFrontRad/RearRad.
      * This is presentation-gained: raw toe is ~0.15°, far below one pixel. */
     const float toeFrontRad = spec->suspToeFrontRad * CV_TOE_VISUAL_GAIN;
     /* [rule] camber visual cos for footprint narrowing × CV_CAMBER_VISUAL_GAIN.
      * Reads suspCamberFrontRad/RearRad. Also presentation-gained. */
-    const float camberCosF = cosf(clampf(spec->suspCamberFrontRad * CV_CAMBER_VISUAL_GAIN, -0.45f, 0.45f));
-    const float camberCosR = cosf(clampf(spec->suspCamberRearRad * CV_CAMBER_VISUAL_GAIN, -0.45f, 0.45f));
+    const float camberCosF =
+        cosf(clampf(spec->suspCamberFrontRad * CV_CAMBER_VISUAL_GAIN, -0.45f, 0.45f));
+    const float camberCosR =
+        cosf(clampf(spec->suspCamberRearRad * CV_CAMBER_VISUAL_GAIN, -0.45f, 0.45f));
 
     /* [rule] wheel poke (lateral offset vs body half-width).
      * Reads wheelOffsetEt[Front|Rear]Mm and widthOverallM. Positive poke = wheel
@@ -529,26 +558,26 @@ void car_visual_derive(const VehicleSpec *spec, CarVisual *out)
 
     for (int i = 0; i < WHEEL_COUNT; i++) {
         const bool isFront = (i == WHEEL_FRONT_LEFT || i == WHEEL_FRONT_RIGHT);
-        const bool isLeft  = (i == WHEEL_FRONT_LEFT || i == WHEEL_REAR_LEFT);
+        const bool isLeft = (i == WHEEL_FRONT_LEFT || i == WHEEL_REAR_LEFT);
         CarWheelVisual *w = &out->wheels[i];
 
         /* [identity] must equal vehicle.c set_wheel_positions(); asserted by `car-visual`. */
         w->centreM.x = isFront ? spec->cgToFrontM : -spec->cgToRearM;
         w->centreM.y = (isLeft ? 1.0f : -1.0f) * (isFront ? halfTrackF : halfTrackR);
 
-        w->diameterM       = isFront ? tireDiaF : tireDiaR;
-        w->widthM          = isFront ? tireWidthF : tireWidthR;
-        w->rimDiameterM    = isFront ? rimDiaF : rimDiaR;
-        w->rimWidthM       = isFront ? rimWidF : rimWidR;
+        w->diameterM = isFront ? tireDiaF : tireDiaR;
+        w->widthM = isFront ? tireWidthF : tireWidthR;
+        w->rimDiameterM = isFront ? rimDiaF : rimDiaR;
+        w->rimWidthM = isFront ? rimWidF : rimWidR;
         w->sidewallHeightM = isFront ? sidewallF : sidewallR;
-        w->discDiameterM   = isFront ? discDiaF : discDiaR;
-        w->spokeCount      = spokes;
+        w->discDiameterM = isFront ? discDiaF : discDiaR;
+        w->spokeCount = spokes;
         /* Static toe angle: front-left toes outward, front-right outward (mirrored).
          * Negative toe is toe-out. Left side: +left → outward. */
-        w->staticAngleRad  = isFront ? ((isLeft ? 1.0f : -1.0f) * toeFrontRad) : 0.0f;
+        w->staticAngleRad = isFront ? ((isLeft ? 1.0f : -1.0f) * toeFrontRad) : 0.0f;
         w->camberVisualCos = isFront ? camberCosF : camberCosR;
-        w->pokeM           = isFront ? pokeValF : pokeValR;
-        w->archGapM        = isFront ? archGapF : archGapR;
+        w->pokeM = isFront ? pokeValF : pokeValR;
+        w->archGapM = isFront ? archGapF : archGapR;
     }
 
     /* [rule] the arch stands proud wherever the track pushes the tire outboard of the hull —
@@ -571,7 +600,7 @@ void car_visual_derive(const VehicleSpec *spec, CarVisual *out)
      * widebody drift shell) has flush front arches, and folding a mean into the shared value
      * would flare all four. */
     out->fenderFlareFrontM = maxf(spec->fenderFlareFrontM, 0.0f);
-    out->fenderFlareRearM  = maxf(spec->fenderFlareRearM, 0.0f);
+    out->fenderFlareRearM = maxf(spec->fenderFlareRearM, 0.0f);
     for (int i = 0; i < WHEEL_COUNT; i++) {
         const bool isFront = (i == WHEEL_FRONT_LEFT || i == WHEEL_FRONT_RIGHT);
         out->wheels[i].archFlareM =
@@ -602,36 +631,38 @@ void car_visual_derive(const VehicleSpec *spec, CarVisual *out)
         const float present = smoothstep(-0.30f, 0.02f, demand);
         const float mag = u01(demand, -0.30f, 1.80f);
         if (present > 0.01f) {
-            out->wingSpanM  = out->widthM * (0.50f + 0.70f * mag) * present;
+            out->wingSpanM = out->widthM * (0.50f + 0.70f * mag) * present;
             out->wingChordM = (0.06f + 0.34f * mag) * present;
-            out->wingXM     = tailX + 0.10f;
+            out->wingXM = tailX + 0.10f;
         }
     }
 
     /* [rule] Splitter: the front counterpart, from front downforce demand.
      * Reads aeroLiftCoefFront, aeroRefAreaFrontM2. */
     {
-        const float frontDown = aero_downforce(spec->aeroLiftCoefFront, spec->aeroRefAreaFrontM2);
+        const float frontDown =
+            aero_downforce(spec->aeroLiftCoefFront, spec->aeroRefAreaFrontM2);
         const float present = smoothstep(0.02f, 0.15f, frontDown);
         const float mag = u01(frontDown, 0.02f, 1.20f);
         if (present > 0.01f) {
             out->splitterProtrusionM = (0.04f + 0.22f * mag) * present;
-            out->splitterWidthM      = out->widthM * (0.82f + 0.18f * mag);
+            out->splitterWidthM = out->widthM * (0.82f + 0.18f * mag);
         }
     }
 
     /* [rule] Canards: small fins at the front corners once front downforce demand is strong,
      * ramped so they fade in. Reads aeroLiftCoefFront, aeroRefAreaFrontM2. */
     {
-        const float frontDown = aero_downforce(spec->aeroLiftCoefFront, spec->aeroRefAreaFrontM2);
+        const float frontDown =
+            aero_downforce(spec->aeroLiftCoefFront, spec->aeroRefAreaFrontM2);
         out->canardStrength = smoothstep(0.25f, 1.00f, frontDown);
     }
 
     /* [rule] Race-detail appendages: cage, mirrors, tow hook, hood pins.
      * Reads raceDetailWeight (composite of mass/size, grip, aero, strip01). */
-    out->hasCage     = (out->raceDetailWeight > 0.55f);
-    out->hasMirrors  = (out->raceDetailWeight <= 0.82f);
-    out->hasTowHook  = (out->raceDetailWeight > 0.50f);
+    out->hasCage = (out->raceDetailWeight > 0.55f);
+    out->hasMirrors = (out->raceDetailWeight <= 0.82f);
+    out->hasTowHook = (out->raceDetailWeight > 0.50f);
     out->hasHoodPins = (out->raceDetailWeight > 0.42f);
     out->mirrorOffsetM = out->hasMirrors ? (halfW + 0.10f) : 0.0f;
 
@@ -641,12 +672,13 @@ void car_visual_derive(const VehicleSpec *spec, CarVisual *out)
     {
         const float cyl01 = u01(spec->engineCylinders, 2.0f, 12.0f);
         /* Smooth cylinder count prevents snapping across thresholds. */
-        const int rawCount = (spec->engineCylinders <= 4.0f) ? 1
-                           : (spec->engineCylinders <= 8.0f) ? 2 : 4;
+        const int rawCount = (spec->engineCylinders <= 4.0f)   ? 1
+                             : (spec->engineCylinders <= 8.0f) ? 2
+                                                               : 4;
         out->exhaustCount = rawCount;
         out->exhaustTransition = smoothstep(0.1f, 0.4f, cyl01);
-        out->exhaustBoreM = (0.025f + 0.065f * u01(spec->engineDisplacementL, 0.5f, 8.0f))
-                          * CV_EXHAUST_VISUAL_GAIN;
+        out->exhaustBoreM = (0.025f + 0.065f * u01(spec->engineDisplacementL, 0.5f, 8.0f)) *
+                            CV_EXHAUST_VISUAL_GAIN;
     }
 
     /* [rule] Hood bulge: from engineDisplacementL and massEngineXM.
@@ -663,7 +695,7 @@ void car_visual_derive(const VehicleSpec *spec, CarVisual *out)
          * Reads engineDisplacementL and engineCylinders; documented as a visual
          * interpretation, since neither uniquely determines a bonnet pressing. */
         const float disp01 = u01(spec->engineDisplacementL, 0.6f, 8.0f);
-        const float cyl01  = u01(spec->engineCylinders, 2.0f, 12.0f);
+        const float cyl01 = u01(spec->engineCylinders, 2.0f, 12.0f);
         const float bulk01 = 0.5f * (disp01 + cyl01);
         out->hoodBulgeStrength =
             smoothstep(0.05f, 0.75f, bulk01 * smoothstep(0.15f, 0.50f, engineFwd01));
@@ -687,34 +719,35 @@ void car_visual_derive(const VehicleSpec *spec, CarVisual *out)
      * So: the outline is a very dark version of the car's OWN hue — the standard pixel-art
      * selective-outline recommendation, and it makes the whole car palette-swap cleanly —
      * and everything that is not paint is a true neutral. */
-    out->body      = hsv_to_color(hue, sat, val, 255);
+    out->body = hsv_to_color(hue, sat, val, 255);
     out->bodyShade = shade(out->body, 0.78f);
-    out->cabin     = shade(out->body, 0.42f);
-    out->outline   = hsv_to_color(hue, clampf(sat * 0.85f, 0.0f, 1.0f), 0.13f, 255);
-    out->glass        = (Color){ 46, 47, 50, 255 };
-    out->tire         = (Color){ 26, 26, 28, 255 };
+    out->cabin = shade(out->body, 0.42f);
+    out->outline = hsv_to_color(hue, clampf(sat * 0.85f, 0.0f, 1.0f), 0.13f, 255);
+    out->glass = (Color){ 46, 47, 50, 255 };
+    out->tire = (Color){ 26, 26, 28, 255 };
     out->tireSidewall = (Color){ 42, 42, 45, 255 };
-    out->rim          = (Color){ 150, 151, 154, 255 };
-    out->disc         = (Color){ 98, 99, 102, 255 };
+    out->rim = (Color){ 150, 151, 154, 255 };
+    out->disc = (Color){ 98, 99, 102, 255 };
     /* Bodywork appendages — wing, canards, tow hook, hood pins. In-family: a wing is painted
      * panel, not signage, so it stays the body's hue and separates on VALUE alone. */
-    out->accent    = hsv_to_color(hue, clampf(sat * 0.75f, 0.0f, 1.0f),
-                                  clampf(val * 1.22f, 0.0f, 1.0f), 255);
+    out->accent = hsv_to_color(hue, clampf(sat * 0.75f, 0.0f, 1.0f),
+                               clampf(val * 1.22f, 0.0f, 1.0f), 255);
     /* The L9 heading marker is the one place a contrasting hue is CORRECT: it is a gameplay
      * affordance telling the player which way the car points, not bodywork, and it must not
      * disappear into the paint. It is the sole survivor of the old complement rule. */
-    out->heading   = hsv_to_color(hue + 180.0f, clampf(sat * 0.85f, 0.0f, 1.0f),
-                                  clampf(val * 1.15f, 0.0f, 1.0f), 255);
+    out->heading = hsv_to_color(hue + 180.0f, clampf(sat * 0.85f, 0.0f, 1.0f),
+                                clampf(val * 1.15f, 0.0f, 1.0f), 255);
     /* Lamps are emissive, so a warm off-white is correct and matches the reference art
      * (#ffffbc there). At ~12 px per car they never approach the 5% hue-family floor. */
-    out->lamp      = (Color){ 255, 240, 200, 255 };
+    out->lamp = (Color){ 255, 240, 200, 255 };
 
     /* [decorative] Stripe colour uses colour-seed bits only. Stripe GEOMETRY is a pure
      * function of stripeWeight and body extents; this colour is the only seed-dependent
      * part of the stripes layer, and it is excluded from the signature. */
     {
         const float stripeHue = fmodf(hue + 35.0f + (float)((seed >> 13) & 0x3Fu), 360.0f);
-        const float stripeSat = sat * clampf(0.55f + 0.35f * (float)((seed >> 3) & 0x1Fu) / 31.0f, 0.3f, 1.0f);
+        const float stripeSat =
+            sat * clampf(0.55f + 0.35f * (float)((seed >> 3) & 0x1Fu) / 31.0f, 0.3f, 1.0f);
         const float stripeVal = clampf(val * 1.08f, 0.0f, 1.0f);
         out->stripeColor = hsv_to_color(stripeHue, stripeSat, stripeVal, 255);
     }
@@ -730,6 +763,7 @@ static void key_f32(uint32_t *h, float value)
     /* The exact bit pattern, not a quantisation: a sub-pixel change still has to rebake,
      * because the rasterizer may still round it into a different pixel. Normalise the two
      * zeroes so +0 and -0 cannot produce different keys for the same picture. */
+    // cppcheck-suppress duplicateConditionalAssign
     if (value == 0.0f) value = 0.0f;
     uint32_t bits = 0u;
     memcpy(&bits, &value, sizeof(bits));
@@ -849,25 +883,30 @@ uint32_t car_visual_bake_key(const CarVisual *v)
  * One list generates the enum, the count and the names, so they cannot drift apart.
  * NEW COMPONENTS MUST BE APPENDED — never reorder existing ones. Discrete components
  * use the CAR_SIG_LEVEL_STEP multiplier (0.08 m = one visible pixel). */
-#define CAR_SIGNATURE_COMPONENTS(X)                                                          \
-    X(length) X(width) X(wheelbase) X(front_overhang) X(rear_overhang)                       \
-    X(hull0) X(hull1) X(hull2) X(hull3) X(hull4) X(hull5) X(hull6) X(hull7) X(hull8)         \
-    X(cabin_centre_x) X(cabin_length) X(cabin_half_width) X(windscreen_x) X(backlight_x)     \
-    X(arch_flare)                                                                            \
-    X(tire_diameter_front) X(tire_diameter_rear) X(tire_width_front) X(tire_width_rear)      \
-    X(rim_diameter_front) X(rim_diameter_rear) X(disc_diameter_front) X(disc_diameter_rear)  \
-    X(track_front) X(track_rear) X(rest_angle_front)                                         \
-    X(wing_span) X(wing_chord) X(splitter_protrusion) X(mirror_offset) X(exhaust_bore)       \
-    X(spoke_level) X(exhaust_level) X(cage_flag) X(mirror_flag)                              \
-    X(canard_strength) X(hood_bulge_strength) X(bed_length) X(pickup_bed_weight)             \
-    X(van_window_weight) X(side_window_count) X(open_wheel_weight)                           \
-    X(race_detail_weight) X(stripe_weight)                                                    \
-    X(tow_hook_flag) X(hood_pins_flag)                                                       \
-    X(height_visual) X(roof_length) X(glass_half_width)                                      \
-    X(sidewall_height_front) X(sidewall_height_rear)                                          \
-    X(poke_front) X(poke_rear) X(arch_gap_front) X(arch_gap_rear)                            \
-    X(static_toe_front) X(static_toe_rear)                                                   \
-    X(shoulder_x) X(arch_flare_front) X(arch_flare_rear)
+// clang-format off
+#define CAR_SIGNATURE_COMPONENTS(X)                                                            \
+    X(length)                                                                                  \
+    X(width)                                                                                   \
+    X(wheelbase) X(front_overhang) X(rear_overhang) X(hull0) X(hull1) X(hull2) X(hull3) X(     \
+        hull4) X(hull5) X(hull6) X(hull7) X(hull8) X(cabin_centre_x) X(cabin_length)           \
+        X(cabin_half_width) X(windscreen_x) X(backlight_x) X(arch_flare) X(                    \
+            tire_diameter_front) X(tire_diameter_rear) X(tire_width_front) X(tire_width_rear)  \
+            X(rim_diameter_front) X(rim_diameter_rear) X(disc_diameter_front)                  \
+                X(disc_diameter_rear) X(track_front) X(track_rear) X(rest_angle_front)         \
+                    X(wing_span) X(wing_chord) X(splitter_protrusion) X(mirror_offset) X(      \
+                        exhaust_bore) X(spoke_level) X(exhaust_level) X(cage_flag)             \
+                        X(mirror_flag) X(canard_strength) X(hood_bulge_strength) X(bed_length) \
+                            X(pickup_bed_weight) X(van_window_weight) X(side_window_count)     \
+                                X(open_wheel_weight) X(race_detail_weight) X(stripe_weight)    \
+                                    X(tow_hook_flag) X(hood_pins_flag) X(height_visual)        \
+                                        X(roof_length) X(glass_half_width)                     \
+                                            X(sidewall_height_front) X(sidewall_height_rear)   \
+                                                X(poke_front) X(poke_rear) X(arch_gap_front)   \
+                                                    X(arch_gap_rear) X(static_toe_front)       \
+                                                        X(static_toe_rear) X(shoulder_x)       \
+                                                            X(arch_flare_front)                \
+                                                                X(arch_flare_rear)
+// clang-format on
 
 #define X_ENUM(name) CAR_SIG_##name,
 enum { CAR_SIGNATURE_COMPONENTS(X_ENUM) CAR_SIG_COUNT };
@@ -881,7 +920,10 @@ static const char *const kSignatureNames[] = { CAR_SIGNATURE_COMPONENTS(X_NAME) 
  * level is by itself always enough to separate two cars. */
 #define CAR_SIG_LEVEL_STEP 0.08f
 
-int car_visual_signature_count(void) { return CAR_SIG_COUNT; }
+int car_visual_signature_count(void)
+{
+    return CAR_SIG_COUNT;
+}
 
 const char *car_visual_signature_component_name(int index)
 {
@@ -896,83 +938,83 @@ int car_visual_signature(const CarVisual *v, float *out, int cap)
     const CarWheelVisual *fl = &v->wheels[WHEEL_FRONT_LEFT];
     const CarWheelVisual *rl = &v->wheels[WHEEL_REAR_LEFT];
 
-    out[CAR_SIG_length]         = v->lengthM;
-    out[CAR_SIG_width]          = v->widthM;
-    out[CAR_SIG_wheelbase]      = v->wheelbaseM;
+    out[CAR_SIG_length] = v->lengthM;
+    out[CAR_SIG_width] = v->widthM;
+    out[CAR_SIG_wheelbase] = v->wheelbaseM;
     out[CAR_SIG_front_overhang] = v->frontOverhangM;
-    out[CAR_SIG_rear_overhang]  = v->rearOverhangM;
+    out[CAR_SIG_rear_overhang] = v->rearOverhangM;
 
     for (int i = 0; i < CAR_HULL_STATIONS; i++) {
         out[CAR_SIG_hull0 + i] = v->hull[i].halfWidthM;
     }
 
-    out[CAR_SIG_cabin_centre_x]   = v->cabinCentreXM;
-    out[CAR_SIG_cabin_length]     = v->cabinLengthM;
+    out[CAR_SIG_cabin_centre_x] = v->cabinCentreXM;
+    out[CAR_SIG_cabin_length] = v->cabinLengthM;
     out[CAR_SIG_cabin_half_width] = v->cabinHalfWidthM;
-    out[CAR_SIG_windscreen_x]     = v->windscreenXM;
-    out[CAR_SIG_backlight_x]      = v->backlightXM;
-    out[CAR_SIG_arch_flare]       = v->archFlareM;
+    out[CAR_SIG_windscreen_x] = v->windscreenXM;
+    out[CAR_SIG_backlight_x] = v->backlightXM;
+    out[CAR_SIG_arch_flare] = v->archFlareM;
 
     out[CAR_SIG_tire_diameter_front] = fl->diameterM;
-    out[CAR_SIG_tire_diameter_rear]  = rl->diameterM;
-    out[CAR_SIG_tire_width_front]    = fl->widthM;
-    out[CAR_SIG_tire_width_rear]     = rl->widthM;
-    out[CAR_SIG_rim_diameter_front]  = fl->rimDiameterM;
-    out[CAR_SIG_rim_diameter_rear]   = rl->rimDiameterM;
+    out[CAR_SIG_tire_diameter_rear] = rl->diameterM;
+    out[CAR_SIG_tire_width_front] = fl->widthM;
+    out[CAR_SIG_tire_width_rear] = rl->widthM;
+    out[CAR_SIG_rim_diameter_front] = fl->rimDiameterM;
+    out[CAR_SIG_rim_diameter_rear] = rl->rimDiameterM;
     out[CAR_SIG_disc_diameter_front] = fl->discDiameterM;
-    out[CAR_SIG_disc_diameter_rear]  = rl->discDiameterM;
+    out[CAR_SIG_disc_diameter_rear] = rl->discDiameterM;
 
     out[CAR_SIG_track_front] = 2.0f * fabsf(fl->centreM.y);
-    out[CAR_SIG_track_rear]  = 2.0f * fabsf(rl->centreM.y);
+    out[CAR_SIG_track_rear] = 2.0f * fabsf(rl->centreM.y);
 
     /* Converted from radians to the arc it sweeps at the tire's edge, so it is in the same
      * "visible metres" currency as everything else. */
     out[CAR_SIG_rest_angle_front] = fabsf(fl->staticAngleRad) * fl->diameterM;
 
-    out[CAR_SIG_wing_span]            = v->wingSpanM;
-    out[CAR_SIG_wing_chord]           = v->wingChordM;
-    out[CAR_SIG_splitter_protrusion]  = v->splitterProtrusionM;
-    out[CAR_SIG_mirror_offset]        = v->mirrorOffsetM;
-    out[CAR_SIG_exhaust_bore]         = v->exhaustBoreM;
+    out[CAR_SIG_wing_span] = v->wingSpanM;
+    out[CAR_SIG_wing_chord] = v->wingChordM;
+    out[CAR_SIG_splitter_protrusion] = v->splitterProtrusionM;
+    out[CAR_SIG_mirror_offset] = v->mirrorOffsetM;
+    out[CAR_SIG_exhaust_bore] = v->exhaustBoreM;
 
-    out[CAR_SIG_spoke_level]   = (float)fl->spokeCount * CAR_SIG_LEVEL_STEP;
+    out[CAR_SIG_spoke_level] = (float)fl->spokeCount * CAR_SIG_LEVEL_STEP;
     out[CAR_SIG_exhaust_level] = (float)v->exhaustCount * CAR_SIG_LEVEL_STEP;
-    out[CAR_SIG_cage_flag]     = v->hasCage ? CAR_SIG_LEVEL_STEP : 0.0f;
-    out[CAR_SIG_mirror_flag]   = v->hasMirrors ? CAR_SIG_LEVEL_STEP : 0.0f;
+    out[CAR_SIG_cage_flag] = v->hasCage ? CAR_SIG_LEVEL_STEP : 0.0f;
+    out[CAR_SIG_mirror_flag] = v->hasMirrors ? CAR_SIG_LEVEL_STEP : 0.0f;
 
     /* ---- Phase 3 new components (appended) ---- */
-    out[CAR_SIG_canard_strength]      = v->canardStrength;
-    out[CAR_SIG_hood_bulge_strength]  = v->hoodBulgeStrength;
+    out[CAR_SIG_canard_strength] = v->canardStrength;
+    out[CAR_SIG_hood_bulge_strength] = v->hoodBulgeStrength;
     /* True metres, so it is directly comparable against the 0.08 m one-pixel floor. */
-    out[CAR_SIG_bed_length]           = v->bedLengthM;
-    out[CAR_SIG_pickup_bed_weight]    = v->pickupBedWeight;
-    out[CAR_SIG_van_window_weight]    = v->vanWindowWeight;
-    out[CAR_SIG_side_window_count]    = (float)v->sideWindowCount * CAR_SIG_LEVEL_STEP;
-    out[CAR_SIG_open_wheel_weight]    = v->openWheelWeight;
-    out[CAR_SIG_race_detail_weight]   = v->raceDetailWeight;
-    out[CAR_SIG_stripe_weight]        = v->stripeWeight;
-    out[CAR_SIG_tow_hook_flag]        = v->hasTowHook ? CAR_SIG_LEVEL_STEP : 0.0f;
-    out[CAR_SIG_hood_pins_flag]       = v->hasHoodPins ? CAR_SIG_LEVEL_STEP : 0.0f;
-    out[CAR_SIG_height_visual]        = v->heightVisual;
-    out[CAR_SIG_roof_length]          = v->roofLengthM;
-    out[CAR_SIG_glass_half_width]     = v->glassHalfWidthM;
+    out[CAR_SIG_bed_length] = v->bedLengthM;
+    out[CAR_SIG_pickup_bed_weight] = v->pickupBedWeight;
+    out[CAR_SIG_van_window_weight] = v->vanWindowWeight;
+    out[CAR_SIG_side_window_count] = (float)v->sideWindowCount * CAR_SIG_LEVEL_STEP;
+    out[CAR_SIG_open_wheel_weight] = v->openWheelWeight;
+    out[CAR_SIG_race_detail_weight] = v->raceDetailWeight;
+    out[CAR_SIG_stripe_weight] = v->stripeWeight;
+    out[CAR_SIG_tow_hook_flag] = v->hasTowHook ? CAR_SIG_LEVEL_STEP : 0.0f;
+    out[CAR_SIG_hood_pins_flag] = v->hasHoodPins ? CAR_SIG_LEVEL_STEP : 0.0f;
+    out[CAR_SIG_height_visual] = v->heightVisual;
+    out[CAR_SIG_roof_length] = v->roofLengthM;
+    out[CAR_SIG_glass_half_width] = v->glassHalfWidthM;
     out[CAR_SIG_sidewall_height_front] = fl->sidewallHeightM;
-    out[CAR_SIG_sidewall_height_rear]  = rl->sidewallHeightM;
-    out[CAR_SIG_poke_front]           = fl->pokeM;
-    out[CAR_SIG_poke_rear]            = rl->pokeM;
-    out[CAR_SIG_arch_gap_front]       = fl->archGapM;
-    out[CAR_SIG_arch_gap_rear]        = rl->archGapM;
-    out[CAR_SIG_static_toe_front]     = fabsf(fl->staticAngleRad);
-    out[CAR_SIG_static_toe_rear]      = fabsf(rl->staticAngleRad);
+    out[CAR_SIG_sidewall_height_rear] = rl->sidewallHeightM;
+    out[CAR_SIG_poke_front] = fl->pokeM;
+    out[CAR_SIG_poke_rear] = rl->pokeM;
+    out[CAR_SIG_arch_gap_front] = fl->archGapM;
+    out[CAR_SIG_arch_gap_rear] = rl->archGapM;
+    out[CAR_SIG_static_toe_front] = fabsf(fl->staticAngleRad);
+    out[CAR_SIG_static_toe_rear] = fabsf(rl->staticAngleRad);
 
     /* ---- Phase B new components (appended) ----
      * The shoulder station and the two per-axle arch flares are drawn geometry the existing
      * components could not see: hull0..hull8 record the half-widths, but not WHERE the maximum
      * sits, and CAR_SIG_arch_flare records only the shared derived flare. All three are true
      * metres, directly comparable against the 0.08 m one-pixel floor. */
-    out[CAR_SIG_shoulder_x]           = v->shoulderXM;
-    out[CAR_SIG_arch_flare_front]     = fl->archFlareM;
-    out[CAR_SIG_arch_flare_rear]      = rl->archFlareM;
+    out[CAR_SIG_shoulder_x] = v->shoulderXM;
+    out[CAR_SIG_arch_flare_front] = fl->archFlareM;
+    out[CAR_SIG_arch_flare_rear] = rl->archFlareM;
 
     return CAR_SIG_COUNT;
 }

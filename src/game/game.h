@@ -20,7 +20,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "raylib.h"     /* Vector2 only; game.c is the only TU here that calls raylib */
+#include "raylib.h" /* Vector2 only; game.c is the only TU here that calls raylib */
 
 #include "core/config.h"
 #include "dev/dev_state.h"
@@ -50,21 +50,21 @@ typedef struct {
 } SimState;
 
 struct Game {
-    GameStateId    state;
-    Input          input;
-    SimState       sim;
-    VehicleSpec        spec;
-    VehicleState       vehicle;
-    VehicleDerived     derived;
+    GameStateId state;
+    Input input;
+    SimState sim;
+    VehicleSpec spec;
+    VehicleState vehicle;
+    VehicleDerived derived;
     VehicleRenderState renderState;
-    Track               track;
-    ParticlePool        particles;
-    Camera2D            camera;
+    Track track;
+    ParticlePool particles;
+    Camera2D camera;
 
     /* Fixed-timestep bookkeeping, written by the platform loop via timestep_advance(). */
     float accumulatorS;
-    int   lastSubstepCount;
-    int   physicsBacklogDrops;
+    int lastSubstepCount;
+    int physicsBacklogDrops;
 
     /* Deterministic input recording and playback. Fixed capacity, no allocation. */
     ReplayBuffer replay;
@@ -85,11 +85,11 @@ struct Game {
     float driftTimeS;
     float comboMultiplier;
     float comboTimerS;
-    float crashLockoutTimerS;   /* seconds remaining in the post-impact scoring lockout */
-    bool  debugOverlay;
-    int   reloadCount;
+    float crashLockoutTimerS; /* seconds remaining in the post-impact scoring lockout */
+    bool debugOverlay;
+    int reloadCount;
     float reloadFlashTimerS;
-    bool  initialized;
+    bool initialized;
 
     /* Automatic transmission mode (toggle with T). */
     AutoTransmission autoTrans;

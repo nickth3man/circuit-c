@@ -42,13 +42,20 @@ void dev_lab_reload_style(void);
 
 #else
 
-static inline void dev_lab_update(struct Game *game) { (void)game; }
+static inline void dev_lab_update(struct Game *game)
+{
+    (void)game;
+}
 static inline void dev_lab_draw_world(const struct Game *game, const VehicleDrawState *draw)
 {
-    (void)game; (void)draw;
+    (void)game;
+    (void)draw;
 }
-static inline void dev_lab_draw_ui(struct Game *game) { (void)game; }
-static inline void dev_lab_reload_style(void) { }
+static inline void dev_lab_draw_ui(struct Game *game)
+{
+    (void)game;
+}
+static inline void dev_lab_reload_style(void) {}
 
 #endif
 

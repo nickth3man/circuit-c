@@ -9,22 +9,15 @@
 #include "physics/vehicle.h"
 #include "game/input.h"
 
-typedef enum {
-    AUTO_DRIVE   = 0,
-    AUTO_NEUTRAL = 1,
-    AUTO_REVERSE = 2
-} AutoDriveState;
+typedef enum { AUTO_DRIVE = 0, AUTO_NEUTRAL = 1, AUTO_REVERSE = 2 } AutoDriveState;
 
 typedef struct {
-    bool           enabled;
+    bool enabled;
     AutoDriveState driveState;
-    float          neutralTimer;
+    float neutralTimer;
 } AutoTransmission;
 
-void auto_transmission_update(AutoTransmission *at,
-                               VehicleState *vs,
-                               const VehicleSpec *spec,
-                               const VehicleDerived *derived,
-                               Input *io, float dt);
+void auto_transmission_update(AutoTransmission *at, VehicleState *vs, const VehicleSpec *spec,
+                              const VehicleDerived *derived, Input *io, float dt);
 
 #endif

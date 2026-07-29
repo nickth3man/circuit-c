@@ -25,12 +25,12 @@
 #include "physics/vehicle.h"
 
 typedef struct {
-    const char *name;           /* "Touge Hero" */
-    const char *description;    /* one-line feel, shown in the lab status line */
+    const char *name;        /* "Touge Hero" */
+    const char *description; /* one-line feel, shown in the lab status line */
 } DevPreset;
 
 /* Stable table; index-safe. Index 0 is always "Stock Baseline" (no overrides). */
-int              dev_preset_count(void);
+int dev_preset_count(void);
 const DevPreset *dev_preset_at(int index);
 
 /* Reset spec to stock defaults, then apply every override in the preset.

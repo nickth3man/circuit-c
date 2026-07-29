@@ -29,8 +29,8 @@
 /* Geometry of a rasterization: the buffer size, the scale, and where body-space (0,0) lands.
  * Produced by car_raster_info() so a caller can allocate before drawing. */
 typedef struct {
-    int   width;
-    int   height;
+    int width;
+    int height;
     float pxPerM;
     float originXPx;
     float originYPx;
@@ -61,17 +61,17 @@ typedef struct {
  *                without double-counting it.
  */
 typedef enum {
-    CAR_RASTER_PART_ALL = 0,   /* the whole car, wheels in place at their static angles */
-    CAR_RASTER_PART_BODY,      /* everything except the tires: hull, glass, arches, appendages */
-    CAR_RASTER_PART_WHEEL      /* one wheel, about its hub, unrotated */
+    CAR_RASTER_PART_ALL = 0, /* the whole car, wheels in place at their static angles */
+    CAR_RASTER_PART_BODY,    /* everything except the tires: hull, glass, arches, appendages */
+    CAR_RASTER_PART_WHEEL    /* one wheel, about its hub, unrotated */
 } CarRasterPart;
 
 /* Size the buffer for one part. For CAR_RASTER_PART_WHEEL, wheelIndex selects the wheel;
  * it is ignored otherwise. BODY deliberately uses the same bounds as ALL: the wheel arches
  * are body geometry and reach past the hull wherever the track does, so the car's bounds are
  * the body's bounds. */
-CarRasterInfo car_raster_part_info(const CarVisual *visual, CarRasterPart part,
-                                   int wheelIndex, float pxPerM, int padPx);
+CarRasterInfo car_raster_part_info(const CarVisual *visual, CarRasterPart part, int wheelIndex,
+                                   float pxPerM, int padPx);
 
 /* Draw one part. Same contract as car_raster_draw otherwise. */
 bool car_raster_draw_part(const CarVisual *visual, CarRasterPart part, int wheelIndex,
@@ -92,15 +92,15 @@ size_t car_raster_bytes(CarRasterInfo info);
  * Deterministic: the same visual and info always produce byte-identical output within a
  * binary. Do not compare buffers produced by two DIFFERENT binaries — game.dll builds at -O0
  * and drifty_tests at -O2, so float results may differ in the last bit. */
-bool car_raster_draw(const CarVisual *visual, CarRasterInfo info,
-                     unsigned char *rgba, size_t bytes);
+bool car_raster_draw(const CarVisual *visual, CarRasterInfo info, unsigned char *rgba,
+                     size_t bytes);
 
 /* Rotate a buffer 90 degrees counter-clockwise into `dst`, so the nose points up as in
  * resources/sprite_examples/. dst must hold height*width*CAR_RASTER_BPP bytes; its dimensions
  * are the source's transposed. Exact and lossless — this is an index permutation, not a
  * resample. */
-bool car_raster_rotate_nose_up(const unsigned char *src, int srcW, int srcH,
-                               unsigned char *dst, size_t dstBytes);
+bool car_raster_rotate_nose_up(const unsigned char *src, int srcW, int srcH, unsigned char *dst,
+                               size_t dstBytes);
 
 /* ------------------------------------------------------------------- feature labels ----
  *
@@ -119,31 +119,31 @@ typedef enum {
     CAR_LABEL_CABIN,
     CAR_LABEL_GLASS,
     CAR_LABEL_TIRE,
-    CAR_LABEL_TIRE_SIDEWALL,  /* sidewall ring between tread and rim */
+    CAR_LABEL_TIRE_SIDEWALL, /* sidewall ring between tread and rim */
     CAR_LABEL_RIM,
     CAR_LABEL_DISC,
     CAR_LABEL_ARCH,
     CAR_LABEL_WING,
     CAR_LABEL_SPLITTER,
-    CAR_LABEL_CANARD,         /* small front-corner fins */
+    CAR_LABEL_CANARD, /* small front-corner fins */
     CAR_LABEL_MIRROR,
     CAR_LABEL_EXHAUST,
-    CAR_LABEL_BED,            /* pickup bed floor and rails */
-    CAR_LABEL_HOOD_BULGE,     /* engine hood bulge */
-    CAR_LABEL_TOW_HOOK,       /* race-detail tow-hook marker */
-    CAR_LABEL_HOOD_PINS,      /* race-detail hood-pin markers */
+    CAR_LABEL_BED,        /* pickup bed floor and rails */
+    CAR_LABEL_HOOD_BULGE, /* engine hood bulge */
+    CAR_LABEL_TOW_HOOK,   /* race-detail tow-hook marker */
+    CAR_LABEL_HOOD_PINS,  /* race-detail hood-pin markers */
     CAR_LABEL_LAMP,
     CAR_LABEL_CAGE,
-    CAR_LABEL_STRIPE,         /* livery stripes */
-    CAR_LABEL_HEADING,        /* L9 gameplay heading marker */
+    CAR_LABEL_STRIPE,  /* livery stripes */
+    CAR_LABEL_HEADING, /* L9 gameplay heading marker */
     CAR_LABEL_OUTLINE,
-    CAR_LABEL_SHADOW,         /* L0 shadow; excluded from distinctness */
+    CAR_LABEL_SHADOW, /* L0 shadow; excluded from distinctness */
     CAR_LABEL_COUNT
 } CarRasterLabel;
 
 /* One byte per pixel. `labels` must hold at least info.width * info.height bytes. */
-bool car_raster_draw_labels(const CarVisual *visual, CarRasterInfo info,
-                            unsigned char *labels, size_t bytes);
+bool car_raster_draw_labels(const CarVisual *visual, CarRasterInfo info, unsigned char *labels,
+                            size_t bytes);
 
 /* Fraction of the union of two label maps whose labels disagree, in [0,1]. The authoritative
  * "are these two cars visibly different" measure, used by the `corpus` scenario. Both maps

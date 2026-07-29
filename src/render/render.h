@@ -51,7 +51,7 @@ void render_shutdown(void);
  * A human-review artifact, deliberately not a GPU regression baseline: a hundred cars behind
  * an RMSE gate on hardware that renders differently per vendor is a maintenance sinkhole with
  * no CI value. The headless contact sheet and the `corpus` scenario are the actual gates. */
-int  render_gallery_page_count(void);
+int render_gallery_page_count(void);
 void render_draw_gallery(struct Game *game, int page);
 
 #endif /* DRIFTY_RENDER_H */

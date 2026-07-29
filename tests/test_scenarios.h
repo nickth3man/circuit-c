@@ -16,14 +16,14 @@
 typedef void (*TestScenarioFn)(void);
 
 typedef struct {
-    const char    *name;
-    const char    *description;
+    const char *name;
+    const char *description;
     TestScenarioFn run;
 } TestScenario;
 
 typedef struct {
     const TestScenario *items;
-    size_t              count;
+    size_t count;
 } TestScenarioGroup;
 
 TestScenarioGroup test_core_scenarios(void);

@@ -33,18 +33,12 @@ void vehicle_spec_refresh_derived(VehicleSpec *spec)
     spec->frontalAreaM2 = spec->widthOverallM * spec->heightOverallM * VEH_FRONTAL_AREA_FILL;
 
     /* Stage 2 — mass particles → mass, CG, yaw inertia ----------------------------------- */
-    const float masses[5] = {
-        spec->massEngineKg, spec->massGearboxKg, spec->massFuelKg,
-        spec->massDriverKg, spec->massChassisKg
-    };
-    const float xs[5] = {
-        spec->massEngineXM, spec->massGearboxXM, spec->massFuelXM,
-        spec->massDriverXM, spec->massChassisXM
-    };
-    const float zs[5] = {
-        spec->massEngineZM, spec->massGearboxZM, spec->massFuelZM,
-        spec->massDriverZM, spec->massChassisZM
-    };
+    const float masses[5] = { spec->massEngineKg, spec->massGearboxKg, spec->massFuelKg,
+                              spec->massDriverKg, spec->massChassisKg };
+    const float xs[5] = { spec->massEngineXM, spec->massGearboxXM, spec->massFuelXM,
+                          spec->massDriverXM, spec->massChassisXM };
+    const float zs[5] = { spec->massEngineZM, spec->massGearboxZM, spec->massFuelZM,
+                          spec->massDriverZM, spec->massChassisZM };
 
     float massKg = 0.0f;
     float momentX = 0.0f;
@@ -230,7 +224,8 @@ bool vehicle_spec_is_valid(const VehicleSpec *spec)
     if (!(isfinite(spec->cgToFrontM) && spec->cgToFrontM > 0.0f)) return false;
     if (!(isfinite(spec->cgToRearM) && spec->cgToRearM > 0.0f)) return false;
     if (!(isfinite(spec->wheelbaseM) &&
-          fabsf(spec->wheelbaseM - (spec->cgToFrontM + spec->cgToRearM)) < 1e-4f)) return false;
+          fabsf(spec->wheelbaseM - (spec->cgToFrontM + spec->cgToRearM)) < 1e-4f))
+        return false;
     if (!(isfinite(spec->trackWidthFrontM) && spec->trackWidthFrontM > 0.0f)) return false;
     if (!(isfinite(spec->trackWidthRearM) && spec->trackWidthRearM > 0.0f)) return false;
     if (!(isfinite(spec->cgHeightM) && spec->cgHeightM > 0.0f)) return false;
@@ -246,9 +241,11 @@ bool vehicle_spec_is_valid(const VehicleSpec *spec)
      * grammar would have to clamp) and make the shoulder's max-width claim ambiguous. Reject
      * it here rather than silently clamp in car_visual.c. */
     if (!(isfinite(spec->noseWidthM) && spec->noseWidthM > 0.0f &&
-          spec->noseWidthM <= spec->widthOverallM)) return false;
+          spec->noseWidthM <= spec->widthOverallM))
+        return false;
     if (!(isfinite(spec->tailWidthM) && spec->tailWidthM > 0.0f &&
-          spec->tailWidthM <= spec->widthOverallM)) return false;
+          spec->tailWidthM <= spec->widthOverallM))
+        return false;
     /* A longitudinal station; finiteness only, like cowl_x / backlight_x. */
     if (!(isfinite(spec->shoulderXM))) return false;
     if (!(isfinite(spec->fenderFlareFrontM) && spec->fenderFlareFrontM >= 0.0f)) return false;
@@ -259,7 +256,8 @@ bool vehicle_spec_is_valid(const VehicleSpec *spec)
     if (!(isfinite(spec->dragCoefficient) && spec->dragCoefficient >= 0.0f)) return false;
     if (!(isfinite(spec->frontalAreaM2) && spec->frontalAreaM2 >= 0.0f)) return false;
     if (!(isfinite(spec->rollingResistanceCoefficient) &&
-          spec->rollingResistanceCoefficient >= 0.0f)) return false;
+          spec->rollingResistanceCoefficient >= 0.0f))
+        return false;
     if (!(isfinite(spec->loadFilterRateHz) && spec->loadFilterRateHz > 0.0f)) return false;
     if (!(isfinite(spec->tireBLatFront) && spec->tireBLatFront > 0.0f &&
           isfinite(spec->tireCLatFront) && spec->tireCLatFront > 0.0f &&
@@ -267,58 +265,69 @@ bool vehicle_spec_is_valid(const VehicleSpec *spec)
           isfinite(spec->tireBLatRear) && spec->tireBLatRear > 0.0f &&
           isfinite(spec->tireCLatRear) && spec->tireCLatRear > 0.0f &&
           isfinite(spec->tireMuLatRear) && spec->tireMuLatRear > 0.0f &&
-          isfinite(spec->tireBLong) && spec->tireBLong > 0.0f &&
-          isfinite(spec->tireCLong) && spec->tireCLong > 0.0f &&
-          isfinite(spec->tireMuLongScale) && spec->tireMuLongScale > 0.0f)) return false;
+          isfinite(spec->tireBLong) && spec->tireBLong > 0.0f && isfinite(spec->tireCLong) &&
+          spec->tireCLong > 0.0f && isfinite(spec->tireMuLongScale) &&
+          spec->tireMuLongScale > 0.0f))
+        return false;
     if (spec->gearCount <= 0 || spec->gearCount > MAX_GEARS) return false;
     for (int i = 0; i < spec->gearCount; i++) {
         if (!(isfinite(spec->gearRatios[i]) && spec->gearRatios[i] > 0.0f)) return false;
     }
     if (!(isfinite(spec->reverseGearRatio) && spec->reverseGearRatio > 0.0f)) return false;
     if (!(isfinite(spec->finalDriveRatio) && spec->finalDriveRatio > 0.0f)) return false;
-    if (!(isfinite(spec->drivetrainEfficiency) &&
-          spec->drivetrainEfficiency >= 0.0f && spec->drivetrainEfficiency <= 1.0f)) return false;
+    if (!(isfinite(spec->drivetrainEfficiency) && spec->drivetrainEfficiency >= 0.0f &&
+          spec->drivetrainEfficiency <= 1.0f))
+        return false;
     if (!(isfinite(spec->engineIdleRpm) && isfinite(spec->engineRedlineRpm) &&
-          spec->engineIdleRpm > 0.0f && spec->engineIdleRpm < spec->engineRedlineRpm)) return false;
+          spec->engineIdleRpm > 0.0f && spec->engineIdleRpm < spec->engineRedlineRpm))
+        return false;
     for (int i = 0; i < ENGINE_CURVE_POINTS; i++) {
-        if (!(isfinite(spec->engineTorqueCurveNm[i]) &&
-              spec->engineTorqueCurveNm[i] >= 0.0f)) return false;
+        if (!(isfinite(spec->engineTorqueCurveNm[i]) && spec->engineTorqueCurveNm[i] >= 0.0f))
+            return false;
     }
-    if (!(isfinite(spec->engineBrakingTorqueNm) &&
-          spec->engineBrakingTorqueNm >= 0.0f)) return false;
+    if (!(isfinite(spec->engineBrakingTorqueNm) && spec->engineBrakingTorqueNm >= 0.0f))
+        return false;
     if (!(isfinite(spec->maxBrakeTorqueNm) && spec->maxBrakeTorqueNm >= 0.0f)) return false;
-    if (!(isfinite(spec->brakeBiasFront) &&
-          spec->brakeBiasFront >= 0.0f && spec->brakeBiasFront <= 1.0f)) return false;
+    if (!(isfinite(spec->brakeBiasFront) && spec->brakeBiasFront >= 0.0f &&
+          spec->brakeBiasFront <= 1.0f))
+        return false;
     if (!(isfinite(spec->handbrakeTorqueNm) && spec->handbrakeTorqueNm >= 0.0f)) return false;
 
     if (!(isfinite(spec->bodyHalfWidthM) && spec->bodyHalfWidthM > 0.0f)) return false;
-    if (!(isfinite(spec->collisionRestitution) &&
-          spec->collisionRestitution >= 0.0f && spec->collisionRestitution <= 1.0f)) return false;
+    if (!(isfinite(spec->collisionRestitution) && spec->collisionRestitution >= 0.0f &&
+          spec->collisionRestitution <= 1.0f))
+        return false;
     if (!(isfinite(spec->collisionFriction) && spec->collisionFriction >= 0.0f)) return false;
 
-    if (!(isfinite(spec->tireRelaxationLengthM) &&
-          spec->tireRelaxationLengthM >= 0.0f && spec->tireRelaxationLengthM <= 1.0f)) return false;
-    if (!(isfinite(spec->tireLoadSensitivityK) &&
-          spec->tireLoadSensitivityK >= 0.0f && spec->tireLoadSensitivityK <= 0.05f)) return false;
-    if (!(isfinite(spec->tireLoadRefPerWheelN) &&
-          spec->tireLoadRefPerWheelN > 0.0f && spec->tireLoadRefPerWheelN <= 20000.0f)) return false;
-    if (!(isfinite(spec->ackermannPercent) &&
-          spec->ackermannPercent >= 0.0f && spec->ackermannPercent <= 1.0f)) return false;
-    if (!(isfinite(spec->differentialMode) &&
-          spec->differentialMode >= 0.0f && spec->differentialMode <= 2.0f)) return false;
-    if (!(isfinite(spec->differentialBiasRatio) &&
-          spec->differentialBiasRatio >= 1.0f && spec->differentialBiasRatio <= 5.0f)) return false;
-    if (!(isfinite(spec->differentialPreloadNm) &&
-          spec->differentialPreloadNm >= 0.0f && spec->differentialPreloadNm <= 400.0f)) return false;
+    if (!(isfinite(spec->tireRelaxationLengthM) && spec->tireRelaxationLengthM >= 0.0f &&
+          spec->tireRelaxationLengthM <= 1.0f))
+        return false;
+    if (!(isfinite(spec->tireLoadSensitivityK) && spec->tireLoadSensitivityK >= 0.0f &&
+          spec->tireLoadSensitivityK <= 0.05f))
+        return false;
+    if (!(isfinite(spec->tireLoadRefPerWheelN) && spec->tireLoadRefPerWheelN > 0.0f &&
+          spec->tireLoadRefPerWheelN <= 20000.0f))
+        return false;
+    if (!(isfinite(spec->ackermannPercent) && spec->ackermannPercent >= 0.0f &&
+          spec->ackermannPercent <= 1.0f))
+        return false;
+    if (!(isfinite(spec->differentialMode) && spec->differentialMode >= 0.0f &&
+          spec->differentialMode <= 2.0f))
+        return false;
+    if (!(isfinite(spec->differentialBiasRatio) && spec->differentialBiasRatio >= 1.0f &&
+          spec->differentialBiasRatio <= 5.0f))
+        return false;
+    if (!(isfinite(spec->differentialPreloadNm) && spec->differentialPreloadNm >= 0.0f &&
+          spec->differentialPreloadNm <= 400.0f))
+        return false;
     if (!(isfinite(spec->rollStiffnessFrontFraction) &&
-          spec->rollStiffnessFrontFraction >= 0.0f && spec->rollStiffnessFrontFraction <= 1.0f)) return false;
+          spec->rollStiffnessFrontFraction >= 0.0f && spec->rollStiffnessFrontFraction <= 1.0f))
+        return false;
 
     return true;
 }
 
-void vehicle_state_reset(const VehicleSpec *spec,
-                         VehicleState *state,
-                         VehicleDerived *derived,
+void vehicle_state_reset(const VehicleSpec *spec, VehicleState *state, VehicleDerived *derived,
                          VehicleRenderState *renderState)
 {
     if (spec == NULL || state == NULL || derived == NULL || renderState == NULL) return;

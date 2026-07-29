@@ -8,16 +8,16 @@ ReplayFrame replay_pack(const Input *in)
     memset(&frame, 0, sizeof(frame));
     if (in == NULL) return frame;
 
-    frame.steer     = in->steer;
-    frame.throttle  = in->throttle;
-    frame.brake     = in->brake;
+    frame.steer = in->steer;
+    frame.throttle = in->throttle;
+    frame.brake = in->brake;
     frame.handbrake = in->handbrake;
 
     uint8_t bits = 0;
-    if (in->pausePressed)     bits = (uint8_t)(bits | REPLAY_BIT_PAUSE);
-    if (in->resetPressed)     bits = (uint8_t)(bits | REPLAY_BIT_RESET);
-    if (in->debugPressed)     bits = (uint8_t)(bits | REPLAY_BIT_DEBUG);
-    if (in->shiftUpPressed)   bits = (uint8_t)(bits | REPLAY_BIT_SHIFT_UP);
+    if (in->pausePressed) bits = REPLAY_BIT_PAUSE;
+    if (in->resetPressed) bits = (uint8_t)(bits | REPLAY_BIT_RESET);
+    if (in->debugPressed) bits = (uint8_t)(bits | REPLAY_BIT_DEBUG);
+    if (in->shiftUpPressed) bits = (uint8_t)(bits | REPLAY_BIT_SHIFT_UP);
     if (in->shiftDownPressed) bits = (uint8_t)(bits | REPLAY_BIT_SHIFT_DOWN);
     frame.oneshotBits = bits;
 
@@ -30,27 +30,27 @@ void replay_unpack(const ReplayFrame *frame, Input *out)
     input_zero(out);
     if (frame == NULL) return;
 
-    out->steer     = frame->steer;
-    out->throttle  = frame->throttle;
-    out->brake     = frame->brake;
+    out->steer = frame->steer;
+    out->throttle = frame->throttle;
+    out->brake = frame->brake;
     out->handbrake = frame->handbrake;
 
-    out->pausePressed     = (frame->oneshotBits & REPLAY_BIT_PAUSE)      != 0;
-    out->resetPressed     = (frame->oneshotBits & REPLAY_BIT_RESET)      != 0;
-    out->debugPressed     = (frame->oneshotBits & REPLAY_BIT_DEBUG)      != 0;
-    out->shiftUpPressed   = (frame->oneshotBits & REPLAY_BIT_SHIFT_UP)   != 0;
+    out->pausePressed = (frame->oneshotBits & REPLAY_BIT_PAUSE) != 0;
+    out->resetPressed = (frame->oneshotBits & REPLAY_BIT_RESET) != 0;
+    out->debugPressed = (frame->oneshotBits & REPLAY_BIT_DEBUG) != 0;
+    out->shiftUpPressed = (frame->oneshotBits & REPLAY_BIT_SHIFT_UP) != 0;
     out->shiftDownPressed = (frame->oneshotBits & REPLAY_BIT_SHIFT_DOWN) != 0;
 }
 
 void replay_reset(ReplayBuffer *rb)
 {
     if (rb == NULL) return;
-    rb->head             = 0;
-    rb->count            = 0;
-    rb->playbackCursor   = 0;
-    rb->firstTick        = 0;
+    rb->head = 0;
+    rb->count = 0;
+    rb->playbackCursor = 0;
+    rb->firstTick = 0;
     rb->overwrittenTicks = 0;
-    rb->mode             = REPLAY_MODE_IDLE;
+    rb->mode = REPLAY_MODE_IDLE;
     /* frames[] is left as-is: entries outside [head, head+count) are never read. */
 }
 
@@ -59,7 +59,7 @@ void replay_begin_recording(ReplayBuffer *rb, uint64_t startTick)
     if (rb == NULL) return;
     replay_reset(rb);
     rb->firstTick = startTick;
-    rb->mode      = REPLAY_MODE_RECORDING;
+    rb->mode = REPLAY_MODE_RECORDING;
 }
 
 void replay_record(ReplayBuffer *rb, const Input *in)
@@ -72,8 +72,8 @@ void replay_record(ReplayBuffer *rb, const Input *in)
         rb->count++;
     } else {
         /* Ring is full: drop the oldest tick. */
-        slot      = rb->head;
-        rb->head  = (rb->head + 1) % REPLAY_CAPACITY_TICKS;
+        slot = rb->head;
+        rb->head = (rb->head + 1) % REPLAY_CAPACITY_TICKS;
         rb->firstTick++;
         rb->overwrittenTicks++;
     }
@@ -85,7 +85,7 @@ bool replay_begin_playback(ReplayBuffer *rb)
 {
     if (rb == NULL || rb->count <= 0) return false;
     rb->playbackCursor = 0;
-    rb->mode           = REPLAY_MODE_PLAYBACK;
+    rb->mode = REPLAY_MODE_PLAYBACK;
     return true;
 }
 

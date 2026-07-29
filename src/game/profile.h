@@ -28,32 +28,32 @@
 #include "tracy/TracyC.h"
 
 #define DRIFTY_ZONE_BEGIN(handle, name) TracyCZoneN(handle, name, 1)
-#define DRIFTY_ZONE_END(handle)         TracyCZoneEnd(handle)
-#define DRIFTY_FRAME_MARK()             TracyCFrameMark
-#define DRIFTY_PROFILE_REPORT(out)      ((void)(out))
+#define DRIFTY_ZONE_END(handle) TracyCZoneEnd(handle)
+#define DRIFTY_FRAME_MARK() TracyCFrameMark
+#define DRIFTY_PROFILE_REPORT(out) ((void)(out))
 
 #elif defined(DRIFTY_PROFILE)
 
 /* Monotonic nanoseconds since an arbitrary origin. */
 uint64_t profile_now_ns(void);
-void     profile_zone_end(const char *name, uint64_t startedNs);
-void     profile_frame_mark(void);
-void     profile_report(FILE *out);
+void profile_zone_end(const char *name, uint64_t startedNs);
+void profile_frame_mark(void);
+void profile_report(FILE *out);
 
-#define DRIFTY_ZONE_BEGIN(handle, name)                 \
-    const char *handle##_name = (name);                 \
+#define DRIFTY_ZONE_BEGIN(handle, name) \
+    const char *handle##_name = (name); \
     const uint64_t handle##_started = profile_now_ns()
 
-#define DRIFTY_ZONE_END(handle)  profile_zone_end(handle##_name, handle##_started)
-#define DRIFTY_FRAME_MARK()      profile_frame_mark()
+#define DRIFTY_ZONE_END(handle) profile_zone_end(handle##_name, handle##_started)
+#define DRIFTY_FRAME_MARK() profile_frame_mark()
 #define DRIFTY_PROFILE_REPORT(out) profile_report(out)
 
 #else
 
 #define DRIFTY_ZONE_BEGIN(handle, name) ((void)0)
-#define DRIFTY_ZONE_END(handle)         ((void)0)
-#define DRIFTY_FRAME_MARK()             ((void)0)
-#define DRIFTY_PROFILE_REPORT(out)      ((void)(out))
+#define DRIFTY_ZONE_END(handle) ((void)0)
+#define DRIFTY_FRAME_MARK() ((void)0)
+#define DRIFTY_PROFILE_REPORT(out) ((void)(out))
 
 #endif
 

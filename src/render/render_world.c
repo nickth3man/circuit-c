@@ -16,24 +16,20 @@ static Vector2 body_point_to_world(Vector2 bodyPointM, Vector2 positionM, float 
 {
     const float c = cosf(headingRad);
     const float s = sinf(headingRad);
-    return (Vector2){
-        positionM.x + bodyPointM.x * c - bodyPointM.y * s,
-        positionM.y + bodyPointM.x * s + bodyPointM.y * c
-    };
+    return (Vector2){ positionM.x + bodyPointM.x * c - bodyPointM.y * s,
+                      positionM.y + bodyPointM.x * s + bodyPointM.y * c };
 }
 
 static Vector2 body_vector_to_world(Vector2 bodyVector, float headingRad)
 {
     const float c = cosf(headingRad);
     const float s = sinf(headingRad);
-    return (Vector2){
-        bodyVector.x * c - bodyVector.y * s,
-        bodyVector.x * s + bodyVector.y * c
-    };
+    return (Vector2){ bodyVector.x * c - bodyVector.y * s,
+                      bodyVector.x * s + bodyVector.y * c };
 }
 
-static void draw_world_vector(Vector2 startM, Vector2 vectorM, float ppm,
-                              Color color, const char *label)
+static void draw_world_vector(Vector2 startM, Vector2 vectorM, float ppm, Color color,
+                              const char *label)
 {
     if (vectorM.x * vectorM.x + vectorM.y * vectorM.y < 0.0004f) return;
     const Vector2 endM = { startM.x + vectorM.x, startM.y + vectorM.y };
@@ -62,40 +58,36 @@ void render_world_draw_track(const Track *track, float ppm)
         /* ---- Grass surround (behind everything) ---- */
         {
             const float marginM = 60.0f;
-            const Vector2 blPx = units_world_to_render_px(
-                (Vector2){ lotL - marginM, lotB - marginM }, ppm);
-            const Vector2 trPx = units_world_to_render_px(
-                (Vector2){ lotR + marginM, lotT + marginM }, ppm);
-            DrawRectangle((int)blPx.x, (int)trPx.y,
-                          (int)(trPx.x - blPx.x), (int)(blPx.y - trPx.y),
-                          (Color){ 76, 117, 67, 255 });
+            const Vector2 blPx =
+                units_world_to_render_px((Vector2){ lotL - marginM, lotB - marginM }, ppm);
+            const Vector2 trPx =
+                units_world_to_render_px((Vector2){ lotR + marginM, lotT + marginM }, ppm);
+            DrawRectangle((int)blPx.x, (int)trPx.y, (int)(trPx.x - blPx.x),
+                          (int)(blPx.y - trPx.y), (Color){ 76, 117, 67, 255 });
         }
 
         /* ---- Asphalt lot ---- */
         {
-            const Vector2 blPx = units_world_to_render_px(
-                (Vector2){ lotL, lotB }, ppm);
-            const Vector2 trPx = units_world_to_render_px(
-                (Vector2){ lotR, lotT }, ppm);
-            DrawRectangle((int)blPx.x, (int)trPx.y,
-                          (int)(trPx.x - blPx.x), (int)(blPx.y - trPx.y),
-                          (Color){ 45, 45, 50, 255 });
+            const Vector2 blPx = units_world_to_render_px((Vector2){ lotL, lotB }, ppm);
+            const Vector2 trPx = units_world_to_render_px((Vector2){ lotR, lotT }, ppm);
+            DrawRectangle((int)blPx.x, (int)trPx.y, (int)(trPx.x - blPx.x),
+                          (int)(blPx.y - trPx.y), (Color){ 45, 45, 50, 255 });
         }
 
         /* ---- Parking-space lines (vertical & horizontal grid) ---- */
         {
-            const float spacingM  = 6.0f;   /* distance between line centres */
-            const float lineLenM  = 5.0f;   /* length of each painted line */
-            const float lineW     = 3.0f;   /* pixel thickness */
-            const Color colWhite  = { 210, 210, 215, 200 };  /* semi-transparent white */
+            const float spacingM = 6.0f;                   /* distance between line centres */
+            const float lineLenM = 5.0f;                   /* length of each painted line */
+            const float lineW = 3.0f;                      /* pixel thickness */
+            const Color colWhite = { 210, 210, 215, 200 }; /* semi-transparent white */
 
             /* Vertical parking strips: rows of short east-west lines at regular Y intervals */
             for (float yy = lotB + 3.0f; yy <= lotT - 3.0f; yy += spacingM) {
                 for (float xx = lotL + 3.0f; xx <= lotR - 3.0f; xx += spacingM) {
-                    const Vector2 aPx = units_world_to_render_px(
-                        (Vector2){ xx - lineLenM * 0.5f, yy }, ppm);
-                    const Vector2 bPx = units_world_to_render_px(
-                        (Vector2){ xx + lineLenM * 0.5f, yy }, ppm);
+                    const Vector2 aPx =
+                        units_world_to_render_px((Vector2){ xx - lineLenM * 0.5f, yy }, ppm);
+                    const Vector2 bPx =
+                        units_world_to_render_px((Vector2){ xx + lineLenM * 0.5f, yy }, ppm);
                     DrawLineEx(aPx, bPx, lineW, colWhite);
                 }
             }
@@ -118,14 +110,14 @@ void render_world_draw_track(const Track *track, float ppm)
             const float inset = 2.0f;
             const Color colInnerCurb = { 140, 140, 145, 120 };
             {
-                const Vector2 bl = units_world_to_render_px(
-                    (Vector2){ lotL + inset, lotB + inset }, ppm);
-                const Vector2 br = units_world_to_render_px(
-                    (Vector2){ lotR - inset, lotB + inset }, ppm);
-                const Vector2 tr = units_world_to_render_px(
-                    (Vector2){ lotR - inset, lotT - inset }, ppm);
-                const Vector2 tl = units_world_to_render_px(
-                    (Vector2){ lotL + inset, lotT - inset }, ppm);
+                const Vector2 bl =
+                    units_world_to_render_px((Vector2){ lotL + inset, lotB + inset }, ppm);
+                const Vector2 br =
+                    units_world_to_render_px((Vector2){ lotR - inset, lotB + inset }, ppm);
+                const Vector2 tr =
+                    units_world_to_render_px((Vector2){ lotR - inset, lotT - inset }, ppm);
+                const Vector2 tl =
+                    units_world_to_render_px((Vector2){ lotL + inset, lotT - inset }, ppm);
                 DrawLineEx(bl, br, 2.0f, colInnerCurb);
                 DrawLineEx(br, tr, 2.0f, colInnerCurb);
                 DrawLineEx(tr, tl, 2.0f, colInnerCurb);
@@ -157,15 +149,16 @@ void render_world_draw_track(const Track *track, float ppm)
             if (c.y > maxYM) maxYM = c.y;
         }
         const float marginM = 60.0f;
-        minXM -= marginM; maxXM += marginM;
-        minYM -= marginM; maxYM += marginM;
+        minXM -= marginM;
+        maxXM += marginM;
+        minYM -= marginM;
+        maxYM += marginM;
 
         /* Convert corners.  Y is negated by units_world_to_render_px, so the
          * bottom-left world corner produces the largest render Y. */
-        const Vector2 blPx = units_world_to_render_px((Vector2){minXM, minYM}, ppm);
-        const Vector2 trPx = units_world_to_render_px((Vector2){maxXM, maxYM}, ppm);
-        DrawRectangle((int)blPx.x, (int)trPx.y,
-                      (int)(trPx.x - blPx.x), (int)(blPx.y - trPx.y),
+        const Vector2 blPx = units_world_to_render_px((Vector2){ minXM, minYM }, ppm);
+        const Vector2 trPx = units_world_to_render_px((Vector2){ maxXM, maxYM }, ppm);
+        DrawRectangle((int)blPx.x, (int)trPx.y, (int)(trPx.x - blPx.x), (int)(blPx.y - trPx.y),
                       (Color){ 76, 117, 67, 255 });
     }
 
@@ -194,14 +187,18 @@ void render_world_draw_track(const Track *track, float ppm)
 
         /* Perpendicular in world space: (-uy, ux) = left side of forward direction. */
         const float perpX = -uy * hwM;
-        const float perpY =  ux * hwM;
+        const float perpY = ux * hwM;
 
-        const Vector2 leftA  = units_world_to_render_px((Vector2){a.x + perpX, a.y + perpY}, ppm);
-        const Vector2 leftB  = units_world_to_render_px((Vector2){b.x + perpX, b.y + perpY}, ppm);
-        const Vector2 rightA = units_world_to_render_px((Vector2){a.x - perpX, a.y - perpY}, ppm);
-        const Vector2 rightB = units_world_to_render_px((Vector2){b.x - perpX, b.y - perpY}, ppm);
+        const Vector2 leftA =
+            units_world_to_render_px((Vector2){ a.x + perpX, a.y + perpY }, ppm);
+        const Vector2 leftB =
+            units_world_to_render_px((Vector2){ b.x + perpX, b.y + perpY }, ppm);
+        const Vector2 rightA =
+            units_world_to_render_px((Vector2){ a.x - perpX, a.y - perpY }, ppm);
+        const Vector2 rightB =
+            units_world_to_render_px((Vector2){ b.x - perpX, b.y - perpY }, ppm);
 
-        DrawLineEx(leftA,  leftB,  2.5f, (Color){ 220, 220, 225, 255 });
+        DrawLineEx(leftA, leftB, 2.5f, (Color){ 220, 220, 225, 255 });
         DrawLineEx(rightA, rightB, 2.5f, (Color){ 220, 220, 225, 255 });
     }
 
@@ -222,36 +219,44 @@ void render_world_draw_debug(const Game *game, const VehicleDrawState *draw)
                       ppm, YELLOW, "");
     draw_world_vector(draw->positionM, body_vector_to_world((Vector2){ 0.0f, 1.5f }, heading),
                       ppm, SKYBLUE, "");
-    const Vector2 bodyVelocity = {
-        game->vehicle.velocityLongitudinalMps * 0.30f,
-        game->vehicle.velocityLateralMps * 0.30f
-    };
-    draw_world_vector(draw->positionM, body_vector_to_world(bodyVelocity, heading),
-                      ppm, GREEN, "velocity");
+    const Vector2 bodyVelocity = { game->vehicle.velocityLongitudinalMps * 0.30f,
+                                   game->vehicle.velocityLateralMps * 0.30f };
+    draw_world_vector(draw->positionM, body_vector_to_world(bodyVelocity, heading), ppm, GREEN,
+                      "velocity");
 
-    const Vector2 frontM = body_point_to_world(
-        (Vector2){ game->spec.cgToFrontM, 0.0f }, draw->positionM, heading);
-    const Vector2 rearM = body_point_to_world(
-        (Vector2){ -game->spec.cgToRearM, 0.0f }, draw->positionM, heading);
-    draw_world_vector(frontM, body_vector_to_world(
-        (Vector2){ game->derived.frontAxleContactVelocityBodyMps.x * 0.20f,
-                   game->derived.frontAxleContactVelocityBodyMps.y * 0.20f }, heading),
-        ppm, ORANGE, "front v");
-    draw_world_vector(rearM, body_vector_to_world(
-        (Vector2){ game->derived.rearAxleContactVelocityBodyMps.x * 0.20f,
-                   game->derived.rearAxleContactVelocityBodyMps.y * 0.20f }, heading),
-        ppm, PURPLE, "rear v");
-    draw_world_vector(frontM, body_vector_to_world(
-        (Vector2){ cosf(draw->wheelAngleRad[WHEEL_FRONT_LEFT]) * 1.4f,
-                   sinf(draw->wheelAngleRad[WHEEL_FRONT_LEFT]) * 1.4f }, heading),
+    const Vector2 frontM =
+        body_point_to_world((Vector2){ game->spec.cgToFrontM, 0.0f }, draw->positionM, heading);
+    const Vector2 rearM =
+        body_point_to_world((Vector2){ -game->spec.cgToRearM, 0.0f }, draw->positionM, heading);
+    draw_world_vector(frontM,
+                      body_vector_to_world(
+                          (Vector2){ game->derived.frontAxleContactVelocityBodyMps.x * 0.20f,
+                                     game->derived.frontAxleContactVelocityBodyMps.y * 0.20f },
+                          heading),
+                      ppm, ORANGE, "front v");
+    draw_world_vector(rearM,
+                      body_vector_to_world(
+                          (Vector2){ game->derived.rearAxleContactVelocityBodyMps.x * 0.20f,
+                                     game->derived.rearAxleContactVelocityBodyMps.y * 0.20f },
+                          heading),
+                      ppm, PURPLE, "rear v");
+    draw_world_vector(
+        frontM,
+        body_vector_to_world((Vector2){ cosf(draw->wheelAngleRad[WHEEL_FRONT_LEFT]) * 1.4f,
+                                        sinf(draw->wheelAngleRad[WHEEL_FRONT_LEFT]) * 1.4f },
+                             heading),
         ppm, GOLD, "front heading");
-    draw_world_vector(frontM, body_vector_to_world(
-        (Vector2){ game->derived.frontBodyForceN.x * 0.00008f,
-                   game->derived.frontBodyForceN.y * 0.00008f }, heading),
+    draw_world_vector(
+        frontM,
+        body_vector_to_world((Vector2){ game->derived.frontBodyForceN.x * 0.00008f,
+                                        game->derived.frontBodyForceN.y * 0.00008f },
+                             heading),
         ppm, RED, "front force");
-    draw_world_vector(rearM, body_vector_to_world(
-        (Vector2){ game->derived.rearBodyForceN.x * 0.00008f,
-                   game->derived.rearBodyForceN.y * 0.00008f }, heading),
+    draw_world_vector(
+        rearM,
+        body_vector_to_world((Vector2){ game->derived.rearBodyForceN.x * 0.00008f,
+                                        game->derived.rearBodyForceN.y * 0.00008f },
+                             heading),
         ppm, MAROON, "rear force");
 }
 
@@ -270,11 +275,11 @@ void render_world_draw_particles(const Game *game)
         if (!p->active) continue;
 
         const float maxLifeS = (p->maxLifeS > 0.0f) ? p->maxLifeS : 1.0f;
-        const float t = clampf(1.0f - p->lifeS / maxLifeS, 0.0f, 1.0f);  /* 0 fresh -> 1 gone */
+        const float t = clampf(1.0f - p->lifeS / maxLifeS, 0.0f, 1.0f); /* 0 fresh -> 1 gone */
 
         const unsigned char cr = (unsigned char)lerpf(104.0f, 236.0f, t);
-        const unsigned char cg = (unsigned char)lerpf( 96.0f, 236.0f, t);
-        const unsigned char cb = (unsigned char)lerpf( 88.0f, 240.0f, t);
+        const unsigned char cg = (unsigned char)lerpf(96.0f, 236.0f, t);
+        const unsigned char cb = (unsigned char)lerpf(88.0f, 240.0f, t);
         const float fade = (1.0f - t) * (1.0f - t);
         const float baseA = (float)p->color.a * fade;
 
@@ -282,8 +287,8 @@ void render_world_draw_particles(const Game *game)
         const float radiusPx = p->sizeM * ppm * 0.5f * (1.0f + t * 1.1f);
 
         /* Two fixed wobble directions per pool slot, slowly swirling as the puff ages. */
-        const float wobA = (float)(((unsigned)i * 2654435761u) >> 16 & 0xFF) / 255.0f *
-                           6.2831853f + t * 1.7f;
+        const float wobA =
+            (float)(((unsigned)i * 2654435761u) >> 16 & 0xFF) / 255.0f * 6.2831853f + t * 1.7f;
         const float wobB = wobA + 2.4f;
         const Vector2 offA = { cosf(wobA) * radiusPx * 0.45f, sinf(wobA) * radiusPx * 0.45f };
         const Vector2 offB = { cosf(wobB) * radiusPx * 0.50f, sinf(wobB) * radiusPx * 0.50f };
@@ -293,8 +298,7 @@ void render_world_draw_particles(const Game *game)
                     (Color){ cr, cg, cb, (unsigned char)(baseA * 0.36f) });
         DrawCircleV((Vector2){ px.x + offB.x, px.y + offB.y }, radiusPx * 1.05f,
                     (Color){ cr, cg, cb, (unsigned char)(baseA * 0.28f) });
-        DrawCircleV(px, radiusPx,
-                    (Color){ cr, cg, cb, (unsigned char)(baseA * 0.85f) });
+        DrawCircleV(px, radiusPx, (Color){ cr, cg, cb, (unsigned char)(baseA * 0.85f) });
     }
 }
 

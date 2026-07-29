@@ -33,10 +33,8 @@
  *
  * Returns the number of contacts resolved (0 if none).
  */
-int collision_resolve_track(const VehicleSpec *spec,
-                            VehicleState *state,
-                            VehicleRenderState *renderState,
-                            const Track *track,
+int collision_resolve_track(const VehicleSpec *spec, VehicleState *state,
+                            VehicleRenderState *renderState, const Track *track,
                             float *crashLockoutTimerS);
 
 #endif /* DRIFTY_COLLISION_H */

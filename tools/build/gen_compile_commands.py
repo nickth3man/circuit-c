@@ -33,7 +33,7 @@ from typing import Dict, List, Optional, Tuple
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 BASE_FLAGS = [
-    "-std=c11", "-Isrc", "-Ithird_party", "-Ithird_party/raygui",
+    "-std=c11", "-Isrc", "-Itests", "-Ithird_party", "-Ithird_party/raygui",
     "-Wall", "-Wextra", "-Wshadow", "-Wstrict-prototypes", "-Wmissing-prototypes",
     "-Wpointer-arith",
 ]

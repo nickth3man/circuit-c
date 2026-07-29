@@ -49,8 +49,8 @@ static void run_fixed_ticks(Game *game, int ticks)
         input_zero(&game->input);
         game->input.throttle = 1.0f;
         game->input.steer = 0.25f;
-        (void)timestep_advance(&game->accumulatorS, &game->physicsBacklogDrops,
-                               FIXED_DT_S, fixed_update_adapter, game);
+        (void)timestep_advance(&game->accumulatorS, &game->physicsBacklogDrops, FIXED_DT_S,
+                               fixed_update_adapter, game);
     }
 }
 
@@ -80,9 +80,9 @@ static int bump_module_mtime(void)
 {
     /* GetFileModTime resolution is one second; ensure the next poll sees a change. */
     Sleep(1100);
-    HANDLE file = CreateFileA(GAME_MODULE_NAME, FILE_WRITE_ATTRIBUTES,
-                              FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,
-                              OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    HANDLE file =
+        CreateFileA(GAME_MODULE_NAME, FILE_WRITE_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                    NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
     if (file == INVALID_HANDLE_VALUE) return 0;
     FILETIME ft;
     GetSystemTimeAsFileTime(&ft);
@@ -101,6 +101,7 @@ int main(void)
         return 1;
     }
 
+    // cppcheck-suppress knownConditionTrueFalse
     if (!Game_LoadModule()) {
         fprintf(stderr, "harness: initial Game_LoadModule failed\n");
         free(game);
@@ -195,8 +196,7 @@ int main(void)
 
     const uint64_t tick_pre_swap = game->sim.tick;
     const Vector2 pos_pre_swap = game->vehicle.positionM;
-    const float rear_omega_pre_swap =
-        game->vehicle.wheels[WHEEL_REAR_LEFT].angularVelocityRadS;
+    const float rear_omega_pre_swap = game->vehicle.wheels[WHEEL_REAR_LEFT].angularVelocityRadS;
     const float engine_rpm_pre_swap = game->vehicle.engineRpm;
     const int gear_pre_swap = game->vehicle.selectedGear;
     const uint32_t checksum_pre_swap = game->stateChecksum;
@@ -215,11 +215,9 @@ int main(void)
         free(game);
         return 1;
     }
-    if (game->sim.tick != tick_pre_swap ||
-        game->vehicle.positionM.x != pos_pre_swap.x ||
+    if (game->sim.tick != tick_pre_swap || game->vehicle.positionM.x != pos_pre_swap.x ||
         game->vehicle.positionM.y != pos_pre_swap.y ||
-        game->vehicle.wheels[WHEEL_REAR_LEFT].angularVelocityRadS !=
-            rear_omega_pre_swap ||
+        game->vehicle.wheels[WHEEL_REAR_LEFT].angularVelocityRadS != rear_omega_pre_swap ||
         game->vehicle.engineRpm != engine_rpm_pre_swap ||
         game->vehicle.selectedGear != gear_pre_swap ||
         game->stateChecksum != checksum_pre_swap) {
@@ -243,16 +241,17 @@ int main(void)
     DeleteFileA("build/game_harness_backup.dll");
 
     if (leftover != 0) {
-        fprintf(stderr, "harness: %d stale build/dev/game_load_*.dll copies remain\n", leftover);
+        fprintf(stderr, "harness: %d stale build/dev/game_load_*.dll copies remain\n",
+                leftover);
         free(game);
         return 1;
     }
 
-    printf("hotreload harness: ok (warm tick=%llu checksum=%08x pos=(%.3f,%.3f); "
-           "reject preserved module; swap preserved tick=%llu checksum=%08x; post_reload once)\n",
-           (unsigned long long)tick_before, checksum_before,
-           (double)pos_before.x, (double)pos_before.y,
-           (unsigned long long)tick_pre_swap, checksum_pre_swap);
+    printf(
+        "hotreload harness: ok (warm tick=%llu checksum=%08x pos=(%.3f,%.3f); "
+        "reject preserved module; swap preserved tick=%llu checksum=%08x; post_reload once)\n",
+        (unsigned long long)tick_before, checksum_before, (double)pos_before.x,
+        (double)pos_before.y, (unsigned long long)tick_pre_swap, checksum_pre_swap);
 
     free(game);
     return 0;

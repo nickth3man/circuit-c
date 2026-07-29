@@ -18,19 +18,19 @@
 
 /* The scale everything visual is asserted at: what the game actually draws. Asserting at a
  * higher scale would let differences pass that no player could ever see. */
-#define CV_TEST_PX_PER_M   (PIXELS_PER_METER * CAMERA_BASE_ZOOM)
+#define CV_TEST_PX_PER_M (PIXELS_PER_METER * CAMERA_BASE_ZOOM)
 
 /* Fraction of the union silhouette that must differ for two cars to count as distinguishable.
  * The authoritative metric — a colour-blind comparison of feature-label maps. */
-#define CV_MIN_PIXEL_DIFF  0.030f
+#define CV_MIN_PIXEL_DIFF 0.030f
 
 /* Per-component floor on the diagnostic feature vector: 0.08 m is almost exactly one screen
  * pixel at CV_TEST_PX_PER_M, so "one visible pixel somewhere" is a literal reading of it. */
-#define CV_MIN_LINF        0.080f
+#define CV_MIN_LINF 0.080f
 
 /* Companion floor on the whole diagnostic vector. Two cars that differ a little in many
  * features are as distinguishable as two that differ a lot in one, and L2 is what says so. */
-#define CV_MIN_L2          0.250f
+#define CV_MIN_L2 0.250f
 
 /* The sensitivity floor is deliberately lower than the pairwise one, and the two ask
  * different questions.
@@ -50,15 +50,15 @@
  * 45% change in tire diameter — yet would fail a 3% bar simply because two of four wheels are
  * a small share of a car seen from above. Failing that would be the test lying, not the
  * grammar. */
-#define CV_MIN_SENSITIVITY_DIFF  0.015f
+#define CV_MIN_SENSITIVITY_DIFF 0.015f
 
 /* Where a distinctness failure writes its inspectable bundle. Suppressed by --no-bundle,
  * like every other failure bundle in this suite. */
-#define CV_FAILURE_DIR     "artifacts/car_visual_failures"
+#define CV_FAILURE_DIR "artifacts/car_visual_failures"
 
 CarRasterInfo test_car_shared_canvas(float pxPerM);
 bool test_car_labels_for_spec(const VehicleSpec *spec, CarRasterInfo canvas,
-                             unsigned char *labels, size_t bytes);
+                              unsigned char *labels, size_t bytes);
 float test_car_signature_linf(const CarVisual *a, const CarVisual *b, int *worstOut);
 float test_car_signature_l2(const CarVisual *a, const CarVisual *b);
 int test_car_primary_diff_count(const VehicleSpec *a, const VehicleSpec *b,

@@ -27,18 +27,16 @@ TelemetryRow test_telemetry_row_from_game(const Game *game, int substepCount)
     row.selectedGear = game->vehicle.selectedGear;
     row.frontSlipAngleRad = game->derived.frontSlipAngleRad;
     row.rearSlipAngleRad = game->derived.rearSlipAngleRad;
-    row.frontSlipRatio = 0.5f * (
-        game->vehicle.wheels[WHEEL_FRONT_LEFT].slipRatio +
-        game->vehicle.wheels[WHEEL_FRONT_RIGHT].slipRatio);
-    row.rearSlipRatio = 0.5f * (
-        game->vehicle.wheels[WHEEL_REAR_LEFT].slipRatio +
-        game->vehicle.wheels[WHEEL_REAR_RIGHT].slipRatio);
-    row.frontWheelOmegaRadS = 0.5f * (
-        game->vehicle.wheels[WHEEL_FRONT_LEFT].angularVelocityRadS +
-        game->vehicle.wheels[WHEEL_FRONT_RIGHT].angularVelocityRadS);
-    row.rearWheelOmegaRadS = 0.5f * (
-        game->vehicle.wheels[WHEEL_REAR_LEFT].angularVelocityRadS +
-        game->vehicle.wheels[WHEEL_REAR_RIGHT].angularVelocityRadS);
+    row.frontSlipRatio = 0.5f * (game->vehicle.wheels[WHEEL_FRONT_LEFT].slipRatio +
+                                 game->vehicle.wheels[WHEEL_FRONT_RIGHT].slipRatio);
+    row.rearSlipRatio = 0.5f * (game->vehicle.wheels[WHEEL_REAR_LEFT].slipRatio +
+                                game->vehicle.wheels[WHEEL_REAR_RIGHT].slipRatio);
+    row.frontWheelOmegaRadS =
+        0.5f * (game->vehicle.wheels[WHEEL_FRONT_LEFT].angularVelocityRadS +
+                game->vehicle.wheels[WHEEL_FRONT_RIGHT].angularVelocityRadS);
+    row.rearWheelOmegaRadS =
+        0.5f * (game->vehicle.wheels[WHEEL_REAR_LEFT].angularVelocityRadS +
+                game->vehicle.wheels[WHEEL_REAR_RIGHT].angularVelocityRadS);
     row.frontNormalLoadN = game->derived.normalLoadFrontN;
     row.rearNormalLoadN = game->derived.normalLoadRearN;
     row.frontFxPureN = game->derived.pureLongitudinalForceN[WHEEL_FRONT_LEFT] +
@@ -55,27 +53,22 @@ TelemetryRow test_telemetry_row_from_game(const Game *game, int substepCount)
                          game->vehicle.wheels[WHEEL_REAR_RIGHT].forceLongitudinalN;
     row.frontFyLimitedN = game->derived.frontLateralForceN;
     row.rearFyLimitedN = game->derived.rearLateralForceN;
-    row.frontFrictionUsage = fmaxf(
-        game->vehicle.wheels[WHEEL_FRONT_LEFT].frictionUsage,
-        game->vehicle.wheels[WHEEL_FRONT_RIGHT].frictionUsage);
-    row.rearFrictionUsage = fmaxf(
-        game->vehicle.wheels[WHEEL_REAR_LEFT].frictionUsage,
-        game->vehicle.wheels[WHEEL_REAR_RIGHT].frictionUsage);
+    row.frontFrictionUsage = fmaxf(game->vehicle.wheels[WHEEL_FRONT_LEFT].frictionUsage,
+                                   game->vehicle.wheels[WHEEL_FRONT_RIGHT].frictionUsage);
+    row.rearFrictionUsage = fmaxf(game->vehicle.wheels[WHEEL_REAR_LEFT].frictionUsage,
+                                  game->vehicle.wheels[WHEEL_REAR_RIGHT].frictionUsage);
     row.frontLocked = game->vehicle.wheels[WHEEL_FRONT_LEFT].locked ||
                       game->vehicle.wheels[WHEEL_FRONT_RIGHT].locked;
     row.rearLocked = game->vehicle.wheels[WHEEL_REAR_LEFT].locked ||
                      game->vehicle.wheels[WHEEL_REAR_RIGHT].locked;
     row.driveTorqueNm = game->derived.driveTorqueNm[WHEEL_REAR_LEFT] +
                         game->derived.driveTorqueNm[WHEEL_REAR_RIGHT];
-    row.frontBrakeTorqueNm =
-        game->derived.serviceBrakeTorqueNm[WHEEL_FRONT_LEFT] +
-        game->derived.serviceBrakeTorqueNm[WHEEL_FRONT_RIGHT];
-    row.rearBrakeTorqueNm =
-        game->derived.serviceBrakeTorqueNm[WHEEL_REAR_LEFT] +
-        game->derived.serviceBrakeTorqueNm[WHEEL_REAR_RIGHT];
-    row.handbrakeTorqueNm =
-        game->derived.handbrakeTorqueNm[WHEEL_REAR_LEFT] +
-        game->derived.handbrakeTorqueNm[WHEEL_REAR_RIGHT];
+    row.frontBrakeTorqueNm = game->derived.serviceBrakeTorqueNm[WHEEL_FRONT_LEFT] +
+                             game->derived.serviceBrakeTorqueNm[WHEEL_FRONT_RIGHT];
+    row.rearBrakeTorqueNm = game->derived.serviceBrakeTorqueNm[WHEEL_REAR_LEFT] +
+                            game->derived.serviceBrakeTorqueNm[WHEEL_REAR_RIGHT];
+    row.handbrakeTorqueNm = game->derived.handbrakeTorqueNm[WHEEL_REAR_LEFT] +
+                            game->derived.handbrakeTorqueNm[WHEEL_REAR_RIGHT];
     row.totalForceXN = game->derived.totalBodyForceN.x;
     row.totalForceYN = game->derived.totalBodyForceN.y;
     row.yawTorqueNm = game->derived.totalYawTorqueNm;

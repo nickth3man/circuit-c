@@ -34,8 +34,7 @@ struct Game;
  * A scoring drift requires ALL seven conditions to be true. See docs/SPEC.md for the
  * full list.
  */
-bool scoring_classify(const VehicleState *state,
-                      VehicleDerived *derived,
+bool scoring_classify(const VehicleState *state, VehicleDerived *derived,
                       float crashLockoutTimerS);
 
 /*

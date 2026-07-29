@@ -33,39 +33,39 @@
  * hides the deeper ones behind a filter, so the panel stays legible now that the registry
  * describes the whole vehicle rather than only its handling coefficients. */
 typedef enum {
-    DEV_TIER_ESSENTIAL = 0,   /* the knobs a first-time tuner reaches for */
-    DEV_TIER_ADVANCED  = 1,   /* hardware and geometry detail */
-    DEV_TIER_EXPERT    = 2    /* numerical model internals and readouts */
+    DEV_TIER_ESSENTIAL = 0, /* the knobs a first-time tuner reaches for */
+    DEV_TIER_ADVANCED = 1,  /* hardware and geometry detail */
+    DEV_TIER_EXPERT = 2     /* numerical model internals and readouts */
 } DevParamTier;
 
 /* Description of one tunable float inside VehicleSpec. */
 typedef struct {
-    const char *name;           /* stable dotted key, e.g. "tire.lat_front.mu" */
-    const char *group;          /* UI / documentation grouping */
-    const char *unit;           /* SI unit, or "" for a dimensionless ratio */
-    size_t      offset;         /* byte offset of the float inside VehicleSpec */
-    float       defaultValue;   /* the config.h value; asserted against vehicle_spec_set_default */
-    float       minimum;
-    float       maximum;
-    float       step;
-    bool        requiresRestart; /* needs game_reset_sim() to take full effect (wheel layout) */
+    const char *name;   /* stable dotted key, e.g. "tire.lat_front.mu" */
+    const char *group;  /* UI / documentation grouping */
+    const char *unit;   /* SI unit, or "" for a dimensionless ratio */
+    size_t offset;      /* byte offset of the float inside VehicleSpec */
+    float defaultValue; /* the config.h value; asserted against vehicle_spec_set_default */
+    float minimum;
+    float maximum;
+    float step;
+    bool requiresRestart; /* needs game_reset_sim() to take full effect (wheel layout) */
     /* Computed by vehicle_spec_refresh_derived() from other parameters. A derived entry is a
      * read-only readout: dev_param_set refuses it, the Lab draws a value instead of a slider,
      * and a profile or preset that names one is migrated onto the primaries that produce it
      * (see the alias table in dev_params.c). */
-    bool        derived;
-    int         tier;           /* DevParamTier */
+    bool derived;
+    int tier; /* DevParamTier */
     const char *description;
 } DevParameter;
 
 /* Registry access. The table is immutable and its order is stable. */
-int                 dev_params_count(void);
+int dev_params_count(void);
 const DevParameter *dev_params_all(void);
 const DevParameter *dev_param_at(int index);
 const DevParameter *dev_param_find(const char *name);
 
 /* Distinct group names, in first-appearance order. */
-int         dev_params_group_count(void);
+int dev_params_group_count(void);
 const char *dev_params_group_name(int groupIndex);
 
 /* Value access. dev_param_set clamps to [minimum, maximum], rejects non-finite input, and
@@ -73,8 +73,8 @@ const char *dev_params_group_name(int groupIndex);
  * writing a readout would be undone by the next refresh, so a silent no-op would be worse
  * than a refusal. Use dev_params_apply_assignments() to write one by migration. */
 float dev_param_get(const VehicleSpec *spec, const DevParameter *param);
-bool  dev_param_set(VehicleSpec *spec, const DevParameter *param, float value);
-bool  dev_param_is_default(const VehicleSpec *spec, const DevParameter *param);
+bool dev_param_set(VehicleSpec *spec, const DevParameter *param, float value);
+bool dev_param_is_default(const VehicleSpec *spec, const DevParameter *param);
 
 void dev_param_reset(VehicleSpec *spec, const DevParameter *param);
 void dev_params_reset_all(VehicleSpec *spec);
@@ -102,17 +102,17 @@ bool dev_params_save(const VehicleSpec *spec, const char *path);
 /* Apply a profile on top of spec. *appliedOut / *unknownOut / *rejectedOut receive counts
  * when non-NULL. Returns false only when the file could not be read or the resulting spec
  * fails vehicle_spec_is_valid() — in which case spec is left untouched. */
-bool dev_params_load(VehicleSpec *spec, const char *path,
-                     int *appliedOut, int *unknownOut, int *rejectedOut);
+bool dev_params_load(VehicleSpec *spec, const char *path, int *appliedOut, int *unknownOut,
+                     int *rejectedOut);
 
 /* Same parser over a memory buffer; used by the file loader and by the fuzz harness. */
-bool dev_params_apply_text(VehicleSpec *spec, const char *text, size_t length,
-                           int *appliedOut, int *unknownOut, int *rejectedOut);
+bool dev_params_apply_text(VehicleSpec *spec, const char *text, size_t length, int *appliedOut,
+                           int *unknownOut, int *rejectedOut);
 
 /* One key/value pair, the in-memory form of a profile line. */
 typedef struct {
     const char *key;
-    float       value;
+    float value;
 } DevParamAssignment;
 
 /* Apply a batch of assignments with derived-key migration, then refresh once. This is the
@@ -121,8 +121,7 @@ typedef struct {
  * produces the car it names: each of those keys is translated into the primaries it used
  * to stand for. Returns the number applied. Unlike dev_params_apply_text this writes spec
  * in place and does not validate, because its callers start from a known-good spec. */
-int dev_params_apply_assignments(VehicleSpec *spec,
-                                 const DevParamAssignment *items, int count,
+int dev_params_apply_assignments(VehicleSpec *spec, const DevParamAssignment *items, int count,
                                  int *unknownOut, int *rejectedOut);
 
 /* ------------------------------------------------------------------------------- reports -- */

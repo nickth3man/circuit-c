@@ -65,15 +65,15 @@ void script_build(ScriptFrame *frames, int count)
         ScriptFrame f;
         memset(&f, 0, sizeof(f));
 
-        f.steer      = (float)(int)((r >> 3) % 3u) - 1.0f;   /* -1, 0, +1 */
-        f.throttle   = ((r >> 7) & 3u) != 0u ? 1.0f : 0.0f;
-        f.brake      = ((r >> 11) & 7u) == 0u ? 1.0f : 0.0f;
-        f.handbrake  = ((r >> 13) & 7u) == 0u ? 1.0f : 0.0f;
-        f.pause      = ((r >> 17) & 63u) == 0u;
-        f.reset      = ((r >> 19) & 127u) == 0u;
-        f.debug      = ((r >> 21) & 63u) == 0u;
-        f.shiftUp    = ((r >> 23) & 31u) == 0u;
-        f.shiftDown  = ((r >> 25) & 31u) == 0u;
+        f.steer = (float)(int)((r >> 3) % 3u) - 1.0f; /* -1, 0, +1 */
+        f.throttle = ((r >> 7) & 3u) != 0u ? 1.0f : 0.0f;
+        f.brake = ((r >> 11) & 7u) == 0u ? 1.0f : 0.0f;
+        f.handbrake = ((r >> 13) & 7u) == 0u ? 1.0f : 0.0f;
+        f.pause = ((r >> 17) & 63u) == 0u;
+        f.reset = ((r >> 19) & 127u) == 0u;
+        f.debug = ((r >> 21) & 63u) == 0u;
+        f.shiftUp = ((r >> 23) & 31u) == 0u;
+        f.shiftDown = ((r >> 25) & 31u) == 0u;
         f.frameTimeS = frameTimes[(r >> 29) & 3u];
 
         frames[i] = f;
@@ -87,35 +87,33 @@ void fixed_update_adapter(void *ctx, float dt)
 
 void apply_live_input(Game *game, const ScriptFrame *f)
 {
-    game->input.steer     = f->steer;
-    game->input.throttle  = f->throttle;
-    game->input.brake     = f->brake;
+    game->input.steer = f->steer;
+    game->input.throttle = f->throttle;
+    game->input.brake = f->brake;
     game->input.handbrake = f->handbrake;
 
     /* Latched exactly as input_sample() latches them. */
-    if (f->pause)     game->input.pausePressed     = true;
-    if (f->reset)     game->input.resetPressed     = true;
-    if (f->debug)     game->input.debugPressed     = true;
-    if (f->shiftUp)   game->input.shiftUpPressed   = true;
+    if (f->pause) game->input.pausePressed = true;
+    if (f->reset) game->input.resetPressed = true;
+    if (f->debug) game->input.debugPressed = true;
+    if (f->shiftUp) game->input.shiftUpPressed = true;
     if (f->shiftDown) game->input.shiftDownPressed = true;
 }
 
 /* Drive the script with live input while the game module records it. */
-uint32_t run_recording(Game *game, const ScriptFrame *frames, int count,
-                              float pixelsPerMeter, TelemetryWriter *writer)
+uint32_t run_recording(Game *game, const ScriptFrame *frames, int count, float pixelsPerMeter,
+                       TelemetryWriter *writer)
 {
     game_init(game);
-    game->state = STATE_PLAYING;  /* headless tests start simulating immediately */
+    game->state = STATE_PLAYING; /* headless tests start simulating immediately */
     game->renderPixelsPerMeter = pixelsPerMeter;
 
     for (int i = 0; i < count; i++) {
         apply_live_input(game, &frames[i]);
 
-        const TimestepResult step = timestep_advance(&game->accumulatorS,
-                                                     &game->physicsBacklogDrops,
-                                                     frames[i].frameTimeS,
-                                                     fixed_update_adapter,
-                                                     game);
+        const TimestepResult step =
+            timestep_advance(&game->accumulatorS, &game->physicsBacklogDrops,
+                             frames[i].frameTimeS, fixed_update_adapter, game);
         game->lastSubstepCount = step.substeps;
 
         if (writer != NULL) {
@@ -128,11 +126,11 @@ uint32_t run_recording(Game *game, const ScriptFrame *frames, int count,
 }
 
 /* Drive the same frame-time script with NO live input, feeding the recorded timeline. */
-uint32_t run_playback(Game *game, const ReplayBuffer *timeline,
-                             const ScriptFrame *frames, int count, float pixelsPerMeter)
+uint32_t run_playback(Game *game, const ReplayBuffer *timeline, const ScriptFrame *frames,
+                      int count, float pixelsPerMeter)
 {
     game_init(game);
-    game->state = STATE_PLAYING;  /* headless tests start simulating immediately */
+    game->state = STATE_PLAYING; /* headless tests start simulating immediately */
     game->renderPixelsPerMeter = pixelsPerMeter;
 
     game->replay = *timeline;
@@ -141,11 +139,9 @@ uint32_t run_playback(Game *game, const ReplayBuffer *timeline,
     for (int i = 0; i < count; i++) {
         input_zero(&game->input);
 
-        const TimestepResult step = timestep_advance(&game->accumulatorS,
-                                                     &game->physicsBacklogDrops,
-                                                     frames[i].frameTimeS,
-                                                     fixed_update_adapter,
-                                                     game);
+        const TimestepResult step =
+            timestep_advance(&game->accumulatorS, &game->physicsBacklogDrops,
+                             frames[i].frameTimeS, fixed_update_adapter, game);
         game->lastSubstepCount = step.substeps;
     }
 
@@ -194,7 +190,8 @@ static void scenario_math(void)
                "wrap_angle(+PI) returns -PI (range is closed below, open above)");
     check_near((double)wrap_angle(-DRIFTY_PI), -(double)DRIFTY_PI, 1e-5, "wrap_angle(-PI)");
     check_near_angle(wrap_angle(3.0f * DRIFTY_PI), DRIFTY_PI, 1e-4f, "wrap_angle(3*PI)");
-    check_near((double)wrap_angle(0.5f), 0.5, 1e-6, "wrap_angle leaves an in-range angle alone");
+    check_near((double)wrap_angle(0.5f), 0.5, 1e-6,
+               "wrap_angle leaves an in-range angle alone");
     {
         bool inRange = true;
         bool equivalent = true;
@@ -278,7 +275,8 @@ static void scenario_units(void)
 
     const Vector2 px24 = units_world_to_render_px(worldM, 24.0f);
     check_near((double)px24.x, 48.0, 1e-6, "world->render X scales by pixelsPerMeter");
-    check_near((double)px24.y, -72.0, 1e-6, "world->render Y is negated (render space is +Y down)");
+    check_near((double)px24.y, -72.0, 1e-6,
+               "world->render Y is negated (render space is +Y down)");
 
     const Vector2 px48 = units_world_to_render_px(worldM, 48.0f);
     check_near((double)px48.x, 2.0 * (double)px24.x, 1e-6, "render X is linear in the scale");
@@ -294,8 +292,7 @@ static void scenario_units(void)
                "pixels->meters guards a zero scale instead of returning infinity");
     {
         const Vector2 guarded = units_render_px_to_world(px24, 0.0f);
-        check(guarded.x == 0.0f && guarded.y == 0.0f,
-              "render->world guards a zero scale");
+        check(guarded.x == 0.0f && guarded.y == 0.0f, "render->world guards a zero scale");
     }
 
     /* Heading (radians, CCW positive) -> raylib rotation (degrees, CW positive). */
@@ -308,8 +305,7 @@ static void scenario_units(void)
                1e-5, "heading <-> rotation round-trips");
 
     /* The compiled default must be the documented one. */
-    check_near((double)PIXELS_PER_METER, 24.0, 1e-6,
-               "PIXELS_PER_METER default is 24 px/m");
+    check_near((double)PIXELS_PER_METER, 24.0, 1e-6, "PIXELS_PER_METER default is 24 px/m");
 
     /* ---- pixel-art world pass ------------------------------------------------------ */
 
@@ -319,7 +315,7 @@ static void scenario_units(void)
     check(SCREEN_W % PIXEL_ART_UPSCALE == 0 && SCREEN_H % PIXEL_ART_UPSCALE == 0,
           "%dx%d divides exactly by the %dx upscale", SCREEN_W, SCREEN_H, PIXEL_ART_UPSCALE);
     check(PIXEL_ART_TARGET_W * PIXEL_ART_UPSCALE == SCREEN_W &&
-          PIXEL_ART_TARGET_H * PIXEL_ART_UPSCALE == SCREEN_H,
+              PIXEL_ART_TARGET_H * PIXEL_ART_UPSCALE == SCREEN_H,
           "the low-resolution target enlarges to exactly the window (%dx%d -> %dx%d)",
           PIXEL_ART_TARGET_W, PIXEL_ART_TARGET_H, SCREEN_W, SCREEN_H);
 
@@ -332,8 +328,8 @@ static void scenario_units(void)
     {
         const float offsets[] = { 0.0f, 320.0f, 180.0f };
         const float targets[] = { 0.0f, 1.0f, -1.0f, 37.317f, -204.9993f, 1e4f, -1e4f };
-        const float zooms[]   = { CAMERA_MIN_ZOOM, CAMERA_BASE_ZOOM - CAMERA_ZOOM_RANGE,
-                                  CAMERA_BASE_ZOOM, 1.0f, 2.0f };
+        const float zooms[] = { CAMERA_MIN_ZOOM, CAMERA_BASE_ZOOM - CAMERA_ZOOM_RANGE,
+                                CAMERA_BASE_ZOOM, 1.0f, 2.0f };
         int unsnapped = 0;
         for (size_t o = 0; o < sizeof(offsets) / sizeof(offsets[0]); o++) {
             for (size_t t = 0; t < sizeof(targets) / sizeof(targets[0]); t++) {
@@ -351,8 +347,8 @@ static void scenario_units(void)
                         if (unsnapped == 0) {
                             printf("      camera translation not on a whole pixel:"
                                    " offset %g target %g zoom %g -> %g\n",
-                                   (double)offsets[o], (double)targets[t],
-                                   (double)zooms[z], (double)translation);
+                                   (double)offsets[o], (double)targets[t], (double)zooms[z],
+                                   (double)translation);
                         }
                         unsnapped++;
                     }
@@ -385,9 +381,9 @@ static void scenario_timestep(void)
         int drops = 0;
         g_adapterCalls = 0;
 
-        const TimestepResult r = timestep_advance(&accumulator, &drops,
-                                                  (float)MAX_PHYSICS_STEPS * FIXED_DT_S,
-                                                  counting_adapter, NULL);
+        const TimestepResult r =
+            timestep_advance(&accumulator, &drops, (float)MAX_PHYSICS_STEPS * FIXED_DT_S,
+                             counting_adapter, NULL);
         check(r.substeps == MAX_PHYSICS_STEPS, "a frame worth of %d steps runs %d (got %d)",
               MAX_PHYSICS_STEPS, MAX_PHYSICS_STEPS, r.substeps);
         check(g_adapterCalls == MAX_PHYSICS_STEPS,
@@ -402,8 +398,8 @@ static void scenario_timestep(void)
         int drops = 0;
         g_adapterCalls = 0;
 
-        const TimestepResult r = timestep_advance(&accumulator, &drops, 0.2f,
-                                                  counting_adapter, NULL);
+        const TimestepResult r =
+            timestep_advance(&accumulator, &drops, 0.2f, counting_adapter, NULL);
         check(r.substeps == MAX_PHYSICS_STEPS,
               "a 0.2 s frame is capped at %d substeps (got %d)", MAX_PHYSICS_STEPS, r.substeps);
         check(g_adapterCalls == MAX_PHYSICS_STEPS, "the loop is never unbounded");
@@ -420,8 +416,8 @@ static void scenario_timestep(void)
         int drops = 0;
         g_adapterCalls = 0;
 
-        const TimestepResult r = timestep_advance(&accumulator, &drops, 10.0f,
-                                                  counting_adapter, NULL);
+        const TimestepResult r =
+            timestep_advance(&accumulator, &drops, 10.0f, counting_adapter, NULL);
         check(r.substeps == MAX_PHYSICS_STEPS,
               "a 10 s frame is clamped to %.2f s and capped at %d substeps (got %d)",
               (double)MAX_FRAME_TIME_S, MAX_PHYSICS_STEPS, r.substeps);
@@ -455,12 +451,13 @@ static void scenario_timestep(void)
         int maxSubsteps = 0;
 
         for (int i = 0; i < 2000; i++) {
-            const float frameTime = (i % 3 == 0) ? 1.0f / 60.0f
-                                  : (i % 3 == 1) ? 1.0f / 144.0f
-                                                 : 0.09f;
-            const TimestepResult r = timestep_advance(&accumulator, &drops, frameTime,
-                                                      counting_adapter, NULL);
-            if (!(r.interpolationAlpha >= 0.0f && r.interpolationAlpha <= 1.0f)) bounded = false;
+            const float frameTime = (i % 3 == 0)   ? 1.0f / 60.0f
+                                    : (i % 3 == 1) ? 1.0f / 144.0f
+                                                   : 0.09f;
+            const TimestepResult r =
+                timestep_advance(&accumulator, &drops, frameTime, counting_adapter, NULL);
+            if (!(r.interpolationAlpha >= 0.0f && r.interpolationAlpha <= 1.0f))
+                bounded = false;
             if (fabsf(r.interpolationAlpha - accumulator / FIXED_DT_S) > 1e-4f) {
                 matchesAccumulator = false;
             }
@@ -470,7 +467,8 @@ static void scenario_timestep(void)
         check(bounded, "interpolation alpha stays within [0, 1]");
         check(matchesAccumulator, "interpolation alpha equals accumulator / FIXED_DT_S");
         check(maxSubsteps <= MAX_PHYSICS_STEPS,
-              "the substep cap holds over a long varying-frame-rate run (peak %d)", maxSubsteps);
+              "the substep cap holds over a long varying-frame-rate run (peak %d)",
+              maxSubsteps);
         check(drops > 0, "sustained overload accumulates backlog drops (got %d)", drops);
     }
 }
@@ -486,29 +484,29 @@ static void scenario_oneshot(void)
 
     /* One render frame that runs the maximum number of substeps, with one press of each
      * one-shot command and held controls applied throughout. */
-    game->input.steer            = 0.0f;
-    game->input.throttle         = 1.0f;
-    game->input.resetPressed     = true;
-    game->input.debugPressed     = true;
-    game->input.shiftUpPressed   = true;
+    game->input.steer = 0.0f;
+    game->input.throttle = 1.0f;
+    game->input.resetPressed = true;
+    game->input.debugPressed = true;
+    game->input.shiftUpPressed = true;
 
     const bool debugBefore = game->debugOverlay;
 
-    TimestepResult r = timestep_advance(&game->accumulatorS, &game->physicsBacklogDrops,
-                                        (float)MAX_PHYSICS_STEPS * FIXED_DT_S,
-                                        fixed_update_adapter, game);
+    TimestepResult r =
+        timestep_advance(&game->accumulatorS, &game->physicsBacklogDrops,
+                         (float)MAX_PHYSICS_STEPS * FIXED_DT_S, fixed_update_adapter, game);
 
     check(r.substeps == MAX_PHYSICS_STEPS, "the frame ran %d substeps (got %d)",
           MAX_PHYSICS_STEPS, r.substeps);
     check(game->sim.resetCount == 1u,
           "a one-frame reset press resets exactly once across %d substeps (got %u)",
           MAX_PHYSICS_STEPS, game->sim.resetCount);
-    check(game->sim.debugToggleCount == 1u,
-          "the debug toggle fires exactly once (got %u)", game->sim.debugToggleCount);
+    check(game->sim.debugToggleCount == 1u, "the debug toggle fires exactly once (got %u)",
+          game->sim.debugToggleCount);
     check(game->debugOverlay != debugBefore,
           "the debug overlay ends up toggled, not toggled 8 times back to where it started");
-    check(game->sim.shiftUpCount == 1u,
-          "shift up fires exactly once (got %u)", game->sim.shiftUpCount);
+    check(game->sim.shiftUpCount == 1u, "shift up fires exactly once (got %u)",
+          game->sim.shiftUpCount);
     check(!input_has_oneshot(&game->input),
           "one-shot flags are cleared after the first fixed update that observed them");
     check(game->sim.tick == (uint64_t)MAX_PHYSICS_STEPS,
@@ -522,8 +520,8 @@ static void scenario_oneshot(void)
           (double)game->vehicle.positionM.x);
 
     /* A second frame with nothing pressed must not repeat any command. */
-    r = timestep_advance(&game->accumulatorS, &game->physicsBacklogDrops,
-                         (float)MAX_PHYSICS_STEPS * FIXED_DT_S, fixed_update_adapter, game);
+    (void)timestep_advance(&game->accumulatorS, &game->physicsBacklogDrops,
+                           (float)MAX_PHYSICS_STEPS * FIXED_DT_S, fixed_update_adapter, game);
     check(game->sim.resetCount == 1u, "the reset does not repeat on the next frame (got %u)",
           game->sim.resetCount);
     check(game->sim.debugToggleCount == 1u, "the debug toggle does not repeat (got %u)",
@@ -539,8 +537,8 @@ static void scenario_oneshot(void)
     check(game->sim.pauseToggleCount == 0u, "nothing consumed it yet (got %u)",
           game->sim.pauseToggleCount);
 
-    r = timestep_advance(&game->accumulatorS, &game->physicsBacklogDrops,
-                         (float)MAX_PHYSICS_STEPS * FIXED_DT_S, fixed_update_adapter, game);
+    (void)timestep_advance(&game->accumulatorS, &game->physicsBacklogDrops,
+                           (float)MAX_PHYSICS_STEPS * FIXED_DT_S, fixed_update_adapter, game);
     check(game->sim.pauseToggleCount == 1u,
           "the latched press then fires exactly once (got %u)", game->sim.pauseToggleCount);
     check(!game->input.pausePressed, "and is cleared afterwards");
@@ -579,7 +577,7 @@ static void scenario_replay(void)
           recorder->sim.resetCount, recorder->sim.pauseToggleCount);
 
     /* Replay the recorded timeline twice into fresh Game blocks. */
-    Game *first  = alloc_game();
+    Game *first = alloc_game();
     Game *second = alloc_game();
 
     const uint32_t firstChecksum =
@@ -588,23 +586,23 @@ static void scenario_replay(void)
         run_playback(second, &recorder->replay, frames, SCRIPT_FRAMES, PIXELS_PER_METER);
 
     check(firstChecksum == recordedChecksum,
-          "replay reproduces the recorded final-state checksum (%08x vs %08x)",
-          firstChecksum, recordedChecksum);
+          "replay reproduces the recorded final-state checksum (%08x vs %08x)", firstChecksum,
+          recordedChecksum);
     check(firstChecksum == secondChecksum,
-          "two replays of the same timeline agree (%08x vs %08x)",
-          firstChecksum, secondChecksum);
+          "two replays of the same timeline agree (%08x vs %08x)", firstChecksum,
+          secondChecksum);
     check(first->sim.tick == recordedTicks && second->sim.tick == recordedTicks,
           "both replays executed the same number of fixed ticks");
     check(first->sim.resetCount == recorder->sim.resetCount &&
-          first->sim.pauseToggleCount == recorder->sim.pauseToggleCount &&
-          first->sim.shiftUpCount == recorder->sim.shiftUpCount,
+              first->sim.pauseToggleCount == recorder->sim.pauseToggleCount &&
+              first->sim.shiftUpCount == recorder->sim.shiftUpCount,
           "one-shot commands are reproduced exactly by the timeline");
     check(memcmp(&first->sim, &second->sim, sizeof(SimState)) == 0 &&
-          memcmp(&first->vehicle, &second->vehicle, sizeof(VehicleState)) == 0,
+              memcmp(&first->vehicle, &second->vehicle, sizeof(VehicleState)) == 0,
           "the full vehicle simulation state matches between the two replays");
 
-    printf("    checksum: recorded %08x  replay#1 %08x  replay#2 %08x\n",
-           recordedChecksum, firstChecksum, secondChecksum);
+    printf("    checksum: recorded %08x  replay#1 %08x  replay#2 %08x\n", recordedChecksum,
+           firstChecksum, secondChecksum);
 
     free(second);
     free(first);
@@ -624,7 +622,7 @@ static void scenario_replay(void)
         for (int i = 0; i < REPLAY_CAPACITY_TICKS + extra; i++) {
             Input in;
             input_zero(&in);
-            in.steer = (float)i;        /* a unique, identifiable value per tick */
+            in.steer = (float)i; /* a unique, identifiable value per tick */
             replay_record(ring, &in);
         }
 
@@ -675,7 +673,7 @@ static void scenario_renderscale(void)
     script_build(frames, SCRIPT_FRAMES);
 
     Game *baseline = alloc_game();
-    Game *doubled  = alloc_game();
+    Game *doubled = alloc_game();
 
     const uint32_t baselineChecksum =
         run_recording(baseline, frames, SCRIPT_FRAMES, PIXELS_PER_METER, NULL);
@@ -686,7 +684,7 @@ static void scenario_renderscale(void)
           "doubling the render scale leaves the simulation checksum identical (%08x vs %08x)",
           baselineChecksum, doubledChecksum);
     check(memcmp(&baseline->sim, &doubled->sim, sizeof(SimState)) == 0 &&
-          memcmp(&baseline->vehicle, &doubled->vehicle, sizeof(VehicleState)) == 0,
+              memcmp(&baseline->vehicle, &doubled->vehicle, sizeof(VehicleState)) == 0,
           "every simulation field is bit-identical at both render scales");
     check(baseline->renderPixelsPerMeter * 2.0f == doubled->renderPixelsPerMeter,
           "the two runs really did use different render scales (%.1f vs %.1f px/m)",
@@ -697,8 +695,8 @@ static void scenario_renderscale(void)
     {
         const Vector2 a = units_world_to_render_px(baseline->vehicle.positionM,
                                                    baseline->renderPixelsPerMeter);
-        const Vector2 b = units_world_to_render_px(doubled->vehicle.positionM,
-                                                   doubled->renderPixelsPerMeter);
+        const Vector2 b =
+            units_world_to_render_px(doubled->vehicle.positionM, doubled->renderPixelsPerMeter);
         check(fabsf(a.x) > 1e-4f || fabsf(a.y) > 1e-4f,
               "the vehicle ended away from the origin, so the pixel comparison is meaningful");
         check(fabsf(b.x - a.x) > 1e-5f || fabsf(b.y - a.y) > 1e-5f,
@@ -711,12 +709,15 @@ static void scenario_renderscale(void)
 }
 
 static const TestScenario kCoreScenarios[] = {
-    { "math",        "clampf, lerpf, smooth_to, wrap_angle, smoothstep, lerp_angle", scenario_math },
-    { "units",       "world<->render conversion and the heading sign convention",    scenario_units },
-    { "timestep",    "substep cap, backlog drops, frame clamp, interpolation alpha", scenario_timestep },
-    { "oneshot",     "one-shot commands consumed exactly once per press",            scenario_oneshot },
-    { "replay",      "deterministic recording, repeatable playback, ring overflow",  scenario_replay },
-    { "renderscale", "simulation state is independent of PIXELS_PER_METER",          scenario_renderscale },
+    { "math", "clampf, lerpf, smooth_to, wrap_angle, smoothstep, lerp_angle", scenario_math },
+    { "units", "world<->render conversion and the heading sign convention", scenario_units },
+    { "timestep", "substep cap, backlog drops, frame clamp, interpolation alpha",
+      scenario_timestep },
+    { "oneshot", "one-shot commands consumed exactly once per press", scenario_oneshot },
+    { "replay", "deterministic recording, repeatable playback, ring overflow",
+      scenario_replay },
+    { "renderscale", "simulation state is independent of PIXELS_PER_METER",
+      scenario_renderscale },
 };
 
 TestScenarioGroup test_core_scenarios(void)

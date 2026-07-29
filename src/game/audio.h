@@ -24,8 +24,8 @@ void audio_init(void);
 void audio_shutdown(void);
 void audio_pre_reload(void);
 void audio_post_reload(void);
-void audio_update(float engineRpm, float idleRpm, float redlineRpm,
-                  bool physicallySliding, float speedMps, float dt);
+void audio_update(float engineRpm, float idleRpm, float redlineRpm, bool physicallySliding,
+                  float speedMps, float dt);
 void audio_play_collision_thud(void);
 
 #endif /* DRIFTY_AUDIO_H */

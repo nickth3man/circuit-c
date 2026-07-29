@@ -28,34 +28,30 @@
 #include "game/input.h"
 
 /* Packed one-shot commands, one bit each. */
-#define REPLAY_BIT_PAUSE        0x01u
-#define REPLAY_BIT_RESET        0x02u
-#define REPLAY_BIT_DEBUG        0x04u
-#define REPLAY_BIT_SHIFT_UP     0x08u
-#define REPLAY_BIT_SHIFT_DOWN   0x10u
+#define REPLAY_BIT_PAUSE 0x01u
+#define REPLAY_BIT_RESET 0x02u
+#define REPLAY_BIT_DEBUG 0x04u
+#define REPLAY_BIT_SHIFT_UP 0x08u
+#define REPLAY_BIT_SHIFT_DOWN 0x10u
 
 typedef struct {
-    float   steer;          /* -1 .. +1, left positive */
-    float   throttle;       /* 0 .. 1 */
-    float   brake;          /* 0 .. 1 */
-    float   handbrake;      /* 0 .. 1 */
-    uint8_t oneshotBits;    /* REPLAY_BIT_* */
+    float steer;         /* -1 .. +1, left positive */
+    float throttle;      /* 0 .. 1 */
+    float brake;         /* 0 .. 1 */
+    float handbrake;     /* 0 .. 1 */
+    uint8_t oneshotBits; /* REPLAY_BIT_* */
 } ReplayFrame;
 
-typedef enum {
-    REPLAY_MODE_IDLE = 0,
-    REPLAY_MODE_RECORDING,
-    REPLAY_MODE_PLAYBACK
-} ReplayMode;
+typedef enum { REPLAY_MODE_IDLE = 0, REPLAY_MODE_RECORDING, REPLAY_MODE_PLAYBACK } ReplayMode;
 
 typedef struct {
     ReplayFrame frames[REPLAY_CAPACITY_TICKS];
-    int         head;               /* ring index of the oldest retained frame */
-    int         count;              /* retained frames, 0 .. REPLAY_CAPACITY_TICKS */
-    int         playbackCursor;     /* 0 .. count, offset from head */
-    uint64_t    firstTick;          /* absolute fixed tick of the oldest retained frame */
-    uint64_t    overwrittenTicks;   /* frames discarded by the ring, cumulative */
-    ReplayMode  mode;
+    int head;                  /* ring index of the oldest retained frame */
+    int count;                 /* retained frames, 0 .. REPLAY_CAPACITY_TICKS */
+    int playbackCursor;        /* 0 .. count, offset from head */
+    uint64_t firstTick;        /* absolute fixed tick of the oldest retained frame */
+    uint64_t overwrittenTicks; /* frames discarded by the ring, cumulative */
+    ReplayMode mode;
 } ReplayBuffer;
 
 /* Discard everything and return to REPLAY_MODE_IDLE. */
@@ -88,6 +84,6 @@ double replay_frame_time_s(const ReplayBuffer *rb, int index);
 
 /* Conversions between an Input and its packed timeline representation. */
 ReplayFrame replay_pack(const Input *in);
-void        replay_unpack(const ReplayFrame *frame, Input *out);
+void replay_unpack(const ReplayFrame *frame, Input *out);
 
 #endif /* DRIFTY_REPLAY_H */

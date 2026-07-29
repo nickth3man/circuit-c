@@ -58,32 +58,32 @@
  * At file scope because two assertions use the list — the sensitivity sweep and the bake-key
  * coverage check — and a driver that only one of them knew about would be a gap. */
 static const char *const kVisualDrivers[] = {
-    "body.wheelbase",             /* axle span, and the body length that follows it   */
-    "body.front_overhang",        /* nose length                                      */
-    "body.rear_overhang",         /* tail length                                      */
-    "body.width_overall",         /* silhouette width and fender flare                */
-    "body.height_overall",        /* roof share of the plan area, glass band, windows */
-    "body.cowl_x",                /* windscreen station                               */
-    "body.backlight_x",           /* rear glass station, and the deck behind it       */
-    "body.bed_length",            /* open cargo bed; declared, not inferred           */
-    "body.nose_width",            /* foremost hull station: the drawn nose width       */
-    "body.tail_width",            /* rearmost hull station: the drawn tail width       */
-    "body.shoulder_x",            /* where the body reaches its maximum width          */
-    "body.fender_flare_front",    /* declared front arch flare, on top of the derived  */
-    "body.fender_flare_rear",     /* declared rear arch flare                          */
-    "body.track_front",           /* front stance                                     */
-    "body.track_rear",            /* rear stance                                      */
-    "body.ride_height_front",     /* front arch clearance                             */
-    "mass.engine_x",              /* CG, hood bulge, and the whole layout read        */
-    "mass.driver_x",              /* the glasshouse has to contain the driver         */
-    "tire.section_width_front",   /* front tire width and diameter                    */
-    "tire.section_width_rear",    /* rear tire width and diameter                     */
-    "tire.aspect_front",          /* front sidewall and overall diameter              */
-    "tire.aspect_rear",           /* rear sidewall and overall diameter               */
-    "tire.rim_diameter_front",    /* front rim, and the tire wrapped around it        */
-    "tire.rim_diameter_rear",     /* rear rim                                         */
-    "aero.lift_rear",             /* tail taper and the wing on it                    */
-    "engine.cylinders",           /* exhaust count                                    */
+    "body.wheelbase",           /* axle span, and the body length that follows it   */
+    "body.front_overhang",      /* nose length                                      */
+    "body.rear_overhang",       /* tail length                                      */
+    "body.width_overall",       /* silhouette width and fender flare                */
+    "body.height_overall",      /* roof share of the plan area, glass band, windows */
+    "body.cowl_x",              /* windscreen station                               */
+    "body.backlight_x",         /* rear glass station, and the deck behind it       */
+    "body.bed_length",          /* open cargo bed; declared, not inferred           */
+    "body.nose_width",          /* foremost hull station: the drawn nose width       */
+    "body.tail_width",          /* rearmost hull station: the drawn tail width       */
+    "body.shoulder_x",          /* where the body reaches its maximum width          */
+    "body.fender_flare_front",  /* declared front arch flare, on top of the derived  */
+    "body.fender_flare_rear",   /* declared rear arch flare                          */
+    "body.track_front",         /* front stance                                     */
+    "body.track_rear",          /* rear stance                                      */
+    "body.ride_height_front",   /* front arch clearance                             */
+    "mass.engine_x",            /* CG, hood bulge, and the whole layout read        */
+    "mass.driver_x",            /* the glasshouse has to contain the driver         */
+    "tire.section_width_front", /* front tire width and diameter                    */
+    "tire.section_width_rear",  /* rear tire width and diameter                     */
+    "tire.aspect_front",        /* front sidewall and overall diameter              */
+    "tire.aspect_rear",         /* rear sidewall and overall diameter               */
+    "tire.rim_diameter_front",  /* front rim, and the tire wrapped around it        */
+    "tire.rim_diameter_rear",   /* rear rim                                         */
+    "aero.lift_rear",           /* tail taper and the wing on it                    */
+    "engine.cylinders",         /* exhaust count                                    */
 };
 #define CV_VISUAL_DRIVER_COUNT ((int)(sizeof(kVisualDrivers) / sizeof(kVisualDrivers[0])))
 
@@ -92,9 +92,20 @@ static bool cv_visual_fields_sane(const CarVisual *v)
 {
     if (v == NULL) return false;
 
-#define CV_FIN(x) do { if (!isfinite((x))) return false; } while (0)
-#define CV_NN(x)  do { CV_FIN(x); if ((x) < 0.0f) return false; } while (0)
-#define CV_01(x)  do { CV_FIN(x); if ((x) < 0.0f || (x) > 1.0f) return false; } while (0)
+#define CV_FIN(x)                         \
+    do {                                  \
+        if (!isfinite((x))) return false; \
+    } while (0)
+#define CV_NN(x)                      \
+    do {                              \
+        CV_FIN(x);                    \
+        if ((x) < 0.0f) return false; \
+    } while (0)
+#define CV_01(x)                                    \
+    do {                                            \
+        CV_FIN(x);                                  \
+        if ((x) < 0.0f || (x) > 1.0f) return false; \
+    } while (0)
 
     for (int s = 0; s < CAR_HULL_STATIONS; s++) {
         CV_FIN(v->hull[s].xM);
@@ -166,8 +177,7 @@ static void scenario_car_visual(void)
         const int n = car_visual_signature_count();
         check(n > 0 && n <= (int)(sizeof(sa) / sizeof(sa[0])),
               "signature component count is in range");
-        check(car_visual_signature(&a, sa, n) == n &&
-              car_visual_signature(&b, sb, n) == n,
+        check(car_visual_signature(&a, sa, n) == n && car_visual_signature(&b, sb, n) == n,
               "signature writes every component twice");
         check(memcmp(sa, sb, (size_t)n * sizeof(float)) == 0,
               "car_visual_signature is pure: identical visuals give identical signatures");
@@ -184,16 +194,16 @@ static void scenario_car_visual(void)
         check(ra != NULL && rb != NULL && la != NULL && lb != NULL && bytes > 0,
               "purity raster buffers allocated");
         if (ra != NULL && rb != NULL && la != NULL && lb != NULL) {
-            check(car_raster_draw(&a, info, ra, bytes) &&
-                  car_raster_draw(&a, info, rb, bytes),
+            check(car_raster_draw(&a, info, ra, bytes) && car_raster_draw(&a, info, rb, bytes),
                   "repeated RGBA rasters succeed");
             check(memcmp(ra, rb, bytes) == 0,
                   "car_raster_draw is pure: identical visuals give bit-identical RGBA");
             check(car_raster_draw_labels(&a, info, la, labelBytes) &&
-                  car_raster_draw_labels(&a, info, lb, labelBytes),
+                      car_raster_draw_labels(&a, info, lb, labelBytes),
                   "repeated label rasters succeed");
-            check(memcmp(la, lb, labelBytes) == 0,
-                  "car_raster_draw_labels is pure: identical visuals give bit-identical labels");
+            check(
+                memcmp(la, lb, labelBytes) == 0,
+                "car_raster_draw_labels is pure: identical visuals give bit-identical labels");
         }
         free(ra);
         free(rb);
@@ -217,7 +227,8 @@ static void scenario_car_visual(void)
         check(matched, "drawn wheel centres equal vehicle.c set_wheel_positions()");
         check(fabsf(a.wheelbaseM - (spec.cgToFrontM + spec.cgToRearM)) < 1e-6f,
               "drawn wheelbase equals the simulated wheelbase");
-        check(fabsf(a.wheels[WHEEL_FRONT_LEFT].diameterM - 2.0f * spec.wheelRadiusFrontM) < 1e-6f,
+        check(fabsf(a.wheels[WHEEL_FRONT_LEFT].diameterM - 2.0f * spec.wheelRadiusFrontM) <
+                  1e-6f,
               "drawn front tire diameter equals 2 * wheelRadiusFrontM");
         check(fabsf(a.wheels[WHEEL_REAR_LEFT].diameterM - 2.0f * spec.wheelRadiusRearM) < 1e-6f,
               "drawn rear tire diameter equals 2 * wheelRadiusRearM");
@@ -239,8 +250,7 @@ static void scenario_car_visual(void)
                 car_visual_derive(&probe, &v);
                 if (!cv_visual_fields_sane(&v)) {
                     if (bad == 0) {
-                        printf("      first bad corner: %s = %g\n",
-                               param->name,
+                        printf("      first bad corner: %s = %g\n", param->name,
                                (double)(corner == 0 ? param->minimum : param->maximum));
                     }
                     bad++;
@@ -299,7 +309,8 @@ static void scenario_car_visual(void)
         vehicle_spec_refresh_derived(&hi);
         car_visual_derive(&lo, &vlo);
         car_visual_derive(&hi, &vhi);
-        check(vhi.frontOverhangM > vlo.frontOverhangM, "a longer front overhang draws a longer nose");
+        check(vhi.frontOverhangM > vlo.frontOverhangM,
+              "a longer front overhang draws a longer nose");
         check(vhi.lengthM > vlo.lengthM, "a longer front overhang draws a longer body");
 
         vehicle_spec_set_default(&lo);
@@ -317,14 +328,14 @@ static void scenario_car_visual(void)
          * happen is the hood bulge growing on a car whose engine is now behind the driver. */
         vehicle_spec_set_default(&lo);
         hi = lo;
-        lo.massEngineXM = 1.60f;   /* nose-forward */
-        hi.massEngineXM = -1.20f;  /* behind the driver */
+        lo.massEngineXM = 1.60f;  /* nose-forward */
+        hi.massEngineXM = -1.20f; /* behind the driver */
         vehicle_spec_refresh_derived(&lo);
         vehicle_spec_refresh_derived(&hi);
         car_visual_derive(&lo, &vlo);
         car_visual_derive(&hi, &vhi);
-        check(hi.cgToFrontM > lo.cgToFrontM &&
-              vhi.wheels[WHEEL_FRONT_LEFT].centreM.x > vlo.wheels[WHEEL_FRONT_LEFT].centreM.x,
+        check(hi.cgToFrontM > lo.cgToFrontM && vhi.wheels[WHEEL_FRONT_LEFT].centreM.x >
+                                                   vlo.wheels[WHEEL_FRONT_LEFT].centreM.x,
               "a rearward engine puts the CG back, so the front axle is drawn further ahead");
         check(vhi.hoodBulgeStrength < vlo.hoodBulgeStrength,
               "a rear-mounted engine does not bulge the hood the way a front one does");
@@ -338,14 +349,13 @@ static void scenario_car_visual(void)
         car_visual_derive(&hi, &vhi);
         check(vhi.wingSpanM >= vlo.wingSpanM && vhi.wingChordM >= vlo.wingChordM,
               "more rear downforce demand does not reduce the wing");
-        check(vhi.wingSpanM > vlo.wingSpanM,
-              "and a large increase actually grows it");
+        check(vhi.wingSpanM > vlo.wingSpanM, "and a large increase actually grows it");
 
         /* Terminating the greenhouse earlier must not shorten the deck behind it. */
         vehicle_spec_set_default(&lo);
         hi = lo;
-        lo.backlightXM = -0.20f;   /* glass runs well back */
-        hi.backlightXM = -1.40f;   /* glass stops early, long open rear */
+        lo.backlightXM = -0.20f; /* glass runs well back */
+        hi.backlightXM = -1.40f; /* glass stops early, long open rear */
         vehicle_spec_refresh_derived(&lo);
         vehicle_spec_refresh_derived(&hi);
         car_visual_derive(&lo, &vlo);
@@ -473,7 +483,9 @@ static void scenario_car_visual(void)
             unsigned char *body = (unsigned char *)malloc(bytes);
             unsigned char *labels = (unsigned char *)malloc(labelBytes);
             if (all == NULL || body == NULL || labels == NULL) {
-                free(all); free(body); free(labels);
+                free(all);
+                free(body);
+                free(labels);
                 continue;
             }
 
@@ -494,7 +506,8 @@ static void scenario_car_visual(void)
                             char id[128];
                             car_corpus_id(c, id, sizeof(id));
                             printf("      body sprite differs from the whole car outside the"
-                                   " wheels: %s, label %d\n", id, (int)lab);
+                                   " wheels: %s, label %d\n",
+                                   id, (int)lab);
                         }
                         wrongPixels++;
                     }
@@ -502,7 +515,9 @@ static void scenario_car_visual(void)
                 if (differing == 0) emptyWheels++;
                 tested++;
             }
-            free(all); free(body); free(labels);
+            free(all);
+            free(body);
+            free(labels);
         }
 
         check(tested > 0, "composability sampled %d corpus vehicles", tested);
@@ -517,27 +532,25 @@ static void scenario_car_visual(void)
         vehicle_spec_set_default(&spec);
         car_visual_derive(&spec, &v);
 
-        const CarRasterInfo w0 =
-            car_raster_part_info(&v, CAR_RASTER_PART_WHEEL, WHEEL_FRONT_LEFT,
-                                 CV_TEST_PX_PER_M, 1);
+        const CarRasterInfo w0 = car_raster_part_info(&v, CAR_RASTER_PART_WHEEL,
+                                                      WHEEL_FRONT_LEFT, CV_TEST_PX_PER_M, 1);
         check(w0.width > 0 && w0.height > 0, "a wheel sprite has a size");
         check(fabsf(w0.originXPx - 0.5f * (float)w0.width) < 1e-6f &&
-              fabsf(w0.originYPx - 0.5f * (float)w0.height) < 1e-6f,
+                  fabsf(w0.originYPx - 0.5f * (float)w0.height) < 1e-6f,
               "the wheel sprite pivots on its own hub, at the centre of its buffer");
 
         const size_t bytes = car_raster_bytes(w0);
         unsigned char *buf = (unsigned char *)malloc(bytes);
         if (buf != NULL) {
-            check(car_raster_draw_part(&v, CAR_RASTER_PART_WHEEL, WHEEL_FRONT_LEFT,
-                                       w0, buf, bytes),
+            check(car_raster_draw_part(&v, CAR_RASTER_PART_WHEEL, WHEEL_FRONT_LEFT, w0, buf,
+                                       bytes),
                   "a wheel sprite rasterizes");
             int opaque = 0;
             for (size_t p = 3; p < bytes; p += CAR_RASTER_BPP) {
                 if (buf[p] > 0) opaque++;
             }
             check(opaque > 0, "and it is not empty (%d covered pixels)", opaque);
-            check(!car_raster_draw_part(&v, CAR_RASTER_PART_WHEEL, WHEEL_COUNT,
-                                        w0, buf, bytes),
+            check(!car_raster_draw_part(&v, CAR_RASTER_PART_WHEEL, WHEEL_COUNT, w0, buf, bytes),
                   "an out-of-range wheel index is refused rather than read out of bounds");
             free(buf);
         }
@@ -557,7 +570,8 @@ static void scenario_car_visual(void)
         car_visual_derive(&a2, &v2);
         check(car_visual_bake_key(&v1) == car_visual_bake_key(&v2),
               "the bake key is pure: an unchanged spec never triggers a rebake");
-        check(car_visual_bake_key(NULL) == 0u, "a NULL visual yields no key rather than a read");
+        check(car_visual_bake_key(NULL) == 0u,
+              "a NULL visual yields no key rather than a read");
 
         int deadKeys = 0;
         for (int d = 0; d < CV_VISUAL_DRIVER_COUNT; d++) {
@@ -637,8 +651,8 @@ static void scenario_car_visual(void)
             check(memcmp(s16, s32, (size_t)n * sizeof(float)) == 0,
                   "the diagnostic signature is independent of raster scale");
         }
-        check(fabsf(v16.lengthM - (spec.cgToFrontM + spec.frontOverhangM +
-                                   spec.cgToRearM + spec.rearOverhangM)) < 1e-6f,
+        check(fabsf(v16.lengthM - (spec.cgToFrontM + spec.frontOverhangM + spec.cgToRearM +
+                                   spec.rearOverhangM)) < 1e-6f,
               "drawn length stays a physical quantity, in metres");
     }
 }
@@ -657,12 +671,18 @@ static void scenario_corpus(void)
         int unstable = 0;
         for (int i = 0; i < count; i++) {
             VehicleSpec first, again;
-            if (!car_corpus_spec(i, &first)) { unstable++; continue; }
+            if (!car_corpus_spec(i, &first)) {
+                unstable++;
+                continue;
+            }
             /* Ask for a later entry in between, so a cache that keyed on "last index" would
              * be caught rather than flattered. */
             VehicleSpec scratch;
             (void)car_corpus_spec((i + 37) % count, &scratch);
-            if (!car_corpus_spec(i, &again)) { unstable++; continue; }
+            if (!car_corpus_spec(i, &again)) {
+                unstable++;
+                continue;
+            }
             if (memcmp(&first, &again, sizeof(VehicleSpec)) != 0) {
                 if (unstable == 0) {
                     char id[128];
@@ -682,7 +702,10 @@ static void scenario_corpus(void)
             VehicleSpec spec;
             char id[128];
             car_corpus_id(i, id, sizeof(id));
-            if (!car_corpus_spec(i, &spec)) { invalid++; continue; }
+            if (!car_corpus_spec(i, &spec)) {
+                invalid++;
+                continue;
+            }
             if (!vehicle_spec_is_valid(&spec)) {
                 if (invalid == 0) printf("      first invalid corpus spec: %s\n", id);
                 invalid++;
@@ -725,8 +748,8 @@ static void scenario_corpus(void)
                 if (collapsed == 0) {
                     char id[128];
                     car_corpus_id(i, id, sizeof(id));
-                    printf("      sweep reproduces stock: %s (%s = %g, stock %g)\n",
-                           id, param->name, (double)value, (double)stockValue);
+                    printf("      sweep reproduces stock: %s (%s = %g, stock %g)\n", id,
+                           param->name, (double)value, (double)stockValue);
                 }
                 collapsed++;
                 continue;
@@ -747,8 +770,8 @@ static void scenario_corpus(void)
                         char id[128], pid[128];
                         car_corpus_id(i, id, sizeof(id));
                         car_corpus_id(i - 1, pid, sizeof(pid));
-                        printf("      sweep neighbours collide: %s vs %s (%s = %g / %g)\n",
-                               pid, id, param->name, (double)prevValue, (double)value);
+                        printf("      sweep neighbours collide: %s vs %s (%s = %g / %g)\n", pid,
+                               id, param->name, (double)prevValue, (double)value);
                     }
                     collapsed++;
                 }
@@ -816,17 +839,17 @@ static void scenario_corpus(void)
         }
 
         check(minMass <= 800.0f && maxMass >= 6000.0f,
-              "corpus mass spans kei to heavy commercial (%.0f .. %.0f kg)",
-              (double)minMass, (double)maxMass);
+              "corpus mass spans kei to heavy commercial (%.0f .. %.0f kg)", (double)minMass,
+              (double)maxMass);
         check(minWb <= 2.30f && maxWb >= 5.00f,
-              "corpus wheelbase spans kei to bus (%.2f .. %.2f m)",
-              (double)minWb, (double)maxWb);
+              "corpus wheelbase spans kei to bus (%.2f .. %.2f m)", (double)minWb,
+              (double)maxWb);
         check(minWidth <= 1.40f && maxWidth >= 2.20f,
-              "corpus width spans narrow to commercial (%.2f .. %.2f m)",
-              (double)minWidth, (double)maxWidth);
+              "corpus width spans narrow to commercial (%.2f .. %.2f m)", (double)minWidth,
+              (double)maxWidth);
         check(minHeight <= 1.20f && maxHeight >= 2.60f,
-              "corpus height spans supercar to box truck (%.2f .. %.2f m)",
-              (double)minHeight, (double)maxHeight);
+              "corpus height spans supercar to box truck (%.2f .. %.2f m)", (double)minHeight,
+              (double)maxHeight);
     }
 
     /* --- the checked-in profiles are still the fleet the code generates ---
@@ -834,7 +857,7 @@ static void scenario_corpus(void)
      * truth.
      * That only stays true if it is asserted: without this the files rot silently and the
      * next reader trusts a stale one. Regenerate with
-     *     drifty_tests --generate-corpus data/vehicles/corpus                               */
+     *     build/tests/drifty_tests.exe --generate-corpus data/vehicles/corpus                 */
     {
         int missing = 0, mismatched = 0;
         const char *firstMissing = NULL;
@@ -869,9 +892,10 @@ static void scenario_corpus(void)
         }
 
         if (missing > 0) {
-            printf("      %d corpus profile(s) missing, first '%s' —"
-                   " run: drifty_tests --generate-corpus data/vehicles/corpus\n",
-                   missing, (firstMissing != NULL) ? firstMissing : "?");
+            printf(
+                "      %d corpus profile(s) missing, first '%s' —"
+                " run: build/tests/drifty_tests.exe --generate-corpus data/vehicles/corpus\n",
+                missing, (firstMissing != NULL) ? firstMissing : "?");
         }
         check(missing == 0, "every corpus vehicle has a checked-in tuning profile");
         check(mismatched == 0, "every checked-in corpus profile round-trips to its spec");
@@ -889,10 +913,13 @@ static void scenario_corpus(void)
             bool built = true;
             for (int i = 0; i < count; i++) {
                 VehicleSpec spec;
-                if (!car_corpus_spec(i, &spec)) { built = false; break; }
+                if (!car_corpus_spec(i, &spec)) {
+                    built = false;
+                    break;
+                }
                 car_visual_derive(&spec, &visuals[i]);
-                if (!car_raster_draw_labels(&visuals[i], canvas,
-                                            maps + pixels * (size_t)i, pixels)) {
+                if (!car_raster_draw_labels(&visuals[i], canvas, maps + pixels * (size_t)i,
+                                            pixels)) {
                     built = false;
                     break;
                 }
@@ -907,7 +934,11 @@ static void scenario_corpus(void)
                         const float d = car_raster_difference(maps + pixels * (size_t)i,
                                                               maps + pixels * (size_t)j,
                                                               canvas.width, canvas.height);
-                        if (d < worstDiff) { worstDiff = d; worstA = i; worstB = j; }
+                        if (d < worstDiff) {
+                            worstDiff = d;
+                            worstA = i;
+                            worstB = j;
+                        }
                     }
                 }
 
@@ -916,8 +947,8 @@ static void scenario_corpus(void)
                     int worstComponent = 0;
                     car_corpus_id(worstA, ida, sizeof(ida));
                     car_corpus_id(worstB, idb, sizeof(idb));
-                    const float linf = test_car_signature_linf(&visuals[worstA], &visuals[worstB],
-                                                         &worstComponent);
+                    const float linf = test_car_signature_linf(
+                        &visuals[worstA], &visuals[worstB], &worstComponent);
                     printf("      closest pair '%s' vs '%s': %.4f of pixels differ,"
                            " largest feature gap %.4f m in '%s'\n",
                            ida, idb, (double)worstDiff, (double)linf,
@@ -942,10 +973,15 @@ static void scenario_corpus(void)
                 int l2A = -1, l2B = -1;
                 for (int i = 0; i < count; i++) {
                     for (int j = i + 1; j < count; j++) {
-                        const float linf = test_car_signature_linf(&visuals[i], &visuals[j], NULL);
+                        const float linf =
+                            test_car_signature_linf(&visuals[i], &visuals[j], NULL);
                         if (linf < worstLinf) worstLinf = linf;
                         const float l2 = test_car_signature_l2(&visuals[i], &visuals[j]);
-                        if (l2 < worstL2) { worstL2 = l2; l2A = i; l2B = j; }
+                        if (l2 < worstL2) {
+                            worstL2 = l2;
+                            l2A = i;
+                            l2B = j;
+                        }
                     }
                 }
                 check(worstLinf >= CV_MIN_LINF,
@@ -956,12 +992,13 @@ static void scenario_corpus(void)
                     char ida[128], idb[128];
                     car_corpus_id(l2A, ida, sizeof(ida));
                     car_corpus_id(l2B, idb, sizeof(idb));
-                    printf("      closest signature pair '%s' vs '%s': L2 %.4f\n",
-                           ida, idb, (double)worstL2);
+                    printf("      closest signature pair '%s' vs '%s': L2 %.4f\n", ida, idb,
+                           (double)worstL2);
                 }
                 check(worstL2 >= CV_MIN_L2,
                       "every corpus pair differs by L2 >= %.2f across the signature"
-                      " (closest %.4f)", (double)CV_MIN_L2, (double)worstL2);
+                      " (closest %.4f)",
+                      (double)CV_MIN_L2, (double)worstL2);
             }
         }
         free(maps);
@@ -970,8 +1007,9 @@ static void scenario_corpus(void)
 }
 
 static const TestScenario kAppearanceScenarios[] = {
-    { "car-visual",  "appearance is a pure, total function of VehicleSpec",          scenario_car_visual },
-    { "corpus",      "every corpus vehicle is valid and visibly distinct",           scenario_corpus },
+    { "car-visual", "appearance is a pure, total function of VehicleSpec",
+      scenario_car_visual },
+    { "corpus", "every corpus vehicle is valid and visibly distinct", scenario_corpus },
 };
 
 TestScenarioGroup test_appearance_scenarios(void)

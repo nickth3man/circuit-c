@@ -40,18 +40,18 @@
 
 /* ------------------------------------------------------------------------------ layout -- */
 
-#define LAB_X            8.0f
-#define LAB_WIDTH        376.0f
-#define ROW_HEIGHT       22.0f
-#define ROW_GAP          4.0f
-#define SCOPE_WIDTH      430.0f
+#define LAB_X 8.0f
+#define LAB_WIDTH 376.0f
+#define ROW_HEIGHT 22.0f
+#define ROW_GAP 4.0f
+#define SCOPE_WIDTH 430.0f
 #define SCOPE_ROW_HEIGHT 42.0f
 #define INSPECTOR_HEIGHT 132.0f
-#define MAX_EVENTS       256
+#define MAX_EVENTS 256
 
-#define PROFILE_DIR      "data/vehicles"
-#define REPLAY_DIR       "artifacts/replays"
-#define ARTIFACTS_DIR    "artifacts"
+#define PROFILE_DIR "data/vehicles"
+#define REPLAY_DIR "artifacts/replays"
+#define ARTIFACTS_DIR "artifacts"
 
 /*
  * Transient interface state: raygui edit-mode flags, text buffers, and the derived event
@@ -59,23 +59,23 @@
  * preserving across a hot reload, and keeping it out of Game keeps that struct free of
  * anything the UI happens to need this frame.
  */
-static bool  g_scenarioDropdownOpen = false;
-static bool  g_presetDropdownOpen   = false;
-static int   g_activePreset         = 0;     /* last-applied preset index */
-static bool  g_profileNameEditing   = false;
-static char  g_profileName[32]      = "default";
-static char  g_activeProfile[32]    = "default";
-static bool  g_replayNameEditing    = false;
-static char  g_replayName[32]       = "run";
+static bool g_scenarioDropdownOpen = false;
+static bool g_presetDropdownOpen = false;
+static int g_activePreset = 0; /* last-applied preset index */
+static bool g_profileNameEditing = false;
+static char g_profileName[32] = "default";
+static char g_activeProfile[32] = "default";
+static bool g_replayNameEditing = false;
+static char g_replayName[32] = "run";
 static DevReplayEvent g_events[MAX_EVENTS];
-static int   g_eventCount = 0;
-static bool  g_styleReady = false;
+static int g_eventCount = 0;
+static bool g_styleReady = false;
 
-static const Color COLOR_PANEL   = { 18, 20, 25, 232 };
-static const Color COLOR_TEXT    = { 226, 228, 233, 255 };
-static const Color COLOR_DIM     = { 150, 156, 166, 255 };
-static const Color COLOR_ACCENT  = { 120, 200, 255, 255 };
-static const Color COLOR_GHOST   = { 120, 124, 134, 200 };
+static const Color COLOR_PANEL = { 18, 20, 25, 232 };
+static const Color COLOR_TEXT = { 226, 228, 233, 255 };
+static const Color COLOR_DIM = { 150, 156, 166, 255 };
+static const Color COLOR_ACCENT = { 120, 200, 255, 255 };
+static const Color COLOR_GHOST = { 120, 124, 134, 200 };
 static const Color COLOR_WARNING = { 208, 62, 52, 255 };
 
 void dev_lab_reload_style(void)
@@ -120,7 +120,8 @@ static void checkbox(Rectangle cell, const char *text, bool *value)
 static Rectangle column(Rectangle bounds, int index, int count, float gap)
 {
     const float width = (bounds.width - gap * (float)(count - 1)) / (float)count;
-    return (Rectangle){ bounds.x + (width + gap) * (float)index, bounds.y, width, bounds.height };
+    return (Rectangle){ bounds.x + (width + gap) * (float)index, bounds.y, width,
+                        bounds.height };
 }
 
 /* ------------------------------------------------------------------- keyboard shortcuts -- */
@@ -171,10 +172,8 @@ static Vector2 body_to_world(Vector2 bodyPointM, Vector2 positionM, float headin
 {
     const float c = cosf(headingRad);
     const float s = sinf(headingRad);
-    return (Vector2){
-        positionM.x + bodyPointM.x * c - bodyPointM.y * s,
-        positionM.y + bodyPointM.x * s + bodyPointM.y * c
-    };
+    return (Vector2){ positionM.x + bodyPointM.x * c - bodyPointM.y * s,
+                      positionM.y + bodyPointM.x * s + bodyPointM.y * c };
 }
 
 static Vector2 rotate_to_world(Vector2 bodyVector, float headingRad)
@@ -228,8 +227,8 @@ void dev_lab_draw_world(const struct Game *game, const VehicleDrawState *draw)
 
     for (int i = 0; i < WHEEL_COUNT; i++) {
         const WheelState *wheel = &game->vehicle.wheels[i];
-        const Vector2 contactM = body_to_world(wheel->localPositionM,
-                                               draw->positionM, draw->headingRad);
+        const Vector2 contactM =
+            body_to_world(wheel->localPositionM, draw->positionM, draw->headingRad);
 
         if (dev->showContacts) {
             const Vector2 pixel = units_world_to_render_px(contactM, ppm);
@@ -241,8 +240,8 @@ void dev_lab_draw_world(const struct Game *game, const VehicleDrawState *draw)
              * load, so the transfer is the visible gap between the rings. */
             const float radius = fmaxf(2.0f, wheel->normalLoadN * 0.006f);
             const float staticLoadN = (i <= WHEEL_FRONT_RIGHT)
-                ? game->derived.staticFrontLoadN * 0.5f
-                : game->derived.staticRearLoadN * 0.5f;
+                                          ? game->derived.staticFrontLoadN * 0.5f
+                                          : game->derived.staticRearLoadN * 0.5f;
             const Vector2 pixel = units_world_to_render_px(contactM, ppm);
             DrawCircleLinesV(pixel, fmaxf(2.0f, staticLoadN * 0.006f),
                              (Color){ 240, 200, 90, 70 });
@@ -250,8 +249,8 @@ void dev_lab_draw_world(const struct Game *game, const VehicleDrawState *draw)
         }
         if (dev->showForces) {
             const Vector2 wheelForceN = { wheel->forceLongitudinalN, wheel->forceLateralN };
-            const Vector2 bodyForceN = physics_rotate_wheel_force_to_body(wheelForceN,
-                                                                         wheel->steerAngleRad);
+            const Vector2 bodyForceN =
+                physics_rotate_wheel_force_to_body(wheelForceN, wheel->steerAngleRad);
             /* 8 kN maps to one metre of arrow. */
             const Vector2 scaled = { bodyForceN.x * 0.000125f, bodyForceN.y * 0.000125f };
             draw_arrow(contactM, rotate_to_world(scaled, draw->headingRad), ppm,
@@ -260,10 +259,8 @@ void dev_lab_draw_world(const struct Game *game, const VehicleDrawState *draw)
         if (dev->showSlip) {
             /* Slip angle drawn as a short line off the wheel's own heading. */
             const float wheelHeading = draw->headingRad + wheel->steerAngleRad;
-            const Vector2 slipDirection = {
-                cosf(wheelHeading - wheel->slipAngleRad) * 0.9f,
-                sinf(wheelHeading - wheel->slipAngleRad) * 0.9f
-            };
+            const Vector2 slipDirection = { cosf(wheelHeading - wheel->slipAngleRad) * 0.9f,
+                                            sinf(wheelHeading - wheel->slipAngleRad) * 0.9f };
             draw_arrow(contactM, slipDirection, ppm, (Color){ 150, 130, 240, 220 });
         }
     }
@@ -315,7 +312,10 @@ static void draw_scope_channel(Rectangle bounds, const DevState *dev, DevScopeCh
         if (value < low) low = value;
         if (value > high) high = value;
     }
-    if (high - low < 1e-3f) { high += 0.5f; low -= 0.5f; }
+    if (high - low < 1e-3f) {
+        high += 0.5f;
+        low -= 0.5f;
+    }
     const float span = high - low;
 
     /* Zero line, when zero is inside the visible range. */
@@ -332,10 +332,8 @@ static void draw_scope_channel(Rectangle bounds, const DevState *dev, DevScopeCh
         Vector2 previous = { 0.0f, 0.0f };
         for (int i = 0; i < dev->ghostScopeCount; i++) {
             const float value = dev_state_ghost_scope_value(dev, channel, i);
-            const Vector2 point = {
-                bounds.x + ghostStepX * (float)i,
-                bounds.y + bounds.height * ((high - value) / span)
-            };
+            const Vector2 point = { bounds.x + ghostStepX * (float)i,
+                                    bounds.y + bounds.height * ((high - value) / span) };
             if (i > 0) DrawLineV(previous, point, COLOR_GHOST);
             previous = point;
         }
@@ -344,10 +342,8 @@ static void draw_scope_channel(Rectangle bounds, const DevState *dev, DevScopeCh
     Vector2 previous = { 0.0f, 0.0f };
     for (int i = 0; i < count; i++) {
         const float value = dev_state_scope_value(dev, channel, i);
-        const Vector2 point = {
-            bounds.x + stepX * (float)i,
-            bounds.y + bounds.height * ((high - value) / span)
-        };
+        const Vector2 point = { bounds.x + stepX * (float)i,
+                                bounds.y + bounds.height * ((high - value) / span) };
         if (i > 0) DrawLineV(previous, point, COLOR_ACCENT);
         previous = point;
     }
@@ -398,14 +394,14 @@ static void draw_scope(DevState *dev)
 static Color event_color(DevReplayEventKind kind)
 {
     switch (kind) {
-        case DEV_REPLAY_EVENT_THROTTLE:       return (Color){ 110, 220, 130, 255 };
-        case DEV_REPLAY_EVENT_BRAKE:          return (Color){ 232, 120, 96, 255 };
-        case DEV_REPLAY_EVENT_HANDBRAKE:      return (Color){ 240, 180, 70, 255 };
-        case DEV_REPLAY_EVENT_SHIFT_UP:       return (Color){ 120, 200, 255, 255 };
-        case DEV_REPLAY_EVENT_SHIFT_DOWN:     return (Color){ 90, 150, 210, 255 };
-        case DEV_REPLAY_EVENT_RESET:          return (Color){ 220, 220, 220, 255 };
+        case DEV_REPLAY_EVENT_THROTTLE: return (Color){ 110, 220, 130, 255 };
+        case DEV_REPLAY_EVENT_BRAKE: return (Color){ 232, 120, 96, 255 };
+        case DEV_REPLAY_EVENT_HANDBRAKE: return (Color){ 240, 180, 70, 255 };
+        case DEV_REPLAY_EVENT_SHIFT_UP: return (Color){ 120, 200, 255, 255 };
+        case DEV_REPLAY_EVENT_SHIFT_DOWN: return (Color){ 90, 150, 210, 255 };
+        case DEV_REPLAY_EVENT_RESET: return (Color){ 220, 220, 220, 255 };
         case DEV_REPLAY_EVENT_STEER_REVERSAL: return (Color){ 170, 140, 240, 255 };
-        case DEV_REPLAY_EVENT_COUNT:          break;
+        case DEV_REPLAY_EVENT_COUNT: break;
     }
     return COLOR_DIM;
 }
@@ -415,7 +411,8 @@ static void export_failure_bundle(struct Game *game, const char *reason)
     FailureBundle bundle;
     memset(&bundle, 0, sizeof(bundle));
     bundle.scenario = dev_scenario_at(game->dev.scenario) != NULL
-                    ? dev_scenario_at(game->dev.scenario)->name : "manual";
+                          ? dev_scenario_at(game->dev.scenario)->name
+                          : "manual";
     bundle.failureText = reason;
     bundle.replay = &game->replay;
     bundle.spec = &game->spec;
@@ -458,8 +455,8 @@ static void draw_inspector(struct Game *game, Rectangle bounds)
             const float t = (float)g_events[e].index / (float)(frameCount - 1);
             const float x = timeline.x + t * timeline.width;
             DrawLineEx((Vector2){ x, timeline.y + 2.0f },
-                       (Vector2){ x, timeline.y + timeline.height - 2.0f },
-                       1.0f, event_color(g_events[e].kind));
+                       (Vector2){ x, timeline.y + timeline.height - 2.0f }, 1.0f,
+                       event_color(g_events[e].kind));
         }
         for (int m = 0; m < dev->markerCount; m++) {
             const DevMarker *marker = &dev->markers[m];
@@ -469,11 +466,11 @@ static void draw_inspector(struct Game *game, Rectangle bounds)
             const float t = (float)offset / (float)(frameCount - 1);
             const float x = timeline.x + t * timeline.width;
             const Color color =
-                (marker->kind == DEV_MARKER_INVARIANT) ? COLOR_WARNING :
-                (marker->kind == DEV_MARKER_SATURATION) ? (Color){ 255, 150, 60, 255 } :
-                (marker->kind == DEV_MARKER_PEAK_TRANSFER) ? (Color){ 250, 220, 90, 255 } :
-                (marker->kind == DEV_MARKER_RECOVERY) ? (Color){ 120, 235, 150, 255 } :
-                COLOR_DIM;
+                (marker->kind == DEV_MARKER_INVARIANT)       ? COLOR_WARNING
+                : (marker->kind == DEV_MARKER_SATURATION)    ? (Color){ 255, 150, 60, 255 }
+                : (marker->kind == DEV_MARKER_PEAK_TRANSFER) ? (Color){ 250, 220, 90, 255 }
+                : (marker->kind == DEV_MARKER_RECOVERY)      ? (Color){ 120, 235, 150, 255 }
+                                                             : COLOR_DIM;
             DrawLineEx((Vector2){ x, timeline.y + timeline.height * 0.5f },
                        (Vector2){ x, timeline.y + timeline.height - 2.0f }, 2.0f, color);
         }
@@ -524,11 +521,12 @@ static void draw_inspector(struct Game *game, Rectangle bounds)
     const ReplayFrame *frame = dev_replay_frame_at(replay, dev->inspectorCursor);
     const Rectangle frameRow = row(&cursor, 16.0f);
     if (frame != NULL) {
-        GuiLabel(frameRow, TextFormat("tick %llu   steer %+.2f  throttle %.2f  brake %.2f  hb %.2f",
-                                  (unsigned long long)(replay->firstTick +
-                                                       (uint64_t)dev->inspectorCursor),
-                                  (double)frame->steer, (double)frame->throttle,
-                                  (double)frame->brake, (double)frame->handbrake));
+        GuiLabel(
+            frameRow,
+            TextFormat("tick %llu   steer %+.2f  throttle %.2f  brake %.2f  hb %.2f",
+                       (unsigned long long)(replay->firstTick + (uint64_t)dev->inspectorCursor),
+                       (double)frame->steer, (double)frame->throttle, (double)frame->brake,
+                       (double)frame->handbrake));
     } else {
         GuiLabel(frameRow, "no frames recorded yet");
     }
@@ -557,8 +555,8 @@ static void draw_inspector(struct Game *game, Rectangle bounds)
         char path[256];
         telemetry_ensure_dir(REPLAY_DIR);
         snprintf(path, sizeof(path), "%s/%s.bin", REPLAY_DIR, g_replayName);
-        const bool ok = dev_replay_save(replay, path, g_replayName, dev->seed,
-                                        game->stateChecksum);
+        const bool ok =
+            dev_replay_save(replay, path, g_replayName, dev->seed, game->stateChecksum);
         dev_state_set_status(dev, !ok, ok ? "replay saved to %s" : "could not save %s", path);
     }
     if (GuiButton(column(replayRow, 2, 4, 4.0f), "load")) {
@@ -606,17 +604,17 @@ static void draw_parameter_rows(struct Game *game, Rectangle view, float scrollY
         /* Skip rows scrolled out of view: with ~100 parameters this matters. */
         if (y + 30.0f >= view.y && y <= view.y + view.height) {
             const bool modified = !param->derived && !dev_param_is_default(&game->spec, param);
-            GuiLabel(labelBounds, TextFormat("%s%s  [%s]  default %g%s",
-                                             modified ? "* " : "", param->name,
-                                             param->unit[0] != '\0' ? param->unit : "-",
-                                             (double)param->defaultValue,
-                                             param->derived ? "  (derived)" : ""));
+            GuiLabel(labelBounds,
+                     TextFormat("%s%s  [%s]  default %g%s", modified ? "* " : "", param->name,
+                                param->unit[0] != '\0' ? param->unit : "-",
+                                (double)param->defaultValue,
+                                param->derived ? "  (derived)" : ""));
 
             float value = dev_param_get(&game->spec, param);
             if (param->derived) {
                 GuiLabel(sliderBounds, TextFormat("%.3f", (double)value));
             } else if (GuiSlider(sliderBounds, "", TextFormat("%.3f", (double)value), &value,
-                          param->minimum, param->maximum)) {
+                                 param->minimum, param->maximum)) {
                 /* Snap to the declared step so a slider drag produces a value a human can
                  * type back into a profile. */
                 if (param->step > 0.0f) {
@@ -682,8 +680,8 @@ static void draw_lab_panel(struct Game *game)
     }
 
     const Rectangle speedRow = row(&cursor, 16.0f);
-    GuiSlider(column(speedRow, 0, 1, 0.0f), "",
-              TextFormat("%.2fx", (double)dev->timeScale), &dev->timeScale, 0.05f, 4.0f);
+    GuiSlider(column(speedRow, 0, 1, 0.0f), "", TextFormat("%.2fx", (double)dev->timeScale),
+              &dev->timeScale, 0.05f, 4.0f);
 
     /* Overlays. */
     GuiLine(row(&cursor, 12.0f), "overlays");
@@ -711,8 +709,8 @@ static void draw_lab_panel(struct Game *game)
             bool active = wasActive;
             /* raygui's GuiToggle returns 0 unconditionally — it only flips *active — so the
              * standard pattern is to detect a 0->1 edge on the local bool. */
-            GuiToggle(column(groupRow, i, perRow, 4.0f),
-                      dev_params_group_name(groupIndex), &active);
+            GuiToggle(column(groupRow, i, perRow, 4.0f), dev_params_group_name(groupIndex),
+                      &active);
             if (active && !wasActive) {
                 dev->activeGroup = groupIndex;
             }
@@ -733,8 +731,8 @@ static void draw_lab_panel(struct Game *game)
     }
 
     /* Parameter list. The remaining vertical space belongs to it, minus the footer rows. */
-    const float footerHeight = 3.0f * (ROW_HEIGHT + ROW_GAP) + 46.0f + 36.0f
-                             + (12.0f + ROW_GAP) + (ROW_HEIGHT + ROW_GAP); /* presets block */
+    const float footerHeight = 3.0f * (ROW_HEIGHT + ROW_GAP) + 46.0f + 36.0f +
+                               (12.0f + ROW_GAP) + (ROW_HEIGHT + ROW_GAP); /* presets block */
     const float listHeight = fmaxf(80.0f, panel.y + panel.height - cursor.y - footerHeight);
     const Rectangle listBounds = { cursor.x, cursor.y, cursor.width, listHeight };
     cursor.y += listHeight + ROW_GAP;
@@ -775,8 +773,8 @@ static void draw_lab_panel(struct Game *game)
         int applied = 0, unknown = 0, rejected = 0;
         if (dev_params_load(&game->spec, path, &applied, &unknown, &rejected)) {
             snprintf(g_activeProfile, sizeof(g_activeProfile), "%s", g_profileName);
-            dev_state_set_status(dev, false, "%d applied, %d unknown, %d rejected",
-                                 applied, unknown, rejected);
+            dev_state_set_status(dev, false, "%d applied, %d unknown, %d rejected", applied,
+                                 unknown, rejected);
         } else {
             dev_state_set_status(dev, true, "could not load %s", path);
         }
@@ -790,26 +788,26 @@ static void draw_lab_panel(struct Game *game)
     /* Phase 3: the load-transfer chain, previous -> filtered -> solved, then where the
      * load went and what resistance is doing. This is the panel to watch during a lift. */
     const Rectangle loadRow = row(&cursor, 16.0f);
-    GuiLabel(loadRow, TextFormat(
-        "Fz %.0f/%.0f N (st %.0f/%.0f)  xfer %+.0f N",
-        (double)game->derived.normalLoadFrontN, (double)game->derived.normalLoadRearN,
-        (double)game->derived.staticFrontLoadN, (double)game->derived.staticRearLoadN,
-        (double)game->derived.loadTransferN));
+    GuiLabel(loadRow, TextFormat("Fz %.0f/%.0f N (st %.0f/%.0f)  xfer %+.0f N",
+                                 (double)game->derived.normalLoadFrontN,
+                                 (double)game->derived.normalLoadRearN,
+                                 (double)game->derived.staticFrontLoadN,
+                                 (double)game->derived.staticRearLoadN,
+                                 (double)game->derived.loadTransferN));
     const Rectangle accelRow = row(&cursor, 16.0f);
-    GuiLabel(accelRow, TextFormat(
-        "ax %+.2f>%+.2f>%+.2f  drag %.0f  roll %.0f N",
-        (double)game->derived.previousLongAccelMps2,
-        (double)game->derived.filteredLongAccelMps2,
-        (double)game->derived.solvedLongAccelMps2,
-        (double)game->derived.aeroDragMagnitudeN,
-        (double)game->derived.rollingResistanceMagnitudeN));
+    GuiLabel(accelRow, TextFormat("ax %+.2f>%+.2f>%+.2f  drag %.0f  roll %.0f N",
+                                  (double)game->derived.previousLongAccelMps2,
+                                  (double)game->derived.filteredLongAccelMps2,
+                                  (double)game->derived.solvedLongAccelMps2,
+                                  (double)game->derived.aeroDragMagnitudeN,
+                                  (double)game->derived.rollingResistanceMagnitudeN));
 
     /* Run identity. */
     const Rectangle seedRow = row(&cursor, 16.0f);
     const DevScenario *scenario = dev_scenario_at(dev->scenario);
-    GuiLabel(seedRow, TextFormat("seed %u   tick %llu   checksum %08x   modified %d",
-                                 dev->seed, (unsigned long long)game->sim.tick,
-                                 game->stateChecksum, dev_params_modified_count(&game->spec)));
+    GuiLabel(seedRow, TextFormat("seed %u   tick %llu   checksum %08x   modified %d", dev->seed,
+                                 (unsigned long long)game->sim.tick, game->stateChecksum,
+                                 dev_params_modified_count(&game->spec)));
 
     /* Status line. */
     const Rectangle statusRow = row(&cursor, 16.0f);
@@ -862,8 +860,7 @@ static void draw_lab_panel(struct Game *game)
         strncat(presetList, dev_preset_at(i)->name,
                 sizeof(presetList) - strlen(presetList) - 1u);
     }
-    if (GuiDropdownBox(presetDropdown, presetList, &g_activePreset,
-                       g_presetDropdownOpen)) {
+    if (GuiDropdownBox(presetDropdown, presetList, &g_activePreset, g_presetDropdownOpen)) {
         g_presetDropdownOpen = !g_presetDropdownOpen;
         if (g_presetDropdownOpen) g_scenarioDropdownOpen = false;
     }

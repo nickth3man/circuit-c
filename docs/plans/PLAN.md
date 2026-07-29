@@ -273,7 +273,7 @@ A new parameter should reproduce the current derived output, so a phase lands pi
 and every later change is a reviewable diff. A constant default only achieves that for the
 *stock* car, so:
 
-1. Before landing, run `./drifty_tests.exe --dump-corpus-cards artifacts/corpus-cards`.
+1. Before landing, run `./build/tests/drifty_tests.exe --dump-corpus-cards artifacts/corpus-cards`.
    `cards.json` already carries every derived quantity per vehicle.
 2. Generate `A("body.nose_width", <that car's current value>)` assignments for the 17
    archetypes from that JSON.
@@ -314,7 +314,7 @@ assumed — `bed_length` looked like a certainty and failed, because its first g
 - **The `params` scenario asserts every registry `defaultValue` against
   `vehicle_spec_set_default()`** — they cannot disagree.
 - **After editing `src/dev/car_corpus.c`, run
-  `./drifty_tests.exe --generate-corpus data/vehicles/corpus`** — the profiles are checked in and the
+  `./build/tests/drifty_tests.exe --generate-corpus data/vehicles/corpus`** — the profiles are checked in and the
   round-trip is asserted.
 - **Registry ranges are development limits, not physical claims.** Where a sweep needs a
   narrower range than physical reality (as `body.bed_length` did, capped at 1.5 m against the
@@ -364,7 +364,7 @@ an explanation — a determinism claim that nobody checks is worse than none.
 Headless, and required:
 
 ```bash
-./build.sh --tests && ./drifty_tests.exe
+./build.sh --tests && ./build/tests/drifty_tests.exe
 ```
 
 All scenarios must stay green — especially `params`, `car-visual` and `corpus`.

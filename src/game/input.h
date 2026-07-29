@@ -23,10 +23,10 @@
 
 typedef struct {
     /* Held controls, sampled every render frame, valid for every substep */
-    float steer;        /* -1 (right) .. +1 (left), dimensionless */
-    float throttle;     /* 0 .. 1, dimensionless */
-    float brake;        /* 0 .. 1, dimensionless */
-    float handbrake;    /* 0 .. 1, dimensionless */
+    float steer;     /* -1 (right) .. +1 (left), dimensionless */
+    float throttle;  /* 0 .. 1, dimensionless */
+    float brake;     /* 0 .. 1, dimensionless */
+    float handbrake; /* 0 .. 1, dimensionless */
 
     /* One-shot commands, edge-triggered, cleared after the first fixed update */
     bool pausePressed;

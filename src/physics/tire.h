@@ -8,24 +8,19 @@
 
 float tire_normalized_curve(float stiffnessB, float shapeC, float slip);
 
-float tire_lateral_force_n(float slipAngleRad, float normalLoadN,
-                           float stiffnessB, float shapeC,
-                           float frictionCoefficient);
+float tire_lateral_force_n(float slipAngleRad, float normalLoadN, float stiffnessB,
+                           float shapeC, float frictionCoefficient);
 
-float tire_longitudinal_force_n(float slipRatio, float normalLoadN,
-                                float stiffnessB, float shapeC,
-                                float frictionCoefficient);
+float tire_longitudinal_force_n(float slipRatio, float normalLoadN, float stiffnessB,
+                                float shapeC, float frictionCoefficient);
 
 float tire_slip_ratio(float angularVelocityRadS, float wheelRadiusM,
-                      float wheelLongitudinalVelocityMps,
-                      float speedEpsilonMps, float slipClamp);
+                      float wheelLongitudinalVelocityMps, float speedEpsilonMps,
+                      float slipClamp);
 
-void tire_apply_combined_limit(float requestedLongitudinalForceN,
-                               float requestedLateralForceN,
-                               float longitudinalLimitN,
-                               float lateralLimitN,
-                               float *limitedLongitudinalForceN,
-                               float *limitedLateralForceN,
+void tire_apply_combined_limit(float requestedLongitudinalForceN, float requestedLateralForceN,
+                               float longitudinalLimitN, float lateralLimitN,
+                               float *limitedLongitudinalForceN, float *limitedLateralForceN,
                                float *frictionUsage);
 
 #endif /* DRIFTY_TIRE_H */

@@ -67,7 +67,10 @@ static bool copy_file(const char *fromPath, const char *toPath)
     bool ok = true;
     size_t read;
     while ((read = fread(buffer, 1, sizeof(buffer), from)) > 0) {
-        if (fwrite(buffer, 1, read, to) != read) { ok = false; break; }
+        if (fwrite(buffer, 1, read, to) != read) {
+            ok = false;
+            break;
+        }
     }
     if (ferror(from)) ok = false;
 
@@ -90,22 +93,24 @@ static void write_json_string(FILE *out, const char *text)
     for (size_t i = 0; text != NULL && text[i] != '\0'; i++) {
         const unsigned char c = (unsigned char)text[i];
         switch (c) {
-            case '"':  fputs("\\\"", out); break;
+            case '"': fputs("\\\"", out); break;
             case '\\': fputs("\\\\", out); break;
-            case '\n': fputs("\\n", out);  break;
-            case '\r': fputs("\\r", out);  break;
-            case '\t': fputs("\\t", out);  break;
+            case '\n': fputs("\\n", out); break;
+            case '\r': fputs("\\r", out); break;
+            case '\t': fputs("\\t", out); break;
             default:
-                if (c < 0x20u) fprintf(out, "\\u%04x", c);
-                else fputc((int)c, out);
+                if (c < 0x20u)
+                    fprintf(out, "\\u%04x", c);
+                else
+                    fputc((int)c, out);
                 break;
         }
     }
     fputc('"', out);
 }
 
-bool failure_bundle_write(const char *rootDir, const FailureBundle *bundle,
-                          char *dirOut, size_t dirCapacity)
+bool failure_bundle_write(const char *rootDir, const FailureBundle *bundle, char *dirOut,
+                          size_t dirCapacity)
 {
     if (bundle == NULL) return false;
 
@@ -129,7 +134,7 @@ bool failure_bundle_write(const char *rootDir, const FailureBundle *bundle,
     /* failure.txt — the failing check, verbatim. */
     snprintf(path, sizeof(path), "%s/failure.txt", dir);
     if (!write_text_file(path, bundle->failureText != NULL ? bundle->failureText
-                                                          : "(no failure text recorded)\n")) {
+                                                           : "(no failure text recorded)\n")) {
         fprintf(stderr, "BUNDLE: could not write %s\n", path);
     }
 
@@ -177,8 +182,8 @@ bool failure_bundle_write(const char *rootDir, const FailureBundle *bundle,
     /* replay.bin — the minimal failing input timeline. */
     if (bundle->replay != NULL) {
         snprintf(path, sizeof(path), "%s/replay.bin", dir);
-        replayWritten = dev_replay_save(bundle->replay, path, bundle->scenario,
-                                        bundle->seed, bundle->checksum);
+        replayWritten = dev_replay_save(bundle->replay, path, bundle->scenario, bundle->seed,
+                                        bundle->checksum);
         if (!replayWritten) fprintf(stderr, "BUNDLE: could not write %s\n", path);
     }
 
@@ -211,8 +216,8 @@ bool failure_bundle_write(const char *rootDir, const FailureBundle *bundle,
             fprintf(file, ",\n  \"failure\": ");
             write_json_string(file, bundle->failureText);
             fprintf(file, ",\n  \"active_profile\": ");
-            write_json_string(file, bundle->activeProfile != NULL
-                                  ? bundle->activeProfile : "unknown");
+            write_json_string(file, bundle->activeProfile != NULL ? bundle->activeProfile
+                                                                  : "unknown");
             fprintf(file, ",\n  \"tunables_modified\": %d",
                     bundle->spec != NULL ? dev_params_modified_count(bundle->spec) : 0);
             fprintf(file, ",\n  \"build\": {\n");

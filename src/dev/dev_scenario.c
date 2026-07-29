@@ -25,19 +25,22 @@ typedef enum {
 } ScenarioIndex;
 
 static const DevScenario g_scenarios[] = {
-    { "free",            "no scripted input; drive it yourself",                    0,    0u },
-    { "accel",           "standing start at full throttle, straight ahead",         1200, 1001u },
-    { "skidpad",         "constant radius: settle, then hold steady steer and throttle", 2400, 1002u },
-    { "step-steer",      "build speed, step the steering, hold it, then return to centre", 960, 1003u },
-    { "lift-off",        "steady cornering interrupted by a throttle lift",         1200, 1004u },
-    { "power-oversteer", "steady steer, then full throttle until the rear breaks",  1200, 1005u },
-    { "handbrake-entry", "handbrake pull into a corner, release, then counter-steer", 1200, 1006u },
-    { "transition",      "left/right transitions at a constant period",             1800, 1007u },
-    { "brake-corner",    "braking while already turning",                           1200, 1008u },
-    { "coast-down",      "accelerate, then coast with every control released",      2400, 1009u },
-    { "accel-load",      "straight full-throttle launch: load transfers rearward",  720,  1010u },
-    { "brake-load",      "accelerate, then brake to a stop: load transfers forward", 1080, 1011u },
-    { "catchable-drift", "initiate, hold, countersteer, and recover a slide",        1200, 1012u },
+    { "free", "no scripted input; drive it yourself", 0, 0u },
+    { "accel", "standing start at full throttle, straight ahead", 1200, 1001u },
+    { "skidpad", "constant radius: settle, then hold steady steer and throttle", 2400, 1002u },
+    { "step-steer", "build speed, step the steering, hold it, then return to centre", 960,
+      1003u },
+    { "lift-off", "steady cornering interrupted by a throttle lift", 1200, 1004u },
+    { "power-oversteer", "steady steer, then full throttle until the rear breaks", 1200,
+      1005u },
+    { "handbrake-entry", "handbrake pull into a corner, release, then counter-steer", 1200,
+      1006u },
+    { "transition", "left/right transitions at a constant period", 1800, 1007u },
+    { "brake-corner", "braking while already turning", 1200, 1008u },
+    { "coast-down", "accelerate, then coast with every control released", 2400, 1009u },
+    { "accel-load", "straight full-throttle launch: load transfers rearward", 720, 1010u },
+    { "brake-load", "accelerate, then brake to a stop: load transfers forward", 1080, 1011u },
+    { "catchable-drift", "initiate, hold, countersteer, and recover a slide", 1200, 1012u },
 };
 
 #define SCENARIO_COUNT ((int)(sizeof(g_scenarios) / sizeof(g_scenarios[0])))
@@ -69,9 +72,7 @@ void dev_scenario_input(int index, uint64_t tick, Input *out)
     if (index <= SCENARIO_FREE || index >= SCENARIO_COUNT) return;
 
     switch (index) {
-        case SCENARIO_ACCEL:
-            out->throttle = 1.0f;
-            break;
+        case SCENARIO_ACCEL: out->throttle = 1.0f; break;
 
         case SCENARIO_SKIDPAD:
             /* Two seconds of straight-line acceleration, then steering wound on over a
@@ -83,8 +84,8 @@ void dev_scenario_input(int index, uint64_t tick, Input *out)
                 out->throttle = 1.0f;
             } else {
                 const uint64_t sinceEntry = tick - AT(2.0);
-                const float ramp = (sinceEntry >= AT(1.0))
-                    ? 1.0f : (float)sinceEntry / (float)AT(1.0);
+                const float ramp =
+                    (sinceEntry >= AT(1.0)) ? 1.0f : (float)sinceEntry / (float)AT(1.0);
                 out->steer = 0.25f * ramp;
                 out->throttle = 0.30f;
             }
@@ -117,7 +118,7 @@ void dev_scenario_input(int index, uint64_t tick, Input *out)
                 out->steer = 0.50f;
                 out->handbrake = 1.0f;
             } else if (tick >= AT(3.75) && tick < AT(6.0)) {
-                out->steer = -0.30f;         /* counter-steer: right is negative */
+                out->steer = -0.30f; /* counter-steer: right is negative */
                 out->throttle = 0.35f;
             }
             break;
@@ -140,9 +141,7 @@ void dev_scenario_input(int index, uint64_t tick, Input *out)
             }
             break;
 
-        case SCENARIO_COAST_DOWN:
-            out->throttle = (tick < AT(6.0)) ? 1.0f : 0.0f;
-            break;
+        case SCENARIO_COAST_DOWN: out->throttle = (tick < AT(6.0)) ? 1.0f : 0.0f; break;
 
         case SCENARIO_ACCEL_LOAD:
             /* Five seconds of straight full throttle, then one of coast. No steering at all:
@@ -160,24 +159,23 @@ void dev_scenario_input(int index, uint64_t tick, Input *out)
             /* Five stages, all through ordinary controls: build speed, break the rear loose
              * with the handbrake, hold the slide on throttle, catch it on countersteer, then
              * unwind to straight travel. Nothing here reaches into the physics. */
-            if (tick < AT(2.5)) {                       /* 1. build speed */
+            if (tick < AT(2.5)) { /* 1. build speed */
                 out->throttle = 1.0f;
-            } else if (tick < AT(3.2)) {                /* 2. initiate */
+            } else if (tick < AT(3.2)) { /* 2. initiate */
                 out->steer = 0.60f;
                 out->handbrake = 1.0f;
-            } else if (tick < AT(4.6)) {                /* 3. hold the slide */
+            } else if (tick < AT(4.6)) { /* 3. hold the slide */
                 out->steer = 0.25f;
                 out->throttle = 0.55f;
-            } else if (tick < AT(6.6)) {                /* 4. countersteer */
+            } else if (tick < AT(6.6)) { /* 4. countersteer */
                 out->steer = -0.55f;
                 out->throttle = 0.30f;
-            } else {                                    /* 5. recover */
+            } else { /* 5. recover */
                 out->steer = 0.0f;
                 out->throttle = 0.25f;
             }
             break;
 
-        default:
-            break;
+        default: break;
     }
 }

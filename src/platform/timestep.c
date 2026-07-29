@@ -5,21 +5,18 @@
 
 #include "core/math_utils.h"
 
-TimestepResult timestep_advance(float *accumulatorS,
-                                int *backlogDrops,
-                                float frameTimeS,
-                                TimestepFixedUpdateFn fixedUpdate,
-                                void *ctx)
+TimestepResult timestep_advance(float *accumulatorS, int *backlogDrops, float frameTimeS,
+                                TimestepFixedUpdateFn fixedUpdate, void *ctx)
 {
     TimestepResult result;
-    result.substeps           = 0;
-    result.droppedBacklog     = false;
+    result.substeps = 0;
+    result.droppedBacklog = false;
     result.interpolationAlpha = 0.0f;
 
     if (accumulatorS == NULL || backlogDrops == NULL) return result;
 
     /* Clamp an extreme or nonsensical frame time before it reaches the accumulator. */
-    if (!(frameTimeS > 0.0f)) frameTimeS = 0.0f;              /* also catches NaN */
+    if (!(frameTimeS > 0.0f)) frameTimeS = 0.0f; /* also catches NaN */
     if (frameTimeS > MAX_FRAME_TIME_S) frameTimeS = MAX_FRAME_TIME_S;
 
     *accumulatorS += frameTimeS;
@@ -40,7 +37,7 @@ TimestepResult timestep_advance(float *accumulatorS,
         result.droppedBacklog = true;
     }
 
-    result.substeps           = steps;
+    result.substeps = steps;
     result.interpolationAlpha = clampf(*accumulatorS / FIXED_DT_S, 0.0f, 1.0f);
     return result;
 }

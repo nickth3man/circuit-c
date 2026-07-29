@@ -58,28 +58,28 @@ typedef struct Game Game;
 
 /* Exported from the reloadable module; a no-op everywhere else. */
 #if defined(_WIN32) && defined(DRIFTY_HOT_RELOAD) && defined(DRIFTY_GAME_MODULE)
-    #define GAME_API __declspec(dllexport)
+#define GAME_API __declspec(dllexport)
 #else
-    #define GAME_API
+#define GAME_API
 #endif
 
 /* Path the platform layer watches and loads. Overridable at build time. */
 #ifndef GAME_MODULE_NAME
-    #define GAME_MODULE_NAME "build/dev/game.dll"
+#define GAME_MODULE_NAME "build/dev/game.dll"
 #endif
 
 /* ------------------------------------------------------------------------------------- */
 
-#define GAME_ENTRY_POINTS                                                     \
-    ENTRY(game_init,          void,  Game *)        /* first-time setup */    \
-    ENTRY(game_pre_reload,    void,  Game *)        /* release module-owned resources */ \
-    ENTRY(game_post_reload,   void,  Game *)        /* re-acquire them */     \
-    ENTRY(game_fixed_update,  void,  Game *, float) /* one fixed step */      \
-    ENTRY(game_draw,          void,  Game *, float) /* render with interpolation alpha */ \
-    ENTRY(game_shutdown,      void,  Game *)
+#define GAME_ENTRY_POINTS                                                               \
+    ENTRY(game_init, void, Game *)                /* first-time setup */                \
+    ENTRY(game_pre_reload, void, Game *)          /* release module-owned resources */  \
+    ENTRY(game_post_reload, void, Game *)         /* re-acquire them */                 \
+    ENTRY(game_fixed_update, void, Game *, float) /* one fixed step */                  \
+    ENTRY(game_draw, void, Game *, float)         /* render with interpolation alpha */ \
+    ENTRY(game_shutdown, void, Game *)
 
 /* Function types, needed by every configuration. */
-#define ENTRY(name, ret, ...) typedef ret (name##_t)(__VA_ARGS__);
+#define ENTRY(name, ret, ...) typedef ret(name##_t)(__VA_ARGS__);
 GAME_ENTRY_POINTS
 #undef ENTRY
 
@@ -109,9 +109,16 @@ void Game_UnloadModule(void);
 GAME_ENTRY_POINTS
 #undef ENTRY
 
-static inline bool Game_LoadModule(void) { return true; }
-static inline bool Game_MaybeHotReload(Game *game) { (void)game; return false; }
-static inline void Game_UnloadModule(void) { }
+static inline bool Game_LoadModule(void)
+{
+    return true;
+}
+static inline bool Game_MaybeHotReload(Game *game)
+{
+    (void)game;
+    return false;
+}
+static inline void Game_UnloadModule(void) {}
 
 #endif
 

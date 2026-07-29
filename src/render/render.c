@@ -26,8 +26,8 @@ VehicleDrawState render_interpolate_vehicle(const VehicleRenderState *state, flo
     out.positionM.y = lerpf(state->prevPositionM.y, state->currPositionM.y, t);
     out.headingRad = lerp_angle(state->prevHeadingRad, state->currHeadingRad, t);
     for (int i = 0; i < WHEEL_COUNT; i++) {
-        out.wheelAngleRad[i] = lerp_angle(state->prevWheelAngleRad[i],
-                                         state->currWheelAngleRad[i], t);
+        out.wheelAngleRad[i] =
+            lerp_angle(state->prevWheelAngleRad[i], state->currWheelAngleRad[i], t);
     }
     return out;
 }
@@ -38,11 +38,18 @@ void render_draw_game(struct Game *game, float interpolationAlpha)
     (void)game;
     (void)interpolationAlpha;
 }
-void render_pre_reload(void)  {}
+void render_pre_reload(void) {}
 void render_post_reload(void) {}
-void render_shutdown(void)    {}
-int  render_gallery_page_count(void) { return 0; }
-void render_draw_gallery(struct Game *game, int page) { (void)game; (void)page; }
+void render_shutdown(void) {}
+int render_gallery_page_count(void)
+{
+    return 0;
+}
+void render_draw_gallery(struct Game *game, int page)
+{
+    (void)game;
+    (void)page;
+}
 #else
 
 #include "raylib.h"
@@ -89,8 +96,8 @@ static void ensure_world_target(void)
 static Camera2D world_camera_for_target(Camera2D camera)
 {
     Camera2D cam = camera;
-    cam.offset = (Vector2){ (float)PIXEL_ART_TARGET_W * 0.5f,
-                            (float)PIXEL_ART_TARGET_H * 0.5f };
+    cam.offset =
+        (Vector2){ (float)PIXEL_ART_TARGET_W * 0.5f, (float)PIXEL_ART_TARGET_H * 0.5f };
 
     cam.offset.x = units_snap_camera_offset_axis(cam.offset.x, cam.target.x, cam.zoom);
     cam.offset.y = units_snap_camera_offset_axis(cam.offset.y, cam.target.y, cam.zoom);
@@ -103,8 +110,7 @@ static Camera2D world_camera_for_target(Camera2D camera)
 static void blit_world_target(void)
 {
     if (!s_worldTargetReady) return;
-    const Rectangle src = { 0.0f, 0.0f,
-                            (float)s_worldTarget.texture.width,
+    const Rectangle src = { 0.0f, 0.0f, (float)s_worldTarget.texture.width,
                             -(float)s_worldTarget.texture.height };
     const Rectangle dst = { 0.0f, 0.0f, (float)SCREEN_W, (float)SCREEN_H };
     DrawTexturePro(s_worldTarget.texture, src, dst, (Vector2){ 0.0f, 0.0f }, 0.0f, WHITE);
@@ -159,12 +165,12 @@ void render_draw_game(struct Game *game, float interpolationAlpha)
     /* Camera drift zoom: zoom out during a drift proportional to body sideslip.
      * Smoothed against render delta time and independent of physics determinism. */
     {
-        const float driftIntensity = clampf(
-            fabsf(game->derived.bodySideslipRad) / DRIFT_ZOOM_REF_RAD, 0.0f, 1.0f);
+        const float driftIntensity =
+            clampf(fabsf(game->derived.bodySideslipRad) / DRIFT_ZOOM_REF_RAD, 0.0f, 1.0f);
         float targetZoom = CAMERA_BASE_ZOOM - driftIntensity * CAMERA_ZOOM_RANGE;
         targetZoom = fmaxf(targetZoom, CAMERA_MIN_ZOOM);
-        game->camera.zoom = smooth_to(game->camera.zoom, targetZoom,
-                                      CAMERA_ZOOM_RATE, renderDt);
+        game->camera.zoom =
+            smooth_to(game->camera.zoom, targetZoom, CAMERA_ZOOM_RATE, renderDt);
     }
 
     ensure_world_target();

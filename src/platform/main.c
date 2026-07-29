@@ -54,26 +54,27 @@
 
 typedef struct {
     const char *name;
-    const char *scenario;   /* dev_scenario key driving the sim before the capture */
-    int         ticks;      /* fixed ticks to run before drawing */
-    bool        debugOverlay;
-    bool        lab;
-    int         scopePreset;
-    bool        showLoads;
-    bool        showResistance;
+    const char *scenario; /* dev_scenario key driving the sim before the capture */
+    int ticks;            /* fixed ticks to run before drawing */
+    bool debugOverlay;
+    bool lab;
+    int scopePreset;
+    bool showLoads;
+    bool showResistance;
 } CaptureScene;
 
 static const CaptureScene g_captureScenes[] = {
-    { "debug_overlay", "accel",           240, true,  false, DEV_SCOPE_PRESET_HANDLING, false, false },
-    { "tire_curves",   "skidpad",         600, true,  false, DEV_SCOPE_PRESET_GRIP,     false, false },
-    { "drift_hud",     "handbrake-entry", 500, true,  false, DEV_SCOPE_PRESET_HANDLING, false, false },
-    { "physics_lab",   "skidpad",         480, false, true,  DEV_SCOPE_PRESET_HANDLING, false, false },
-    { "accel_load",    "accel-load",      600, false, true,  DEV_SCOPE_PRESET_LOAD,     true,  true  },
-    { "brake_load",    "brake-load",      760, false, true,  DEV_SCOPE_PRESET_LOAD,     true,  true  },
-    { "skidpad_p3",    "skidpad",        1500, false, true,  DEV_SCOPE_PRESET_GRIP,     true,  true  },
-    { "lift_off",      "lift-off",        850, false, true,  DEV_SCOPE_PRESET_LOAD,     true,  true  },
-    { "transition_p3", "transition",      900, false, true,  DEV_SCOPE_PRESET_GRIP,     true,  true  },
-    { "catchable",     "catchable-drift", 820, false, true,  DEV_SCOPE_PRESET_GRIP,     true,  true  },
+    { "debug_overlay", "accel", 240, true, false, DEV_SCOPE_PRESET_HANDLING, false, false },
+    { "tire_curves", "skidpad", 600, true, false, DEV_SCOPE_PRESET_GRIP, false, false },
+    { "drift_hud", "handbrake-entry", 500, true, false, DEV_SCOPE_PRESET_HANDLING, false,
+      false },
+    { "physics_lab", "skidpad", 480, false, true, DEV_SCOPE_PRESET_HANDLING, false, false },
+    { "accel_load", "accel-load", 600, false, true, DEV_SCOPE_PRESET_LOAD, true, true },
+    { "brake_load", "brake-load", 760, false, true, DEV_SCOPE_PRESET_LOAD, true, true },
+    { "skidpad_p3", "skidpad", 1500, false, true, DEV_SCOPE_PRESET_GRIP, true, true },
+    { "lift_off", "lift-off", 850, false, true, DEV_SCOPE_PRESET_LOAD, true, true },
+    { "transition_p3", "transition", 900, false, true, DEV_SCOPE_PRESET_GRIP, true, true },
+    { "catchable", "catchable-drift", 820, false, true, DEV_SCOPE_PRESET_GRIP, true, true },
 };
 
 #define CAPTURE_SCENE_COUNT ((int)(sizeof(g_captureScenes) / sizeof(g_captureScenes[0])))
@@ -101,15 +102,15 @@ static void ensure_parent_directory(const char *path)
     *lastSeparator = '\0';
 
     /* Walk the path creating one level at a time; EEXIST is the normal case. */
-    for (char *c = buffer; ; c++) {
+    for (char *c = buffer;; c++) {
         const bool atSeparator = (*c == '/' || *c == '\\');
         if (!atSeparator && *c != '\0') continue;
 
         const char saved = *c;
         *c = '\0';
         if (buffer[0] != '\0' && _mkdir(buffer) != 0 && errno != EEXIST) {
-            fprintf(stderr, "CAPTURE: could not create directory '%s': %s\n",
-                    buffer, strerror(errno));
+            fprintf(stderr, "CAPTURE: could not create directory '%s': %s\n", buffer,
+                    strerror(errno));
         }
         *c = saved;
         if (saved == '\0') break;
@@ -125,14 +126,14 @@ static void platform_fixed_update(void *ctx, float dt)
 }
 
 typedef struct {
-    bool        smokeTest;
+    bool smokeTest;
     const char *captureScene;
     const char *outputPath;
-    int         width;
-    int         height;
-    int         ticks;          /* -1: use the scene's own tick count */
-    uint32_t    seed;
-    int         galleryPage;    /* 0: not a gallery capture; >=1: the 1-based page */
+    int width;
+    int height;
+    int ticks; /* -1: use the scene's own tick count */
+    uint32_t seed;
+    int galleryPage; /* 0: not a gallery capture; >=1: the 1-based page */
 } Options;
 
 static void print_usage(const char *argv0)
@@ -217,8 +218,8 @@ static int run_capture(Game *game, const Options *options)
 
     const int scenarioIndex = dev_scenario_find(scene->scenario);
     const int ticks = (options->ticks >= 0) ? options->ticks : scene->ticks;
-    const char *output = (options->outputPath != NULL)
-                       ? options->outputPath : "artifacts/screenshots/capture.png";
+    const char *output = (options->outputPath != NULL) ? options->outputPath
+                                                       : "artifacts/screenshots/capture.png";
 
     game_init(game);
     game->debugOverlay = scene->debugOverlay;
@@ -255,9 +256,8 @@ static int run_capture(Game *game, const Options *options)
     ensure_parent_directory(output);
     TakeScreenshot(output);
 
-    printf("CAPTURE: scene=%s ticks=%d size=%dx%d checksum=%08x -> %s\n",
-           scene->name, ticks, options->width, options->height,
-           game->stateChecksum, output);
+    printf("CAPTURE: scene=%s ticks=%d size=%dx%d checksum=%08x -> %s\n", scene->name, ticks,
+           options->width, options->height, game->stateChecksum, output);
     return 0;
 }
 
@@ -268,8 +268,8 @@ static int run_capture(Game *game, const Options *options)
  */
 static int run_gallery(Game *game, const Options *options)
 {
-    const char *output = (options->outputPath != NULL)
-                       ? options->outputPath : "artifacts/gallery-ingame/page.png";
+    const char *output = (options->outputPath != NULL) ? options->outputPath
+                                                       : "artifacts/gallery-ingame/page.png";
 
     game_init(game);
     game->dev.uiDeterministic = true;
@@ -283,8 +283,8 @@ static int run_gallery(Game *game, const Options *options)
     ensure_parent_directory(output);
     TakeScreenshot(output);
 
-    printf("GALLERY: page=%d size=%dx%d -> %s\n",
-           options->galleryPage, options->width, options->height, output);
+    printf("GALLERY: page=%d size=%dx%d -> %s\n", options->galleryPage, options->width,
+           options->height, output);
     return 0;
 }
 
@@ -304,6 +304,7 @@ int main(int argc, char **argv)
         return 1;
     }
 
+    // cppcheck-suppress knownConditionTrueFalse
     if (!Game_LoadModule()) {
         fprintf(stderr, "FATAL: could not load the game module '%s'. Run build.bat first.\n",
                 GAME_MODULE_NAME);
@@ -327,8 +328,7 @@ int main(int argc, char **argv)
     SetTargetFPS(TARGET_FPS);
 
     if (capture || gallery) {
-        const int status = capture ? run_capture(game, &options)
-                                   : run_gallery(game, &options);
+        const int status = capture ? run_capture(game, &options) : run_gallery(game, &options);
         game_shutdown(game);
         CloseWindow();
         Game_UnloadModule();
@@ -366,7 +366,8 @@ int main(int argc, char **argv)
         if (game->dev.paused) {
             if (game->dev.stepTicks > 0) {
                 const int stepping = (game->dev.stepTicks < MAX_PHYSICS_STEPS)
-                                   ? game->dev.stepTicks : MAX_PHYSICS_STEPS;
+                                         ? game->dev.stepTicks
+                                         : MAX_PHYSICS_STEPS;
                 game->dev.stepTicks -= stepping;
                 game->accumulatorS = 0.0f;
                 frameTimeS = FIXED_DT_S * (float)stepping;
@@ -375,11 +376,9 @@ int main(int argc, char **argv)
             }
         }
 
-        const TimestepResult step = timestep_advance(&game->accumulatorS,
-                                                     &game->physicsBacklogDrops,
-                                                     frameTimeS,
-                                                     platform_fixed_update,
-                                                     game);
+        const TimestepResult step =
+            timestep_advance(&game->accumulatorS, &game->physicsBacklogDrops, frameTimeS,
+                             platform_fixed_update, game);
         game->lastSubstepCount = step.substeps;
 
         game_draw(game, step.interpolationAlpha);
@@ -390,17 +389,19 @@ int main(int argc, char **argv)
                 ensure_parent_directory(SMOKE_TEST_SCREENSHOT);
                 TakeScreenshot(SMOKE_TEST_SCREENSHOT);
                 TRACELOG(LOG_INFO,
-                         "SMOKE: completed %d frames (substeps=%d backlog=%d alpha=%.3f checksum=%08x reloads=%d)",
+                         "SMOKE: completed %d frames (substeps=%d backlog=%d alpha=%.3f "
+                         "checksum=%08x reloads=%d)",
                          smoke_frames, game->lastSubstepCount, game->physicsBacklogDrops,
-                         (double)step.interpolationAlpha, game->stateChecksum, game->reloadCount);
+                         (double)step.interpolationAlpha, game->stateChecksum,
+                         game->reloadCount);
                 break;
             }
         }
     }
 
     if (smoke_test && smoke_frames < SMOKE_TEST_FRAMES) {
-        fprintf(stderr, "SMOKE: window closed early after %d / %d frames\n",
-                smoke_frames, SMOKE_TEST_FRAMES);
+        fprintf(stderr, "SMOKE: window closed early after %d / %d frames\n", smoke_frames,
+                SMOKE_TEST_FRAMES);
         exit_status = 1;
     }
 

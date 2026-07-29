@@ -24,13 +24,13 @@
 #include "game/input.h"
 
 typedef struct {
-    const char *name;           /* stable key, e.g. "skidpad" */
+    const char *name; /* stable key, e.g. "skidpad" */
     const char *description;
-    int         durationTicks;  /* recommended run length at FIXED_HZ */
-    uint32_t    seed;           /* recorded in telemetry and failure bundles */
+    int durationTicks; /* recommended run length at FIXED_HZ */
+    uint32_t seed;     /* recorded in telemetry and failure bundles */
 } DevScenario;
 
-int                dev_scenario_count(void);
+int dev_scenario_count(void);
 const DevScenario *dev_scenario_at(int index);
 
 /* Index of the scenario with this name, or -1. */

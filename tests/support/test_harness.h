@@ -22,13 +22,13 @@
  * valid until the owning scenario releases its Game.
  */
 typedef struct {
-    int         checks;
-    int         failures;
+    int checks;
+    int failures;
     const char *firstFailureText;
     const Game *bundleGame;
     const char *bundleTelemetryPath;
-    bool        bundleHasTelemetry;
-    uint32_t    bundleSeed;
+    bool bundleHasTelemetry;
+    uint32_t bundleSeed;
 } TestHarnessSnapshot;
 
 void test_harness_set_verbose(bool verbose);

@@ -13,10 +13,10 @@ void input_zero(Input *in)
 void input_clear_oneshots(Input *in)
 {
     if (in == NULL) return;
-    in->pausePressed     = false;
-    in->resetPressed     = false;
-    in->debugPressed     = false;
-    in->shiftUpPressed   = false;
+    in->pausePressed = false;
+    in->resetPressed = false;
+    in->debugPressed = false;
+    in->shiftUpPressed = false;
     in->shiftDownPressed = false;
     in->toggleAutoPressed = false;
 }
@@ -24,9 +24,8 @@ void input_clear_oneshots(Input *in)
 bool input_has_oneshot(const Input *in)
 {
     if (in == NULL) return false;
-    return in->pausePressed || in->resetPressed || in->debugPressed ||
-           in->shiftUpPressed || in->shiftDownPressed ||
-           in->toggleAutoPressed;
+    return in->pausePressed || in->resetPressed || in->debugPressed || in->shiftUpPressed ||
+           in->shiftDownPressed || in->toggleAutoPressed;
 }
 
 #if !defined(DRIFTY_HEADLESS)
@@ -62,11 +61,11 @@ void input_sample(Input *in)
 
     /* --- Keyboard sample --- */
     float kb_steer = 0.0f;
-    if (IsKeyDown(KEY_A) || IsKeyDown(KEY_LEFT))  kb_steer += 1.0f;
+    if (IsKeyDown(KEY_A) || IsKeyDown(KEY_LEFT)) kb_steer += 1.0f;
     if (IsKeyDown(KEY_D) || IsKeyDown(KEY_RIGHT)) kb_steer -= 1.0f;
     kb_steer = clampf(kb_steer, -1.0f, 1.0f);
-    const float kb_throttle  = (IsKeyDown(KEY_W) || IsKeyDown(KEY_UP))   ? 1.0f : 0.0f;
-    const float kb_brake     = (IsKeyDown(KEY_S) || IsKeyDown(KEY_DOWN)) ? 1.0f : 0.0f;
+    const float kb_throttle = (IsKeyDown(KEY_W) || IsKeyDown(KEY_UP)) ? 1.0f : 0.0f;
+    const float kb_brake = (IsKeyDown(KEY_S) || IsKeyDown(KEY_DOWN)) ? 1.0f : 0.0f;
     const float kb_handbrake = IsKeyDown(KEY_SPACE) ? 1.0f : 0.0f;
 
     /* --- Gamepad sample (gamepad 0 if available) --- */
@@ -84,36 +83,42 @@ void input_sample(Input *in)
         const float rt = GetGamepadAxisMovement(0, GAMEPAD_AXIS_RIGHT_TRIGGER);
         const float lt = GetGamepadAxisMovement(0, GAMEPAD_AXIS_LEFT_TRIGGER);
         gp_throttle = gamepad_normalize_trigger(rt, 0.05f);
-        gp_brake    = gamepad_normalize_trigger(lt, 0.05f);
+        gp_brake = gamepad_normalize_trigger(lt, 0.05f);
 
         /* Handbrake: right bumper (R1) or Circle. */
         gp_handbrake = (IsGamepadButtonDown(0, GAMEPAD_BUTTON_RIGHT_TRIGGER_1) ||
                         IsGamepadButtonDown(0, GAMEPAD_BUTTON_RIGHT_FACE_RIGHT))
-                       ? 1.0f : 0.0f;
+                           ? 1.0f
+                           : 0.0f;
     }
 
     /* --- Merge held controls: per-axis max magnitude wins. ---
      * This lets keyboard steering (always full ±1) override a partially-deflected
      * stick, while analog triggers blend naturally with digital keys via fmaxf. */
-    in->steer     = (fabsf(kb_steer) >= fabsf(gp_steer)) ? kb_steer : gp_steer;
-    in->throttle  = fmaxf(kb_throttle, gp_throttle);
-    in->brake     = fmaxf(kb_brake, gp_brake);
+    in->steer = (fabsf(kb_steer) >= fabsf(gp_steer)) ? kb_steer : gp_steer;
+    in->throttle = fmaxf(kb_throttle, gp_throttle);
+    in->brake = fmaxf(kb_brake, gp_brake);
     in->handbrake = fmaxf(kb_handbrake, gp_handbrake);
 
     /* --- One-shot commands: latched, OR'd from keyboard and gamepad. --- */
-    if (IsKeyPressed(KEY_P))                                   in->pausePressed     = true;
-    if (IsKeyPressed(KEY_R))                                   in->resetPressed     = true;
-    if (IsKeyPressed(KEY_F1))                                  in->debugPressed     = true;
-    if (IsKeyPressed(KEY_E))                                   in->shiftUpPressed   = true;
-    if (IsKeyPressed(KEY_Q))                                   in->shiftDownPressed = true;
-    if (IsKeyPressed(KEY_T))                                   in->toggleAutoPressed = true;
+    if (IsKeyPressed(KEY_P)) in->pausePressed = true;
+    if (IsKeyPressed(KEY_R)) in->resetPressed = true;
+    if (IsKeyPressed(KEY_F1)) in->debugPressed = true;
+    if (IsKeyPressed(KEY_E)) in->shiftUpPressed = true;
+    if (IsKeyPressed(KEY_Q)) in->shiftDownPressed = true;
+    if (IsKeyPressed(KEY_T)) in->toggleAutoPressed = true;
 
     if (IsGamepadAvailable(0)) {
-        if (IsGamepadButtonPressed(0, GAMEPAD_BUTTON_MIDDLE_RIGHT))      in->pausePressed      = true;  /* Options */
-        if (IsGamepadButtonPressed(0, GAMEPAD_BUTTON_MIDDLE_LEFT))       in->resetPressed      = true;  /* Create/Select */
-        if (IsGamepadButtonPressed(0, GAMEPAD_BUTTON_RIGHT_FACE_UP))     in->shiftUpPressed    = true;  /* Triangle/Y */
-        if (IsGamepadButtonPressed(0, GAMEPAD_BUTTON_RIGHT_FACE_LEFT))   in->shiftDownPressed  = true;  /* Square/X */
-        if (IsGamepadButtonPressed(0, GAMEPAD_BUTTON_LEFT_THUMB))        in->toggleAutoPressed = true;  /* L3 */
+        if (IsGamepadButtonPressed(0, GAMEPAD_BUTTON_MIDDLE_RIGHT))
+            in->pausePressed = true; /* Options */
+        if (IsGamepadButtonPressed(0, GAMEPAD_BUTTON_MIDDLE_LEFT))
+            in->resetPressed = true; /* Create/Select */
+        if (IsGamepadButtonPressed(0, GAMEPAD_BUTTON_RIGHT_FACE_UP))
+            in->shiftUpPressed = true; /* Triangle/Y */
+        if (IsGamepadButtonPressed(0, GAMEPAD_BUTTON_RIGHT_FACE_LEFT))
+            in->shiftDownPressed = true; /* Square/X */
+        if (IsGamepadButtonPressed(0, GAMEPAD_BUTTON_LEFT_THUMB))
+            in->toggleAutoPressed = true; /* L3 */
     }
 }
 

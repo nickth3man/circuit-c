@@ -12,22 +12,22 @@
 
 #include <stdbool.h>
 
-#include "raylib.h"    /* Vector2, Color */
-#include "core/config.h"    /* MAX_PARTICLES, PARTICLE_LIFE_S */
+#include "raylib.h"      /* Vector2, Color */
+#include "core/config.h" /* MAX_PARTICLES, PARTICLE_LIFE_S */
 
 typedef struct {
     Vector2 positionM;
     Vector2 velocityMps;
-    float   lifeS;
-    float   maxLifeS;
-    float   sizeM;
-    Color   color;
-    bool    active;
+    float lifeS;
+    float maxLifeS;
+    float sizeM;
+    Color color;
+    bool active;
 } Particle;
 
 typedef struct {
     Particle particles[MAX_PARTICLES];
-    int      cursor;           /* round-robin spawn index */
+    int cursor; /* round-robin spawn index */
 } ParticlePool;
 
 /* Zero the pool: all particles inactive, cursor at 0. */
@@ -39,7 +39,7 @@ void particle_pool_update(ParticlePool *pool, float dt);
 
 /* Spawn one particle at worldPosM, overwriting the oldest entry (round-robin cursor).
  * Advances the cursor; wraps at MAX_PARTICLES. */
-void particle_spawn(ParticlePool *pool, Vector2 worldPosM, Vector2 worldVelMps,
-                    float sizeM, Color color);
+void particle_spawn(ParticlePool *pool, Vector2 worldPosM, Vector2 worldVelMps, float sizeM,
+                    Color color);
 
 #endif /* DRIFTY_PARTICLE_H */

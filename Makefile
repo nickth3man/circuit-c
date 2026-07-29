@@ -406,16 +406,40 @@ verify: format-check lint analyze test-physics regression
 
 sanitize:
 ifeq ($(CLANG),)
-	@echo "SKIP sanitize: clang not installed. The Linux CI job runs ASan and UBSan on" >&2
-	@echo "every pull request; mingw-w64 GCC ships no sanitizer runtime." >&2
+ifeq ($(DRIFTY_HOST),ucrt64)
+	@echo "SKIP sanitize: clang not installed (pacman -S mingw-w64-ucrt-x86_64-clang)." >&2
+else
+	@echo "SKIP sanitize: clang not installed. Install it with the platform package manager." >&2
+endif
+	@echo "The required Linux CI job runs every scenario under ASan and UBSan." >&2
 else
 	@mkdir -p $(BUILD_SANITIZE)
+ifeq ($(DRIFTY_HOST),ucrt64)
+	@printf 'int main(void) { return 0; }\n' > $(BUILD_SANITIZE)/runtime_probe.c
+	@if ! $(CLANG) -fsanitize=address,undefined \
+	        $(BUILD_SANITIZE)/runtime_probe.c \
+	        -o $(BUILD_SANITIZE)/runtime_probe$(EXE_SUFFIX) >/dev/null 2>&1; then \
+	    rm -f $(BUILD_SANITIZE)/runtime_probe.c $(BUILD_SANITIZE)/runtime_probe$(EXE_SUFFIX); \
+	    echo "SKIP sanitize: this clang installation has no linkable ASan/UBSan runtime." >&2; \
+	    echo "MSYS2 provides those runtimes in CLANG64, not the supported UCRT64 environment." >&2; \
+	    echo "The required Linux CI job runs every scenario under ASan and UBSan." >&2; \
+	else \
+	    rm -f $(BUILD_SANITIZE)/runtime_probe.c $(BUILD_SANITIZE)/runtime_probe$(EXE_SUFFIX); \
+	    $(CLANG) $(CSTD) $(INCLUDES) -O1 -g -fsanitize=address,undefined \
+	        -fno-omit-frame-pointer -fno-sanitize-recover=all -DDRIFTY_HEADLESS \
+	        $(BUILD_DEFINES) -DDRIFTY_BUILD_MODE=\"sanitize\" \
+	        -DDRIFTY_BUILD_FLAGS=\"-O1,-g,-fsanitize=address+undefined\" \
+	        $(TEST_SRCS) -o $(BUILD_SANITIZE)/drifty_tests_asan$(EXE_SUFFIX) $(RAYLIB_CFLAGS) -lm && \
+	    ./$(BUILD_SANITIZE)/drifty_tests_asan$(EXE_SUFFIX); \
+	fi
+else
 	$(CLANG) $(CSTD) $(INCLUDES) -O1 -g -fsanitize=address,undefined \
 	    -fno-omit-frame-pointer -fno-sanitize-recover=all -DDRIFTY_HEADLESS \
 	    $(BUILD_DEFINES) -DDRIFTY_BUILD_MODE=\"sanitize\" \
 	    -DDRIFTY_BUILD_FLAGS=\"-O1,-g,-fsanitize=address+undefined\" \
 	    $(TEST_SRCS) -o $(BUILD_SANITIZE)/drifty_tests_asan$(EXE_SUFFIX) $(RAYLIB_CFLAGS) -lm
 	./$(BUILD_SANITIZE)/drifty_tests_asan$(EXE_SUFFIX)
+endif
 endif
 
 # -------------------------------------------------------------------------- coverage --
@@ -443,7 +467,7 @@ coverage:
 	$(CC) --coverage $$objects -o $(BUILD_COVERAGE)/drifty_tests_cov$(EXE_SUFFIX) -lm
 	./$(BUILD_COVERAGE)/drifty_tests_cov$(EXE_SUFFIX)
 ifeq ($(GCOVR),)
-	@echo "SKIP gcovr report: gcovr not installed (pip install gcovr). Raw .gcda files kept."
+	@echo "SKIP gcovr report: gcovr not installed (pacman -S mingw-w64-ucrt-x86_64-gcovr). Raw .gcda files kept."
 else
 	$(GCOVR) --root . --filter 'src/.*' --exclude 'src/dev/dev_lab.c' \
 	    --txt --html-details $(BUILD_COVERAGE)/index.html \

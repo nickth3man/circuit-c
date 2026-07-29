@@ -1580,7 +1580,7 @@ hot reload becomes a convenience rather than a necessity.
 For physics work specifically, the faster loop skips the window entirely:
 
 ```bash
-./build.sh && ./drifty_tests --scenario skidpad
+./build.sh --tests && ./build/tests/drifty_tests.exe --scenario skidpad
 ```
 
 This terminates, emits CSV telemetry, and diffs against committed baselines. Prefer it for

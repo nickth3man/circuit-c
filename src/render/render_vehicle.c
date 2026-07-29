@@ -54,12 +54,12 @@
  * gallery builds and discards one per cell, so reviewing a hundred vehicles never holds more
  * than a single car's textures on the GPU. */
 typedef struct {
-    bool      ready;
-    float     pxPerM;          /* texels per metre these were baked at */
+    bool ready;
+    float pxPerM; /* texels per metre these were baked at */
     Texture2D body;
-    Vector2   bodyOriginPx;
+    Vector2 bodyOriginPx;
     Texture2D wheel[WHEEL_COUNT];
-    Vector2   wheelOriginPx[WHEEL_COUNT];
+    Vector2 wheelOriginPx[WHEEL_COUNT];
 } CarSprites;
 
 static void car_sprites_unload(CarSprites *s)
@@ -115,11 +115,11 @@ static bool car_sprites_bake(CarSprites *out, const CarVisual *visual, float pxP
     if (out == NULL || visual == NULL) return false;
     car_sprites_unload(out);
 
-    bool ok = upload_part(visual, CAR_RASTER_PART_BODY, 0, pxPerM,
-                          &out->body, &out->bodyOriginPx);
+    bool ok =
+        upload_part(visual, CAR_RASTER_PART_BODY, 0, pxPerM, &out->body, &out->bodyOriginPx);
     for (int i = 0; i < WHEEL_COUNT && ok; i++) {
-        ok = upload_part(visual, CAR_RASTER_PART_WHEEL, i, pxPerM,
-                         &out->wheel[i], &out->wheelOriginPx[i]);
+        ok = upload_part(visual, CAR_RASTER_PART_WHEEL, i, pxPerM, &out->wheel[i],
+                         &out->wheelOriginPx[i]);
     }
     if (!ok) {
         car_sprites_unload(out);
@@ -133,13 +133,13 @@ static bool car_sprites_bake(CarSprites *out, const CarVisual *visual, float pxP
 /* Draw a baked part about its documented pivot, `scale` destination pixels per texel.
  * `rotationRad` is a heading in world terms; units_heading_to_rotation_deg handles the
  * screen-space Y flip. */
-static void draw_car_part(Texture2D tex, Vector2 originPx, Vector2 centrePx,
-                          float rotationRad, float scale)
+static void draw_car_part(Texture2D tex, Vector2 originPx, Vector2 centrePx, float rotationRad,
+                          float scale)
 {
     if (tex.id == 0) return;
     const Rectangle src = { 0.0f, 0.0f, (float)tex.width, (float)tex.height };
-    const Rectangle dst = { centrePx.x, centrePx.y,
-                            (float)tex.width * scale, (float)tex.height * scale };
+    const Rectangle dst = { centrePx.x, centrePx.y, (float)tex.width * scale,
+                            (float)tex.height * scale };
     /* DrawTexturePro measures `origin` in DESTINATION units, so the pivot scales with the
      * sprite. Getting this wrong shifts the car off its own centre of mass as the scale
      * changes, which is exactly the kind of bug a still screenshot hides. */
@@ -150,9 +150,8 @@ static void draw_car_part(Texture2D tex, Vector2 originPx, Vector2 centrePx,
 /* The one place a car is composited, used by the running game and by the gallery alike.
  * `steerRad` is per wheel and is added to the derived static alignment; pass NULL for a
  * straight-ahead pose. `scale` is destination pixels per texel. */
-static void car_sprites_draw(const CarSprites *s, const CarVisual *visual,
-                             Vector2 centrePx, float headingRad,
-                             const float *steerRad, float scale)
+static void car_sprites_draw(const CarSprites *s, const CarVisual *visual, Vector2 centrePx,
+                             float headingRad, const float *steerRad, float scale)
 {
     if (s == NULL || !s->ready || visual == NULL) return;
 
@@ -170,8 +169,7 @@ static void car_sprites_draw(const CarSprites *s, const CarVisual *visual,
          * left in body and world space and up the screen, hence the negated Y. */
         const float wx = hubM.x * c - hubM.y * sn;
         const float wy = hubM.x * sn + hubM.y * c;
-        const Vector2 hubPx = { centrePx.x + wx * destPxPerM,
-                                centrePx.y - wy * destPxPerM };
+        const Vector2 hubPx = { centrePx.x + wx * destPxPerM, centrePx.y - wy * destPxPerM };
 
         const float steer = (steerRad != NULL) ? steerRad[i] : 0.0f;
         draw_car_part(s->wheel[i], s->wheelOriginPx[i], hubPx,
@@ -182,8 +180,8 @@ static void car_sprites_draw(const CarSprites *s, const CarVisual *visual,
 /* ---- the running game's single cached car ---- */
 
 static CarSprites s_car;
-static uint32_t   s_carTexKey = 0u;
-static float      s_carTexPxPerM = 0.0f;
+static uint32_t s_carTexKey = 0u;
+static float s_carTexPxPerM = 0.0f;
 
 /* Rebake if and only if the picture or the scale changed. */
 static void ensure_car_textures(const CarVisual *visual, float pxPerM)
@@ -216,7 +214,7 @@ void render_vehicle_draw(const Game *game, const VehicleDrawState *draw)
 {
     const float ppm = game->renderPixelsPerMeter;
 
-    CarVisual visual;                       /* stack-local by design: never stored in Game */
+    CarVisual visual; /* stack-local by design: never stored in Game */
     car_visual_derive(&game->spec, &visual);
     ensure_car_textures(&visual, car_bake_px_per_m(ppm));
     if (!s_car.ready) return;
@@ -225,15 +223,14 @@ void render_vehicle_draw(const Game *game, const VehicleDrawState *draw)
      * is unmistakable at top-down scale; the physics angle itself is untouched. Rear wheels
      * carry no steer, but they do carry whatever static alignment the grammar derived for
      * them, which car_sprites_draw adds for every wheel. */
-    const float steerVisualGain = 1.25f;  /* render-only amplification, documented above */
+    const float steerVisualGain = 1.25f; /* render-only amplification, documented above */
     float steer[WHEEL_COUNT];
     for (int i = 0; i < WHEEL_COUNT; i++) {
         const bool isFront = (i == WHEEL_FRONT_LEFT || i == WHEEL_FRONT_RIGHT);
         steer[i] = isFront ? draw->wheelAngleRad[i] * steerVisualGain : 0.0f;
     }
 
-    car_sprites_draw(&s_car, &visual,
-                     units_world_to_render_px(draw->positionM, ppm),
+    car_sprites_draw(&s_car, &visual, units_world_to_render_px(draw->positionM, ppm),
                      draw->headingRad, steer, CAR_WORLD_TEXEL_SCALE);
 }
 
@@ -269,10 +266,10 @@ void render_vehicle_resources_reset(void)
  * what sets the cell width. A car wider than its cell overhangs rather than being rescaled —
  * a visible, honest overflow rather than a quiet lie about scale.
  */
-#define GALLERY_COLS      4
-#define GALLERY_ROWS      4
-#define GALLERY_PER_PAGE  (GALLERY_COLS * GALLERY_ROWS)
-#define GALLERY_SCALE     2.0f
+#define GALLERY_COLS 4
+#define GALLERY_ROWS 4
+#define GALLERY_PER_PAGE (GALLERY_COLS * GALLERY_ROWS)
+#define GALLERY_SCALE 2.0f
 /* Front wheels turned so lock, Ackermann and static toe are all legible in a still image. */
 #define GALLERY_STEER_RAD (8.0f * DRIFTY_DEG2RAD)
 
@@ -292,8 +289,8 @@ void render_draw_gallery(struct Game *game, int page)
     if (page < 1 || page > pageCount) {
         BeginDrawing();
         ClearBackground((Color){ 21, 24, 29, 255 });
-        DrawText(TextFormat("gallery page %d is out of range (1..%d)", page, pageCount),
-                 24, 24, 20, COL_TEXT);
+        DrawText(TextFormat("gallery page %d is out of range (1..%d)", page, pageCount), 24, 24,
+                 20, COL_TEXT);
         EndDrawing();
         return;
     }
@@ -307,8 +304,8 @@ void render_draw_gallery(struct Game *game, int page)
      * Every car came out as a block of glyphs. So: bake the page, draw the page, then release
      * once the frame has actually been submitted. */
     static CarSprites cells[GALLERY_PER_PAGE];
-    static CarVisual  visuals[GALLERY_PER_PAGE];
-    bool              baked[GALLERY_PER_PAGE];
+    static CarVisual visuals[GALLERY_PER_PAGE];
+    bool baked[GALLERY_PER_PAGE];
 
     const int first = (page - 1) * GALLERY_PER_PAGE;
     const int count = car_corpus_count();
@@ -352,8 +349,8 @@ void render_draw_gallery(struct Game *game, int page)
         if (baked[slot]) {
             const Vector2 centrePx = { (float)cellX + (float)cellW * 0.5f,
                                        (float)cellY + (float)cellH * 0.5f - 8.0f };
-            car_sprites_draw(&cells[slot], &visuals[slot], centrePx, 0.0f,
-                             steer, GALLERY_SCALE);
+            car_sprites_draw(&cells[slot], &visuals[slot], centrePx, 0.0f, steer,
+                             GALLERY_SCALE);
         }
 
         char id[128], note[192];
@@ -363,9 +360,8 @@ void render_draw_gallery(struct Game *game, int page)
         DrawText(note, cellX + 8, cellY + cellH - 20, 10, COL_TEXT_DIM);
     }
 
-    DrawText(TextFormat("vehicle corpus - page %d / %d - %d vehicles - %.1f px/m x%d",
-                        page, pageCount, count,
-                        (double)bakePxPerM, (int)GALLERY_SCALE),
+    DrawText(TextFormat("vehicle corpus - page %d / %d - %d vehicles - %.1f px/m x%d", page,
+                        pageCount, count, (double)bakePxPerM, (int)GALLERY_SCALE),
              12, 8, 12, COL_TEXT);
 
     EndDrawing();

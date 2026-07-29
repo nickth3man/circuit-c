@@ -11,30 +11,30 @@
 #ifndef DRIFTY_TRACK_H
 #define DRIFTY_TRACK_H
 
-#include "raylib.h"    /* Vector2 */
-#include "physics/vehicle.h"   /* SurfaceId */
+#include "raylib.h"          /* Vector2 */
+#include "physics/vehicle.h" /* SurfaceId */
 
 typedef struct {
-    Vector2   centerM;         /* centerline point, world meters */
-    float     halfWidthM;      /* segment half-width, meters */
-    SurfaceId surfaceId;       /* surface inside this segment */
+    Vector2 centerM;     /* centerline point, world meters */
+    float halfWidthM;    /* segment half-width, meters */
+    SurfaceId surfaceId; /* surface inside this segment */
 } TrackNode;
 
 typedef struct {
-    TrackNode *nodes;          /* heap-allocated, platform-owned, survives reload */
-    int        count;
-    SurfaceId  offTrackSurfaceId;  /* surface returned when point is off-track */
+    TrackNode *nodes; /* heap-allocated, platform-owned, survives reload */
+    int count;
+    SurfaceId offTrackSurfaceId; /* surface returned when point is off-track */
     /* Parking lot mode: rectangular open area instead of laned road. */
-    bool  isParkingLot;
+    bool isParkingLot;
     float lotMinXM, lotMaxXM, lotMinYM, lotMaxYM;
-    int        nextCheckpoint;     /* index of the next gate the car must cross */
-    int        lap;               /* completed laps */
-    float      lapTimerS;         /* seconds elapsed since the last checkpoint/lap */
-    float      lastLapTimeS;      /* time of the most recently completed lap */
+    int nextCheckpoint; /* index of the next gate the car must cross */
+    int lap;            /* completed laps */
+    float lapTimerS;    /* seconds elapsed since the last checkpoint/lap */
+    float lastLapTimeS; /* time of the most recently completed lap */
 } Track;
 
-void      track_init(Track *track);        /* allocate + populate the oval */
-void      track_free(Track *track);        /* free nodes, zero the struct */
+void track_init(Track *track); /* allocate + populate the oval */
+void track_free(Track *track); /* free nodes, zero the struct */
 SurfaceId Track_SurfaceAt(const Track *track, Vector2 pointM);
 
 /* Advance checkpoint/lap state based on the car crossing a gate this tick.

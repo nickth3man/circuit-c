@@ -59,7 +59,7 @@ static inline float units_pixels_to_meters(float pixels, float pixelsPerMeter)
 static inline Vector2 units_world_to_render_px(Vector2 worldM, float pixelsPerMeter)
 {
     Vector2 px;
-    px.x =  worldM.x * pixelsPerMeter;
+    px.x = worldM.x * pixelsPerMeter;
     px.y = -worldM.y * pixelsPerMeter;
     return px;
 }
@@ -73,7 +73,7 @@ static inline Vector2 units_render_px_to_world(Vector2 px, float pixelsPerMeter)
         worldM.y = 0.0f;
         return worldM;
     }
-    worldM.x =  px.x / pixelsPerMeter;
+    worldM.x = px.x / pixelsPerMeter;
     worldM.y = -px.y / pixelsPerMeter;
     return worldM;
 }
