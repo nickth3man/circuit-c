@@ -26,7 +26,6 @@ static const SurfaceSpec kSurfaces[SURFACE_COUNT] = {
         .tireBScale                  = 1.00f,
         .rollingResistanceCoefficient = 0.015f,
         .looseSurfaceDragN           = 0.0f,
-        .sinkFactor                  = 0.0f,
     },
     [SURFACE_GRAVEL] = {
         .name                        = "Gravel",
@@ -35,7 +34,6 @@ static const SurfaceSpec kSurfaces[SURFACE_COUNT] = {
         .tireBScale                  = 0.65f,
         .rollingResistanceCoefficient = 0.045f,
         .looseSurfaceDragN           = 250.0f,
-        .sinkFactor                  = 0.0f,
     },
     [SURFACE_GRASS] = {
         .name                        = "Grass",
@@ -44,7 +42,6 @@ static const SurfaceSpec kSurfaces[SURFACE_COUNT] = {
         .tireBScale                  = 0.70f,
         .rollingResistanceCoefficient = 0.080f,
         .looseSurfaceDragN           = 600.0f,
-        .sinkFactor                  = 0.0f,
     },
     [SURFACE_SNOW] = {
         .name                        = "Snow",
@@ -53,7 +50,6 @@ static const SurfaceSpec kSurfaces[SURFACE_COUNT] = {
         .tireBScale                  = 0.50f,
         .rollingResistanceCoefficient = 0.050f,
         .looseSurfaceDragN           = 200.0f,
-        .sinkFactor                  = 0.0f,
     },
 };
 

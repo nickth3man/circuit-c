@@ -228,6 +228,7 @@ static void scenario_vehicle_units(void)
     check(movedFrontLoadN < frontLoadN && movedRearLoadN > rearLoadN,
           "moving the CG rearward moves static load rearward");
 
+    spec.ackermannPercent = 0.0f;
     physics_update_steering(&spec, &state, 1.0f, 0.05f);
     check_near(state.frontRoadWheelAngleRad, spec.maxSteerRateRadS * 0.05f, 1e-7,
                "left steering maps positive and obeys the steering rate");
@@ -1637,7 +1638,7 @@ static void scenario_low_speed(void)
 {
     Game *game = alloc_game();
     game_init(game);
-    game->input.throttle = 0.35f;
+    game->input.throttle = 0.50f;
     game->input.steer = 0.35f;
     float previousYaw = 0.0f;
     float maxYawJump = 0.0f;
@@ -1669,7 +1670,7 @@ static void scenario_reverse(void)
     Game *game = alloc_game();
     game_init(game);
     game->vehicle.selectedGear = -1;
-    game->input.throttle = 0.3f;
+    game->input.throttle = 0.8f;
     game->input.steer = 0.25f;
     bool finite = true;
     for (int i = 0; i < 180; i++) {

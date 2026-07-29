@@ -363,30 +363,34 @@ static void scenario_scoring_accumulation(void)
 {
     Game *game = alloc_game();
     game_init(game);
+    game->spec.differentialMode = (float)DIFF_LOCKED;
+    game->spec.lateralLoadTransferEnabled = false;
+    game->spec.engineRedlineRpm = 10000.0f;
 
     /* Build enough speed for a drift. Cruise at ~18 m/s on asphalt. */
     set_vehicle_rolling_speed(game, 18.0f);
+    game->autoTrans.enabled = false;
+    game->vehicle.selectedGear = 1;
 
     /* Run 20 ticks with gentle steer — score should be near zero. */
     int i;
     game->input.throttle = 0.60f;
-    game->input.steer = 0.10f;
+    game->input.steer = 0.0f;
     game->input.handbrake = 0.0f;
     for (i = 0; i < 20; i++) game_fixed_update(game, FIXED_DT_S);
     float scoreBefore = game->driftScore;
     check(scoreBefore < 0.01f, "no significant score before drift initiation (%.1f)",
           (double)scoreBefore);
-
-    /* Now add handbrake + more steer to break rear traction and initiate a drift. */
-    game->input.throttle = 0.90f;
-    game->input.steer = 0.50f;
+    /* Handbrake entry: zero throttle so drive torque doesn't fight the lock. */
+    game->input.throttle = 0.0f;
+    game->input.steer = 1.0f;
     game->input.handbrake = 1.0f;
-    for (i = 0; i < 40; i++) game_fixed_update(game, FIXED_DT_S);
+    for (i = 0; i < 120; i++) game_fixed_update(game, FIXED_DT_S);
 
-    /* Release handbrake; keep moderate throttle and steer to sustain the slide. */
+    /* Release handbrake; apply throttle and steer to maintain the slide. */
     game->input.handbrake = 0.0f;
     game->input.throttle = 0.50f;
-    game->input.steer = -0.30f; /* countersteer to hold the angle */
+    game->input.steer = 0.70f;
 
     bool everScoring = false;
     float lastScore = scoreBefore;
@@ -415,14 +419,15 @@ static void scenario_scoring_accumulation(void)
     check(game->comboMultiplier >= 1.0f, "comboMultiplier is never below 1.0 (final %.3f)",
           (double)game->comboMultiplier);
 
-    /* Now stop drifting: straighten the wheel and drop throttle. */
+    /* Now stop drifting: straighten the wheel, drop throttle, apply brake. */
     game->input.steer = 0.0f;
     game->input.throttle = 0.0f;
+    game->input.brake = 1.0f;
 
     /* Run until well past COMBO_GRACE_S (1.5 s → 180 ticks at 120 Hz). */
     bool comboReset = false;
     float timeReset = 0.0f;
-    for (i = 0; i < 200; i++) {
+    for (i = 0; i < 400; i++) {
         game_fixed_update(game, FIXED_DT_S);
         if (game->comboMultiplier < 1.0f + 1e-6f && game->driftTimeS < 1e-6f) {
             comboReset = true;

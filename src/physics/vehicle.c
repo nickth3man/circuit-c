@@ -231,7 +231,7 @@ void vehicle_spec_set_default(VehicleSpec *spec)
     spec->differentialBiasRatio = DIFFERENTIAL_BIAS_RATIO;
     spec->differentialPreloadNm = DIFFERENTIAL_PRELOAD_NM;
     spec->rollStiffnessFrontFraction = ROLL_STIFFNESS_FRONT_FRACTION;
-    spec->lateralLoadTransferEnabled = false;
+    spec->lateralLoadTransferEnabled = true;
     {
         const float ratios[MAX_GEARS] = GEAR_RATIOS;
         memcpy(spec->gearRatios, ratios, sizeof(ratios));

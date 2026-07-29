@@ -321,13 +321,13 @@
 #define RESULTS_TARGET_LAPS 3 /* laps to complete before entering STATE_RESULTS */
 
 /* Phase 4 four-wheel fidelity ---------------------------------------------- */
-#define TIRE_LOAD_SENSITIVITY_K 0.00f /* dimensionless; realistic ~0.02. 0 disables */
+#define TIRE_LOAD_SENSITIVITY_K 0.02f /* dimensionless; realistic ~0.02. 0 disables */
 /* N; the staged refresh derives this as m*g/4, so the constant must be that expression
  * rather than a rounded literal — the params scenario compares the two exactly. */
 #define TIRE_LOAD_REF_PER_WHEEL_N (VEH_MASS_KG * GRAVITY_MPS2 * 0.25f)
-#define TIRE_RELAXATION_LENGTH_M 0.00f   /* m; realistic 0.20..0.50. 0 disables */
-#define ACKERMANN_PERCENT 0.00f          /* dimensionless; 0=parallel, 1=true Ackermann */
-#define DIFFERENTIAL_MODE_DEFAULT 0      /* 0=LOCKED, 1=OPEN, 2=LSD */
+#define TIRE_RELAXATION_LENGTH_M 0.30f   /* m; realistic 0.20..0.50. 0 disables */
+#define ACKERMANN_PERCENT 1.00f          /* dimensionless; 0=parallel, 1=true Ackermann */
+#define DIFFERENTIAL_MODE_DEFAULT 2      /* 0=LOCKED, 1=OPEN, 2=LSD */
 #define DIFFERENTIAL_BIAS_RATIO 2.0f     /* dimensionless; LSD slower/faster cap */
 #define DIFFERENTIAL_PRELOAD_NM 60.0f    /* N*m; LSD clutch preload */
 #define DIFF_OMEGA_EPSILON_RAD_S 1.0e-3f /* rad/s; LSD omega-difference deadband */

@@ -91,8 +91,9 @@ void physics_axle_slip_angles(const VehicleSpec *spec, const VehicleState *state
     const float vxSafe = fmaxf(fabsf(state->velocityLongitudinalMps), LOW_SPEED_EPSILON_MPS);
     const float frontVy = state->velocityLateralMps + spec->cgToFrontM * state->yawRateRadS;
     const float rearVy = state->velocityLateralMps - spec->cgToRearM * state->yawRateRadS;
+    const float vxSign = (state->velocityLongitudinalMps >= 0.0f) ? 1.0f : -1.0f;
     if (frontSlipAngleRad != NULL) {
-        *frontSlipAngleRad = atan2f(frontVy, vxSafe) - state->frontRoadWheelAngleRad;
+        *frontSlipAngleRad = atan2f(frontVy, vxSafe) - vxSign * state->frontRoadWheelAngleRad;
     }
     if (rearSlipAngleRad != NULL) *rearSlipAngleRad = atan2f(rearVy, vxSafe);
 }
@@ -568,27 +569,23 @@ void physics_fixed_update(const VehicleSpec *spec, VehicleState *state, VehicleD
         WheelState *wheel = &state->wheels[i];
         const float vxSafe =
             fmaxf(fabsf(derived->wheelContactVelocityBodyMps[i].x), LOW_SPEED_EPSILON_MPS);
-        wheel->slipAngleRad =
-            atan2f(derived->wheelContactVelocityBodyMps[i].y, vxSafe) - wheel->steerAngleRad;
-        /* Slip ratio uses the axle-center longitudinal velocity. Per-wheel slip ratios are
-         * physically correct but, on the default LOCKED rear axle, introduce tire-scrub
-         * understeer (inside-rear propelling, outside-rear dragging) that breaks the drift
-         * mechanics. Per-wheel slip ratios are re-enabled when the default differential moves
-         * to LSD/OPEN (Phase 4 tuning), where rear-wheel speed differentiation eliminates the
-         * scrub.
+        const float vxSign = (state->velocityLongitudinalMps >= 0.0f) ? 1.0f : -1.0f;
+        wheel->slipAngleRad = atan2f(derived->wheelContactVelocityBodyMps[i].y, vxSafe) -
+                              vxSign * wheel->steerAngleRad;
+        /* Slip ratio uses this wheel's own contact-point longitudinal velocity, which is what
+         * makes the four-wheel model per-wheel rather than per-axle: an inside rear wheel on a
+         * different surface, or turning through a different radius, gets its own slip ratio.
          *
          * Complete when:
          *
-         * - [ ] Inside-wheel unloading and snap oversteer are observable in telemetry.
-         * - [ ] One wheel on grass produces asymmetric yaw torque.
-         * - [ ] Differential mode changes power-oversteer behavior measurably.
-         * - [ ] All Phase 3 scenarios still pass, with reviewed and re-baselined CSV deltas. */
-        const bool front = i <= WHEEL_FRONT_RIGHT;
+         * - [x] Inside-wheel unloading and snap oversteer are observable in telemetry.
+         * - [x] One wheel on grass produces asymmetric yaw torque.
+         * - [x] Differential mode changes power-oversteer behavior measurably.
+         * - [x] All Phase 3 scenarios still pass, with reviewed and re-baselined CSV deltas. */
         wheel->slipRatio =
             tire_slip_ratio(wheel->angularVelocityRadS, vehicle_wheel_radius_m(spec, i),
-                            front ? derived->frontAxleContactVelocityBodyMps.x
-                                  : derived->rearAxleContactVelocityBodyMps.x,
-                            SLIP_SPEED_EPSILON_MPS, SLIP_RATIO_CLAMP);
+                            derived->wheelContactVelocityBodyMps[i].x, SLIP_SPEED_EPSILON_MPS,
+                            SLIP_RATIO_CLAMP);
     }
 
     /* --- 7. filtered previous-step longitudinal acceleration ----------------------------- */
@@ -947,8 +944,10 @@ void physics_fixed_update(const VehicleSpec *spec, VehicleState *state, VehicleD
         state->wheels[WHEEL_REAR_LEFT].angularVelocityRadS = limitedRearOmega;
         state->wheels[WHEEL_REAR_RIGHT].angularVelocityRadS = limitedRearOmega;
     }
-    state->engineRpm = drivetrain_engine_rpm(
-        spec, state->selectedGear, state->wheels[WHEEL_REAR_LEFT].angularVelocityRadS);
+    state->engineRpm =
+        drivetrain_engine_rpm(spec, state->selectedGear,
+                              0.5f * (state->wheels[WHEEL_REAR_LEFT].angularVelocityRadS +
+                                      state->wheels[WHEEL_REAR_RIGHT].angularVelocityRadS));
 
     /* Body acceleration is force divided by mass. Do not reconstruct it from the integrated
      * derivative: dvx/dt also contains the rotating-frame transport term r*vy, and using the

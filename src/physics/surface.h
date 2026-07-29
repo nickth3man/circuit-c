@@ -19,7 +19,6 @@ typedef struct {
     float tireBScale;     /* dimensionless; scales tire stiffness B (soft buildup < 1) */
     float rollingResistanceCoefficient; /* dimensionless */
     float looseSurfaceDragN; /* extra drag force, newtons, opposing contact velocity */
-    float sinkFactor;        /* dimensionless 0..1, reserved for terrain resistance */
 } SurfaceSpec;
 
 /* Never returns NULL; out-of-range id is clamped to SURFACE_ASPHALT. */

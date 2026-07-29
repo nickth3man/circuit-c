@@ -79,7 +79,27 @@ DrivetrainTorques drivetrain_calculate_torques(const VehicleSpec *spec, int sele
     const float rearAngularVelocityRadS = 0.5f * (rearOmegaLeftRadS + rearOmegaRightRadS);
     out.totalGearRatio = drivetrain_total_gear_ratio(spec, selectedGear);
     const float rpm = drivetrain_engine_rpm(spec, selectedGear, rearAngularVelocityRadS);
-    const float curveTorqueNm = drivetrain_engine_torque_at_rpm(spec, rpm);
+    float curveTorqueNm = drivetrain_engine_torque_at_rpm(spec, rpm);
+
+    /* Rev limiter: drive torque tapers to zero over the last 500 rpm before redline. The
+     * curve sampler clamps to its last point, and the curve's value AT redline is nonzero,
+     * so without a limiter a wheel that breaks loose free-revs the carrier at full burnout
+     * torque indefinitely - measured: rear omegas run to 944 rad/s (14x redline wheel
+     * speed in gear 1) during a 4 s launch with an LSD, storing ~1 MJ of wheelspin that
+     * the next grip recovery dumps into the body. The LOCKED-only omega clamp used to
+     * mask this. A progressive taper, not a hard cut, so the carrier settles smoothly
+     * against the limiter instead of banging full/zero torque each tick (the bang-bang
+     * cycle oscillated longitudinal load transfer). Engine braking is unaffected: it is
+     * subtracted separately below. */
+    if (out.totalGearRatio != 0.0f) {
+        const float rawRpm =
+            fabsf(rearAngularVelocityRadS) * fabsf(out.totalGearRatio) * 60.0f / DRIFTY_TWO_PI;
+        const float limiterStartRpm = spec->engineRedlineRpm - 500.0f;
+        if (rawRpm > limiterStartRpm) {
+            const float fade = clampf((spec->engineRedlineRpm - rawRpm) / 500.0f, 0.0f, 1.0f);
+            curveTorqueNm *= fade;
+        }
+    }
 
 /* The simple engine model has no clutch state. Suppressing closed-throttle engine
      * braking while the axle is stationary prevents idle torque from launching the car
