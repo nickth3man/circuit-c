@@ -10,7 +10,7 @@
  *   - tick / position / wheel speed / RPM / gear / checksum survive the swap
  *   - stale load copies are cleaned up after unload
  *
- * Failed-compile preservation of build/game.dll is exercised by
+ * Failed-compile preservation of build/dev/game.dll is exercised by
  * scripts/validate_hotreload.sh (the harness itself must not depend on a live
  * interactive drifty.exe).
  */
@@ -32,11 +32,11 @@
 #undef near
 #undef far
 
-#include "config.h"
-#include "game.h"
-#include "hotreload.h"
-#include "input.h"
-#include "timestep.h"
+#include "core/config.h"
+#include "game/game.h"
+#include "platform/hotreload.h"
+#include "game/input.h"
+#include "platform/timestep.h"
 
 static void fixed_update_adapter(void *ctx, float dt)
 {
@@ -57,7 +57,7 @@ static void run_fixed_ticks(Game *game, int ticks)
 static int count_load_copies(void)
 {
     WIN32_FIND_DATAA find;
-    HANDLE search = FindFirstFileA("build\\game_load_*.dll", &find);
+    HANDLE search = FindFirstFileA("build\\dev\\game_load_*.dll", &find);
     int count = 0;
     if (search == INVALID_HANDLE_VALUE) return 0;
     do {
@@ -123,7 +123,7 @@ int main(void)
     }
 
     /* Keep a full PE backup so the corrupt-candidate path can restore cleanly. */
-    if (!CopyFileA(GAME_MODULE_NAME, "build/game_harness_backup.dll", FALSE)) {
+    if (!CopyFileA(GAME_MODULE_NAME, "build/dev/game_harness_backup.dll", FALSE)) {
         fprintf(stderr, "harness: could not backup %s\n", GAME_MODULE_NAME);
         Game_UnloadModule();
         free(game);
@@ -169,7 +169,7 @@ int main(void)
             return 1;
         }
 
-        if (!CopyFileA("build/game_harness_backup.dll", GAME_MODULE_NAME, FALSE)) {
+        if (!CopyFileA("build/dev/game_harness_backup.dll", GAME_MODULE_NAME, FALSE)) {
             fprintf(stderr, "harness: failed to restore module backup\n");
             Game_UnloadModule();
             free(game);
@@ -180,7 +180,7 @@ int main(void)
     /* Publish a fresh, valid candidate. Copying the known-good backup with a new mtime
      * exercises the loader swap without nesting a compiler inside system(). The companion
      * scripts/validate_hotreload.sh covers deliberate compile-failure preservation. */
-    if (!CopyFileA("build/game_harness_backup.dll", GAME_MODULE_NAME, FALSE)) {
+    if (!CopyFileA("build/dev/game_harness_backup.dll", GAME_MODULE_NAME, FALSE)) {
         fprintf(stderr, "harness: failed to publish valid candidate\n");
         Game_UnloadModule();
         free(game);
@@ -243,7 +243,7 @@ int main(void)
     DeleteFileA("build/game_harness_backup.dll");
 
     if (leftover != 0) {
-        fprintf(stderr, "harness: %d stale build/game_load_*.dll copies remain\n", leftover);
+        fprintf(stderr, "harness: %d stale build/dev/game_load_*.dll copies remain\n", leftover);
         free(game);
         return 1;
     }

@@ -12,13 +12,13 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "car_corpus.h"
-#include "car_visual.h"
-#include "car_visual_raster.h"
-#include "config.h"
-#include "dev_params.h"
-#include "telemetry.h"   /* telemetry_ensure_dir — the project's mkdir helper */
-#include "vehicle.h"
+#include "dev/car_corpus.h"
+#include "render/car_visual.h"
+#include "render/car_visual_raster.h"
+#include "core/config.h"
+#include "dev/dev_params.h"
+#include "game/telemetry.h"   /* telemetry_ensure_dir — the project's mkdir helper */
+#include "physics/vehicle.h"
 
 /* stb triggers a handful of the project's stricter warnings. It is vendored verbatim and is
  * not ours to fix (third_party/README.md), so the diagnostics are silenced for this include
@@ -790,7 +790,7 @@ bool car_sheet_write_pair_failure(const char *outDir, int indexA, int indexB, fl
 
     if (ok) {
         /* Signature metrics: L2, Linf, and the three components that differ most, by name. */
-        float sigA[64], sigB[64];
+        float sigA[CAR_SIGNATURE_MAX], sigB[CAR_SIGNATURE_MAX];
         const int n = car_visual_signature_count();
         const int cap = (int)(sizeof(sigA) / sizeof(sigA[0]));
         float l2 = 0.0f, linf = 0.0f;

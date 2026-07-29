@@ -1,6 +1,6 @@
 # Visual regression
 
-`make screenshots` captures the deterministic scenes listed in `src/main.c` and writes them
+`make screenshots` captures the deterministic scenes listed in `src/platform/main.c` and writes them
 to `artifacts/screenshots/`. `make visual-test` compares those against the images in
 `baseline/` with ImageMagick and a small RMSE tolerance, writing difference images to
 `artifacts/visual-diff/`.

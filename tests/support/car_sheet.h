@@ -2,9 +2,9 @@
  * car_sheet.h — the vehicle contact sheet, written headlessly from drifty_tests.
  *
  * No GPU, no window, no raylib call: the cars are rasterized on the CPU by
- * src/car_visual_raster.c and written as PNGs by the vendored stb_image_write. That is what
+ * src/render/car_visual_raster.c and written as PNGs by the vendored stb_image_write. That is what
  * lets the whole fleet be reviewed on any machine, including CI, and — crucially — before
- * src/render.c has been touched at all.
+ * src/render/render.c has been touched at all.
  *
  * OUTPUT. Paginated composite PNGs (page_1.png, page_2.png, …) plus index.html. Every cell
  * shares one metres-to-pixels scale; cells are not individually auto-fitted. Each cell is
