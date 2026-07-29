@@ -167,7 +167,10 @@ typedef struct {
 
     /* ---- emergent form weights: 0 = absent, 1 = fully expressed ---- */
     float hoodBulgeStrength;  /* [rule] 0..1; reads engineDisplacementL, massEngineXM */
-    float pickupBedWeight;    /* [rule] 0..1; reads backlightXM vs tail position */
+    float bedLengthM;         /* [identity] open bed forward from the tail; reads
+                                            spec bedLengthM, clamped to the space behind
+                                            the greenhouse. 0 = no bed. */
+    float pickupBedWeight;    /* [rule] 0..1 expression strength; reads bedLengthM */
     float vanWindowWeight;    /* [rule] 0..1; reads heightOverallM, cowlXM, backlightXM */
     int   sideWindowCount;    /* [rule] 2..6 glass segments; reads heightOverallM, cowlXM, backlightXM */
     float openWheelWeight;    /* [rule] 0..1; reads trackWidth[Front|Rear]M vs widthOverallM */
@@ -187,7 +190,8 @@ typedef struct {
     Color tireSidewall;     /* slightly different shade for sidewall vs tread ring */
     Color rim;
     Color disc;
-    Color accent;
+    Color accent;       /* bodywork appendages: wing, canards, tow hook, hood pins — in-hue */
+    Color heading;      /* [gameplay] L9 facing marker; deliberately the body's complement */
     Color lamp;
     Color stripeColor;      /* [decorative] stripe colour from seed bits; geometry from stripeWeight */
 

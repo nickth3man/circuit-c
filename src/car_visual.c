@@ -384,12 +384,24 @@ void car_visual_derive(const VehicleSpec *spec, CarVisual *out)
      * in strip01 never snaps full-width stripes into existence. */
     out->stripeWeight = smoothstep(0.28f, 0.65f, l.strip01);
 
-    /* [rule] pickup bed: the body behind the rear glass. When the greenhouse ends well
-     * forward of the tail, that stretch stops reading as a decklid and starts reading as an
-     * open bed. Reads the derived backlight station and the tail. */
+    /* [identity] pickup bed: bedLengthM, measured forward from the tail.
+     *
+     * WHY THIS IS NOT INFERRED ANY MORE. The previous rule read
+     * (backlightXM - tailX) / lengthM and called anything past ~0.3 a bed. That ratio cannot
+     * tell a bed from a boot, because on every three-box car the boot IS the body behind the
+     * rear glass: the rule fired on 78 of the 100 corpus vehicles, 74 of them not trucks, and
+     * on the muscle car the bed covered 47% of the bodywork. No threshold fixes that — the
+     * measurement is genuinely ambiguous — so the bed is now declared by the spec.
+     *
+     * The bed is clamped to the space actually behind the greenhouse: a bed cannot eat the
+     * cabin, whatever the spec asks for. */
     {
-        const float bedFrac = (out->backlightXM - tailX) / maxf(out->lengthM, 0.1f);
-        out->pickupBedWeight = smoothstep(0.30f, 0.52f, bedFrac);
+        const float availableM = maxf(out->backlightXM - tailX, 0.0f);
+        out->bedLengthM = clampf(spec->bedLengthM, 0.0f, availableM);
+        /* [rule] Expression strength, used for the drawn bed width. A bed shorter than
+         * ~0.35 m is a tailgate lip rather than a load area, so it ramps in rather than
+         * snapping to full width. */
+        out->pickupBedWeight = smoothstep(0.0f, 0.35f, out->bedLengthM);
     }
 
     /* [rule] van/bus side windows: a tall body whose greenhouse covers most of its length
@@ -644,16 +656,37 @@ void car_visual_derive(const VehicleSpec *spec, CarVisual *out)
     const float sat = 0.45f + 0.40f * (float)((seed >> 9) % 256u) / 255.0f;
     const float val = 0.55f + 0.35f * (float)((seed >> 17) % 256u) / 255.0f;
 
+    /* HUE UNITY. A real car seen from above is one paint colour plus neutrals. Measured over
+     * 77 reference top-down sprites, the median count of saturated hue families covering >5%
+     * of a sprite is ONE; this grammar previously produced THREE, because the outline was a
+     * fixed warm brown (#16100e, hue 15deg, sat 0.36), the glass a fixed blue (#3a4454, hue
+     * 216deg, sat 0.31), and the accent the body's exact complement. On a teal car that is
+     * teal + brown + blue, and it reads as an assembly of unrelated parts rather than one
+     * object.
+     *
+     * So: the outline is a very dark version of the car's OWN hue — the standard pixel-art
+     * selective-outline recommendation, and it makes the whole car palette-swap cleanly —
+     * and everything that is not paint is a true neutral. */
     out->body      = hsv_to_color(hue, sat, val, 255);
     out->bodyShade = shade(out->body, 0.78f);
     out->cabin     = shade(out->body, 0.42f);
-    out->glass     = (Color){ 58, 68, 84, 255 };
-    out->outline   = (Color){ 22, 16, 14, 255 };
-    out->tire      = (Color){ 24, 26, 30, 255 };
-    out->tireSidewall = (Color){ 40, 42, 48, 255 };
-    out->rim       = (Color){ 150, 155, 165, 255 };
-    out->disc      = (Color){ 96, 100, 110, 255 };
-    out->accent    = hsv_to_color(hue + 180.0f, sat * 0.85f, clampf(val * 1.15f, 0.0f, 1.0f), 255);
+    out->outline   = hsv_to_color(hue, clampf(sat * 0.85f, 0.0f, 1.0f), 0.13f, 255);
+    out->glass        = (Color){ 46, 47, 50, 255 };
+    out->tire         = (Color){ 26, 26, 28, 255 };
+    out->tireSidewall = (Color){ 42, 42, 45, 255 };
+    out->rim          = (Color){ 150, 151, 154, 255 };
+    out->disc         = (Color){ 98, 99, 102, 255 };
+    /* Bodywork appendages — wing, canards, tow hook, hood pins. In-family: a wing is painted
+     * panel, not signage, so it stays the body's hue and separates on VALUE alone. */
+    out->accent    = hsv_to_color(hue, clampf(sat * 0.75f, 0.0f, 1.0f),
+                                  clampf(val * 1.22f, 0.0f, 1.0f), 255);
+    /* The L9 heading marker is the one place a contrasting hue is CORRECT: it is a gameplay
+     * affordance telling the player which way the car points, not bodywork, and it must not
+     * disappear into the paint. It is the sole survivor of the old complement rule. */
+    out->heading   = hsv_to_color(hue + 180.0f, clampf(sat * 0.85f, 0.0f, 1.0f),
+                                  clampf(val * 1.15f, 0.0f, 1.0f), 255);
+    /* Lamps are emissive, so a warm off-white is correct and matches the reference art
+     * (#ffffbc there). At ~12 px per car they never approach the 5% hue-family floor. */
     out->lamp      = (Color){ 255, 240, 200, 255 };
 
     /* [decorative] Stripe colour uses colour-seed bits only. Stripe GEOMETRY is a pure
@@ -757,6 +790,7 @@ uint32_t car_visual_bake_key(const CarVisual *v)
     key_i32(&h, v->hasMirrors ? 1 : 0);
 
     key_f32(&h, v->hoodBulgeStrength);
+    key_f32(&h, v->bedLengthM);
     key_f32(&h, v->pickupBedWeight);
     key_f32(&h, v->vanWindowWeight);
     key_i32(&h, v->sideWindowCount);
@@ -779,6 +813,7 @@ uint32_t car_visual_bake_key(const CarVisual *v)
     key_colour(&h, v->rim);
     key_colour(&h, v->disc);
     key_colour(&h, v->accent);
+    key_colour(&h, v->heading);
     key_colour(&h, v->lamp);
     key_colour(&h, v->stripeColor);
 
@@ -800,7 +835,7 @@ uint32_t car_visual_bake_key(const CarVisual *v)
     X(track_front) X(track_rear) X(rest_angle_front)                                         \
     X(wing_span) X(wing_chord) X(splitter_protrusion) X(mirror_offset) X(exhaust_bore)       \
     X(spoke_level) X(exhaust_level) X(cage_flag) X(mirror_flag)                              \
-    X(canard_strength) X(hood_bulge_strength) X(pickup_bed_weight)                           \
+    X(canard_strength) X(hood_bulge_strength) X(bed_length) X(pickup_bed_weight)             \
     X(van_window_weight) X(side_window_count) X(open_wheel_weight)                           \
     X(race_detail_weight) X(stripe_weight)                                                    \
     X(tow_hook_flag) X(hood_pins_flag)                                                       \
@@ -883,6 +918,8 @@ int car_visual_signature(const CarVisual *v, float *out, int cap)
     /* ---- Phase 3 new components (appended) ---- */
     out[CAR_SIG_canard_strength]      = v->canardStrength;
     out[CAR_SIG_hood_bulge_strength]  = v->hoodBulgeStrength;
+    /* True metres, so it is directly comparable against the 0.08 m one-pixel floor. */
+    out[CAR_SIG_bed_length]           = v->bedLengthM;
     out[CAR_SIG_pickup_bed_weight]    = v->pickupBedWeight;
     out[CAR_SIG_van_window_weight]    = v->vanWindowWeight;
     out[CAR_SIG_side_window_count]    = (float)v->sideWindowCount * CAR_SIG_LEVEL_STEP;

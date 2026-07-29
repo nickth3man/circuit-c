@@ -154,7 +154,7 @@ REGRESSION_SCENARIOS := skidpad step-steer transition lift-off \
 .PHONY: all help info dev run release tests test test-physics scenario report regression \
         baselines verify-fast verify sanitize coverage screenshots visual-test gallery profile \
         benchmark ci params-doc compile-commands format format-check lint analyze fuzz \
-        clean clean-telemetry dirs windows-only
+        clean clean-telemetry dirs windows-only cards inspect visual-diagnose
 
 all: dev
 
@@ -372,6 +372,30 @@ gallery: windows-only dev
 	    page=$$((page + 1)); \
 	done
 	@echo "gallery: $(GALLERY_PAGES) page(s) in $(ARTIFACTS)/gallery-ingame/"
+
+# ------------------------------------------------------- appearance debugging tools --
+#
+# `cards` is headless and cheap: per-car PNGs, feature-label maps and cards.json. Everything
+# below reads it, and nothing below needs a window or a GPU.
+cards: tests
+	@./$(EXE_TESTS) --dump-corpus-cards $(ARTIFACTS)/corpus-cards
+
+# The browser inspector. Serves tools/visual over artifacts/corpus-cards and blocks, so it is
+# an INTERACTIVE target — a coding agent must never invoke it (same rule as `run`).
+inspect: cards
+	@echo "Serving the vehicle inspector. This does not return until you stop it."
+	@echo "Coding agents must never run this target — use 'make visual-diagnose' instead."
+	@cd tools/visual && node serve.js
+
+# The agent-safe path: runs the Playwright suite, which starts and stops its own server and
+# exits on its own. Writes evidence to artifacts/visual/ — per-car cards, label maps, sweep
+# strips, and diagnostics.txt.
+#
+# EXPECTED TO FAIL while the grammar is being fixed. The failures are the diagnosis, not a
+# broken build, which is why this is not in `ci` and not in the required checks.
+visual-diagnose: cards
+	@cd tools/visual && npm install --silent && npx playwright test --reporter=list || true
+	@echo "visual-diagnose: evidence in $(ARTIFACTS)/visual/ (start with diagnostics.txt)"
 
 visual-test: screenshots
 ifeq ($(MAGICK),)

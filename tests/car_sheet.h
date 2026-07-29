@@ -32,6 +32,24 @@ float car_sheet_default_px_per_m(void);
  * Returns false if the directory could not be created or any file could not be written. */
 bool car_sheet_write(const char *outDir, float pxPerM, int zoom);
 
+/* ------------------------------------------------------------------ inspector cards ----
+ *
+ * One directory of per-car evidence for the browser inspector in tools/visual/. The contact
+ * sheet answers "does the fleet look varied"; this answers "what is this ONE car made of, and
+ * which of its features survive the trip to the screen".
+ *
+ * Written into outDir:
+ *   <id>.png          the car, nose-up, at pxPerM — the same pixels the sheet shows
+ *   <id>_labels.png   the feature-label map, one flat colour per CarRasterLabel
+ *   cards.json        every derived quantity per car: latents, named signature components,
+ *                     hull stations, per-wheel visuals, appendages, AND the label histogram
+ *
+ * THE HISTOGRAM IS THE POINT. A rule can be perfectly implemented and still cover zero pixels
+ * once it is quantised at 13.2 px/m. Counting the pixels each feature actually occupies is the
+ * only way to tell a grammar bug from a fidelity-budget loss, and no pass/fail check reports
+ * it. pxPerM <= 0 selects car_sheet_default_px_per_m(). */
+bool car_sheet_write_cards(const char *outDir, float pxPerM);
+
 /* ------------------------------------------------------------- distinctness failures ----
  *
  * When two corpus vehicles are too similar, a pass/fail line is useless on its own: the whole

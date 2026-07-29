@@ -468,6 +468,241 @@ static bool write_profile(const char *path, const VehicleSpec *spec)
     return dev_params_save(spec, path);
 }
 
+/* ------------------------------------------------------------------ inspector cards ----
+ *
+ * Flat, high-contrast colours for the label map. These are DIAGNOSTIC colours and have nothing
+ * to do with the car's palette: the whole point is that two features never share one, so a
+ * human can see at a glance which pixels the grammar assigned to what. Indexed by
+ * CarRasterLabel; a compile-time count check keeps this honest when a label is added. */
+static const unsigned char kLabelColour[CAR_LABEL_COUNT][3] = {
+    { 0x15, 0x18, 0x1d },  /* EMPTY        */
+    { 0x4d, 0x9b, 0xe6 },  /* BODY         */
+    { 0x2c, 0x5f, 0x94 },  /* BODY_SHADE   */
+    { 0x8f, 0x6a, 0xd8 },  /* CABIN        */
+    { 0xc9, 0xa8, 0xff },  /* GLASS        */
+    { 0x3a, 0x3f, 0x48 },  /* TIRE         */
+    { 0x5a, 0x60, 0x6b },  /* TIRE_SIDEWALL*/
+    { 0xb9, 0xc0, 0xcc },  /* RIM          */
+    { 0xe8, 0xee, 0xf6 },  /* DISC         */
+    { 0xe0, 0x7b, 0x39 },  /* ARCH         */
+    { 0x36, 0xc9, 0x8f },  /* WING         */
+    { 0x1f, 0x9c, 0x6e },  /* SPLITTER     */
+    { 0x7a, 0xe0, 0xb8 },  /* CANARD       */
+    { 0xf0, 0xd0, 0x4a },  /* MIRROR       */
+    { 0x9a, 0x5a, 0x2a },  /* EXHAUST      */
+    { 0xa0, 0x88, 0x60 },  /* BED          */
+    { 0xd8, 0x5c, 0x8a },  /* HOOD_BULGE   */
+    { 0xff, 0x4d, 0x4d },  /* TOW_HOOK     */
+    { 0xff, 0x9d, 0x9d },  /* HOOD_PINS    */
+    { 0xff, 0xf0, 0x9c },  /* LAMP         */
+    { 0x6e, 0xcd, 0xeb },  /* CAGE         */
+    { 0xff, 0xff, 0xff },  /* STRIPE       */
+    { 0x00, 0xd0, 0xff },  /* HEADING      */
+    { 0x20, 0x24, 0x2c },  /* OUTLINE      */
+    { 0x0d, 0x0f, 0x12 },  /* SHADOW       */
+};
+
+/* JSON string escaping for the few characters a corpus id or description can actually contain.
+ * Everything upstream is ASCII by construction (car_corpus_id is filesystem-safe), so this only
+ * has to survive quotes and backslashes rather than implement the whole spec. */
+static void json_escape(const char *in, char *out, size_t cap)
+{
+    size_t o = 0;
+    for (size_t i = 0; in[i] != '\0' && o + 2 < cap; i++) {
+        const char c = in[i];
+        if (c == '"' || c == '\\') out[o++] = '\\';
+        else if (c < 0x20) { out[o++] = ' '; continue; }
+        out[o++] = c;
+    }
+    out[o] = '\0';
+}
+
+static void json_hull(FILE *f, const CarVisual *v)
+{
+    fprintf(f, "[");
+    for (int i = 0; i < CAR_HULL_STATIONS; i++) {
+        fprintf(f, "%s{\"x\":%.4f,\"hw\":%.4f}", (i ? "," : ""), v->hull[i].xM,
+                v->hull[i].halfWidthM);
+    }
+    fprintf(f, "]");
+}
+
+static void json_wheels(FILE *f, const CarVisual *v)
+{
+    fprintf(f, "[");
+    for (int i = 0; i < WHEEL_COUNT; i++) {
+        const CarWheelVisual *w = &v->wheels[i];
+        fprintf(f,
+                "%s{\"cx\":%.4f,\"cy\":%.4f,\"diameter\":%.4f,\"width\":%.4f,"
+                "\"rimDiameter\":%.4f,\"sidewall\":%.4f,\"disc\":%.4f,\"angle\":%.5f,"
+                "\"camberCos\":%.4f,\"poke\":%.4f,\"archGap\":%.4f,\"spokes\":%d}",
+                (i ? "," : ""), w->centreM.x, w->centreM.y, w->diameterM, w->widthM,
+                w->rimDiameterM, w->sidewallHeightM, w->discDiameterM, w->staticAngleRad,
+                w->camberVisualCos, w->pokeM, w->archGapM, w->spokeCount);
+    }
+    fprintf(f, "]");
+}
+
+bool car_sheet_write_cards(const char *outDir, float pxPerM)
+{
+    if (outDir == NULL || outDir[0] == '\0') return false;
+    if (!(pxPerM > 0.0f)) pxPerM = car_sheet_default_px_per_m();
+    if (!telemetry_ensure_dir(outDir)) return false;
+
+    char jsonPath[512];
+    snprintf(jsonPath, sizeof(jsonPath), "%s/cards.json", outDir);
+    FILE *json = fopen(jsonPath, "wb");
+    if (json == NULL) return false;
+
+    const int sigCount = car_visual_signature_count();
+
+    fprintf(json, "{\n  \"pxPerM\": %.4f,\n  \"labelNames\": [", pxPerM);
+    static const char *kLabelName[CAR_LABEL_COUNT] = {
+        "empty", "body", "body_shade", "cabin", "glass", "tire", "tire_sidewall", "rim",
+        "disc", "arch", "wing", "splitter", "canard", "mirror", "exhaust", "bed",
+        "hood_bulge", "tow_hook", "hood_pins", "lamp", "cage", "stripe", "heading",
+        "outline", "shadow"
+    };
+    for (int i = 0; i < CAR_LABEL_COUNT; i++) {
+        fprintf(json, "%s\"%s\"", (i ? ", " : ""), kLabelName[i]);
+    }
+    fprintf(json, "],\n  \"labelColours\": [");
+    for (int i = 0; i < CAR_LABEL_COUNT; i++) {
+        fprintf(json, "%s\"#%02x%02x%02x\"", (i ? ", " : ""), kLabelColour[i][0],
+                kLabelColour[i][1], kLabelColour[i][2]);
+    }
+    fprintf(json, "],\n  \"signatureNames\": [");
+    for (int i = 0; i < sigCount; i++) {
+        fprintf(json, "%s\"%s\"", (i ? ", " : ""), car_visual_signature_component_name(i));
+    }
+    fprintf(json, "],\n  \"cars\": [\n");
+
+    bool ok = true;
+    const int count = car_corpus_count();
+
+    for (int i = 0; i < count && ok; i++) {
+        VehicleSpec spec;
+        if (!car_corpus_spec(i, &spec)) continue;
+
+        CarVisual v;
+        car_visual_derive(&spec, &v);
+
+        const CarRasterInfo info = car_raster_info(&v, pxPerM, 2);
+        const size_t pixels = (size_t)info.width * (size_t)info.height;
+        const size_t rgbaBytes = car_raster_bytes(info);
+        if (pixels == 0 || rgbaBytes == 0) { ok = false; break; }
+
+        unsigned char *rgba   = (unsigned char *)malloc(rgbaBytes);
+        unsigned char *labels = (unsigned char *)malloc(pixels);
+        unsigned char *labRgba = (unsigned char *)malloc(rgbaBytes);
+        ok = (rgba != NULL && labels != NULL && labRgba != NULL) &&
+             car_raster_draw(&v, info, rgba, rgbaBytes) &&
+             car_raster_draw_labels(&v, info, labels, pixels);
+
+        /* Histogram and colourised label map in one pass. */
+        int hist[CAR_LABEL_COUNT];
+        memset(hist, 0, sizeof(hist));
+        if (ok) {
+            for (size_t p = 0; p < pixels; p++) {
+                const unsigned char lab =
+                    (labels[p] < CAR_LABEL_COUNT) ? labels[p] : (unsigned char)CAR_LABEL_EMPTY;
+                hist[lab]++;
+                unsigned char *px = labRgba + p * CAR_RASTER_BPP;
+                px[0] = kLabelColour[lab][0];
+                px[1] = kLabelColour[lab][1];
+                px[2] = kLabelColour[lab][2];
+                px[3] = 0xff;
+            }
+        }
+
+        char id[128];
+        car_corpus_id(i, id, sizeof(id));
+
+        if (ok) {
+            char path[512];
+            snprintf(path, sizeof(path), "%s/%s.png", outDir, id);
+            ok = write_upright_png(path, rgba, info.width, info.height);
+            if (ok) {
+                snprintf(path, sizeof(path), "%s/%s_labels.png", outDir, id);
+                ok = write_upright_png(path, labRgba, info.width, info.height);
+            }
+        }
+
+        if (ok) {
+            char note[192], noteEsc[384], idEsc[256];
+            car_corpus_describe(i, note, sizeof(note));
+            json_escape(note, noteEsc, sizeof(noteEsc));
+            json_escape(id, idEsc, sizeof(idEsc));
+
+            float sig[128];
+            const int written =
+                car_visual_signature(&v, sig, (int)(sizeof(sig) / sizeof(sig[0])));
+
+            /* Nose-up, so the recorded size is what the PNG actually is. The pivot follows
+             * car_raster_rotate_nose_up's index permutation (dx = y, dy = srcW-1-x), which is
+             * what lets the inspector overlay body-frame geometry on the rotated image:
+             *   pngX = cgXPx - Y_m * pxPerM      (body +Y is left, which is -X once nose-up)
+             *   pngY = cgYPx - X_m * pxPerM      (body +X is forward, which is -Y nose-up) */
+            const float cgXPx = info.originYPx;
+            const float cgYPx = (float)(info.width - 1) - info.originXPx;
+
+            fprintf(json, "%s    {\n", (i ? ",\n" : ""));
+            fprintf(json, "      \"index\": %d, \"id\": \"%s\", \"group\": \"%s\",\n", i, idEsc,
+                    car_corpus_group_name(car_corpus_group(i)));
+            fprintf(json, "      \"note\": \"%s\",\n", noteEsc);
+            fprintf(json, "      \"png\": \"%s.png\", \"labelPng\": \"%s_labels.png\",\n", idEsc,
+                    idEsc);
+            fprintf(json, "      \"widthPx\": %d, \"heightPx\": %d,\n", info.height, info.width);
+            fprintf(json, "      \"cgXPx\": %.4f, \"cgYPx\": %.4f,\n", cgXPx, cgYPx);
+            fprintf(json,
+                    "      \"latents\": {\"mass01\":%.5f,\"size01\":%.5f,\"low01\":%.5f,"
+                    "\"grip01\":%.5f,\"balance01\":%.5f,\"power01\":%.5f,\"aero01\":%.5f,"
+                    "\"sport01\":%.5f,\"strip01\":%.5f},\n",
+                    v.latents.mass01, v.latents.size01, v.latents.low01, v.latents.grip01,
+                    v.latents.balance01, v.latents.power01, v.latents.aero01, v.latents.sport01,
+                    v.latents.strip01);
+            fprintf(json,
+                    "      \"dims\": {\"length\":%.4f,\"width\":%.4f,\"wheelbase\":%.4f,"
+                    "\"frontOverhang\":%.4f,\"rearOverhang\":%.4f,\"cabinCentreX\":%.4f,"
+                    "\"cabinLength\":%.4f,\"cabinHalfWidth\":%.4f,\"windscreenX\":%.4f,"
+                    "\"backlightX\":%.4f,\"roofLength\":%.4f,\"glassHalfWidth\":%.4f,"
+                    "\"archFlare\":%.4f,\"wingSpan\":%.4f,\"wingChord\":%.4f,\"wingX\":%.4f,"
+                    "\"splitterProtrusion\":%.4f,\"canardStrength\":%.4f,\"exhaustBore\":%.4f,"
+                    "\"exhaustCount\":%d,\"hoodBulge\":%.4f,\"pickupBed\":%.4f,"
+                    "\"vanWindow\":%.4f,\"sideWindows\":%d,\"openWheel\":%.4f,"
+                    "\"raceDetail\":%.4f,\"stripe\":%.4f,\"heightVisual\":%.4f},\n",
+                    v.lengthM, v.widthM, v.wheelbaseM, v.frontOverhangM, v.rearOverhangM,
+                    v.cabinCentreXM, v.cabinLengthM, v.cabinHalfWidthM, v.windscreenXM,
+                    v.backlightXM, v.roofLengthM, v.glassHalfWidthM, v.archFlareM, v.wingSpanM,
+                    v.wingChordM, v.wingXM, v.splitterProtrusionM, v.canardStrength,
+                    v.exhaustBoreM, v.exhaustCount, v.hoodBulgeStrength, v.pickupBedWeight,
+                    v.vanWindowWeight, v.sideWindowCount, v.openWheelWeight, v.raceDetailWeight,
+                    v.stripeWeight, v.heightVisual);
+            fprintf(json, "      \"hull\": ");
+            json_hull(json, &v);
+            fprintf(json, ",\n      \"wheels\": ");
+            json_wheels(json, &v);
+            fprintf(json, ",\n      \"signature\": [");
+            for (int c = 0; c < written; c++) fprintf(json, "%s%.5f", (c ? "," : ""), sig[c]);
+            fprintf(json, "],\n      \"labelPixels\": [");
+            for (int c = 0; c < CAR_LABEL_COUNT; c++) {
+                fprintf(json, "%s%d", (c ? "," : ""), hist[c]);
+            }
+            fprintf(json, "]\n    }");
+        }
+
+        free(rgba);
+        free(labels);
+        free(labRgba);
+    }
+
+    fprintf(json, "\n  ]\n}\n");
+    if (fclose(json) != 0) ok = false;
+
+    if (ok) printf("CAR-CARDS: wrote %d vehicles to %s (cards.json + 2 PNGs each)\n", count, outDir);
+    return ok;
+}
+
 bool car_sheet_write_pair_failure(const char *outDir, int indexA, int indexB, float pxPerM)
 {
     if (outDir == NULL || outDir[0] == '\0') return false;

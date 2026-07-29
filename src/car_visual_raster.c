@@ -11,7 +11,7 @@
  *
  * Raylib-free: linked into drifty_tests.exe.
  *
- * ======================================================== LAYER STACK (matches ISSUE.md) ===
+ * =============================================================== LAYER STACK, fixed order ===
  *
  *   L0  shadow / ground contact       — offset dark translucent ellipse, drawn first
  *   L1  body silhouette + outline     — hull polygon, dark outline plate underneath
@@ -581,12 +581,12 @@ static void render(const CarVisual *v, RasterTarget *t, CarRasterPart part, int 
         }
     }
 
-    /* L7f: pickup bed — bed floor and bed rails when pickupBedWeight > threshold.
-     * Drawn over the rear body section; the cabin's backlight is the bed's front wall. */
-    if (v->pickupBedWeight > 0.05f) {
-        const float bedStartX = v->backlightXM;
+    /* L7f: pickup bed — bed floor and rails, spanning bedLengthM forward from the tail.
+     * The length is the declared one (car_visual.c already clamped it to the space behind the
+     * greenhouse), NOT the whole stretch behind the backlight: a boot is not a bed. */
+    if (v->pickupBedWeight > 0.05f && v->bedLengthM > 0.0f) {
         const float bedEndX = tailX;
-        const float bedLen = maxf(bedStartX - bedEndX, 0.05f);
+        const float bedLen = maxf(v->bedLengthM, 0.05f);
         const float bedWid = v->widthM * 0.78f * v->pickupBedWeight;
         if (bedLen > 0.0f && bedWid > 0.0f) {
             /* Bed floor: darker rectangle covering the rear body. */
@@ -653,9 +653,11 @@ static void render(const CarVisual *v, RasterTarget *t, CarRasterPart part, int 
 
     /* ==================================================== L9: heading marker =====
      *
-     * Small accent-coloured chevron/triangle at the nose. This is the gameplay
-     * affordance previously drawn in src/render.c — now part of the shared raster so
-     * headless and in-game output are pixel-identical. */
+     * Small chevron/triangle at the nose, in CarVisual.heading — the one colour in the
+     * palette that is deliberately the body's complement, because this is a gameplay
+     * affordance and must not sink into the paint. This is the affordance previously drawn
+     * in src/render.c — now part of the shared raster so headless and in-game output are
+     * pixel-identical. */
     {
         const float tipLen = 0.12f;
         const float baseWid = 0.10f;
@@ -663,7 +665,7 @@ static void render(const CarVisual *v, RasterTarget *t, CarRasterPart part, int 
         const Vector2 lb  = to_px(t, noseX - 0.04f, +baseWid);
         const Vector2 rb  = to_px(t, noseX - 0.04f, -baseWid);
         Vector2 pts[3] = { tip, lb, rb };
-        fill_polygon_px(t, pts, 3, v->accent, CAR_LABEL_HEADING);
+        fill_polygon_px(t, pts, 3, v->heading, CAR_LABEL_HEADING);
     }
 }
 

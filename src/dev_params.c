@@ -53,6 +53,14 @@ static const DevParameter g_params[] = {
     { "body.backlight_x", "Body", "m", SPEC_OFFSET(backlightXM),
       VEH_BACKLIGHT_X_M, -2.0f, 2.0f, 0.01f, false, false, 1,
       "Backlight X in layout frame." },
+    /* Maximum is 1.5 m, not the ~2.0 m of a real long bed, because this is a sweep axis and
+     * car_visual.c clamps the bed to the space behind the greenhouse — about 1.57 m on the
+     * stock car. A range reaching past that would make the top sweep steps clamp to the same
+     * value and collapse into each other. Ranges here are development limits, not physical
+     * claims; a longer bed on a longer truck is a corpus question, not a registry one. */
+    { "body.bed_length", "Body", "m", SPEC_OFFSET(bedLengthM),
+      VEH_BED_LENGTH_M, 0.0f, 1.5f, 0.05f, false, false, 1,
+      "Open cargo bed forward from the tail; 0 = none. Declared, never inferred." },
     { "body.drag_coefficient", "Body", "", SPEC_OFFSET(dragCoefficient),
       DRAG_COEFFICIENT, 0.1f, 1.2f, 0.01f, false, false, 1,
       "Cd in 0.5*rho*Cd*A*v^2." },

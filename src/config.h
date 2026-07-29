@@ -74,6 +74,15 @@
 /* Cowl / backlight X in the layout frame (axle midpoint origin, +X forward). */
 #define VEH_COWL_X_M            0.55f
 #define VEH_BACKLIGHT_X_M      (-0.55f)
+/* Open cargo bed measured forward from the tail; 0 means the vehicle has none.
+ *
+ * This exists because a bed and a boot are the same measurement when read off the backlight
+ * station, and the appearance grammar previously had to guess between them from
+ * (backlight - tail) / length alone. It guessed "bed" on 78 of the 100 corpus vehicles, 74 of
+ * which are not trucks. A decklid IS the stretch of body behind the rear glass on every
+ * three-box car, so no threshold on that ratio can separate the two. Only the vehicle itself
+ * knows, so the vehicle now says. */
+#define VEH_BED_LENGTH_M        0.0f
 /* Derived readout default: the staged refresh computes exactly this sum. */
 #define VEH_LENGTH_OVERALL_M   (VEH_WHEELBASE_M + VEH_FRONT_OVERHANG_M + VEH_REAR_OVERHANG_M)
 /* Frontal area fill of width*height that recovers FRONTAL_AREA_M2 at stock. */

@@ -1,0 +1,14 @@
+{
+  "name": "drifty-visual-inspector",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Browser inspector and Playwright diagnostics for the Drifty vehicle appearance grammar",
+  "scripts": {
+    "serve": "node serve.js",
+    "test": "playwright test",
+    "report": "playwright show-report"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.62.0"
+  }
+}

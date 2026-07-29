@@ -1,0 +1,377 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Drifty — vehicle appearance inspector</title>
+<style>
+  :root { color-scheme: dark; }
+  body { background:#12151a; color:#e8eaee; font:13px/1.5 ui-monospace,Consolas,monospace; margin:0; padding:16px; }
+  h1 { font:600 18px/1.3 system-ui,sans-serif; margin:0 0 2px; }
+  .sub { color:#8b94a3; font:13px/1.5 system-ui,sans-serif; margin:0 0 14px; }
+
+  #controls { position:sticky; top:0; z-index:5; background:#12151a; border-bottom:1px solid #262c36;
+              padding:8px 0 10px; margin-bottom:14px; display:flex; gap:14px; align-items:center; flex-wrap:wrap; }
+  #controls label { display:flex; gap:5px; align-items:center; color:#a8b0bd; }
+  input[type=search] { background:#1b1f26; border:1px solid #2f3641; color:#e8eaee;
+                       padding:4px 8px; border-radius:4px; font:inherit; min-width:200px; }
+  select, input[type=range] { accent-color:#6ecdeb; }
+
+  #diagnostics { border:1px solid #2f3641; border-radius:6px; padding:12px 14px; margin-bottom:16px; background:#171b21; }
+  #diagnostics h2 { font:600 13px/1.4 system-ui,sans-serif; margin:0 0 8px; color:#6ecdeb; letter-spacing:.03em; }
+  .diag-row { display:flex; gap:8px; padding:2px 0; }
+  .diag-row .k { min-width:170px; color:#a8b0bd; }
+  .bad  { color:#ff6b6b; font-weight:600; }
+  .warn { color:#ffc861; }
+  .ok   { color:#5fd39a; }
+
+  #grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(330px,1fr)); gap:14px; }
+  .card { border:1px solid #262c36; border-radius:6px; background:#171b21; padding:10px; }
+  .card h3 { font:600 12px/1.4 ui-monospace,monospace; margin:0; color:#6ecdeb; word-break:break-all; }
+  .card .note { color:#8b94a3; font-size:11px; margin:2px 0 8px; min-height:2.4em; }
+  .stage { background:#0d0f13; border:1px solid #232933; border-radius:4px; display:flex;
+           justify-content:center; align-items:center; overflow:auto; padding:6px; }
+  canvas { image-rendering:pixelated; display:block; }
+  table.kv { width:100%; border-collapse:collapse; margin-top:8px; font-size:11px; }
+  table.kv td { padding:1px 0; vertical-align:top; }
+  table.kv td:first-child { color:#8b94a3; width:48%; }
+  .bars { margin-top:8px; }
+  .bar { display:flex; align-items:center; gap:6px; font-size:11px; padding:1px 0; }
+  .sw { width:10px; height:10px; border-radius:2px; flex:none; }
+  .count { color:#8b94a3; margin-left:auto; }
+  details summary { cursor:pointer; color:#8b94a3; font-size:11px; margin-top:6px; }
+</style>
+</head>
+<body>
+
+<h1>Drifty — vehicle appearance inspector</h1>
+<p class="sub">
+  Every car is drawn from <code>cards.json</code>, produced by
+  <code>drifty_tests --dump-corpus-cards</code>. The sprite is the exact PNG the CPU rasterizer
+  emits at the scale the game draws at; overlays are computed from the same derived
+  <code>CarVisual</code> the rasterizer read, so an overlay that disagrees with the pixels is a
+  rasterizer bug, not a drawing error here.
+</p>
+
+<div id="controls">
+  <label>zoom <input id="zoom" type="range" min="1" max="12" value="5"><span id="zoomv">5&times;</span></label>
+  <label>group
+    <select id="group"><option value="">all</option></select>
+  </label>
+  <label><input id="showLabels" type="checkbox"> label map</label>
+  <label><input id="showOverlay" type="checkbox" checked> overlay</label>
+  <label><input id="showHull" type="checkbox" checked> hull</label>
+  <label><input id="showWheels" type="checkbox" checked> wheels</label>
+  <label><input id="showCabin" type="checkbox" checked> cabin</label>
+  <label><input id="showAxes" type="checkbox"> CG / axles</label>
+  <input id="search" type="search" placeholder="filter by id or note…">
+  <span id="shown" style="color:#8b94a3"></span>
+</div>
+
+<div id="diagnostics"><h2>Diagnostics</h2><div id="diagBody">loading…</div></div>
+<div id="grid"></div>
+
+<script>
+const PX_PER_SCREEN_PX = 1; // cards are rasterized at game scale: 1 raster px == 1 screen px
+let DATA = null;
+
+const $ = (id) => document.getElementById(id);
+const LATENTS = ["mass01","size01","low01","grip01","balance01","power01","aero01","sport01","strip01"];
+
+function stdev(v) {
+  const m = v.reduce((a,b)=>a+b,0)/v.length;
+  return Math.sqrt(v.reduce((a,b)=>a+(b-m)*(b-m),0)/v.length);
+}
+
+/* ---------------------------------------------------------------- diagnostics ----
+ * Recomputed in the page rather than baked into the JSON, so the same file can be
+ * re-dumped after a grammar change and the verdicts move with it. */
+function diagnostics(d) {
+  const out = [];
+  const cars = d.cars;
+
+  // 1. Style axes that do not vary. A frozen axis silently freezes every feature downstream.
+  const frozen = [], weak = [];
+  for (const k of LATENTS) {
+    const v = cars.map(c => c.latents[k]);
+    const range = Math.max(...v) - Math.min(...v);
+    if (range < 1e-6) frozen.push(`${k} (constant at ${v[0].toFixed(3)})`);
+    else if (range < 0.15) weak.push(`${k} (range ${range.toFixed(3)})`);
+  }
+  out.push({
+    k: "frozen style axes",
+    cls: frozen.length ? "bad" : "ok",
+    v: frozen.length ? `${frozen.length}/9 — ${frozen.join(", ")}` : "none",
+  });
+  out.push({
+    k: "near-frozen axes",
+    cls: weak.length ? "warn" : "ok",
+    v: weak.length ? weak.join(", ") : "none",
+  });
+
+  // 2. Signature components whose whole-corpus range is under one screen pixel: the rule
+  //    exists, is computed, and can never be seen.
+  const px = d.pxPerM;
+  const subPixel = [];
+  d.signatureNames.forEach((name, i) => {
+    const v = cars.map(c => c.signature[i]);
+    const rangePx = (Math.max(...v) - Math.min(...v)) * px;
+    if (rangePx < 1.0) subPixel.push(`${name} (${rangePx.toFixed(2)}px)`);
+  });
+  out.push({
+    k: "sub-pixel signature",
+    cls: subPixel.length ? "warn" : "ok",
+    v: `${subPixel.length}/${d.signatureNames.length}` + (subPixel.length ? ` — ${subPixel.join(", ")}` : ""),
+  });
+
+  // 3. Features that are never drawn anywhere in the fleet, and features present on so few
+  //    pixels they cannot read as anything.
+  // "shadow" can never appear here and its absence means nothing: put_px only records a label
+  // for alpha >= 128, and the L0 shadow is drawn at alpha 55 on purpose so it cannot inflate
+  // the distinctness metric. Counting it as "never drawn" would be a permanent false alarm.
+  const UNLABELLABLE = new Set(["empty", "shadow"]);
+  const never = [], tiny = [];
+  d.labelNames.forEach((name, i) => {
+    if (UNLABELLABLE.has(name)) return;
+    const total = cars.reduce((a,c) => a + c.labelPixels[i], 0);
+    const present = cars.filter(c => c.labelPixels[i] > 0).length;
+    if (total === 0) never.push(name);
+    else if (present > 0 && total / present < 4) tiny.push(`${name} (${(total/present).toFixed(1)}px avg)`);
+  });
+  out.push({ k: "never drawn", cls: never.length ? "bad" : "ok",
+             v: never.length ? never.join(", ") : "none" });
+  out.push({ k: "under 4px when present", cls: tiny.length ? "warn" : "ok",
+             v: tiny.length ? tiny.join(", ") : "none" });
+
+  // 4. Silhouette boxiness. A real top-down car narrows toward nose and tail; a value near 0
+  //    means the hull half-width barely changes station to station — a brick.
+  const taper = cars.map(c => {
+    const hw = c.hull.map(h => h.hw);
+    return (Math.max(...hw) - Math.min(...hw)) / Math.max(...hw);
+  });
+  const boxy = cars.filter((c,i) => taper[i] < 0.25).length;
+  out.push({
+    k: "boxiness",
+    cls: boxy > cars.length * 0.3 ? "bad" : boxy ? "warn" : "ok",
+    v: `mean taper ${(taper.reduce((a,b)=>a+b,0)/taper.length*100).toFixed(1)}% of max half-width; `
+       + `${boxy}/${cars.length} cars taper less than 25% (read as rectangles)`,
+  });
+
+  // 5. Front/rear asymmetry in the silhouette alone. If the hull is near-symmetric the player
+  //    cannot tell which end is the nose without the lamp pixels.
+  const asym = cars.map(c => {
+    const hw = c.hull.map(h => h.hw);
+    const n = hw.length, half = Math.floor(n/2);
+    let diff = 0;
+    for (let i = 0; i < half; i++) diff += Math.abs(hw[i] - hw[n-1-i]);
+    return diff / half / Math.max(...hw);
+  });
+  const symmetric = cars.filter((c,i) => asym[i] < 0.10).length;
+  out.push({
+    k: "nose/tail asymmetry",
+    cls: symmetric > cars.length * 0.3 ? "bad" : "warn",
+    v: `mean ${(asym.reduce((a,b)=>a+b,0)/asym.length*100).toFixed(1)}%; `
+       + `${symmetric}/${cars.length} cars under 10% (nose and tail nearly identical)`,
+  });
+
+  return out;
+}
+
+function renderDiagnostics(d) {
+  $("diagBody").innerHTML = diagnostics(d).map(r =>
+    `<div class="diag-row"><span class="k">${r.k}</span><span class="${r.cls}">${r.v}</span></div>`
+  ).join("");
+}
+
+/* -------------------------------------------------------------------- drawing ---- */
+function drawCard(car, img, canvas, zoom, opts) {
+  const w = car.widthPx, h = car.heightPx;
+  canvas.width = w * zoom;
+  canvas.height = h * zoom;
+  const g = canvas.getContext("2d");
+  g.imageSmoothingEnabled = false;
+  g.clearRect(0, 0, canvas.width, canvas.height);
+  g.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+  if (!opts.overlay) return;
+  const ppm = DATA.pxPerM * zoom;
+  // Body frame -> nose-up PNG, the mapping cards.json documents alongside cgXPx/cgYPx.
+  const X = (yM) => (car.cgXPx - yM * DATA.pxPerM) * zoom;
+  const Y = (xM) => (car.cgYPx - xM * DATA.pxPerM) * zoom;
+
+  g.lineWidth = Math.max(1, zoom * 0.18);
+
+  if (opts.hull) {
+    // Closed outline: half-widths mirrored about the centreline, exactly as the rasterizer does.
+    g.strokeStyle = "rgba(255,90,120,0.95)";
+    g.beginPath();
+    car.hull.forEach((s, i) => {
+      const px = X(s.hw), py = Y(s.x);
+      i ? g.lineTo(px, py) : g.moveTo(px, py);
+    });
+    for (let i = car.hull.length - 1; i >= 0; i--) {
+      g.lineTo(X(-car.hull[i].hw), Y(car.hull[i].x));
+    }
+    g.closePath();
+    g.stroke();
+    // Station ticks: where the nine control points actually sit.
+    g.fillStyle = "rgba(255,90,120,0.95)";
+    car.hull.forEach(s => {
+      g.fillRect(X(s.hw) - zoom*0.3, Y(s.x) - zoom*0.3, zoom*0.6, zoom*0.6);
+      g.fillRect(X(-s.hw) - zoom*0.3, Y(s.x) - zoom*0.3, zoom*0.6, zoom*0.6);
+    });
+  }
+
+  if (opts.wheels) {
+    g.strokeStyle = "rgba(110,205,235,0.95)";
+    car.wheels.forEach(wl => {
+      const cx = X(wl.cy), cy = Y(wl.cx);
+      const halfW = 0.5 * wl.width * wl.camberCos * ppm;  // across the car
+      const halfL = 0.5 * wl.diameter * ppm;              // along the car
+      g.save();
+      g.translate(cx, cy);
+      g.rotate(-wl.angle);
+      g.strokeRect(-halfW, -halfL, halfW*2, halfL*2);
+      g.restore();
+    });
+  }
+
+  if (opts.cabin) {
+    g.strokeStyle = "rgba(200,150,255,0.9)";
+    const x0 = Y(car.dims.cabinCentreX + car.dims.cabinLength/2);
+    const x1 = Y(car.dims.cabinCentreX - car.dims.cabinLength/2);
+    const y0 = X(car.dims.cabinHalfWidth), y1 = X(-car.dims.cabinHalfWidth);
+    g.strokeRect(Math.min(y0,y1), Math.min(x0,x1), Math.abs(y1-y0), Math.abs(x1-x0));
+    // Windscreen and backlight, the two edges that ought to make the nose readable.
+    g.strokeStyle = "rgba(255,240,150,0.9)";
+    [car.dims.windscreenX, car.dims.backlightX].forEach(xm => {
+      g.beginPath(); g.moveTo(y1, Y(xm)); g.lineTo(y0, Y(xm)); g.stroke();
+    });
+  }
+
+  if (opts.axes) {
+    g.strokeStyle = "rgba(95,211,154,0.9)";
+    const front = car.wheels[0].cx, rear = car.wheels[2].cx;
+    [front, rear].forEach(xm => {
+      g.beginPath(); g.moveTo(0, Y(xm)); g.lineTo(canvas.width, Y(xm)); g.stroke();
+    });
+    g.fillStyle = "rgba(255,255,255,0.95)";
+    g.beginPath(); g.arc(X(0), Y(0), Math.max(1.5, zoom*0.5), 0, Math.PI*2); g.fill();
+  }
+}
+
+function labelBars(car) {
+  const rows = [];
+  DATA.labelNames.forEach((name, i) => {
+    if (name === "empty") return;
+    const n = car.labelPixels[i];
+    if (n === 0) return;
+    rows.push({ name, n, colour: DATA.labelColours[i] });
+  });
+  rows.sort((a,b) => b.n - a.n);
+  return rows.map(r =>
+    `<div class="bar"><span class="sw" style="background:${r.colour}"></span>${r.name}` +
+    `<span class="count">${r.n}px</span></div>`).join("");
+}
+
+function kv(car) {
+  const d = car.dims, l = car.latents;
+  const hw = car.hull.map(h => h.hw);
+  const taper = ((Math.max(...hw) - Math.min(...hw)) / Math.max(...hw) * 100).toFixed(0);
+  const rows = [
+    ["length x width", `${d.length.toFixed(2)} x ${d.width.toFixed(2)} m`],
+    ["px on screen", `${car.widthPx} x ${car.heightPx}`],
+    ["hull taper", `${taper}% of max half-width`],
+    ["wheelbase", `${d.wheelbase.toFixed(2)} m`],
+    ["overhang f/r", `${d.frontOverhang.toFixed(2)} / ${d.rearOverhang.toFixed(2)}`],
+    ["cabin len/halfw", `${d.cabinLength.toFixed(2)} / ${d.cabinHalfWidth.toFixed(2)}`],
+    ["sport01 / low01", `${l.sport01.toFixed(3)} / ${l.low01.toFixed(3)}`],
+    ["grip01 / balance01", `${l.grip01.toFixed(3)} / ${l.balance01.toFixed(3)}`],
+    ["mass01 / size01", `${l.mass01.toFixed(3)} / ${l.size01.toFixed(3)}`],
+  ];
+  return rows.map(([k,v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join("");
+}
+
+/* ---------------------------------------------------------------------- page ---- */
+const imgCache = new Map();
+function loadImage(src) {
+  if (imgCache.has(src)) return imgCache.get(src);
+  const p = new Promise((res, rej) => {
+    const im = new Image();
+    im.onload = () => res(im);
+    im.onerror = () => rej(new Error("failed to load " + src));
+    im.src = src;
+  });
+  imgCache.set(src, p);
+  return p;
+}
+
+/* Renders are async (images load), and the controls fire input events faster than one render
+ * completes. Without a generation guard two runs interleave and both append to the same grid,
+ * which shows up as duplicated cards. Stale runs bail at every await point. */
+let renderGeneration = 0;
+
+async function render() {
+  const gen = ++renderGeneration;
+  const zoom = +$("zoom").value;
+  $("zoomv").textContent = zoom + "×";
+  const q = $("search").value.trim().toLowerCase();
+  const grp = $("group").value;
+  const opts = {
+    overlay: $("showOverlay").checked,
+    hull: $("showHull").checked,
+    wheels: $("showWheels").checked,
+    cabin: $("showCabin").checked,
+    axes: $("showAxes").checked,
+  };
+  const useLabels = $("showLabels").checked;
+
+  const cars = DATA.cars.filter(c =>
+    (!grp || c.group === grp) &&
+    (!q || c.id.toLowerCase().includes(q) || c.note.toLowerCase().includes(q)));
+  $("shown").textContent = `${cars.length} / ${DATA.cars.length} shown`;
+
+  document.body.dataset.ready = "0";
+
+  // Every image first, then one synchronous DOM swap: the grid is never observed half-built,
+  // and a superseded render can never touch it.
+  const images = await Promise.all(cars.map(c => loadImage(useLabels ? c.labelPng : c.png)));
+  if (gen !== renderGeneration) return;
+
+  const frag = document.createDocumentFragment();
+  cars.forEach((car, i) => {
+    const el = document.createElement("div");
+    el.className = "card";
+    el.dataset.id = car.id;
+    el.innerHTML =
+      `<h3>${car.index}. ${car.id}</h3><div class="note">${car.note}</div>` +
+      `<div class="stage"><canvas></canvas></div>` +
+      `<table class="kv">${kv(car)}</table>` +
+      `<details><summary>feature pixels</summary><div class="bars">${labelBars(car)}</div></details>`;
+    frag.appendChild(el);
+    drawCard(car, images[i], el.querySelector("canvas"), zoom, opts);
+  });
+
+  const grid = $("grid");
+  grid.replaceChildren(frag);
+  document.body.dataset.ready = "1";
+}
+
+async function main() {
+  DATA = await (await fetch("cards.json")).json();
+  const groups = [...new Set(DATA.cars.map(c => c.group))];
+  $("group").innerHTML = `<option value="">all</option>` +
+    groups.map(g => `<option value="${g}">${g}</option>`).join("");
+  renderDiagnostics(DATA);
+  window.DRIFTY_DIAGNOSTICS = diagnostics(DATA);
+  window.DRIFTY_DATA = DATA;
+  ["zoom","search","group","showLabels","showOverlay","showHull","showWheels","showCabin","showAxes"]
+    .forEach(id => $(id).addEventListener("input", render));
+  await render();
+}
+main().catch(e => {
+  $("diagBody").innerHTML = `<span class="bad">${e.message}</span>`;
+  document.body.dataset.ready = "error";
+});
+</script>
+</body>
+</html>

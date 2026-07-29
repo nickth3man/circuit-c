@@ -10,11 +10,23 @@ load-transfer behaviour, not because a state machine reaches in and changes forc
 - Full specification: [docs/SPEC.md](docs/SPEC.md)
 - Reference index: [docs/SOURCES.md](docs/SOURCES.md)
 - Agent-facing workflow rules: [AGENTS.md](AGENTS.md)
+- Vehicle-appearance contract: [docs/CAR_VISUAL.md](docs/CAR_VISUAL.md)
 
-## Current phase: Phase 3 complete — Load Transfer and Handling Validation
+## Current phase
 
-Phases 0–3 are complete. The running game uses a deterministic planar rigid-body vehicle
-in SI units:
+Two workstreams number their phases independently, so "phase 4" needs qualifying.
+
+**Physics phases 0–3 are complete** — load transfer and handling validation. Physics phase 4
+(four-wheel fidelity) is an optional, deliberate upgrade.
+
+**Vehicle-appearance phases 0–6 are complete.** A car's appearance is a pure, total function
+of its physics parameters — there is no hand-authored art for any vehicle. That workstream
+built the parameter registry expansion, the appearance grammar, a 100-vehicle demonstration
+corpus, the production texture path, and the in-game gallery. See
+[docs/CAR_VISUAL.md](docs/CAR_VISUAL.md) for the contract and
+[docs/CORPUS.md](docs/CORPUS.md) for the fleet.
+
+The running game uses a deterministic planar rigid-body vehicle in SI units:
 
 | System | State |
 |--------|-------|
@@ -46,11 +58,13 @@ previous step's solved body-longitudinal acceleration, transfers axle load from 
 CG geometry, propagates the dynamic loads into tire capacity, and applies separated
 quadratic aerodynamic drag and per-wheel rolling resistance.
 
-The headless runner covers 36 scenarios and 715 checks. Eight reviewed Phase 3 CSV baselines
-cover acceleration/braking load transfer, coast-down, skidpad, step steer, lift-off,
-transition, and a catchable drift. The deterministic replay checksum is `f0b4580e`.
+The headless runner covers 54 scenarios. (The check count is not quoted here — it moves with
+every parameter added, and `./drifty_tests.exe` prints the current total.) Eight reviewed
+Phase 3 CSV baselines cover acceleration/braking load transfer, coast-down, skidpad, step
+steer, lift-off, transition, and a catchable drift.
 [docs/PHASE3_VALIDATION.md](docs/PHASE3_VALIDATION.md) records the equations, numerical
-handling results, acceptance checklist, tuning decision, and baseline classification.
+handling results, acceptance checklist, baseline classification, and the deterministic replay
+checksum accepted at that phase.
 
 ## Prerequisites (Windows / MSYS2 UCRT64)
 
@@ -200,6 +214,9 @@ Or the fuller script (harness + failed-compile preservation):
 Hot reload cannot handle these. Restart `drifty.exe` after:
 
 - A change to the layout of `Game` or anything it contains.
+- **Adding a field to `VehicleSpec`** (`src/vehicle.h`) — it lives inside `Game`, so this is
+  the same layout change. Worth its own line because every new tunable parameter is a field
+  on it, so this is the restart trigger you will hit most often.
 - A change to `src/main.c`, `src/timestep.c`, or `src/hotreload_windows.c`.
 - A change to `GAME_ENTRY_POINTS`.
 
@@ -225,15 +242,21 @@ mk test                 # fast scenarios          mk verify        analysis + te
 mk scenario NAME=skidpad
 mk report NAME=skidpad  # self-contained HTML report with plots and a baseline comparison
 mk ci                   # exactly what the required CI checks run
+mk cards                # per-car sprites, feature-label maps and cards.json (headless)
+mk visual-diagnose      # appearance measurements and evidence into artifacts/visual/
+mk gallery              # the fleet through the production texture path, for human review
 ```
 
-`mk.bat` enters MSYS2 UCRT64 for you; from a UCRT64 shell use `make <target>`. Every target
-terminates on its own except `mk run`, which launches the game.
+`mk.bat` enters MSYS2 UCRT64 for you and works from cmd.exe or PowerShell; from a UCRT64
+shell use `make <target>`. Every target terminates on its own except **`mk run`** (launches
+the game) and **`mk inspect`** (serves the browser inspector) — use `mk visual-diagnose`
+instead of the latter, since it starts and stops its own server.
 
 Press **F2** in the running game for the Physics Lab: scenario selector, pause and single
-step, live sliders for all 46 tunables with their defaults and units, tuning profiles,
-overlay toggles, an eight-channel scope with a baseline ghost, and an invariant panel. **F3**
-opens the replay inspector.
+step, live sliders for every tunable in the registry with its default and unit — currently
+123, listed in [docs/PARAMETERS.md](docs/PARAMETERS.md) — tuning profiles, overlay toggles,
+an eight-channel scope with a baseline ghost, and an invariant panel. **F3** opens the replay
+inspector.
 
 ![The Physics Lab](tests/visual/baseline/physics_lab.png)
 
@@ -250,6 +273,9 @@ sliders, the profile format, the telemetry metadata, and
 - **Restart `drifty.exe` once for the Phase 2 layout.** Canonical vehicle diagnostics and
   reverse gearing changed persistent structure layout; normal code-only hot reload works
   after that restart.
+- **Every new tunable parameter costs one restart.** A parameter is a field on `VehicleSpec`,
+  which lives inside `Game`, so adding one is a layout change like any other. Expect this
+  while the parameter set is still growing.
 - **Linux gameplay remains unsupported.** Linux builds are headless CI support only and are
   not a substitute for the MSYS2 UCRT64 gameplay build.
 - **Release still needs `glfw3.dll`.** The MSYS2 `libraylib.a` was built against shared
@@ -268,12 +294,14 @@ docs/SPEC.md, docs/SOURCES.md   specification and reference index
 docs/DEVTOOLS.md                the development shell: lab, inspector, reports, targets
 docs/CI.md                      workflows, required checks, and why the gates are shaped so
 docs/PARAMETERS.md              generated from the tunable registry
+docs/CAR_VISUAL.md              the vehicle-appearance contract and the fidelity budget
+docs/CORPUS.md                  the 100 demonstration vehicles, generated from car_corpus.c
 src/main.c                      platform layer: window, Game allocation, fixed-timestep loop
 src/timestep.h/.c               the accumulator, isolated so the harness can assert it
 src/hotreload.h                 GAME_ENTRY_POINTS, the one authoritative entry-point list
 src/hotreload_windows.c         LoadLibrary / GetProcAddress loader
 src/game.h/.c                   the Game block and the reloadable entry points
-src/config.h                    Phase 0–3 constants, every physical value unit-bearing
+src/config.h                    default constants, every physical value unit-bearing
 src/units.h                     world<->render conversion and the coordinate convention
 src/math_utils.h/.c             scalar helpers raymath.h does not provide
 src/input.h/.c                  held controls and one-shot commands
@@ -282,9 +310,20 @@ src/telemetry.h/.c              CSV row writer, no raylib dependency
 src/vehicle.h/.c                canonical vehicle data and initialization
 src/tire.h/.c                   pure nonlinear curves, slip ratio, combined-friction limit
 src/drivetrain.h/.c             pure engine/gearing/torque/wheel dynamics
+src/auto_transmission.h/.c      automatic shift logic over the drivetrain
 src/physics.h/.c                pure Phase 3 integration and fixed-update owner
-src/render.h/.c                 interpolation, vehicle rendering, HUD, vectors, tire plots
+src/collision.h/.c              swept body collision against track geometry
+src/surface.h/.c                surface types by SurfaceId, resolved at point of use
+src/track.h/.c                  track layout and surface regions
+src/scoring.h/.c                drift scoring, combo, and run results
+src/particle.h/.c               skidmarks and tire smoke
+src/audio.h/.c                  engine, screech, and impact playback
+src/car_visual.h/.c             the appearance grammar: VehicleSpec -> CarVisual, raylib-free
+src/car_visual_raster.h/.c      CPU rasterizer, feature-label maps, nose-up rotation
+src/car_corpus.h/.c             the 100 demonstration vehicles as pure functions of an index
+src/render.h/.c                 interpolation, sprite bake/compose, HUD, vectors, tire plots
 src/dev_params.h/.c             the one tunable registry: sliders, profiles, docs, metadata
+src/dev_presets.h/.c            hand-designed vehicle presets
 src/dev_scenario.h/.c           scripted maneuvers, shared by the lab and the headless runner
 src/dev_state.h/.c              lab state inside Game: scope, trajectory, invariant monitor
 src/dev_lab.h/.c                the raygui Physics Lab (development builds only)
@@ -297,6 +336,9 @@ tests/hotreload_harness.c       windowless hot-reload validation
 tests/baselines/                reviewed deterministic scenario CSV baselines
 tests/visual/                   deterministic scene baselines and the RMSE gate
 tools/*.py                      telemetry comparison, plots, summaries, HTML reports
+tools/visual/                   browser appearance inspector and its Playwright measurements
+tuning/corpus/                  the corpus exported as tuning profiles; checked in, and the
+                                `corpus` scenario asserts it round-trips
 fuzz/fuzz_*.c                   libFuzzer targets for the parsers and the tire functions
 third_party/raygui/             vendored raygui, development builds only
 telemetry/                      generated CSV / smoke screenshot (gitignored)

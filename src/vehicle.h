@@ -64,6 +64,7 @@ typedef struct {
     float rideHeightRearM;
     float cowlXM;                  /* layout-frame X of cowl / windscreen foot */
     float backlightXM;             /* layout-frame X of backlight / hatch foot */
+    float bedLengthM;              /* open cargo bed forward from the tail; 0 = none */
 
     /* ---- mass particles (layout frame: axle midpoint origin, +X forward) ---- */
     float massEngineKg, massEngineXM, massEngineZM;

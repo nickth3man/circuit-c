@@ -106,6 +106,7 @@ void vehicle_spec_set_default(VehicleSpec *spec)
     spec->rideHeightRearM = VEH_RIDE_HEIGHT_REAR_M;
     spec->cowlXM = VEH_COWL_X_M;
     spec->backlightXM = VEH_BACKLIGHT_X_M;
+    spec->bedLengthM = VEH_BED_LENGTH_M;
 
     spec->massEngineKg = MASS_ENGINE_KG;
     spec->massEngineXM = MASS_ENGINE_X_M;
@@ -232,6 +233,8 @@ bool vehicle_spec_is_valid(const VehicleSpec *spec)
     if (!(isfinite(spec->rearOverhangM) && spec->rearOverhangM >= 0.0f)) return false;
     if (!(isfinite(spec->widthOverallM) && spec->widthOverallM > 0.0f)) return false;
     if (!(isfinite(spec->heightOverallM) && spec->heightOverallM > 0.0f)) return false;
+    /* Zero is the common case — most vehicles have no bed — so this is >= rather than >. */
+    if (!(isfinite(spec->bedLengthM) && spec->bedLengthM >= 0.0f)) return false;
     if (!(isfinite(spec->wheelRadiusFrontM) && spec->wheelRadiusFrontM > 0.0f)) return false;
     if (!(isfinite(spec->wheelRadiusRearM) && spec->wheelRadiusRearM > 0.0f)) return false;
     if (!(isfinite(spec->wheelInertiaKgM2) && spec->wheelInertiaKgM2 > 0.0f)) return false;

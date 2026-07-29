@@ -19,6 +19,7 @@ generates the Physics Lab sliders and the tuning-profile format.
 | `body.ride_height_rear` | 0.14 | m | 0.04 .. 0.5 | 0.005 | advanced | — | — | Rear ride height / arch clearance. |
 | `body.cowl_x` | 0.55 | m | -2 .. 2 | 0.01 | advanced | — | — | Cowl X in layout frame (axle midpoint origin). |
 | `body.backlight_x` | -0.55 | m | -2 .. 2 | 0.01 | advanced | — | — | Backlight X in layout frame. |
+| `body.bed_length` | 0 | m | 0 .. 1.5 | 0.05 | advanced | — | — | Open cargo bed forward from the tail; 0 = none. Declared, never inferred. |
 | `body.drag_coefficient` | 0.32 | — | 0.1 .. 1.2 | 0.01 | advanced | — | — | Cd in 0.5*rho*Cd*A*v^2. |
 | `body.rolling_resistance` | 0.015 | — | 0 .. 0.06 | 0.001 | advanced | — | — | Rolling resistance coefficient. |
 | `body.load_filter_rate` | 20 | Hz | 1 .. 60 | 0.5 | expert | — | — | Load-transfer accel filter corner frequency. |

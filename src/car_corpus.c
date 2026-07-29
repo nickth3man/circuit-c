@@ -42,6 +42,25 @@
  * primaries like "tire.section_width_front".
  *
  * Ordered for stability: the index of each archetype is part of the corpus API.
+ *
+ * WHY EVERY ARCHETYPE SETS cg_height AND BOTH LATERAL mu.
+ *
+ * car_visual.c derives nine normalised style axes, and three of them read only these fields:
+ * low01 <- cgHeightM, grip01 <- max lateral mu, balance01 <- muLatFront - muLatRear. Before
+ * these assignments existed no corpus entry touched any of them, so all three were CONSTANT
+ * across the whole fleet — measured range exactly 0.000 on 100 vehicles. That froze everything
+ * downstream: sport01 is 0.35*grip01 + 0.30*low01 + 0.35*power01, so with two of its three
+ * inputs pinned it spanned only 0.142 of 0..1, and the nose taper, tail taper and waist pinch
+ * rules that read it could barely move. The grammar was not at fault; it was being fed
+ * constants.
+ *
+ * body.cg_height is a `derived` registry key with a migration alias (dev_params.c ->
+ * shift_particle_z_to_cg), which shifts every mass particle's Z by a constant. That shift is
+ * NOT clamped, so a target below ~0.25 m would push the lowest particle (fuel, 0.30 m by
+ * default) under the 0.05 m registry floor for mass.*_z. The open-wheel car sits at 0.30 m,
+ * which is the practical floor with margin.
+ *
+ * Values are ordinary engineering estimates, not measurements of specific cars.
  */
 #define ARCHETYPE_COUNT 17
 
@@ -68,6 +87,11 @@ static const DevParamAssignment kArch1[] = {
     A("body.rear_overhang",         0.50f),
     A("body.ride_height_front",     0.150f),
     A("body.ride_height_rear",      0.155f),
+    /* CG height and tire grip: see the note above ARCHETYPE_COUNT. Tall and narrow on skinny
+     * economy tires. */
+    A("body.cg_height",             0.52f),
+    A("tire.lat_front.mu",          0.95f),
+    A("tire.lat_rear.mu",           0.90f),
     A("mass.engine_x",              0.90f),   /* mid-front */
     A("tire.section_width_front", 155.0f),
     A("tire.section_width_rear",  155.0f),
@@ -95,6 +119,9 @@ static const DevParamAssignment kArch2[] = {
     A("body.rear_overhang",        0.65f),
     A("body.ride_height_front",    0.140f),
     A("body.ride_height_rear",     0.145f),
+    A("body.cg_height",            0.53f),
+    A("tire.lat_front.mu",         1.05f),
+    A("tire.lat_rear.mu",          1.00f),
     A("mass.engine_x",             1.40f),  /* front transverse */
     A("tire.section_width_front", 185.0f),
     A("tire.section_width_rear",  185.0f),
@@ -121,6 +148,9 @@ static const DevParamAssignment kArch3[] = {
     A("body.rear_overhang",        0.85f),
     A("body.ride_height_front",    0.120f),
     A("body.ride_height_rear",     0.125f),
+    A("body.cg_height",            0.44f),
+    A("tire.lat_front.mu",         1.25f),
+    A("tire.lat_rear.mu",          1.20f),
     A("body.cowl_x",               0.60f),
     A("body.backlight_x",         -0.35f),  /* fast roofline */
     A("mass.engine_x",             2.00f),  /* front-mid */
@@ -147,6 +177,9 @@ static const DevParamAssignment kArch4[] = {
     A("body.rear_overhang",        1.05f),
     A("body.ride_height_front",    0.140f),
     A("body.ride_height_rear",     0.140f),
+    A("body.cg_height",            0.52f),
+    A("tire.lat_front.mu",         1.10f),
+    A("tire.lat_rear.mu",          1.05f),
     A("body.cowl_x",               0.70f),
     A("body.backlight_x",         -0.55f),
     A("mass.engine_x",             1.60f),  /* front */
@@ -173,6 +206,9 @@ static const DevParamAssignment kArch5[] = {
     A("body.rear_overhang",        0.70f),
     A("body.ride_height_front",    0.110f),
     A("body.ride_height_rear",     0.115f),
+    A("body.cg_height",            0.40f),
+    A("tire.lat_front.mu",         1.40f),
+    A("tire.lat_rear.mu",          1.38f),
     A("body.cowl_x",               0.40f),
     A("body.backlight_x",         -0.40f),
     A("mass.engine_x",             0.20f),  /* mid */
@@ -202,6 +238,9 @@ static const DevParamAssignment kArch6[] = {
     A("body.rear_overhang",        0.90f),
     A("body.ride_height_front",    0.080f),
     A("body.ride_height_rear",     0.085f),
+    A("body.cg_height",            0.34f),
+    A("tire.lat_front.mu",         1.55f),
+    A("tire.lat_rear.mu",          1.55f),
     A("body.cowl_x",               0.30f),
     A("body.backlight_x",         -0.55f),
     A("mass.engine_x",            -0.50f),  /* mid-rear */
@@ -235,6 +274,9 @@ static const DevParamAssignment kArch7[] = {
     A("body.rear_overhang",        1.10f),
     A("body.ride_height_front",    0.135f),
     A("body.ride_height_rear",     0.140f),
+    A("body.cg_height",            0.51f),
+    A("tire.lat_front.mu",         1.15f),
+    A("tire.lat_rear.mu",          1.10f),
     A("body.cowl_x",               0.60f),
     A("body.backlight_x",         -0.30f),  /* fastback */
     A("mass.engine_x",             2.80f),  /* engine far forward → long hood */
@@ -263,6 +305,9 @@ static const DevParamAssignment kArch8[] = {
     A("body.rear_overhang",        0.90f),
     A("body.ride_height_front",    0.060f),
     A("body.ride_height_rear",     0.065f),
+    A("body.cg_height",            0.32f),
+    A("tire.lat_front.mu",         1.75f),   /* slicks */
+    A("tire.lat_rear.mu",          1.75f),
     A("body.cowl_x",               0.30f),
     A("body.backlight_x",         -0.60f),
     A("mass.engine_x",            -0.40f),  /* mid-rear */
@@ -296,6 +341,9 @@ static const DevParamAssignment kArch9[] = {
     A("body.rear_overhang",        0.75f),
     A("body.ride_height_front",    0.220f),
     A("body.ride_height_rear",     0.230f),
+    A("body.cg_height",            0.60f),   /* high ride, tall body */
+    A("tire.lat_front.mu",         1.20f),   /* gravel */
+    A("tire.lat_rear.mu",          1.18f),
     A("body.cowl_x",               0.55f),
     A("body.backlight_x",         -0.40f),
     A("mass.engine_x",             1.00f),  /* front-mid */
@@ -330,6 +378,11 @@ static const DevParamAssignment kArch10[] = {
     A("body.rear_overhang",        0.50f),
     A("body.ride_height_front",    0.040f),
     A("body.ride_height_rear",     0.045f),
+    A("body.cg_height",            0.30f),   /* floor of the safe range: shift_particle_z_to_cg
+                                              * moves the lowest particle (fuel, 0.30 m) to
+                                              * 0.10 m, clear of the 0.05 m registry floor */
+    A("tire.lat_front.mu",         1.95f),
+    A("tire.lat_rear.mu",          1.95f),
     A("body.cowl_x",               0.10f),
     A("body.backlight_x",         -0.60f),
     A("mass.engine_x",            -0.20f),  /* mid-rear */
@@ -362,6 +415,11 @@ static const DevParamAssignment kArch11[] = {
     A("body.rear_overhang",        0.85f),
     A("body.ride_height_front",    0.090f),
     A("body.ride_height_rear",     0.095f),
+    A("body.cg_height",            0.46f),
+    /* The rear grip deficit IS the drift setup: balance01 reads muFront - muRear, and this
+     * 0.30 spread is the widest in the corpus, which is what makes the axis span its range. */
+    A("tire.lat_front.mu",         1.35f),
+    A("tire.lat_rear.mu",          1.05f),
     A("body.cowl_x",               0.50f),
     A("body.backlight_x",         -0.35f),
     A("mass.engine_x",             1.50f),  /* front */
@@ -381,7 +439,9 @@ static const DevParamAssignment kArch11[] = {
 };
 
 /* ------------------------------------------------------------------- 12: Pickup ------
- * Light-duty truck: early backlight → short cabin → long bed (pickupBedWeight fires). */
+ * Light-duty truck: short cabin and a declared 1.45 m open bed. Before body.bed_length
+ * existed this had to be faked by shoving the backlight forward, which is exactly why 74
+ * non-trucks grew beds too. */
 static const char *const kArchName12 = "Pickup";
 static const char *const kArchDesc12 = "light truck: short cabin, long bed, high ride height";
 static const DevParamAssignment kArch12[] = {
@@ -395,8 +455,12 @@ static const DevParamAssignment kArch12[] = {
     A("body.rear_overhang",        1.35f),  /* long bed behind axle */
     A("body.ride_height_front",    0.200f),
     A("body.ride_height_rear",     0.220f),
+    A("body.cg_height",            0.70f),
+    A("tire.lat_front.mu",         0.98f),
+    A("tire.lat_rear.mu",          0.92f),
     A("body.cowl_x",               0.90f),  /* windscreen far forward */
-    A("body.backlight_x",          0.20f),  /* backlight ends early → bed */
+    A("body.backlight_x",          0.20f),  /* short cabin: rear glass ends early */
+    A("body.bed_length",           1.45f),  /* the only vehicle here that has one */
     A("mass.engine_x",             2.50f),  /* engine well forward */
     A("tire.section_width_front", 245.0f),
     A("tire.section_width_rear",  245.0f),
@@ -423,6 +487,9 @@ static const DevParamAssignment kArch13[] = {
     A("body.rear_overhang",        0.80f),
     A("body.ride_height_front",    0.170f),
     A("body.ride_height_rear",     0.175f),
+    A("body.cg_height",            0.80f),   /* tall cargo box above the floor */
+    A("tire.lat_front.mu",         0.92f),
+    A("tire.lat_rear.mu",          0.90f),
     A("body.cowl_x",               1.10f),  /* windscreen well forward */
     A("body.backlight_x",         -0.70f), /* greenhouse stretches far rearward */
     A("mass.engine_x",             1.00f),
@@ -455,6 +522,9 @@ static const DevParamAssignment kArch14[] = {
     A("body.rear_overhang",        2.00f),
     A("body.ride_height_front",    0.250f),
     A("body.ride_height_rear",     0.250f),
+    A("body.cg_height",            1.05f),   /* the fleet's high-water mark for low01 */
+    A("tire.lat_front.mu",         0.85f),
+    A("tire.lat_rear.mu",          0.85f),
     A("body.cowl_x",               2.00f),  /* driver sits at the very front */
     A("body.backlight_x",         -1.80f), /* glass nearly to the tail */
     A("mass.engine_x",            -1.50f), /* rear-engine bus */
@@ -481,6 +551,9 @@ static const DevParamAssignment kArch15[] = {
     A("body.rear_overhang",        1.20f),
     A("body.ride_height_front",    0.140f),
     A("body.ride_height_rear",     0.140f),
+    A("body.cg_height",            0.53f),
+    A("tire.lat_front.mu",         1.08f),
+    A("tire.lat_rear.mu",          1.05f),
     A("body.cowl_x",               0.80f),
     A("body.backlight_x",         -1.00f), /* long greenhouse */
     A("mass.engine_x",             2.00f),
@@ -507,6 +580,9 @@ static const DevParamAssignment kArch16[] = {
     A("body.rear_overhang",        2.00f),
     A("body.ride_height_front",    0.230f),
     A("body.ride_height_rear",     0.230f),
+    A("body.cg_height",            0.95f),
+    A("tire.lat_front.mu",         0.88f),
+    A("tire.lat_rear.mu",          0.85f),
     A("body.cowl_x",               1.60f),  /* cab-forward box truck */
     A("body.backlight_x",         -1.50f), /* greenhouse nearly to cargo box end */
     A("mass.engine_x",             0.50f),  /* cab-under engine */
@@ -562,8 +638,9 @@ typedef struct {
 
 /* WHY TIRE ASPECT RATIO IS NOT ONE OF THESE AXES.
  *
- * plans/ISSUE.md lists tire aspect ratio among the sweep categories it recommends, and it is
- * not here. That is a measured decision, not an omission.
+ * Tire aspect ratio is an obvious candidate for a sweep axis — it changes the drawn tire
+ * diameter directly — and it is deliberately not here. That is a measured decision, not an
+ * omission.
  *
  * Every PAIR of corpus vehicles has to clear three floors at once: >= 3% of union-silhouette
  * pixels differing, signature L2 >= 0.25, and signature L-infinity >= 0.08 m. Adjacent steps
@@ -600,8 +677,36 @@ static const SweepAxis kSweepAxes[SWEEP_AXES] = {
     { "body.front_overhang", "nose length ahead of the front axle" },
     { "body.track_front",    "front stance: track against body width" },
     { "aero.lift_rear",      "rear aero: tail taper and the wing on it" },
-    { "body.backlight_x",    "greenhouse rear edge: cabin, deck and bed proportion" },
+    { "body.rear_overhang",  "tail length behind the rear axle" },
 };
+
+/* WHY body.backlight_x LEFT THIS TABLE, AND WHY body.bed_length DID NOT REPLACE IT.
+ *
+ * Both are the tire-aspect story above, told twice more.
+ *
+ * backlight_x used to carry TWO visual jobs: the rear glass station, and — through the old
+ * inference — the pickup bed. The second job was a bug (it grew beds on 74 non-trucks) and
+ * body.bed_length replaced it. Stripped of the bed, the axis moves only cabin length, roof
+ * panel and glass band, and the row stopped clearing the floors: sweep_body_backlight_x_3
+ * measured L-infinity 0.0700 m and L2 0.1071 against sweep_mass_engine_x_0, versus floors of
+ * 0.08 m and 0.25. The axis genuinely does less than it used to.
+ *
+ * bed_length was the obvious replacement and does not work either, for the opposite reason.
+ * Its four upper steps are strongly distinct (measured bed areas 133 / 209 / 285 / 380 px),
+ * but its default is 0 — most vehicles have no bed — so the generator's exclusion window puts
+ * the FIRST step at 0.1875 m. At 13.2 px/m that is a 2.5 px lip that renders as nothing, so
+ * step 0 came out byte-identical to the stock baseline: 0.00% of pixels differing. Widening
+ * the range cannot help, because the exclusion window is half a grid step and scales with it.
+ * A bed that short is not a configuration a real vehicle has.
+ *
+ * body.rear_overhang takes the slot instead: 0.2..2.5 m is 0.575 m per step, and it moves
+ * length, both tail hull stations and the tail taper together, so it clears the pixel and L2
+ * floors with room to spare.
+ *
+ * Both displaced keys stay covered where they can be honest — `body.backlight_x` and
+ * `body.bed_length` are designated visual drivers in the `car-visual` sensitivity table,
+ * perturbed across their whole declared registry range.
+ */
 
 /* ---- sweep value computation ----
  *

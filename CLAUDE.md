@@ -1,53 +1,21 @@
 # CLAUDE.md
 
-**Read [AGENTS.md](AGENTS.md) before doing any work in this repository.** It is the
-authoritative guide for this project and covers the hot-reload development workflow, the
-build commands, the physics conventions, and the constraints that keep hot reload working.
+**[AGENTS.md](AGENTS.md) is the authoritative guide for this repository. Read it before
+doing any work here.** This file exists only so that tools looking for `CLAUDE.md` find the
+pointer; it deliberately duplicates nothing, because two copies of a rule is one copy that
+goes stale.
 
-`docs/SPEC.md` is the full specification. `docs/SOURCES.md` is its reference index.
-`docs/PHASE3_VALIDATION.md` records the accepted handling metrics, baseline policy, and
-Phase 1–3 acceptance evidence.
-`docs/DEVTOOLS.md` covers the development shell — the Physics Lab, the replay inspector,
-failure bundles, telemetry reports, the vehicle corpus and gallery, and the one-command make
-targets. `docs/CI.md` covers the workflows and the required checks.
-`docs/CAR_VISUAL.md` is the vehicle-appearance contract: a car's look is a pure function of
-its physics parameters, and that document states what every drawn feature reads, where the
-render-only gains are, and which rules a change must not break. `docs/CORPUS.md` lists the
-100 demonstration vehicles.
+AGENTS.md covers, in order: the document index, the current phase of both workstreams, the
+toolchain, the hot-reload development workflow and the commands that must never be run, the
+headless test loop, restart triggers, reload-safety constraints, the vehicle-appearance
+contract, the parameter-registry procedure, and the physics conventions.
 
-**Windows only — MSYS2 UCRT64.** Use `build.bat` from cmd.exe, or `./build.sh` from an
-MSYS2 UCRT64 shell. Phases 0–3 are complete; Phase 4 is an optional, deliberate upgrade.
+Four things there are worth knowing before you run anything, because breaking them hangs the
+session rather than failing loudly:
 
-## Read this before running anything
-
-These rules exist because breaking them hangs the session rather than failing loudly:
-
-- **Never start, launch, or supervise `drifty.exe` for interactive sessions.** The
-  developer runs it and leaves it running. Your job is to rebuild the game module with
-  `build.bat` / `./build.sh`, which always returns in under a second. The running game
-  picks up the change on its own.
-- **Exception:** `build.bat --smoke-test` and `drifty.exe --capture-scene NAME` are allowed;
-  both are bounded and exit on their own. `mk screenshots` and `mk visual-test` use the
-  latter.
-- **`mk run` is the same trap under another name.** It launches the game. Never invoke it.
-- **Never run a file watcher or any command that does not return on its own** — no
-  `watchexec`, no `nodemon`, no `--watch` flags.
-
-For physics and tuning work, prefer the headless loop, which needs no window at all:
-
-```bash
-./build.sh --tests && ./drifty_tests.exe
-```
-
-or, for one scenario with a report:
-
-```bash
-mk report NAME=skidpad
-```
-
-The Phase 2 canonical vehicle structures, and then the development-tool state (`DevState`),
-each changed the persistent `Game` layout. Restart `drifty.exe` once after updating; ordinary
-module-only hot reload preserves body state, wheel speeds, engine RPM, and gear after that.
-
-Everything else — restart triggers, reload-safety constraints on game code, unit and sign
-conventions — is in [AGENTS.md](AGENTS.md).
+- **Never launch or supervise `drifty.exe`** — the developer keeps it running; you rebuild
+  the module with `build.bat` and the running game swaps it in.
+- **Never invoke `mk run` or `mk inspect`** — neither returns.
+- **Never run a file watcher**, or any command that does not exit on its own.
+- **Prefer the headless loops**: `./drifty_tests.exe` for physics, `mk visual-diagnose` for
+  vehicle appearance.

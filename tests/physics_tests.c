@@ -5382,8 +5382,8 @@ static float cv_signature_linf(const CarVisual *a, const CarVisual *b, int *wors
 
 /* The designated visual drivers: the registry keys the grammar promises to be sensitive to.
  *
- * These are exactly the twenty keys plans/ISSUE.md designates, minus one. `wheel.offset` is
- * deliberately absent: with body.track_* primary, an ET offset is already folded into the
+ * One key that might be expected here is deliberately absent: `wheel.offset`. With
+ * body.track_* primary, an ET offset is already folded into the
  * track the hubs sit at, so a grammar that read it again would be double-counting a quantity
  * it has already consumed. car_visual.h states that where the field is described.
  *
@@ -5396,7 +5396,8 @@ static const char *const kVisualDrivers[] = {
     "body.width_overall",         /* silhouette width and fender flare                */
     "body.height_overall",        /* roof share of the plan area, glass band, windows */
     "body.cowl_x",                /* windscreen station                               */
-    "body.backlight_x",           /* rear glass station, and the deck/bed behind it   */
+    "body.backlight_x",           /* rear glass station, and the deck behind it       */
+    "body.bed_length",            /* open cargo bed; declared, not inferred           */
     "body.track_front",           /* front stance                                     */
     "body.track_rear",            /* rear stance                                      */
     "body.ride_height_front",     /* front arch clearance                             */
@@ -6413,6 +6414,10 @@ static void print_usage(const char *argv0)
     printf("       %s --generate-corpus [DIR]   export the vehicle corpus as tuning profiles\n",
            argv0);
     printf("       %s --dump-corpus-index [PATH] write the corpus table as Markdown\n", argv0);
+    printf("       %s --dump-corpus-metrics [PATH] write corpus latents+signatures as CSV\n",
+           argv0);
+    printf("       %s --dump-corpus-cards [DIR]  per-car PNGs, label maps and cards.json\n",
+           argv0);
     printf("       %s --dump-corpus-sheet [DIR]  render the vehicle contact sheet (PNG+HTML)\n",
            argv0);
 }
@@ -6643,6 +6648,64 @@ static int dump_corpus_index(const char *path)
     return 0;
 }
 
+/* Every corpus vehicle's style axes and signature vector as one CSV, for spread analysis.
+ *
+ * The `corpus` scenario only answers "is any PAIR closer than the threshold". That is a
+ * minimum, and it says nothing about how the fleet uses the space: a corpus can pass while
+ * every car sits in one corner of it. This dump exists so the distribution can be looked at
+ * directly — per-column range, variance, and which components are effectively constant. */
+static int dump_corpus_metrics(const char *path)
+{
+    FILE *out = stdout;
+    if (path != NULL) {
+        out = fopen(path, "wb");
+        if (out == NULL) {
+            fprintf(stderr, "error: could not write '%s'\n", path);
+            return 1;
+        }
+    }
+
+    const int sigCount = car_visual_signature_count();
+
+    fprintf(out, "index,group,id,mass01,size01,low01,grip01,balance01,power01,aero01,"
+                 "sport01,strip01");
+    for (int c = 0; c < sigCount; c++) {
+        fprintf(out, ",%s", car_visual_signature_component_name(c));
+    }
+    fprintf(out, "\n");
+
+    for (int i = 0; i < car_corpus_count(); i++) {
+        VehicleSpec spec;
+        if (!car_corpus_spec(i, &spec)) continue;
+
+        CarVisual visual;
+        car_visual_derive(&spec, &visual);
+
+        float sig[128];
+        const int written = car_visual_signature(&visual, sig, (int)(sizeof(sig) / sizeof(sig[0])));
+
+        char id[128];
+        car_corpus_id(i, id, sizeof(id));
+
+        const CarLatents *l = &visual.latents;
+        fprintf(out, "%d,%s,%s,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f", i,
+                car_corpus_group_name(car_corpus_group(i)), id, l->mass01, l->size01, l->low01,
+                l->grip01, l->balance01, l->power01, l->aero01, l->sport01, l->strip01);
+        for (int c = 0; c < written; c++) fprintf(out, ",%.6f", sig[c]);
+        fprintf(out, "\n");
+    }
+
+    if (path != NULL) {
+        if (fclose(out) != 0) {
+            fprintf(stderr, "error: could not close '%s'\n", path);
+            return 1;
+        }
+        printf("wrote %s (%d vehicles, %d signature components)\n", path, car_corpus_count(),
+               sigCount);
+    }
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
     const char *only = NULL;
@@ -6667,6 +6730,15 @@ int main(int argc, char **argv)
         if (strcmp(argv[i], "--dump-corpus-index") == 0) {
             return dump_corpus_index((i + 1 < argc && argv[i + 1][0] != '-')
                                          ? argv[i + 1] : NULL);
+        }
+        if (strcmp(argv[i], "--dump-corpus-cards") == 0) {
+            const char *dir = (i + 1 < argc && argv[i + 1][0] != '-')
+                                  ? argv[i + 1] : "artifacts/corpus-cards";
+            return car_sheet_write_cards(dir, 0.0f) ? 0 : 1;
+        }
+        if (strcmp(argv[i], "--dump-corpus-metrics") == 0) {
+            return dump_corpus_metrics((i + 1 < argc && argv[i + 1][0] != '-')
+                                           ? argv[i + 1] : NULL);
         }
         if (strcmp(argv[i], "--dump-corpus-sheet") == 0) {
             const char *dir = (i + 1 < argc && argv[i + 1][0] != '-')

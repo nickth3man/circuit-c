@@ -11,7 +11,7 @@ each one exists, and which rules a change must not break.
 
 - `docs/CORPUS.md` — the 100 demonstration vehicles, generated
 - `docs/PARAMETERS.md` — the tunable registry, generated
-- `plans/SPRITE_OVERHAUL.md`, `plans/ISSUE.md` — the plan this was built to
+- `plans/PLAN.md`, `plans/ROADMAP.md` — the remaining work on this system
 
 ---
 
@@ -159,7 +159,8 @@ Two consequences discipline the whole feature list:
 | Exhaust count | `engineCylinders` | rule |
 | Exhaust bore | `engineDisplacementL` | rule |
 | Hood bulge | `engineDisplacementL` + `engineCylinders` (engine *bulk*), `massEngineXM` | rule |
-| Pickup bed weight | derived backlight station vs the tail | rule |
+| Pickup bed length | `bedLengthM`, clamped to the space behind the greenhouse | identity |
+| Pickup bed weight | `bedLengthM` (expression strength for the drawn width) | rule |
 | Van/bus windows, segment count | `heightVisual` × greenhouse span | rule |
 | Open-wheel weight | `trackWidth[Front\|Rear]M` vs `widthOverallM` | rule |
 | Race details (cage, mirrors, tow hook, hood pins) | mass-per-length, `grip01`, downforce, `strip01` | rule |
@@ -187,13 +188,24 @@ There is **no `body.type` key and no per-archetype branch.** The reference forms
 
 | Form | Emerges when |
 |---|---|
-| Pickup | the greenhouse ends well forward of the tail — a long rear deck reads as an open bed |
+| Pickup | a short cabin plus a non-zero `body.bed_length` — see the note below |
 | Van / bus | a tall body whose greenhouse covers most of its length ⇒ a repeated side-window band |
 | Limousine | long wheelbase + long greenhouse + modest width |
 | Supercar | low `heightOverallM`, wide, strong rear downforce ⇒ wing, splitter, canards |
 | Kei / compact | short wheelbase, narrow, tall-ish, small tires |
 | Race car | light for its size ⇒ cage, mirrors deleted, stripes, tow hook |
 | Open-wheel | `trackWidth` ≫ `widthOverallM` ⇒ wheels drawn clear of a narrowed body |
+
+There is still no `body.type` enum: `body.bed_length` is a continuous dimension in metres, not
+a category, and nothing branches on it. But it marks where inference has to stop.
+
+**When a form must be declared instead of inferred.** The bed used to emerge from
+`(backlightXM − tailX) / lengthM`, on the theory that a long rear deck reads as an open bed.
+It does not: on every three-box car the boot *is* the body behind the rear glass, so the two
+are the same measurement. The rule fired on **78 of 100** corpus vehicles, 74 of them not
+trucks, and covered 47% of the muscle car's bodywork. No threshold separates them, because
+there is nothing in the geometry to separate. When two forms are genuinely indistinguishable
+from the parameters in hand, the answer is a new parameter, not a better guess.
 
 ### Transition bands
 
@@ -365,7 +377,7 @@ differing by 1 N·m of peak torque cannot be required to look different.
 1. **Purity and totality** — the same spec gives a bit-identical `CarVisual`, signature and
    raster; every registry range corner and every corpus car yields finite, non-negative,
    in-range output.
-2. **Sensitivity** — twenty designated visual-driver keys, each perturbed across its whole
+2. **Sensitivity** — twenty-one designated visual-driver keys, each perturbed across its whole
    declared range from stock. Both metrics must move. Catches a deleted or dead rule.
 3. **Corpus distinctness** — all pairs among the 100 exceed the thresholds.
 
