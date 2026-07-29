@@ -72,14 +72,14 @@ jobs:
             echo "is skipped rather than failed."
             exit 0
           fi
-          # The merge base may predate the artifacts/ consolidation, when telemetry was written
-          # to a top-level telemetry/ directory. Accept either location so the pull request that
-          # performs the move can still be compared against its own base.
-          mkdir -p /tmp/basetelemetry
+          # The merge base may predate the artifacts consolidation. Accept its legacy
+          # top-level output directory so the pull request that performs the move can still
+          # be compared against its own base.
+          mkdir -p /tmp/base-csv
           if [ -d /tmp/base/artifacts/telemetry ]; then
-            cp /tmp/base/artifacts/telemetry/*.csv /tmp/basetelemetry/
+            cp /tmp/base/artifacts/telemetry/*.csv /tmp/base-csv/
           else
-            cp /tmp/base/telemetry/*.csv /tmp/basetelemetry/
+            cp /tmp/base/telemetry/*.csv /tmp/base-csv/
           fi
           echo "status=ok" >> "$GITHUB_OUTPUT"
 
@@ -90,7 +90,7 @@ jobs:
           set +e
           # Capture the comparison's own exit status, not the pipeline's.
           python tools/telemetry/compare_telemetry.py \
-            --baseline-dir /tmp/basetelemetry --current-dir /tmp/head \
+            --baseline-dir /tmp/base-csv --current-dir /tmp/head \
             --markdown /tmp/regression.md > /tmp/regression.txt 2>&1
           status=$?
           cat /tmp/regression.txt
@@ -102,7 +102,7 @@ jobs:
           mkdir -p artifacts
           for csv in /tmp/head/scenario_*.csv; do
             name=$(basename "$csv" .csv)
-            base="/tmp/basetelemetry/$name.csv"
+            base="/tmp/base-csv/$name.csv"
             if [ -f "$base" ]; then
               python tools/telemetry/make_report.py "$csv" --baseline "$base" \
                 --title "Drifty — $name" --out "artifacts/report_$name.html"

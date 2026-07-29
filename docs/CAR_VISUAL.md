@@ -26,17 +26,18 @@ VehicleSpec ─► car_visual_derive() ─► CarVisual ─► car_raster_draw_p
                      └─► car_visual_bake_key()   the texture cache key          │
                                                                                 │
                               ┌─────────────────────────────────────────────────┤
-                    tests/car_sheet.c                                   src/render/render.c
+                    tests/support/car_sheet.c                       src/render/render_vehicle.c
                     headless PNG contact sheet                    Texture2D, drawn rotated
                     (no GPU, no window, CI-safe)                   (the same pixels)
 ```
 
 Four rules make this work, and each one is load-bearing:
 
-1. **`src/render/car_visual.c` is the only place a styling decision may live.** `src/render/render.c` and
-   the contact-sheet writer are dumb consumers; neither may invent geometry. A rule kept in
-   the rasterizer would be invisible to the signature, and therefore to every test that reads
-   it — this has happened once already (the roof and glass rules) and was moved.
+1. **`src/render/car_visual.c` is the only place a styling decision may live.** The
+   `src/render/render_vehicle.c` texture consumer and the contact-sheet writer are dumb consumers;
+   neither may invent geometry. A rule kept in the rasterizer would be invisible to the signature,
+   and therefore to every test that reads it — this has happened once already (the roof and glass
+   rules) and was moved.
 
 2. **`car_visual.c` and `car_visual_raster.c` are raylib-free.** They include `raylib.h` for
    the `Color` and `Vector2` *types* and call no raylib function, exactly as `src/core/units.h`

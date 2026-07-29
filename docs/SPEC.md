@@ -1595,8 +1595,10 @@ checklist is fully satisfied.
 
 ### Phase 0 — Foundations and Test Harness *(~1 day)*
 
-**Files:** `config.h`, `units.h`, `math_utils.h/.c`, `input.h/.c`, `game.h/.c`, `main.c`,
-`hotreload.h`, `hotreload_windows.c`, `build.sh`/`build.bat`, `tests/physics_tests.c`
+**Files:** `src/core/config.h`, `src/core/units.h`, `src/core/math_utils.h/.c`,
+`src/game/input.h/.c`, `src/game/game.h/.c`, `src/platform/main.c`,
+`src/platform/hotreload.h`, `src/platform/hotreload_windows.c`, `build.sh`/`build.bat`,
+`tests/test_main.c`, `tests/scenarios/core_tests.c`
 
 | Task | Details |
 |------|---------|
