@@ -61,6 +61,27 @@ static const DevParameter g_params[] = {
     { "body.bed_length", "Body", "m", SPEC_OFFSET(bedLengthM),
       VEH_BED_LENGTH_M, 0.0f, 1.5f, 0.05f, false, false, 1,
       "Open cargo bed forward from the tail; 0 = none. Declared, never inferred." },
+    /* Phase B silhouette control. nose_width and tail_width are [identity] hull endpoints:
+     * the half-width the rasterizer draws at the foremost/rearmost station is exactly half
+     * this value. shoulder_x is the layout-frame station of maximum width (widthOverallM).
+     * Ranges are development limits, not physical claims; the px effect at 13.2 px/m is stated
+     * in each entry, and validity rejects an endpoint wider than widthOverallM (see vehicle.c). */
+    { "body.nose_width", "Body", "m", SPEC_OFFSET(noseWidthM),
+      VEH_NOSE_WIDTH_M, 0.8f, 2.2f, 0.01f, false, false, 1,
+      "Width at the foremost hull station (full width). [identity] endpoint; 0.8..2.2 m = 11..29 px." },
+    { "body.tail_width", "Body", "m", SPEC_OFFSET(tailWidthM),
+      VEH_TAIL_WIDTH_M, 0.8f, 2.4f, 0.01f, false, false, 1,
+      "Width at the rearmost hull station (full width). [identity] endpoint; 0.8..2.4 m = 11..32 px." },
+    { "body.shoulder_x", "Body", "m", SPEC_OFFSET(shoulderXM),
+      VEH_SHOULDER_X_M, -2.0f, 2.0f, 0.01f, false, false, 1,
+      "Station of maximum body width, layout frame (axle midpoint origin). Same convention as "
+      "cowl_x/backlight_x; moves the widest point over ~53 px of body length at stock." },
+    { "body.fender_flare_front", "Body", "m", SPEC_OFFSET(fenderFlareFrontM),
+      VEH_FENDER_FLARE_FRONT_M, 0.0f, 0.12f, 0.002f, false, false, 1,
+      "Front arch flare proud of the hull over the wheel arch; 0 = none. 0..0.12 m = 0..1.6 px." },
+    { "body.fender_flare_rear", "Body", "m", SPEC_OFFSET(fenderFlareRearM),
+      VEH_FENDER_FLARE_REAR_M, 0.0f, 0.15f, 0.002f, false, false, 1,
+      "Rear arch flare proud of the hull over the wheel arch; 0 = none. 0..0.15 m = 0..2 px." },
     { "body.drag_coefficient", "Body", "", SPEC_OFFSET(dragCoefficient),
       DRAG_COEFFICIENT, 0.1f, 1.2f, 0.01f, false, false, 1,
       "Cd in 0.5*rho*Cd*A*v^2." },

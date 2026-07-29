@@ -133,6 +133,8 @@ typedef struct {
     float wheelbaseM;       /* [identity] cgToFrontM + cgToRearM */
     float frontOverhangM;   /* body ahead of the front axle */
     float rearOverhangM;    /* body behind the rear axle */
+    float shoulderXM;      /* [identity] body-frame station of maximum width; reads shoulderXM
+                                        via layout_to_body_x (layout frame -> body frame) */
 
     /* ---- greenhouse ---- */
     float cabinCentreXM;
@@ -150,6 +152,8 @@ typedef struct {
     /* ---- wheels ---- */
     CarWheelVisual wheels[WHEEL_COUNT];
     float archFlareM;       /* how far the arch stands proud of the hull */
+    float fenderFlareFrontM; /* [identity] declared front arch flare; added per-axle to archFlareM */
+    float fenderFlareRearM;  /* [identity] declared rear arch flare; added per-axle to archFlareM */
 
     /* ---- appendages; a zero magnitude means absent ---- */
     float wingSpanM;        /* [rule] wing span; reads |aeroLiftCoefRear| × aeroRefAreaRearM2 */

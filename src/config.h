@@ -83,6 +83,16 @@
  * three-box car, so no threshold on that ratio can separate the two. Only the vehicle itself
  * knows, so the vehicle now says. */
 #define VEH_BED_LENGTH_M        0.0f
+/* Phase B silhouette endpoints and arch flare (SI metres). Pixel effects are stated against
+ * the 13.2 px/m world scale (PIXELS_PER_METER 24 x CAMERA_BASE_ZOOM 0.55): nose_width
+ * 0.8..2.2 m = 11..29 px; tail_width 0.8..2.4 m = 11..32 px; shoulder_x moves the max-width
+ * station over ~53 px of body length at stock; fender_flare_front 0..0.12 m = 0..1.6 px;
+ * fender_flare_rear 0..0.15 m = 0..2 px. */
+#define VEH_NOSE_WIDTH_M            0.90f
+#define VEH_TAIL_WIDTH_M            1.10f
+#define VEH_SHOULDER_X_M            0.50f   /* layout frame (axle midpoint origin, +X forward) */
+#define VEH_FENDER_FLARE_FRONT_M    0.0f
+#define VEH_FENDER_FLARE_REAR_M     0.0f
 /* Derived readout default: the staged refresh computes exactly this sum. */
 #define VEH_LENGTH_OVERALL_M   (VEH_WHEELBASE_M + VEH_FRONT_OVERHANG_M + VEH_REAR_OVERHANG_M)
 /* Frontal area fill of width*height that recovers FRONTAL_AREA_M2 at stock. */

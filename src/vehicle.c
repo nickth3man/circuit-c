@@ -107,6 +107,11 @@ void vehicle_spec_set_default(VehicleSpec *spec)
     spec->cowlXM = VEH_COWL_X_M;
     spec->backlightXM = VEH_BACKLIGHT_X_M;
     spec->bedLengthM = VEH_BED_LENGTH_M;
+    spec->noseWidthM = VEH_NOSE_WIDTH_M;
+    spec->tailWidthM = VEH_TAIL_WIDTH_M;
+    spec->shoulderXM = VEH_SHOULDER_X_M;
+    spec->fenderFlareFrontM = VEH_FENDER_FLARE_FRONT_M;
+    spec->fenderFlareRearM = VEH_FENDER_FLARE_REAR_M;
 
     spec->massEngineKg = MASS_ENGINE_KG;
     spec->massEngineXM = MASS_ENGINE_X_M;
@@ -235,6 +240,19 @@ bool vehicle_spec_is_valid(const VehicleSpec *spec)
     if (!(isfinite(spec->heightOverallM) && spec->heightOverallM > 0.0f)) return false;
     /* Zero is the common case — most vehicles have no bed — so this is >= rather than >. */
     if (!(isfinite(spec->bedLengthM) && spec->bedLengthM >= 0.0f)) return false;
+    /* Phase B silhouette endpoints are physical [identity] hull stations. An endpoint wider
+     * than the body it caps is incompatible geometry: widthOverallM is the maximum body width
+     * and the shoulder sits at it, so an endpoint past it would falsify the identity (the
+     * grammar would have to clamp) and make the shoulder's max-width claim ambiguous. Reject
+     * it here rather than silently clamp in car_visual.c. */
+    if (!(isfinite(spec->noseWidthM) && spec->noseWidthM > 0.0f &&
+          spec->noseWidthM <= spec->widthOverallM)) return false;
+    if (!(isfinite(spec->tailWidthM) && spec->tailWidthM > 0.0f &&
+          spec->tailWidthM <= spec->widthOverallM)) return false;
+    /* A longitudinal station; finiteness only, like cowl_x / backlight_x. */
+    if (!(isfinite(spec->shoulderXM))) return false;
+    if (!(isfinite(spec->fenderFlareFrontM) && spec->fenderFlareFrontM >= 0.0f)) return false;
+    if (!(isfinite(spec->fenderFlareRearM) && spec->fenderFlareRearM >= 0.0f)) return false;
     if (!(isfinite(spec->wheelRadiusFrontM) && spec->wheelRadiusFrontM > 0.0f)) return false;
     if (!(isfinite(spec->wheelRadiusRearM) && spec->wheelRadiusRearM > 0.0f)) return false;
     if (!(isfinite(spec->wheelInertiaKgM2) && spec->wheelInertiaKgM2 > 0.0f)) return false;

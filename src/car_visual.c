@@ -225,29 +225,35 @@ CarLatents car_visual_latents(const VehicleSpec *spec)
 /* ------------------------------------------------------------------------ hull profile --
  *
  * [rule] Half-width as a fraction of the body half-width, along t from tail (0) to nose (1).
- * The tail rises from its taper, the middle carries a slight waist pinch, and the nose falls
- * away. Sporty cars get a sharper nose and a tighter waist; heavy cars keep a fuller tail. */
-static float hull_profile(float t, float noseTaper, float tailTaper, float waistDepth)
+ * Three anchors are physical [identity]: the tail endpoint (tailFrac), the shoulder (1.0, the
+ * maximum width, at tShoulder) and the nose endpoint (noseFrac). sport01 modulates ONLY the
+ * interior — the waist pinch, via waistDepth — which is exactly zero at the tail, the shoulder
+ * and the nose, so the endpoints and the maximum-width station are never moved by it. This is
+ * the Phase B change: the taper sport01 used to drive too weakly is replaced by explicit
+ * endpoint widths and an explicit shoulder station. */
+static float hull_profile(float t, float tShoulder, float tailFrac, float noseFrac,
+                          float waistDepth)
 {
     t = clampf(t, 0.0f, 1.0f);
+    const float ts = clampf(tShoulder, 0.02f, 0.98f);
 
     float frac;
-    /* The tail taper governs the rear 62% of the body, on a LINEAR ramp rather than a
-     * smoothstep. Two reasons, both measured: rear aero is a designated visual driver and has
-     * to move a readable amount of silhouette, which one station could not do; and a
-     * smoothstep concentrates all the movement in one or two stations, so the diagnostic
-     * signature saw a single large component instead of the several moderate ones the shape
-     * change actually is. A linear ramp spreads it the way the drawn outline does. */
-    if (t < 0.62f) {
-        frac = lerpf(tailTaper, 1.0f, t / 0.62f);
+    float dip;
+    if (t <= ts) {
+        /* Rear section: linear ramp from the tail endpoint up to the shoulder. Linear (not
+         * smoothstep) so moving tail_width spreads across several stations the way the drawn
+         * outline does, rather than concentrating on one. */
+        frac = lerpf(tailFrac, 1.0f, t / ts);
+        /* Waist dip that is zero at the tail and at the shoulder. */
+        const float u = t / ts;
+        dip = 4.0f * u * (1.0f - u);
     } else {
-        frac = lerpf(1.0f, noseTaper, smoothstep(0.62f, 1.0f, t));
+        /* Front section: smoothstep from the shoulder down to the nose endpoint. */
+        frac = lerpf(1.0f, noseFrac, smoothstep(ts, 1.0f, t));
+        const float u = (t - ts) * (1.0f / (1.0f - ts));
+        dip = 4.0f * u * (1.0f - u);
     }
-
-    /* A shallow dip centred between the axles, so the car is not a lozenge. */
-    const float d = (t - 0.42f) / 0.26f;
-    const float bump = expf(-d * d);
-    return clampf(frac * (1.0f - waistDepth * bump), 0.02f, 1.50f);
+    return clampf(frac * (1.0f - waistDepth * dip), 0.02f, 1.50f);
 }
 
 /* ---------------------------------------------------------------------------- derive -- */
@@ -418,46 +424,37 @@ void car_visual_derive(const VehicleSpec *spec, CarVisual *out)
 
     /* ---- hull outline ----
      *
-     * [rule] Nose taper reads dragCoefficient AND front aero lift. A slippery car with
-     * downforce gets a sharper nose. Tail taper reads dragCoefficient, rear aero, and mass. */
+     * [identity/rule] Phase B: the half-width outline is anchored on three physical stations —
+     * the tail endpoint (body.tail_width), the shoulder (widthOverallM, the maximum, at
+     * body.shoulder_x) and the nose endpoint (body.nose_width). sport01 modulates only the
+     * interior waist between them (see hull_profile). The aero-driven taper sport01 used to own
+     * is retired here: aero.lift_rear still moves the silhouette through the wing it carries,
+     * and the explicit endpoint widths carry the tail/nose shape the derived taper could not
+     * express — the measured 3x tail-closure gap and the negative nose gain on supercar/GT3.
+     * The endpoints are physical identities: validity guarantees each is <= widthOverallM, so
+     * the grammar never clamps them and the shoulder is unambiguously the widest point. */
     {
-        /* SIGNED aero, not magnitude: a lifting nose is a rounded, tapering nose, a downforce
-         * nose is a squared-off one with a working front end. u01 spans the registry's signed
-         * range mapped to downforce-positive, so the whole aero.lift_* range moves the taper
-         * instead of saturating in its first fifth. */
-        const float frontAero = u01(-spec->aeroLiftCoefFront, -1.0f, 2.0f);
-        const float rearAero  = u01(-spec->aeroLiftCoefRear, -1.0f, 3.0f);
-        const float drag01 = u01(spec->dragCoefficient, 0.20f, 1.20f);
+        const float invHalfW = (halfW > 1e-6f) ? (1.0f / halfW) : 0.0f;
+        /* [identity] endpoint half-widths as a fraction of the body half-width. */
+        const float tailFrac = maxf(spec->tailWidthM, 0.0f) * 0.5f * invHalfW;
+        const float noseFrac = maxf(spec->noseWidthM, 0.0f) * 0.5f * invHalfW;
 
-        /* Downforce squares the tail off (a Kamm tail works the diffuser and the wing);
-         * lift lets it taper away. The rear-aero weight is the dominant taper term because
-         * `aero.lift_rear` is a designated visual driver and has to move the silhouette, not
-         * only the wing bolted to it. */
-        /* Tall bodies are slab-sided: a van's plan outline is very nearly a rectangle, a low
-         * car's tapers at both ends. Reads heightOverallM via heightVisual — the same source
-         * as the roof and glass rules, so a tall spec reads tall consistently. */
-        const float slab = out->heightVisual;
+        /* [identity] shoulder station: where the body reaches its full half-width. Converted
+         * out of the layout frame exactly like cowl_x / backlight_x — reading it as a body
+         * value would shift the widest point by the CG offset. */
+        const float shoulderX = layout_to_body_x(spec, spec->shoulderXM);
+        out->shoulderXM = shoulderX;
+        const float tShoulder = (out->lengthM > 1e-6f)
+            ? clampf((shoulderX - tailX) / out->lengthM, 0.02f, 0.98f)
+            : 0.5f;
 
-        const float noseTaper = clampf(
-            0.74f - 0.34f * l.sport01 - 0.18f * (1.0f - l.aero01)
-                  + 0.16f * frontAero + 0.16f * slab - 0.08f * drag01,
-            0.12f, 0.98f);
-        /* The constant is where an aerodynamically neutral car's tail sits. It was low enough
-         * that the stock car rendered as a boat-tailed wedge, which nothing in its spec asks
-         * for and which the reference sheet's saloons plainly are not. Raised so a neutral
-         * tail is squarish and the aero term moves it either side of that, with the ceiling
-         * lifted to match so a downforce car is not clipped into the same shape as the one
-         * below it. */
-        const float tailTaper = clampf(
-            0.52f - 0.20f * l.sport01 + 0.18f * l.mass01
-                  + 0.80f * rearAero + 0.20f * slab - 0.04f * drag01,
-            0.15f, 1.40f);
+        /* [rule] sport01 owns only the interior waist now; endpoints and shoulder are identity. */
         const float waistDepth = 0.02f + 0.10f * l.sport01;
 
         for (int i = 0; i < CAR_HULL_STATIONS; i++) {
             const float t = (float)i / (float)(CAR_HULL_STATIONS - 1);
             out->hull[i].xM = lerpf(tailX, noseX, t);
-            out->hull[i].halfWidthM = halfW * hull_profile(t, noseTaper, tailTaper, waistDepth);
+            out->hull[i].halfWidthM = halfW * hull_profile(t, tShoulder, tailFrac, noseFrac, waistDepth);
         }
 
         /* [rule] Open-wheel cars have a narrower body centre section so the wheels read as

@@ -65,6 +65,11 @@ typedef struct {
     float cowlXM;                  /* layout-frame X of cowl / windscreen foot */
     float backlightXM;             /* layout-frame X of backlight / hatch foot */
     float bedLengthM;              /* open cargo bed forward from the tail; 0 = none */
+    float noseWidthM;               /* width at the foremost hull station (full width, m) */
+    float tailWidthM;               /* width at the rearmost hull station (full width, m) */
+    float shoulderXM;               /* layout-frame station of maximum body width */
+    float fenderFlareFrontM;        /* arch flare proud of the hull, front axle (m) */
+    float fenderFlareRearM;         /* arch flare proud of the hull, rear axle (m) */
 
     /* ---- mass particles (layout frame: axle midpoint origin, +X forward) ---- */
     float massEngineKg, massEngineXM, massEngineZM;
