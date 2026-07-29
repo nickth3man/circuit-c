@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Build one self-contained HTML report for a telemetry run.
 
-    python tools/make_report.py telemetry/scenario_skidpad.csv --out artifacts/report.html
-    python tools/make_report.py current.csv --baseline tests/baselines/skidpad.csv
-    python tools/make_report.py --dir telemetry --out artifacts/report.html
+    python tools/telemetry/make_report.py artifacts/telemetry/scenario_skidpad.csv --out artifacts/report.html
+    python tools/telemetry/make_report.py current.csv --baseline tests/baselines/skidpad.csv
+    python tools/telemetry/make_report.py --dir artifacts/telemetry --out artifacts/report.html
 
 Everything is inlined — charts are SVG elements, styles are a <style> block, there is no
 script and no external request. Open it from disk, attach it to a PR, or drop it in a

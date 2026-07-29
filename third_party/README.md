@@ -22,12 +22,12 @@ replacing a file wholesale and recording the provenance below.
 - Licence: dual public domain / MIT, Sean Barrett. The full text is in the header's own banner.
 
 stb_image_write is a **test-only** dependency, used to write the vehicle contact sheet from
-`drifty_tests.exe` without a GPU or a window. `tests/car_sheet.c` is the single translation
-unit that defines `STB_IMAGE_WRITE_IMPLEMENTATION`. Neither `build/game.dll`, `drifty.exe`,
-nor `drifty_release.exe` links it.
+`build/tests/drifty_tests.exe` without a GPU or a window. `tests/car_sheet.c` is the single translation
+unit that defines `STB_IMAGE_WRITE_IMPLEMENTATION`. Neither `build/dev/game.dll`, `build/dev/drifty.exe`,
+nor `build/release/drifty_release.exe` links it.
 
-raygui is a **development-only** dependency. It is compiled into `build/game.dll` only when
+raygui is a **development-only** dependency. It is compiled into `build/dev/game.dll` only when
 `DRIFTY_DEV_TOOLS` is defined (the default for `build.sh` / `build.bat` development builds)
-and `DRIFTY_HEADLESS` is not. `src/dev_lab.c` is the single translation unit that defines
+and `DRIFTY_HEADLESS` is not. `src/dev/dev_lab.c` is the single translation unit that defines
 `RAYGUI_IMPLEMENTATION`. Release builds (`--release`) and the headless test executable link
-none of it, which is why `drifty_release.exe` and `drifty_tests.exe` are unaffected.
+none of it, which is why `build/release/drifty_release.exe` and `build/tests/drifty_tests.exe` are unaffected.

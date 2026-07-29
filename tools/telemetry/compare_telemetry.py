@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Tolerance-aware comparison of two telemetry runs.
 
-    python tools/compare_telemetry.py BASELINE.csv CURRENT.csv
-    python tools/compare_telemetry.py BASELINE.csv CURRENT.csv --markdown summary.md
-    python tools/compare_telemetry.py --baseline-dir tests/baselines --current-dir telemetry
+    python tools/telemetry/compare_telemetry.py BASELINE.csv CURRENT.csv
+    python tools/telemetry/compare_telemetry.py BASELINE.csv CURRENT.csv --markdown summary.md
+    python tools/telemetry/compare_telemetry.py --baseline-dir tests/baselines --current-dir telemetry
 
 Exit status is 0 when every comparison is inside tolerance and 1 when anything breached, so
 this is usable directly as a CI gate.

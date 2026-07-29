@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Summarise one telemetry run as text or JSON.
 
-    python tools/summarize_run.py telemetry/scenario_skidpad.csv
-    python tools/summarize_run.py telemetry/*.csv --json artifacts/summary.json
+    python tools/telemetry/summarize_run.py artifacts/telemetry/scenario_skidpad.csv
+    python tools/telemetry/summarize_run.py artifacts/telemetry/*.csv --json artifacts/summary.json
 
 Derived metrics only — the numbers a human asks about after a change ("did it still hit 100
 in the same time? did the peak sideslip move?"). The raw columns are what compare_telemetry

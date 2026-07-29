@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Render telemetry as standalone SVG charts.
 
-    python tools/plot_telemetry.py telemetry/scenario_skidpad.csv --out artifacts/plots
-    python tools/plot_telemetry.py run.csv --baseline base.csv --out plots
+    python tools/telemetry/plot_telemetry.py artifacts/telemetry/scenario_skidpad.csv --out artifacts/plots
+    python tools/telemetry/plot_telemetry.py run.csv --baseline base.csv --out plots
 
 One SVG per chart, no external libraries, no fonts to install. make_report.py inlines the
 same chart definitions into a single HTML page; this script exists for when you want the

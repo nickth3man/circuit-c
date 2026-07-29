@@ -3,8 +3,8 @@
 Standard library only, on purpose. These tools run in CI, on a fresh Windows checkout, and
 inside a failure triage session; none of those should need a package install first.
 
-The CSV schema is whatever `telemetry_header()` in src/telemetry.c writes — the header row is
-parsed rather than assumed, so adding a column here is not a code change.
+The CSV schema is whatever `telemetry_header()` in src/game/telemetry.c writes — the header
+row is parsed rather than assumed, so adding a column here is not a code change.
 """
 
 from __future__ import annotations
