@@ -57,11 +57,11 @@ Every entry is a pure function of its index in `src/car_corpus.c`. Appearance is
 | 49 | sweep | `sweep_aero_lift_rear_2` | aero.lift_rear = -1.500  (step 3/5) |
 | 50 | sweep | `sweep_aero_lift_rear_3` | aero.lift_rear = -0.750  (step 4/5) |
 | 51 | sweep | `sweep_aero_lift_rear_4` | aero.lift_rear = 1.000  (step 5/5) |
-| 52 | sweep | `sweep_body_backlight_x_0` | body.backlight_x = -2.000 m (step 1/5) |
-| 53 | sweep | `sweep_body_backlight_x_1` | body.backlight_x = -1.250 m (step 2/5) |
-| 54 | sweep | `sweep_body_backlight_x_2` | body.backlight_x = 0.500 m (step 3/5) |
-| 55 | sweep | `sweep_body_backlight_x_3` | body.backlight_x = 1.250 m (step 4/5) |
-| 56 | sweep | `sweep_body_backlight_x_4` | body.backlight_x = 2.000 m (step 5/5) |
+| 52 | sweep | `sweep_body_rear_overhang_0` | body.rear_overhang = 0.200 m (step 1/5) |
+| 53 | sweep | `sweep_body_rear_overhang_1` | body.rear_overhang = 1.206 m (step 2/5) |
+| 54 | sweep | `sweep_body_rear_overhang_2` | body.rear_overhang = 1.638 m (step 3/5) |
+| 55 | sweep | `sweep_body_rear_overhang_3` | body.rear_overhang = 2.069 m (step 4/5) |
+| 56 | sweep | `sweep_body_rear_overhang_4` | body.rear_overhang = 2.500 m (step 5/5) |
 | 57 | sampled | `sampled_00` | sampled_00 - Halton seed 0 |
 | 58 | sampled | `sampled_01` | sampled_01 - Halton seed 1 |
 | 59 | sampled | `sampled_02` | sampled_02 - Halton seed 2 |
