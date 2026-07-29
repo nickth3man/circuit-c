@@ -17,8 +17,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "dev_params.h"
-#include "vehicle.h"
+#include "dev/dev_params.h"
+#include "physics/vehicle.h"
 
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size);
 

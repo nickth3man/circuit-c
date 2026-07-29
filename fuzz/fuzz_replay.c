@@ -15,7 +15,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "dev_replay.h"
+#include "dev/dev_replay.h"
 
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size);
 

@@ -17,8 +17,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "config.h"
-#include "tire.h"
+#include "core/config.h"
+#include "physics/tire.h"
 
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size);
 
