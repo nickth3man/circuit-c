@@ -20,9 +20,9 @@ on:
   pull_request:
     paths:
       - "fuzz/**"
-      - "src/dev_params.*"
-      - "src/dev_replay.*"
-      - "src/tire.*"
+      - "src/dev/dev_params.*"
+      - "src/dev/dev_replay.*"
+      - "src/physics/tire.*"
       - ".github/workflows/fuzz.yml"
 
 permissions:
@@ -49,11 +49,12 @@ jobs:
       - name: Build ${{ matrix.target }}
         run: |
           mkdir -p artifacts/fuzz corpus/${{ matrix.target }}
+          # Link membership comes from the Makefile manifest, not a copy in this file.
+          FUZZ_SUPPORT_SRCS="$(make --no-print-directory -s print-source-group GROUP=FUZZ_SUPPORT_SRCS)"
           clang -std=c11 -Isrc -Ithird_party/raylib-src/src -O1 -g \
             -DDRIFTY_HEADLESS -DDRIFTY_LIBFUZZER \
             -fsanitize=fuzzer,address,undefined -fno-sanitize-recover=all \
-            fuzz/${{ matrix.target }}.c src/dev_params.c src/dev_replay.c src/vehicle.c \
-            src/tire.c src/replay.c src/math_utils.c src/input.c \
+            fuzz/${{ matrix.target }}.c $FUZZ_SUPPORT_SRCS \
             -o artifacts/fuzz/${{ matrix.target }} -lm
 
       - name: Run

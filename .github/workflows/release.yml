@@ -42,26 +42,26 @@ jobs:
         run: ./build.sh --clean && ./build.sh --release
 
       - name: Full headless suite (no sanitizer instrumentation)
-        run: ./build.sh --tests && ./drifty_tests.exe
+        run: ./build.sh --tests && ./build/tests/drifty_tests.exe
 
       - name: Package
         run: |
           set -e
-          mkdir -p dist/drifty
-          cp drifty_release.exe dist/drifty/drifty.exe
-          cp glfw3.dll dist/drifty/
-          cp README.md AGENTS.md dist/drifty/
-          cp docs/SPEC.md docs/SOURCES.md docs/PARAMETERS.md dist/drifty/ 2>/dev/null || true
-          cp third_party/README.md dist/drifty/THIRD_PARTY.md
-          ( cd dist && zip -r drifty-windows-x64.zip drifty )
-          ( cd dist && sha256sum drifty-windows-x64.zip > drifty-windows-x64.zip.sha256 )
+          mkdir -p build/packages/drifty
+          cp build/release/drifty_release.exe build/packages/drifty/drifty.exe
+          cp build/release/glfw3.dll build/packages/drifty/
+          cp README.md AGENTS.md build/packages/drifty/
+          cp docs/SPEC.md docs/SOURCES.md docs/generated/PARAMETERS.md build/packages/drifty/ 2>/dev/null || true
+          cp third_party/README.md build/packages/drifty/THIRD_PARTY.md
+          ( cd build/packages && zip -r drifty-windows-x64.zip drifty )
+          ( cd build/packages && sha256sum drifty-windows-x64.zip > drifty-windows-x64.zip.sha256 )
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: windows-package
           path: |
-            dist/drifty-windows-x64.zip
-            dist/drifty-windows-x64.zip.sha256
+            build/packages/drifty-windows-x64.zip
+            build/packages/drifty-windows-x64.zip.sha256
           retention-days: 7
 
   linux:
@@ -83,20 +83,20 @@ jobs:
       - name: Package
         run: |
           set -e
-          mkdir -p dist/drifty
-          cp drifty_tests dist/drifty/drifty_tests
-          cp -r tools dist/drifty/tools
-          cp README.md AGENTS.md dist/drifty/
-          cp docs/SPEC.md docs/SOURCES.md docs/PARAMETERS.md dist/drifty/ 2>/dev/null || true
-          tar -czf dist/drifty-linux-x64.tar.gz -C dist drifty
-          ( cd dist && sha256sum drifty-linux-x64.tar.gz > drifty-linux-x64.tar.gz.sha256 )
+          mkdir -p build/packages/drifty
+          cp build/tests/drifty_tests build/packages/drifty/drifty_tests
+          cp -r tools build/packages/drifty/tools
+          cp README.md AGENTS.md build/packages/drifty/
+          cp docs/SPEC.md docs/SOURCES.md docs/generated/PARAMETERS.md build/packages/drifty/ 2>/dev/null || true
+          tar -czf build/packages/drifty-linux-x64.tar.gz -C build/packages drifty
+          ( cd build/packages && sha256sum drifty-linux-x64.tar.gz > drifty-linux-x64.tar.gz.sha256 )
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: linux-package
           path: |
-            dist/drifty-linux-x64.tar.gz
-            dist/drifty-linux-x64.tar.gz.sha256
+            build/packages/drifty-linux-x64.tar.gz
+            build/packages/drifty-linux-x64.tar.gz.sha256
           retention-days: 7
 
   publish:

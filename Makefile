@@ -4,13 +4,13 @@
 # check exists in CI it exists here, spelled the same way, and `make ci` is the local
 # equivalent of the required GitHub checks.
 #
-#   make dev              hot-reload development build: build/game.dll + drifty.exe
+#   make dev              hot-reload development build: build/dev/game.dll + build/dev/drifty.exe
 #   make run              build, then LAUNCH the game (a human does this, never an agent)
 #   make test             fast unit and infrastructure scenarios
 #   make test-physics     every physics and maneuver scenario, with telemetry
 #   make scenario NAME=skidpad     one scenario
 #   make report NAME=skidpad       one scenario, then a self-contained HTML report
-#   make regression       compare telemetry/ against tests/baselines/ with tolerances
+#   make regression       compare artifacts/telemetry against tests/baselines/ with tolerances
 #   make baselines        re-record tests/baselines/ from the current build (explain it!)
 #   make verify-fast      format check + tests
 #   make verify           static analysis + tests + physics + regression
@@ -23,7 +23,7 @@
 #   make benchmark        fixed-update throughput
 #   make release          release build
 #   make ci               everything the required CI checks run
-#   make params-doc       regenerate docs/PARAMETERS.md from the registry
+#   make params-doc       regenerate docs/generated/PARAMETERS.md from the registry
 #   make compile-commands write compile_commands.json for clangd
 #   make format           apply .clang-format        make format-check  check only
 #   make lint             cppcheck                   make analyze       clang --analyze
@@ -105,7 +105,7 @@ MAGICK       := $(shell command -v magick 2>/dev/null)
 # ------------------------------------------------------------------------------- flags --
 
 CSTD     := -std=c11
-INCLUDES := -Isrc -Ithird_party -Ithird_party/raygui
+INCLUDES := -Isrc -Itests -Ithird_party -Ithird_party/raygui
 WARNINGS := -Wall -Wextra -Wshadow -Wstrict-prototypes -Wmissing-prototypes -Wpointer-arith
 DEBUG_FLAGS   := -O0 -g
 RELEASE_FLAGS := -O2 -DNDEBUG
@@ -118,31 +118,89 @@ BUILD_DEFINES = -DDRIFTY_BUILD_COMMIT=\"$(BUILD_COMMIT)\" \
                 -DDRIFTY_BUILD_DIRTY=\"$(BUILD_DIRTY)\"
 
 # ----------------------------------------------------------------------------- sources --
+#
+# THE source manifest. build.sh, tools/build/gen_compile_commands.py and the fuzz workflows
+# all read these groups out of this file through `print-source-groups` / `print-source-group`,
+# so link membership is declared exactly once. It used to be declared four times, and the
+# fourth copy had already drifted.
+#
+# Membership is explicit on purpose: no globs for link membership and no recursive make,
+# because a glob silently adopts a new file into every binary that happens to match it.
+#
+# Paths must stay repository-relative and free of whitespace and apostrophes: one manifest is
+# consumed by both Make and POSIX shell.
 
-SHARED_SRCS := src/input.c src/math_utils.c src/dev_scenario.c src/profile.c src/car_visual.c src/car_visual_raster.c
-DEV_SRCS    := src/dev_params.c src/dev_presets.c src/dev_replay.c src/dev_state.c src/failure_bundle.c src/car_corpus.c
-# Must stay in sync with GAME_SRCS in build.sh. build.sh owns the UCRT64 build; this list
-# is what `make sanitize`, `make coverage`, and the POSIX `make tests` fallback compile.
-GAME_SRCS   := src/game.c src/audio.c src/auto_transmission.c src/particle.c src/vehicle.c \
-               src/physics.c src/tire.c src/drivetrain.c src/surface.c src/track.c \
-               src/collision.c src/scoring.c src/render.c src/replay.c src/telemetry.c \
+SHARED_SRCS := src/game/input.c src/core/math_utils.c src/dev/dev_scenario.c src/game/profile.c src/render/car_visual.c src/render/car_visual_raster.c
+DEV_SRCS    := src/dev/dev_params.c src/dev/dev_presets.c src/dev/dev_replay.c src/dev/dev_state.c src/dev/failure_bundle.c src/dev/car_corpus.c
+DEV_UI_SRCS := src/dev/dev_lab.c
+GAME_SRCS   := src/game/game.c src/game/audio.c src/physics/auto_transmission.c src/game/particle.c src/physics/vehicle.c \
+               src/physics/physics.c src/physics/tire.c src/physics/drivetrain.c src/physics/surface.c src/world/track.c \
+               src/world/collision.c src/game/scoring.c src/render/render.c src/game/replay.c src/game/telemetry.c \
                $(DEV_SRCS)
-PLATFORM_SRCS := src/main.c src/timestep.c
-TEST_SRCS   := tests/physics_tests.c tests/car_sheet.c src/timestep.c $(GAME_SRCS) $(SHARED_SRCS)
-ALL_C_SRCS  := $(wildcard src/*.c) $(wildcard tests/*.c) $(wildcard fuzz/*.c)
-ALL_H_SRCS  := $(wildcard src/*.h)
+PLATFORM_SRCS := src/platform/main.c src/platform/timestep.c
+HOTRELOAD_SRC := src/platform/hotreload_windows.c
 
-# Static analysis covers the headless-safe set: the platform layer is Windows-only and
-# dev_lab.c is mostly a 6000-line vendored header, which is not our code to fix.
-ANALYZE_SRCS := $(filter-out src/main.c src/hotreload_windows.c src/dev_lab.c,\
-                             $(wildcard src/*.c)) tests/physics_tests.c
+# Test-owned translation units only. TEST_SRCS below is the headless LINK CLOSURE: the
+# runner plus everything it pulls in.
+TEST_RUNNER_SRCS := tests/test_main.c tests/test_commands.c \
+                    tests/support/test_harness.c tests/support/simulation_fixture.c \
+                    tests/support/appearance_metrics.c tests/support/car_sheet.c \
+                    tests/scenarios/core_tests.c tests/scenarios/appearance_tests.c \
+                    tests/scenarios/physics_tests.c tests/scenarios/handling_tests.c \
+                    tests/scenarios/gameplay_tests.c
+TEST_SRCS   := $(TEST_RUNNER_SRCS) src/platform/timestep.c $(GAME_SRCS) $(SHARED_SRCS)
+HOTRELOAD_HARNESS_SRCS := tests/hotreload/hotreload_harness.c src/platform/timestep.c $(HOTRELOAD_SRC) $(SHARED_SRCS)
 
-EXE_TESTS := drifty_tests$(EXE_SUFFIX)
-EXE_DEBUG := drifty$(EXE_SUFFIX)
-EXE_RELEASE := drifty_release$(EXE_SUFFIX)
+# The support set every libFuzzer target links against.
+FUZZ_SUPPORT_SRCS := src/dev/dev_params.c src/dev/dev_replay.c src/physics/vehicle.c src/physics/tire.c \
+                     src/game/replay.c src/core/math_utils.c src/game/input.c
+
+# The groups `print-source-groups` exports, in the order it prints them.
+SOURCE_GROUP_NAMES := SHARED_SRCS DEV_SRCS DEV_UI_SRCS GAME_SRCS PLATFORM_SRCS \
+                      HOTRELOAD_SRC TEST_RUNNER_SRCS TEST_SRCS HOTRELOAD_HARNESS_SRCS \
+                      FUZZ_SUPPORT_SRCS
+
+# Formatter input is derived from the manifest rather than globbed, so a file that is not in
+# any build cannot quietly become the only thing the formatter checks.
+ALL_C_SRCS  := $(sort $(PLATFORM_SRCS) $(HOTRELOAD_SRC) $(GAME_SRCS) $(DEV_UI_SRCS) \
+                      $(TEST_RUNNER_SRCS) $(TEST_SRCS) $(HOTRELOAD_HARNESS_SRCS) \
+                      $(wildcard fuzz/*.c))
+ALL_H_SRCS  := $(sort $(wildcard src/*.h src/*/*.h tests/*.h tests/*/*.h))
+
+# Static analysis covers the headless-safe set. The exclusions are named as translation units,
+# NOT as source groups: subtracting whole groups looks tidier but HOTRELOAD_HARNESS_SRCS and
+# PLATFORM_SRCS both contain shared code, so `filter-out $(HOTRELOAD_HARNESS_SRCS)` would take
+# car_visual.c, car_visual_raster.c, input.c, math_utils.c, dev_scenario.c, profile.c and
+# timestep.c out of analysis as collateral — the appearance core included.
+#
+# What genuinely cannot be analysed: the Windows-only platform entry point, the hot-reload
+# loader, dev_lab.c (mostly a 6000-line vendored header, not our code to fix), the harness
+# entry point, and the libFuzzer drivers, which need -fsanitize=fuzzer to parse.
+NO_ANALYZE_SRCS := src/platform/main.c $(HOTRELOAD_SRC) $(DEV_UI_SRCS) tests/hotreload/hotreload_harness.c \
+                   $(wildcard fuzz/*.c)
+ANALYZE_SRCS := $(filter-out $(NO_ANALYZE_SRCS),$(ALL_C_SRCS))
+
+# ----------------------------------------------------------------------------- outputs --
+#
+# One directory per configuration under build/. The GNU Make manual recommends keeping
+# binaries out of the source tree; no VPATH or recursive make is needed for it because every
+# recipe here already names its sources explicitly.
+BUILD_DIR      := build
+BUILD_DEV      := $(BUILD_DIR)/dev
+BUILD_TESTS    := $(BUILD_DIR)/tests
+BUILD_RELEASE  := $(BUILD_DIR)/release
+BUILD_SANITIZE := $(BUILD_DIR)/sanitize
+BUILD_COVERAGE := $(BUILD_DIR)/coverage
+BUILD_FUZZ     := $(BUILD_DIR)/fuzz
+BUILD_PACKAGES := $(BUILD_DIR)/packages
+
+EXE_TESTS   := $(BUILD_TESTS)/drifty_tests$(EXE_SUFFIX)
+EXE_DEBUG   := $(BUILD_DEV)/drifty$(EXE_SUFFIX)
+EXE_RELEASE := $(BUILD_RELEASE)/drifty_release$(EXE_SUFFIX)
 
 ARTIFACTS := artifacts
-TELEMETRY := telemetry
+# Ephemeral run evidence, all of it under the already-ignored artifacts/ root.
+TELEMETRY := $(ARTIFACTS)/telemetry
 BASELINES := tests/baselines
 SCENES    := debug_overlay tire_curves drift_hud physics_lab \
              accel_load brake_load skidpad_p3 lift_off transition_p3 catchable
@@ -154,7 +212,8 @@ REGRESSION_SCENARIOS := skidpad step-steer transition lift-off \
 .PHONY: all help info dev run release tests test test-physics scenario report regression \
         baselines verify-fast verify sanitize coverage screenshots visual-test gallery profile \
         benchmark ci params-doc compile-commands format format-check lint analyze fuzz \
-        clean clean-telemetry dirs windows-only cards inspect visual-diagnose
+        clean clean-telemetry dirs windows-only cards inspect visual-diagnose \
+        print-source-groups print-source-group
 
 all: dev
 
@@ -173,8 +232,38 @@ info:
 	@echo "gcovr       : $(if $(GCOVR),$(GCOVR),not installed)"
 	@echo "magick      : $(if $(MAGICK),$(MAGICK),not installed)"
 
+# ------------------------------------------------------------- the source manifest, out --
+#
+# `print-source-groups` emits one single-quoted shell assignment per group, in
+# SOURCE_GROUP_NAMES order, so a POSIX shell can adopt the whole manifest at once:
+#
+#     eval "$(make --no-print-directory -s print-source-groups)"
+#
+# `print-source-group GROUP=NAME` prints one group's unquoted, space-separated value, which
+# is what a workflow wants to interpolate straight into a compiler command line. An unknown
+# or empty group exits 2 rather than expanding to nothing and silently linking less.
+
+print-source-groups:
+	@$(foreach g,$(SOURCE_GROUP_NAMES),printf "%s='%s'\n" '$(g)' '$(strip $($(g)))';)
+
+print-source-group:
+	@name='$(strip $(GROUP))'; \
+	known=' $(SOURCE_GROUP_NAMES) '; \
+	if [ -z "$$name" ]; then \
+	    echo "make: print-source-group needs GROUP=NAME (one of:$$known)" >&2; exit 2; \
+	fi; \
+	case "$$known" in \
+	    *" $$name "*) ;; \
+	    *) echo "make: unknown source group '$$name' (one of:$$known)" >&2; exit 2 ;; \
+	esac; \
+	value='$(strip $($(strip $(GROUP))))'; \
+	if [ -z "$$value" ]; then \
+	    echo "make: source group '$$name' is empty" >&2; exit 2; \
+	fi; \
+	printf '%s\n' "$$value"
+
 dirs:
-	@mkdir -p build $(TELEMETRY) $(ARTIFACTS)
+	@mkdir -p $(BUILD_DEV) $(BUILD_TESTS) $(BUILD_RELEASE) $(TELEMETRY) $(ARTIFACTS)
 
 windows-only:
 ifneq ($(DRIFTY_HOST),ucrt64)
@@ -191,7 +280,7 @@ dev: windows-only
 	./build.sh
 
 run: dev
-	@echo "Launching drifty.exe. This does not return until you close the window."
+	@echo "Launching $(EXE_DEBUG). This does not return until you close the window."
 	@echo "Coding agents must never run this target — rebuild with 'make dev' instead."
 	./$(EXE_DEBUG)
 
@@ -234,20 +323,20 @@ benchmark: tests
 	./$(EXE_TESTS) --benchmark 240000
 
 params-doc: tests
-	./$(EXE_TESTS) --dump-params docs/PARAMETERS.md
+	./$(EXE_TESTS) --dump-params docs/generated/PARAMETERS.md
 
 # ------------------------------------------------------------------- telemetry tooling --
 
 report: tests
 	@test -n "$(NAME)" || (echo "usage: make report NAME=skidpad" >&2; exit 2)
 	./$(EXE_TESTS) --scenario $(NAME)
-	$(PYTHON) tools/make_report.py $(TELEMETRY)/scenario_$(NAME).csv \
+	$(PYTHON) tools/telemetry/make_report.py $(TELEMETRY)/scenario_$(NAME).csv \
 	    $(if $(wildcard $(BASELINES)/scenario_$(NAME).csv),--baseline $(BASELINES)/scenario_$(NAME).csv,) \
 	    --title "Drifty — $(NAME)" --out $(ARTIFACTS)/report_$(NAME).html
 	@echo "open $(ARTIFACTS)/report_$(NAME).html"
 
 regression: test-physics
-	$(PYTHON) tools/compare_telemetry.py --baseline-dir $(BASELINES) --current-dir $(TELEMETRY) \
+	$(PYTHON) tools/telemetry/compare_telemetry.py --baseline-dir $(BASELINES) --current-dir $(TELEMETRY) \
 	    --markdown $(ARTIFACTS)/regression.md
 
 # Re-recording a baseline is never a way to make a failing test green. Say why in the PR.
@@ -318,29 +407,47 @@ ifeq ($(CLANG),)
 	@echo "SKIP sanitize: clang not installed. The Linux CI job runs ASan and UBSan on" >&2
 	@echo "every pull request; mingw-w64 GCC ships no sanitizer runtime." >&2
 else
+	@mkdir -p $(BUILD_SANITIZE)
 	$(CLANG) $(CSTD) $(INCLUDES) -O1 -g -fsanitize=address,undefined \
 	    -fno-omit-frame-pointer -fno-sanitize-recover=all -DDRIFTY_HEADLESS \
 	    $(BUILD_DEFINES) -DDRIFTY_BUILD_MODE=\"sanitize\" \
 	    -DDRIFTY_BUILD_FLAGS=\"-O1,-g,-fsanitize=address+undefined\" \
-	    $(TEST_SRCS) -o drifty_tests_asan$(EXE_SUFFIX) $(RAYLIB_CFLAGS) -lm
-	./drifty_tests_asan$(EXE_SUFFIX)
+	    $(TEST_SRCS) -o $(BUILD_SANITIZE)/drifty_tests_asan$(EXE_SUFFIX) $(RAYLIB_CFLAGS) -lm
+	./$(BUILD_SANITIZE)/drifty_tests_asan$(EXE_SUFFIX)
 endif
 
 # -------------------------------------------------------------------------- coverage --
+#
+# gcov writes the .gcno note file beside the OBJECT it compiled, and records that same
+# directory inside the object so the .gcda lands there at run time. A single compile-and-link
+# command therefore sprays both across the repository root — 43 files, measured.
+#
+# -fprofile-dir does NOT fix it: it only redirects the runtime .gcda, and it mangles the
+# absolute path into a `build/coverage/C~...` directory name. So compile to real objects inside
+# build/coverage instead, which puts notes and data where they belong by construction.
 
 coverage:
-	$(CC) $(CSTD) $(INCLUDES) -O0 -g --coverage -DDRIFTY_HEADLESS \
-	    $(BUILD_DEFINES) -DDRIFTY_BUILD_MODE=\"coverage\" -DDRIFTY_BUILD_FLAGS=\"-O0,--coverage\" \
-	    $(TEST_SRCS) -o drifty_tests_cov$(EXE_SUFFIX) $(RAYLIB_CFLAGS) -lm
-	./drifty_tests_cov$(EXE_SUFFIX)
+	@mkdir -p $(BUILD_COVERAGE)
+	@set -e; \
+	objects=""; \
+	for src in $(TEST_SRCS); do \
+	    object="$(BUILD_COVERAGE)/$$(echo $$src | tr '/' '_' | sed 's/\.c$$/.o/')"; \
+	    $(CC) $(CSTD) $(INCLUDES) -O0 -g --coverage -DDRIFTY_HEADLESS \
+	        $(BUILD_DEFINES) -DDRIFTY_BUILD_MODE=\"coverage\" \
+	        -DDRIFTY_BUILD_FLAGS=\"-O0,--coverage\" \
+	        $(RAYLIB_CFLAGS) -c $$src -o $$object; \
+	    objects="$$objects $$object"; \
+	done; \
+	$(CC) --coverage $$objects -o $(BUILD_COVERAGE)/drifty_tests_cov$(EXE_SUFFIX) -lm
+	./$(BUILD_COVERAGE)/drifty_tests_cov$(EXE_SUFFIX)
 ifeq ($(GCOVR),)
 	@echo "SKIP gcovr report: gcovr not installed (pip install gcovr). Raw .gcda files kept."
 else
-	@mkdir -p coverage
-	$(GCOVR) --root . --filter 'src/.*' --exclude 'src/dev_lab.c' \
-	    --txt --html-details coverage/index.html --cobertura coverage/cobertura.xml \
+	$(GCOVR) --root . --filter 'src/.*' --exclude 'src/dev/dev_lab.c' \
+	    --txt --html-details $(BUILD_COVERAGE)/index.html \
+	    --cobertura $(BUILD_COVERAGE)/cobertura.xml \
 	    --print-summary
-	@echo "coverage/index.html written"
+	@echo "$(BUILD_COVERAGE)/index.html written"
 endif
 
 # ------------------------------------------------------------------- visual regression --
@@ -425,17 +532,18 @@ fuzz:
 ifeq ($(CLANG),)
 	@echo "SKIP fuzz: clang with libFuzzer not installed. The scheduled CI job runs these." >&2
 else
-	@mkdir -p $(ARTIFACTS)/fuzz
+	@mkdir -p $(BUILD_FUZZ) $(ARTIFACTS)/fuzz/crashes
 	@for target in fuzz/fuzz_*.c; do \
 	    name=$$(basename $$target .c); \
 	    echo "  building $$name"; \
+	    mkdir -p $(ARTIFACTS)/fuzz/corpus/$$name; \
 	    $(CLANG) $(CSTD) $(INCLUDES) -O1 -g -DDRIFTY_HEADLESS \
 	        -fsanitize=fuzzer,address,undefined -fno-sanitize-recover=all \
-	        $$target src/dev_params.c src/dev_replay.c src/vehicle.c src/tire.c \
-	        src/replay.c src/math_utils.c src/input.c \
-	        -o $(ARTIFACTS)/fuzz/$$name $(RAYLIB_CFLAGS) -lm || exit 1; \
-	    $(ARTIFACTS)/fuzz/$$name -max_total_time=$(FUZZ_SECONDS) \
-	        -artifact_prefix=$(ARTIFACTS)/fuzz/ || exit 1; \
+	        $$target $(FUZZ_SUPPORT_SRCS) \
+	        -o $(BUILD_FUZZ)/$$name $(RAYLIB_CFLAGS) -lm || exit 1; \
+	    $(BUILD_FUZZ)/$$name $(ARTIFACTS)/fuzz/corpus/$$name \
+	        -max_total_time=$(FUZZ_SECONDS) \
+	        -artifact_prefix=$(ARTIFACTS)/fuzz/crashes/ || exit 1; \
 	done
 endif
 FUZZ_SECONDS ?= 20
@@ -466,19 +574,29 @@ ci: format-check lint analyze test-physics regression sanitize coverage
 # ---------------------------------------------------------------------- editor support --
 
 compile-commands:
-	$(PYTHON) tools/gen_compile_commands.py --output compile_commands.json \
+	$(PYTHON) tools/build/gen_compile_commands.py --output compile_commands.json \
 	    --raylib-cflags "$(RAYLIB_CFLAGS)"
 
 # -------------------------------------------------------------------------- housekeeping --
 
+# `rm -rf build` covers every current output. Everything after it removes the LEGACY
+# root-level layout, so a tree that was last built before the build/ consolidation cannot keep
+# a stale runnable executable or a stale coverage file beside the new ones.
 clean:
-	rm -rf build coverage $(ARTIFACTS)/fuzz $(ARTIFACTS)/plots $(ARTIFACTS)/screenshots
-	rm -f $(EXE_DEBUG) $(EXE_RELEASE) $(EXE_TESTS) drifty_hotreload_harness$(EXE_SUFFIX)
+	rm -rf $(BUILD_DIR) coverage dist replays corpus
+	rm -rf $(ARTIFACTS)/fuzz $(ARTIFACTS)/plots $(ARTIFACTS)/screenshots
+	rm -f drifty$(EXE_SUFFIX) drifty_release$(EXE_SUFFIX) drifty_tests$(EXE_SUFFIX)
+	rm -f drifty_hotreload_harness$(EXE_SUFFIX)
 	rm -f drifty_tests_asan$(EXE_SUFFIX) drifty_tests_cov$(EXE_SUFFIX)
 	rm -f libraylib.dll raylib.dll glfw3.dll
 	rm -f *.gcda *.gcno *.gcov
-	rm -f $(TELEMETRY)/phase1_smoke.png $(TELEMETRY)/phase2_smoke.png $(TELEMETRY)/phase3_smoke.png
-	rm -f *.o src/*.o tests/*.o *.pdb
+	rm -f mk_verify*.log
+	rm -f $(ARTIFACTS)/screenshots/phase1_smoke.png $(ARTIFACTS)/screenshots/phase2_smoke.png
+	rm -f $(ARTIFACTS)/screenshots/phase3_smoke.png
+	rm -rf $(ARTIFACTS)/telemetry $(ARTIFACTS)/replays
+	# Legacy root telemetry output from before the artifacts/ consolidation.
+	rm -rf telemetry
+	rm -f *.o src/*.o tests/*.o *.pdb *.d *.ilk *.exp *.map
 
 clean-telemetry:
 	rm -f $(TELEMETRY)/*.csv $(TELEMETRY)/*.png

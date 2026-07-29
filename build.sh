@@ -2,8 +2,8 @@
 #
 # build.sh — canonical Drifty build, executed inside MSYS2 UCRT64.
 #
-# Rebuilds the game module every time, and rebuilds drifty.exe only when it is not already
-# running. It always terminates in well under a second and returns the compiler's exit
+# Rebuilds the game module every time, and rebuilds build/dev/drifty.exe only when it is not
+# already running. It always terminates in well under a second and returns the compiler's exit
 # status. It never launches or supervises drifty.exe: the developer starts that once and
 # leaves it open. Use --smoke-test for a bounded visual run that exits on its own.
 #
@@ -11,11 +11,16 @@
 # temporary name and is only renamed into place on success — so a compile error can never
 # close the running game.
 #
+# Every artifact goes under build/, one directory per configuration:
+#   build/dev/      drifty.exe, game.dll, the hot-reload harness, and their runtime DLLs
+#   build/tests/    drifty_tests.exe (headless)
+#   build/release/  drifty_release.exe and glfw3.dll
+#
 #   ./build.sh              build the module (and the exe if it is not running)
 #   ./build.sh --release    single executable; raylib linked statically (no libraylib.dll)
 #   ./build.sh --tests      headless test executable
 #   ./build.sh --hotreload-harness  windowless hot-reload validation executable
-#   ./build.sh --smoke-test build (if needed) and run drifty.exe --smoke-test
+#   ./build.sh --smoke-test build (if needed) and run build/dev/drifty.exe --smoke-test
 #   ./build.sh --clean      remove generated artifacts
 #
 # From cmd.exe / PowerShell prefer build.bat, which enters the UCRT64 environment for you.
@@ -117,7 +122,7 @@ build_info_defines() {
 # -------------------------------------------------------------------------------- flags --
 
 CSTD="-std=c11"
-INCLUDES="-Isrc -Ithird_party -Ithird_party/raygui"
+INCLUDES="-Isrc -Itests -Ithird_party -Ithird_party/raygui"
 WARNINGS="-Wall -Wextra -Wshadow -Wstrict-prototypes -Wmissing-prototypes -Wpointer-arith"
 DEBUG_FLAGS="-O0 -g"
 RELEASE_FLAGS="-O2 -DNDEBUG"
@@ -131,33 +136,80 @@ DEV_TOOL_DEFINES="-DDRIFTY_DEV_TOOLS"
 # `make profile` uses it. Values must not contain spaces (see the note above).
 EXTRA_DEFINES="${DRIFTY_EXTRA_DEFINES:-}"
 
-SHARED_SRCS="src/input.c src/math_utils.c src/dev_scenario.c src/profile.c src/car_visual.c src/car_visual_raster.c"
-DEV_SRCS="src/dev_params.c src/dev_presets.c src/dev_replay.c src/dev_state.c src/failure_bundle.c src/car_corpus.c"
-DEV_UI_SRCS="src/dev_lab.c"
-GAME_SRCS="src/game.c src/audio.c src/auto_transmission.c src/particle.c src/vehicle.c src/physics.c src/tire.c src/drivetrain.c src/surface.c src/track.c src/collision.c src/scoring.c src/render.c src/replay.c src/telemetry.c $DEV_SRCS"
-PLATFORM_SRCS="src/main.c src/timestep.c"
-HOTRELOAD_SRC="src/hotreload_windows.c"
-TEST_SRCS="tests/physics_tests.c tests/car_sheet.c src/timestep.c $GAME_SRCS $SHARED_SRCS"
-HOTRELOAD_HARNESS_SRCS="tests/hotreload_harness.c src/timestep.c $HOTRELOAD_SRC $SHARED_SRCS"
+# ------------------------------------------------------------------------------ sources --
+#
+# The source manifest lives in the Makefile and nowhere else. It used to be duplicated here,
+# which meant two lists that had to be edited together and a comment asking the next person to
+# remember. Adopt it instead: `print-source-groups` prints shell assignments.
 
-MODULE="build/game.dll"
-EXE="drifty.exe"
-EXE_RELEASE="drifty_release.exe"
-EXE_TESTS="drifty_tests.exe"
-EXE_HOTRELOAD="drifty_hotreload_harness.exe"
+# GNU Make specifically: `print-source-groups` is built on $(foreach) and the export relies on
+# --no-print-directory, neither of which a BSD or NMAKE-style make provides.
+if ! command -v make >/dev/null 2>&1; then
+    echo "build.sh: make not found. Run scripts/setup_windows.ps1." >&2
+    exit 1
+fi
+if ! make --version 2>/dev/null | grep -qi "GNU Make"; then
+    echo "build.sh: '$(command -v make)' is not GNU Make. Run scripts/setup_windows.ps1." >&2
+    exit 1
+fi
 
-mkdir -p build telemetry
+# MAKEFLAGS/MAKELEVEL are cleared because this runs as a nested make when the caller was
+# `make dev` or `make tests`: inheriting a jobserver flag here buys nothing and warns.
+if ! SOURCE_GROUPS="$(MAKEFLAGS= MAKELEVEL= make --no-print-directory -s print-source-groups)"; then
+    echo "build.sh: could not read the source manifest from the Makefile." >&2
+    exit 1
+fi
+eval "$SOURCE_GROUPS"
+unset SOURCE_GROUPS
+
+# A typo in the manifest must not link a smaller binary in silence. Every exported group is
+# checked, not just the ones this script links, so the manifest is validated as a whole.
+for group in SHARED_SRCS DEV_SRCS DEV_UI_SRCS GAME_SRCS PLATFORM_SRCS HOTRELOAD_SRC \
+             TEST_RUNNER_SRCS TEST_SRCS HOTRELOAD_HARNESS_SRCS FUZZ_SUPPORT_SRCS; do
+    eval "value=\${$group:-}"
+    if [ -z "$value" ]; then
+        echo "build.sh: empty source group $group" >&2
+        exit 2
+    fi
+done
+unset group value
+
+# ------------------------------------------------------------------------------ outputs --
+#
+# Generated binaries live under build/, one directory per configuration, so the repository
+# root stays readable and `rm -rf build` is a complete clean. The four entry points
+# (build.bat, build.sh, mk.bat, Makefile) stay at the root, where a developer expects them.
+#
+# Each configuration's runtime DLLs sit BESIDE its executable: Windows resolves an import from
+# the directory of the loading module first, so this is what makes build/dev/drifty.exe find
+# libraylib.dll without a PATH entry.
+
+BUILD_DEV="build/dev"
+BUILD_TESTS="build/tests"
+BUILD_RELEASE="build/release"
+
+MODULE="$BUILD_DEV/game.dll"
+MODULE_TMP="$BUILD_DEV/game_tmp.tmp"
+EXE="$BUILD_DEV/drifty.exe"
+EXE_RELEASE="$BUILD_RELEASE/drifty_release.exe"
+EXE_TESTS="$BUILD_TESTS/drifty_tests.exe"
+EXE_HOTRELOAD="$BUILD_DEV/drifty_hotreload_harness.exe"
+
+# Only the build output roots. Run-evidence directories under artifacts/ are created by the
+# writer that needs them (telemetry_ensure_dir / ensure_parent_directory), so a clean checkout
+# never depends on this line having listed them.
+mkdir -p "$BUILD_DEV" "$BUILD_TESTS" "$BUILD_RELEASE"
 
 copy_dev_runtime() {
     # Development binaries import libraylib.dll, which itself imports glfw3.dll.
     if [ -f "$RAYLIB_SHARED_DLL" ]; then
-        cp -f "$RAYLIB_SHARED_DLL" "$ROOT/libraylib.dll"
+        cp -f "$RAYLIB_SHARED_DLL" "$ROOT/$BUILD_DEV/libraylib.dll"
     else
         echo "build.sh: missing $RAYLIB_SHARED_DLL" >&2
         return 1
     fi
     if [ -f "$GLFW_SHARED_DLL" ]; then
-        cp -f "$GLFW_SHARED_DLL" "$ROOT/glfw3.dll"
+        cp -f "$GLFW_SHARED_DLL" "$ROOT/$BUILD_DEV/glfw3.dll"
     else
         echo "build.sh: missing $GLFW_SHARED_DLL" >&2
         return 1
@@ -167,7 +219,7 @@ copy_dev_runtime() {
 copy_release_runtime() {
     # Release embeds raylib statically but still needs glfw3.dll with the MSYS2 package.
     if [ -f "$GLFW_SHARED_DLL" ]; then
-        cp -f "$GLFW_SHARED_DLL" "$ROOT/glfw3.dll"
+        cp -f "$GLFW_SHARED_DLL" "$ROOT/$BUILD_RELEASE/glfw3.dll"
     else
         echo "build.sh: missing $GLFW_SHARED_DLL" >&2
         return 1
@@ -185,7 +237,7 @@ if [ $# -gt 0 ]; then
         --smoke-test) MODE="smoke-test" ;;
         --clean)   MODE="clean" ;;
         --help|-h)
-            sed -n '2,22p' "$0"
+            sed -n '2,27p' "$0"
             exit 0
             ;;
         *)
@@ -196,10 +248,20 @@ if [ $# -gt 0 ]; then
 fi
 
 if [ "$MODE" = "clean" ]; then
-    rm -rf build
-    rm -f "$EXE" "$EXE_RELEASE" "$EXE_TESTS" "$EXE_HOTRELOAD"
+    rm -rf build coverage dist corpus
+    rm -rf artifacts/telemetry artifacts/replays artifacts/fuzz
+    rm -f artifacts/screenshots/phase1_smoke.png artifacts/screenshots/phase2_smoke.png
+    rm -f artifacts/screenshots/phase3_smoke.png
+    # Legacy root-level outputs from before the build/ and artifacts/ consolidation, so a tree
+    # built by an older checkout does not keep a stale runnable or generated copy beside the
+    # new one.
+    rm -rf telemetry replays
+    rm -f drifty.exe drifty_release.exe drifty_tests.exe drifty_hotreload_harness.exe
+    rm -f drifty_tests_asan.exe drifty_tests_cov.exe
     rm -f libraylib.dll raylib.dll glfw3.dll
-    rm -f telemetry/phase1_smoke.png telemetry/phase2_smoke.png telemetry/phase3_smoke.png
+    rm -f ./*.o src/*.o tests/*.o ./*.d ./*.pdb ./*.ilk ./*.exp ./*.map
+    rm -f ./*.gcda ./*.gcno ./*.gcov
+    rm -f mk_verify*.log
     echo "cleaned."
     exit 0
 fi
@@ -217,20 +279,20 @@ fi
 if [ "$MODE" = "hotreload-harness" ]; then
     copy_dev_runtime || exit 1
 
-    # The harness loads build/game.dll; build it the same safe way as the dev path.
+    # The harness loads $MODULE; build it the same safe way as the dev path.
     # shellcheck disable=SC2086,SC2046
     $CC $CSTD $INCLUDES $WARNINGS $DEBUG_FLAGS -shared \
         -DDRIFTY_HOT_RELOAD -DDRIFTY_GAME_MODULE $DEV_TOOL_DEFINES \
         $(build_info_defines module "-O0,-g") $EXTRA_DEFINES \
-        $GAME_SRCS $DEV_UI_SRCS $SHARED_SRCS -o build/game_tmp.tmp \
+        $GAME_SRCS $DEV_UI_SRCS $SHARED_SRCS -o "$MODULE_TMP" \
         $RAYLIB_CFLAGS $RAYLIB_SHARED_LIBS
     status=$?
     if [ $status -ne 0 ]; then
-        rm -f build/game_tmp.tmp
+        rm -f "$MODULE_TMP"
         echo "build.sh: game module failed to compile; harness not built." >&2
         exit $status
     fi
-    mv -f build/game_tmp.tmp "$MODULE" || exit 1
+    mv -f "$MODULE_TMP" "$MODULE" || exit 1
 
     # shellcheck disable=SC2086
     $CC $CSTD $INCLUDES $WARNINGS $DEBUG_FLAGS -DDRIFTY_HOT_RELOAD \
@@ -264,15 +326,15 @@ build_dev() {
     $CC $CSTD $INCLUDES $WARNINGS $DEBUG_FLAGS -shared \
         -DDRIFTY_HOT_RELOAD -DDRIFTY_GAME_MODULE $DEV_TOOL_DEFINES \
         $(build_info_defines module "-O0,-g") $EXTRA_DEFINES \
-        $GAME_SRCS $DEV_UI_SRCS $SHARED_SRCS -o build/game_tmp.tmp \
+        $GAME_SRCS $DEV_UI_SRCS $SHARED_SRCS -o "$MODULE_TMP" \
         $RAYLIB_CFLAGS $RAYLIB_SHARED_LIBS
     status=$?
     if [ $status -ne 0 ]; then
-        rm -f build/game_tmp.tmp
+        rm -f "$MODULE_TMP"
         echo "build.sh: game module failed to compile; $MODULE left untouched." >&2
         return $status
     fi
-    mv -f build/game_tmp.tmp "$MODULE" || return 1
+    mv -f "$MODULE_TMP" "$MODULE" || return 1
 
     # If the game is already running, that is all there is to do: it will pick the module up.
     if command -v tasklist >/dev/null 2>&1; then

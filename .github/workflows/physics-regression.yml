@@ -12,16 +12,16 @@ name: physics-regression
 on:
   pull_request:
     paths:
-      - "src/physics.*"
-      - "src/vehicle.*"
-      - "src/tire.*"
-      - "src/drivetrain.*"
-      - "src/surface.*"
-      - "src/config.h"
-      - "src/dev_scenario.*"
+      - "src/physics/physics.*"
+      - "src/physics/vehicle.*"
+      - "src/physics/tire.*"
+      - "src/physics/drivetrain.*"
+      - "src/physics/surface.*"
+      - "src/core/config.h"
+      - "src/dev/dev_scenario.*"
       - "tests/**"
-      - "tools/compare_telemetry.py"
-      - "tools/telemetry_common.py"
+      - "tools/telemetry/compare_telemetry.py"
+      - "tools/telemetry/telemetry_common.py"
       - ".github/workflows/physics-regression.yml"
 
 concurrency:
@@ -55,7 +55,7 @@ jobs:
         run: |
           make test-physics
           mkdir -p /tmp/head
-          cp telemetry/*.csv /tmp/head/
+          cp artifacts/telemetry/*.csv /tmp/head/
 
       - name: Run every scenario at the merge base
         id: base
@@ -72,8 +72,15 @@ jobs:
             echo "is skipped rather than failed."
             exit 0
           fi
+          # The merge base may predate the artifacts/ consolidation, when telemetry was written
+          # to a top-level telemetry/ directory. Accept either location so the pull request that
+          # performs the move can still be compared against its own base.
           mkdir -p /tmp/basetelemetry
-          cp /tmp/base/telemetry/*.csv /tmp/basetelemetry/
+          if [ -d /tmp/base/artifacts/telemetry ]; then
+            cp /tmp/base/artifacts/telemetry/*.csv /tmp/basetelemetry/
+          else
+            cp /tmp/base/telemetry/*.csv /tmp/basetelemetry/
+          fi
           echo "status=ok" >> "$GITHUB_OUTPUT"
 
       - name: Compare
@@ -82,7 +89,7 @@ jobs:
         run: |
           set +e
           # Capture the comparison's own exit status, not the pipeline's.
-          python tools/compare_telemetry.py \
+          python tools/telemetry/compare_telemetry.py \
             --baseline-dir /tmp/basetelemetry --current-dir /tmp/head \
             --markdown /tmp/regression.md > /tmp/regression.txt 2>&1
           status=$?
@@ -97,10 +104,10 @@ jobs:
             name=$(basename "$csv" .csv)
             base="/tmp/basetelemetry/$name.csv"
             if [ -f "$base" ]; then
-              python tools/make_report.py "$csv" --baseline "$base" \
+              python tools/telemetry/make_report.py "$csv" --baseline "$base" \
                 --title "Drifty — $name" --out "artifacts/report_$name.html"
             else
-              python tools/make_report.py "$csv" --title "Drifty — $name (new)" \
+              python tools/telemetry/make_report.py "$csv" --title "Drifty — $name (new)" \
                 --out "artifacts/report_$name.html"
             fi
           done

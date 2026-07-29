@@ -42,8 +42,11 @@ jobs:
         # Advisory until the tree is normalised in its own commit: see the adoption note in
         # .clang-format. Flip continue-on-error to false in the same pull request that lands
         # the normalisation, and this becomes a real gate.
+        #
+        # `make format-check` derives its input from the source manifest, so this cannot drift
+        # out of step with what the build actually compiles the way a glob here did.
         continue-on-error: true
-        run: clang-format --dry-run --Werror src/*.c src/*.h tests/*.c fuzz/*.c
+        run: make format-check
 
       - name: ShellCheck
         run: shellcheck build.sh scripts/*.sh
@@ -108,25 +111,25 @@ jobs:
         # The whole appearance system is CPU-side and raylib-free, so the fleet can be
         # rendered and reviewed on a runner with no GPU and no window. Two things are checked
         # here that nothing else checks: that the sheet still renders at all, and that the
-        # committed docs/CORPUS.md is still what the code generates rather than a stale copy.
+        # committed docs/generated/CORPUS.md is still what the code generates rather than a stale copy.
         run: |
           set -e
-          ./drifty_tests --dump-corpus-sheet artifacts/gallery
-          ./drifty_tests --dump-corpus-index artifacts/CORPUS.generated.md
-          diff -u docs/CORPUS.md artifacts/CORPUS.generated.md || {
-            echo "docs/CORPUS.md is stale."
-            echo "Regenerate: ./drifty_tests.exe --dump-corpus-index docs/CORPUS.md"
+          ./build/tests/drifty_tests --dump-corpus-sheet artifacts/gallery
+          ./build/tests/drifty_tests --dump-corpus-index artifacts/CORPUS.generated.md
+          diff -u docs/generated/CORPUS.md artifacts/CORPUS.generated.md || {
+            echo "docs/generated/CORPUS.md is stale."
+            echo "Regenerate: build/tests/drifty_tests.exe --dump-corpus-index docs/generated/CORPUS.md"
             exit 1
           }
 
       - name: Standalone fuzz corpora
         run: |
           set -e
+          FUZZ_SUPPORT_SRCS="$(make --no-print-directory -s print-source-group GROUP=FUZZ_SUPPORT_SRCS)"
           for target in fuzz/fuzz_*.c; do
             name=$(basename "$target" .c)
             ${{ matrix.compiler }} -std=c11 -Isrc -Ithird_party/raylib-src/src -O1 -g \
-              -DDRIFTY_HEADLESS "$target" src/dev_params.c src/dev_replay.c src/vehicle.c \
-              src/tire.c src/replay.c src/math_utils.c src/input.c -o "/tmp/$name" -lm
+              -DDRIFTY_HEADLESS "$target" $FUZZ_SUPPORT_SRCS -o "/tmp/$name" -lm
             "/tmp/$name"
           done
 
@@ -136,7 +139,6 @@ jobs:
         with:
           name: telemetry-linux-${{ matrix.compiler }}
           path: |
-            telemetry/*.csv
             artifacts/**
           retention-days: 7
           if-no-files-found: ignore
@@ -183,18 +185,18 @@ jobs:
         run: ./build.sh --release
 
       - name: Headless tests
-        run: ./build.sh --tests && ./drifty_tests.exe
+        run: ./build.sh --tests && ./build/tests/drifty_tests.exe
 
       - name: Hot-reload harness
-        run: ./build.sh --hotreload-harness && ./drifty_hotreload_harness.exe
+        run: ./build.sh --hotreload-harness && ./build/dev/drifty_hotreload_harness.exe
 
       - name: Linkage inspection
         # The development module must import libraylib.dll; the release and test binaries
         # must not. Getting this backwards breaks hot reload in a way nothing else catches.
         run: |
-          objdump -p build/game.dll | grep -i "DLL Name" | grep -qi "libraylib.dll"
-          ! objdump -p drifty_release.exe | grep -i "DLL Name" | grep -qi "libraylib.dll"
-          ! objdump -p drifty_tests.exe | grep -i "DLL Name" | grep -qi "libraylib.dll"
+          objdump -p build/dev/game.dll | grep -i "DLL Name" | grep -qi "libraylib.dll"
+          ! objdump -p build/release/drifty_release.exe | grep -i "DLL Name" | grep -qi "libraylib.dll"
+          ! objdump -p build/tests/drifty_tests.exe | grep -i "DLL Name" | grep -qi "libraylib.dll"
 
       - name: Upload artifacts on failure
         if: failure()
@@ -203,7 +205,6 @@ jobs:
           name: windows-failure
           path: |
             artifacts/**
-            telemetry/*.csv
           retention-days: 7
           if-no-files-found: ignore
 
@@ -261,7 +262,7 @@ jobs:
             echo "## Coverage"
             echo ""
             echo '```'
-            gcovr --root . --filter 'src/.*' --exclude 'src/dev_lab.c' --txt
+            gcovr --root . --filter 'src/.*' --exclude 'src/dev/dev_lab.c' --txt
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 

@@ -37,7 +37,7 @@ jobs:
       - name: Ten million fixed updates
         run: |
           make tests
-          ./drifty_tests --benchmark 10000000
+          ./build/tests/drifty_tests --benchmark 10000000
 
       - name: Replay corpus
         # Every replay.bin the repository carries must still load in today's build. A format
@@ -50,15 +50,15 @@ jobs:
             echo "no replay corpus committed yet — nothing to check"
             exit 0
           fi
+          FUZZ_SUPPORT_SRCS="$(make --no-print-directory -s print-source-group GROUP=FUZZ_SUPPORT_SRCS)"
           clang -std=c11 -Isrc -Ithird_party/raylib-src/src -O1 -g -DDRIFTY_HEADLESS \
-            fuzz/fuzz_replay.c src/dev_params.c src/dev_replay.c src/vehicle.c src/tire.c \
-            src/replay.c src/math_utils.c src/input.c -o /tmp/replay_check -lm
+            fuzz/fuzz_replay.c $FUZZ_SUPPORT_SRCS -o /tmp/replay_check -lm
           /tmp/replay_check "${files[@]}"
 
       - name: Telemetry report for every scenario
         run: |
           make test-physics
-          python tools/make_report.py --dir telemetry --title "Drifty — nightly" \
+          python tools/telemetry/make_report.py --dir artifacts/telemetry --title "Drifty — nightly" \
             --out artifacts/nightly-report.html
 
       - name: Upload
@@ -68,7 +68,6 @@ jobs:
           name: nightly
           path: |
             artifacts/**
-            telemetry/*.csv
           retention-days: 14
           if-no-files-found: ignore
 
