@@ -146,9 +146,10 @@ typedef struct {
     float maxRoadWheelAngleRad;
     float maxSteerRateRadS;
     float steerReturnRateRadS;
+    float steerSpeedRefMps;    /* m/s; below this, full-rate steering */
+    float steerSpeedMinFactor; /* dimensionless; minimum rate factor at high speed */
 
     float dragCoefficient;
-    float rollingResistanceCoefficient;
     float loadFilterRateHz;
 
     float tireBLatFront, tireCLatFront, tireMuLatFront;

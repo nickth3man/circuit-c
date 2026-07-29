@@ -490,9 +490,7 @@ static void scenario_coast_down_scripted(void)
         if (s->aeroDragN > previousDragN + 1e-3f) dragMonotonic = false;
         const float totalN = s->aeroDragN + s->rollingN;
         if (totalN > previousTotalN + 1.0f) noSpike = false;
-        if (s->rollingN >
-            g_scriptedGame->spec.rollingResistanceCoefficient * (s->frontLoadN + s->rearLoadN) +
-                1.0f)
+        if (s->rollingN > ROLLING_RESISTANCE_COEF * (s->frontLoadN + s->rearLoadN) + 1.0f)
             rollingBounded = false;
         previousSpeedMps = s->speedMps;
         previousDragN = s->aeroDragN;
@@ -1500,6 +1498,59 @@ static void scenario_tire_relaxation(void)
     free(game);
 }
 
+/*
+ * steer-speed-feel: steering rate decreases at higher speed.
+ *
+ * At low speed (<= steerSpeedRefMps) the rate is full. At high speed it
+ * approaches steerSpeedMinFactor * fullRate. With minFactor=1.0 the feel
+ * layer is disabled and rate is independent of speed.
+ */
+static void scenario_steer_speed_feel(void)
+{
+    Game *game = alloc_game();
+    game_init(game);
+
+    /* Low-speed baseline: rate should be ~full. */
+    set_vehicle_rolling_speed(game, 3.0f);
+    game->input.steer = 0.0f;
+    game_fixed_update(game, FIXED_DT_S);
+    game->input.steer = 1.0f;
+    game_fixed_update(game, FIXED_DT_S);
+    const float lowRate = fabsf(game->vehicle.frontRoadWheelAngleRad) / FIXED_DT_S;
+    check(lowRate > 0.0f, "low-speed steering produces non-zero rate");
+
+    /* High-speed: rate should be reduced by at least 40%. */
+    Game *game2 = alloc_game();
+    game_init(game2);
+    game2->spec.steerSpeedMinFactor = 0.25f;
+    set_vehicle_rolling_speed(game2, 25.0f);
+    game2->input.steer = 0.0f;
+    game_fixed_update(game2, FIXED_DT_S);
+    game2->input.steer = 1.0f;
+    game_fixed_update(game2, FIXED_DT_S);
+    const float highRate = fabsf(game2->vehicle.frontRoadWheelAngleRad) / FIXED_DT_S;
+    check(highRate < lowRate * 0.6f,
+          "high-speed rate is reduced vs low-speed (low %.2f, high %.2f rad/s)",
+          (double)lowRate, (double)highRate);
+
+    /* Disable feel layer: minFactor=1.0 → rate independent of speed. */
+    Game *game3 = alloc_game();
+    game_init(game3);
+    game3->spec.steerSpeedMinFactor = 1.0f;
+    set_vehicle_rolling_speed(game3, 25.0f);
+    game3->input.steer = 0.0f;
+    game_fixed_update(game3, FIXED_DT_S);
+    game3->input.steer = 1.0f;
+    game_fixed_update(game3, FIXED_DT_S);
+    const float noFeelRate = fabsf(game3->vehicle.frontRoadWheelAngleRad) / FIXED_DT_S;
+    check_near((double)noFeelRate, (double)lowRate, 0.1,
+               "with minFactor=1.0, high-speed rate equals low-speed rate");
+
+    free(game3);
+    free(game2);
+    free(game);
+}
+
 static const TestScenario kHandlingScenarios[] = {
     { "accel-load", "acceleration transfers load rearward; capacity follows",
       scenario_accel_load },
@@ -1531,6 +1582,8 @@ static const TestScenario kHandlingScenarios[] = {
       scenario_tire_load_sensitivity },
     { "tire-relaxation", "tire relaxation: lateral force lag and convergence",
       scenario_tire_relaxation },
+    { "steer-speed-feel", "steering rate decreases with speed via feel layer",
+      scenario_steer_speed_feel },
 };
 
 TestScenarioGroup test_handling_scenarios(void)

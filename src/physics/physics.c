@@ -48,9 +48,15 @@ void physics_update_steering(const VehicleSpec *spec, VehicleState *state, float
     if (spec == NULL || state == NULL || !(dt > 0.0f)) return;
     const float target = clampf(steerInput, -1.0f, 1.0f) * spec->maxRoadWheelAngleRad;
     const float error = target - state->frontRoadWheelAngleRad;
+    /* Speed-sensitive feel: steering rate decreases at higher speed. */
+    const float speedFrac =
+        clampf(spec->steerSpeedRefMps / fmaxf(fabsf(state->velocityLongitudinalMps), 1.0f),
+               0.0f, 1.0f);
+    const float speedFactor =
+        spec->steerSpeedMinFactor + (1.0f - spec->steerSpeedMinFactor) * speedFrac;
     const float rate = (fabsf(target) < fabsf(state->frontRoadWheelAngleRad))
-                           ? spec->steerReturnRateRadS
-                           : spec->maxSteerRateRadS;
+                           ? spec->steerReturnRateRadS * speedFactor
+                           : spec->maxSteerRateRadS * speedFactor;
     const float maxChange = rate * dt;
     state->frontRoadWheelAngleRad =
         clampf(state->frontRoadWheelAngleRad + clampf(error, -maxChange, maxChange),

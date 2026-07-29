@@ -212,8 +212,9 @@ void vehicle_spec_set_default(VehicleSpec *spec)
     spec->maxRoadWheelAngleRad = STEER_MAX_RAD;
     spec->maxSteerRateRadS = STEER_RATE_RAD_S;
     spec->steerReturnRateRadS = STEER_RETURN_RATE_RAD_S;
+    spec->steerSpeedRefMps = STEER_SPEED_REF_MPS;
+    spec->steerSpeedMinFactor = STEER_SPEED_MIN_FACTOR;
     spec->dragCoefficient = DRAG_COEFFICIENT;
-    spec->rollingResistanceCoefficient = ROLLING_RESISTANCE_COEF;
     spec->loadFilterRateHz = LOAD_FILTER_RATE_HZ;
     spec->tireBLatFront = TIRE_B_LAT_FRONT;
     spec->tireCLatFront = TIRE_C_LAT_FRONT;
@@ -317,9 +318,6 @@ bool vehicle_spec_is_valid(const VehicleSpec *spec)
     if (!(isfinite(spec->wheelInertiaKgM2) && spec->wheelInertiaKgM2 > 0.0f)) return false;
     if (!(isfinite(spec->dragCoefficient) && spec->dragCoefficient >= 0.0f)) return false;
     if (!(isfinite(spec->frontalAreaM2) && spec->frontalAreaM2 >= 0.0f)) return false;
-    if (!(isfinite(spec->rollingResistanceCoefficient) &&
-          spec->rollingResistanceCoefficient >= 0.0f))
-        return false;
     if (!(isfinite(spec->loadFilterRateHz) && spec->loadFilterRateHz > 0.0f)) return false;
     if (!(isfinite(spec->tireBLatFront) && spec->tireBLatFront > 0.0f &&
           isfinite(spec->tireCLatFront) && spec->tireCLatFront > 0.0f &&
@@ -354,8 +352,10 @@ bool vehicle_spec_is_valid(const VehicleSpec *spec)
           spec->brakeBiasFront <= 1.0f))
         return false;
     if (!(isfinite(spec->handbrakeTorqueNm) && spec->handbrakeTorqueNm >= 0.0f)) return false;
-
-    if (!(isfinite(spec->bodyHalfWidthM) && spec->bodyHalfWidthM > 0.0f)) return false;
+    if (!(isfinite(spec->steerSpeedRefMps) && spec->steerSpeedRefMps > 0.0f)) return false;
+    if (!(isfinite(spec->steerSpeedMinFactor) && spec->steerSpeedMinFactor >= 0.0f &&
+          spec->steerSpeedMinFactor <= 1.0f))
+        return false;
     if (!(isfinite(spec->collisionRestitution) && spec->collisionRestitution >= 0.0f &&
           spec->collisionRestitution <= 1.0f))
         return false;

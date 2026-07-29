@@ -37,7 +37,6 @@ generates the Physics Lab sliders and the tuning-profile format.
 | `body.cabin_rows` | 2 | — | 1 .. 3 | 1 | advanced | — | — | Seat rows; exact integer 1..3, packaged rearward from mass.driver_x. |
 | `body.roof_type` | 0 | — | 0 .. 2 | 1 | advanced | — | — | Roof enum: 0=fixed, 1=targa, 2=convertible. |
 | `body.drag_coefficient` | 0.32 | — | 0.1 .. 1.2 | 0.01 | advanced | — | — | Cd in 0.5*rho*Cd*A*v^2. |
-| `body.rolling_resistance` | 0.015 | — | 0 .. 0.06 | 0.001 | advanced | — | — | Rolling resistance coefficient. |
 | `body.load_filter_rate` | 20 | Hz | 1 .. 60 | 0.5 | expert | — | — | Load-transfer accel filter corner frequency. |
 | `body.roll_stiffness_front` | 0.5 | — | 0 .. 1 | 0.01 | advanced | — | — | Front axle share of roll moment. |
 | `body.mass` | 1200 | kg | 400 .. 15000 | 10 | essential | yes | — | Total mass from particles (read-only). |
@@ -102,8 +101,8 @@ generates the Physics Lab sliders and the tuning-profile format.
 | `tire.long.b` | 12 | — | 2 .. 30 | 0.1 | advanced | — | — | Longitudinal stiffness factor. |
 | `tire.long.c` | 1.55 | — | 1 .. 2.2 | 0.01 | advanced | — | — | Longitudinal shape factor. |
 | `tire.long.mu_scale` | 1 | — | 0.3 .. 2 | 0.01 | advanced | — | — | Longitudinal friction scale. |
-| `tire.relaxation_length` | 0 | m | 0 .. 1 | 0.01 | expert | — | — | Lateral force relaxation length. |
-| `tire.load_sensitivity_k` | 0 | — | 0 .. 0.05 | 0.001 | expert | — | — | Load sensitivity exponent. |
+| `tire.relaxation_length` | 0.3 | m | 0 .. 1 | 0.01 | expert | — | — | Lateral force relaxation length. |
+| `tire.load_sensitivity_k` | 0.02 | — | 0 .. 0.05 | 0.001 | expert | — | — | Load sensitivity exponent. |
 | `tire.load_ref_per_wheel` | 2942 | N | 500 .. 15000 | 10 | expert | yes | — | Reference load = m*g/4 (derived). |
 
 ## Steering
@@ -113,7 +112,9 @@ generates the Physics Lab sliders and the tuning-profile format.
 | `steer.max_angle` | 0.7 | rad | 0.2 .. 1.2 | 0.01 | essential | — | — | Max road-wheel angle. |
 | `steer.rate` | 5 | rad/s | 0.5 .. 20 | 0.1 | advanced | — | — | Steer follow rate. |
 | `steer.return_rate` | 7 | rad/s | 0.5 .. 25 | 0.1 | advanced | — | — | Steer return rate. |
-| `steer.ackermann_percent` | 0 | — | 0 .. 1 | 0.01 | advanced | — | — | Ackermann blend. |
+| `steer.speed_ref` | 8 | m/s | 1 .. 30 | 0.5 | advanced | — | — | Speed below which steering is at full rate. |
+| `steer.speed_min_factor` | 1 | — | 0.05 .. 1 | 0.01 | expert | — | — | Minimum steering rate fraction at high speed. |
+| `steer.ackermann_percent` | 1 | — | 0 .. 1 | 0.01 | advanced | — | — | Ackermann blend. |
 
 ## Suspension
 
@@ -146,7 +147,7 @@ generates the Physics Lab sliders and the tuning-profile format.
 | `drive.reverse` | 3.2 | — | 0.4 .. 6 | 0.01 | advanced | — | — | Reverse gear ratio. |
 | `drive.final` | 4.1 | — | 1 .. 8 | 0.01 | advanced | — | — | Final drive ratio. |
 | `drive.efficiency` | 0.9 | — | 0.5 .. 1 | 0.01 | expert | — | — | Drivetrain efficiency. |
-| `drive.diff_mode` | 0 | — | 0 .. 2 | 1 | advanced | — | — | 0=locked 1=open 2=LSD. |
+| `drive.diff_mode` | 2 | — | 0 .. 2 | 1 | advanced | — | — | 0=locked 1=open 2=LSD. |
 | `drive.diff_bias_ratio` | 2 | — | 1 .. 5 | 0.1 | expert | — | — | LSD bias ratio. |
 | `drive.diff_preload` | 60 | N*m | 0 .. 400 | 5 | expert | — | — | LSD preload. |
 | `drive.layout` | 0 | — | 0 .. 2 | 1 | essential | — | — | 0=RWD 1=FWD 2=AWD. |

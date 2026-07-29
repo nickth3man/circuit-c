@@ -216,9 +216,11 @@
 #define STEER_MAX_RAD 0.70f
 #define STEER_RATE_RAD_S 5.0f
 #define STEER_RETURN_RATE_RAD_S 7.0f
+#define STEER_SPEED_REF_MPS 8.0f /* m/s; below this, full-rate steering */
+#define STEER_SPEED_MIN_FACTOR \
+    1.0f /* dimensionless; minimum steering rate at high speed (1.0 = disabled) */
 
 #define DRAG_COEFFICIENT 0.32f
-#define FRONTAL_AREA_M2 1.90f
 #define ROLLING_RESISTANCE_COEF 0.015f
 
 /* First-order corner frequency of the load-transfer acceleration filter, in hertz. It

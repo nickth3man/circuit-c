@@ -1035,7 +1035,7 @@ static void scenario_resistance(void)
     /* --------------------------------------------------------------- rolling resistance -- */
 
     const float loadN = 3000.0f;
-    const float coefficient = spec.rollingResistanceCoefficient;
+    const float coefficient = ROLLING_RESISTANCE_COEF;
 
     {
         float magnitudeN = -1.0f;
@@ -1129,7 +1129,7 @@ static void scenario_resistance(void)
         physics_aero_drag_body_n(&game->spec, game->vehicle.velocityLongitudinalMps,
                                  game->vehicle.velocityLateralMps, &expectedDragN);
         const float expectedRollingN =
-            game->spec.rollingResistanceCoefficient * game->spec.massKg * GRAVITY_MPS2;
+            ROLLING_RESISTANCE_COEF * game->spec.massKg * GRAVITY_MPS2;
 
         check_near((double)game->derived.aeroDragMagnitudeN, (double)expectedDragN, 0.5,
                    "the model's drag is exactly the closed form, with nothing added");
@@ -1401,7 +1401,7 @@ static void scenario_coast_down(void)
               "%.1f N at 10 m/s)",
               (double)samples[0].rollingN, (double)samples[3].rollingN);
         check_near((double)samples[0].rollingN,
-                   (double)(probe->spec.rollingResistanceCoefficient * samples[0].loadN), 5.0,
+                   (double)(ROLLING_RESISTANCE_COEF * samples[0].loadN), 5.0,
                    "and equals the coefficient times the current dynamic load");
 
         /* Resistance never changes sign while the direction of travel does not. */
