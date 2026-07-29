@@ -11,9 +11,18 @@
  *
  * OVERFLOW BEHAVIOUR IS A DOCUMENTED RING. Once REPLAY_CAPACITY_TICKS entries are held,
  * recording another tick discards the oldest one, advances firstTick, and increments
- * overwrittenTicks. This is intentional: the buffer's purpose (docs/SPEC.md, "Recovering
- * state after a restart") is to replay the most recent N seconds, so the recent window is
- * the part worth keeping. Playback always walks the retained window oldest-first.
+ * overwrittenTicks. This is intentional: the buffer's purpose is to replay the most recent
+ * N seconds, so the recent window is the part worth keeping. Playback always walks the
+ * retained window oldest-first.
+ *
+ * RECOVERING STATE AFTER A RESTART.
+ *
+ * Struct layout changes, platform-layer edits, and crashes all require a restart. The
+ * timestamped input recording required by Phase 0 doubles as the recovery mechanism: replay
+ * the recorded input timeline at maximum speed on startup to arrive back at the moment of
+ * interest in a fraction of a second. This is worth wiring to a key (replay last N seconds)
+ * early, since it makes restarts cheap enough that hot reload becomes a convenience rather
+ * than a necessity.
  *
  * This header and its implementation are raylib-free and are linked by the headless
  * test executable.

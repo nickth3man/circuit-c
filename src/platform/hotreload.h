@@ -13,9 +13,8 @@
  *   !DRIFTY_HOT_RELOAD                        release: plain prototypes, called directly,
  *                                             no module and no indirection.
  *
- * RELOAD-SAFETY INVARIANT (docs/SPEC.md, "Development Workflow"). The platform layer owns
- * the Game allocation and hands the same pointer back to each freshly loaded module. For
- * that to be sound:
+ * RELOAD-SAFETY INVARIANT. The platform layer owns the Game allocation and hands the same
+ * pointer back to each freshly loaded module. For that to be sound:
  *
  *   - No field in Game, or in anything reachable from it, may point into the game module's
  *     code or static data.
@@ -28,6 +27,16 @@
  *   - Changing the layout of Game invalidates the live memory block. Restart the
  *     executable after a struct-layout change. This is the main limitation of the
  *     technique, and it is expected rather than a bug.
+ *
+ * Two build-side contracts belong to this layer and are stated nowhere else:
+ *
+ * **Write to a temporary filename and rename.** The linker creates the output file before
+ * filling it, so a running game polling for changes can load a zero-length module. Building
+ * to `game_tmp.dll` and renaming makes the swap atomic.
+ *
+ * **Emit a fresh PDB per build if you debug on Windows.** A debugger attached to the process
+ * holds a lock on the current PDB and the next build fails. Numbering them
+ * (`game_1.pdb`, `game_2.pdb`, …) avoids this; clean them up on a fresh start.
  */
 #ifndef DRIFTY_HOTRELOAD_H
 #define DRIFTY_HOTRELOAD_H
@@ -48,7 +57,7 @@
 /* Incomplete type: the entry-point signatures only need Game *. game.h completes it. */
 typedef struct Game Game;
 
-/* docs/SPEC.md spells logging TRACELOG(LOG_LEVEL, ...), but raylib's TRACELOG macro lives
+/* This project spells logging TRACELOG(LOG_LEVEL, ...), but raylib's TRACELOG macro lives
  * in its internal utils.h, which is not installed with the library. Provide the same
  * spelling on top of the public TraceLog(). Usable only where raylib.h is in scope, which
  * is every translation unit that logs. */

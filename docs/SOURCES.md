@@ -1,8 +1,8 @@
 # Technical References — Drifty
 
-This document is the reference index for [SPEC.md](SPEC.md). Every physics equation,
-integration rule, raylib API claim, and build instruction in the specification traces
-back to one of the sources listed here.
+This document is Drifty's technical reference index. Every physics equation, integration
+rule, raylib API claim, and build instruction in the project traces back to one of the
+sources listed here.
 
 Sources are grouped by subject. Each entry gives the short identifier used elsewhere in
 the project (`S1`–`S20`), the title, a description of what the source establishes, and

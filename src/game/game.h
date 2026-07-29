@@ -104,7 +104,7 @@ struct Game {
 /*
  * Helpers exposed to the platform layer and the headless harness. These are ordinary
  * module functions, not reloadable entry points: the entry-point list in hotreload.h stays
- * exactly as docs/SPEC.md defines it.
+ * exactly as the GAME_ENTRY_POINTS X-macro in src/platform/hotreload.h defines it.
  */
 
 /* FNV-1a over the deterministic simulation fields only. Explicitly excludes the

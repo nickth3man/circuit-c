@@ -35,7 +35,7 @@
  * documented inline.
  *
  * UNITS AND FRAME. Everything is in metres in the body frame: +X forward (nose), +Y left,
- * origin at the CG — the convention in docs/SPEC.md and src/core/units.h. Consumers apply their own
+ * origin at the CG — the convention in src/core/units.h. Consumers apply their own
  * metres-to-pixels scale.
  *
  * PRESENTATION GAINS. Several real-world quantities are well below the ~7.6 cm / 1 px

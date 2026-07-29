@@ -1,7 +1,7 @@
 /*
  * surface.c — per-surface friction and resistance parameters.
  *
- * The static kSurfaces table holds the baseline surfaces defined in docs/SPEC.md.
+ * The static kSurfaces table holds the project's baseline surfaces.
  * Surface_Get() resolves an id into a const pointer; callers resolve fresh each use
  * and never cache the pointer across hot reloads.
  *
@@ -9,6 +9,15 @@
  */
 #include "physics/surface.h"
 
+/* Baseline surfaces:
+ *
+ * | Surface | muLongitudinal | muLateral | tireBScale | rollingResistanceCoefficient | looseSurfaceDragN |
+ * |---------|---------------|-----------|-----------|------------------------------|-------------------|
+ * | Asphalt | 1.35 | 1.30 | 1.00 | 0.015 | 0 |
+ * | Gravel  | 0.85 | 0.80 | 0.65 | 0.045 | 250 |
+ * | Grass   | 0.65 | 0.60 | 0.70 | 0.080 | 600 |
+ * | Snow    | 0.40 | 0.38 | 0.50 | 0.050 | 200 |
+ */
 static const SurfaceSpec kSurfaces[SURFACE_COUNT] = {
     [SURFACE_ASPHALT] = {
         .name                        = "Asphalt",

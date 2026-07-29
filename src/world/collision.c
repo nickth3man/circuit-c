@@ -1,7 +1,7 @@
 /*
  * collision.c — vehicle-track capsule collision with swept substeps and impulse response.
  *
- * Physics conventions (docs/SPEC.md):
+ * Physics conventions:
  *   - SI units throughout.
  *   - Body X forward, body Y left.
  *   - Heading counterclockwise from world +X.

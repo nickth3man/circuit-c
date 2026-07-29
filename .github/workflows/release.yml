@@ -51,7 +51,7 @@ jobs:
           cp build/release/drifty_release.exe build/packages/drifty/drifty.exe
           cp build/release/glfw3.dll build/packages/drifty/
           cp README.md AGENTS.md build/packages/drifty/
-          cp docs/SPEC.md docs/SOURCES.md docs/generated/PARAMETERS.md build/packages/drifty/ 2>/dev/null || true
+          cp docs/SOURCES.md docs/generated/PARAMETERS.md build/packages/drifty/ 2>/dev/null || true
           cp third_party/README.md build/packages/drifty/THIRD_PARTY.md
           ( cd build/packages && zip -r drifty-windows-x64.zip drifty )
           ( cd build/packages && sha256sum drifty-windows-x64.zip > drifty-windows-x64.zip.sha256 )
@@ -87,7 +87,7 @@ jobs:
           cp build/tests/drifty_tests build/packages/drifty/drifty_tests
           cp -r tools build/packages/drifty/tools
           cp README.md AGENTS.md build/packages/drifty/
-          cp docs/SPEC.md docs/SOURCES.md docs/generated/PARAMETERS.md build/packages/drifty/ 2>/dev/null || true
+          cp docs/SOURCES.md docs/generated/PARAMETERS.md build/packages/drifty/ 2>/dev/null || true
           tar -czf build/packages/drifty-linux-x64.tar.gz -C build/packages drifty
           ( cd build/packages && sha256sum drifty-linux-x64.tar.gz > drifty-linux-x64.tar.gz.sha256 )
 

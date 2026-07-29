@@ -1,11 +1,11 @@
 # Drifty — one command per operation.
 #
-# The rule this file follows: the human and the coding agent run the SAME commands. If a
-# check exists in CI it exists here, spelled the same way, and `make ci` is the local
-# equivalent of the required GitHub checks.
+# Local targets provide the fast core checks used during development. Hosted CI remains
+# authoritative because it also runs its compiler/OS matrix, workflow lint, hot-reload
+# harness, linkage inspection, and security analysis.
 #
 #   make dev              hot-reload development build: build/dev/game.dll + build/dev/drifty.exe
-#   make run              build, then LAUNCH the game (a human does this, never an agent)
+#   make run              build, then LAUNCH the game (interactive; blocks until the window closes)
 #   make test             fast unit and infrastructure scenarios
 #   make test-physics     every physics and maneuver scenario, with telemetry
 #   make scenario NAME=skidpad     one scenario
@@ -22,7 +22,7 @@
 #   make profile          build with the Tracy hooks enabled (DRIFTY_TRACY)
 #   make benchmark        fixed-update throughput
 #   make release          release build
-#   make ci               everything the required CI checks run
+#   make ci               core local checks; inspect every SKIP line
 #   make params-doc       regenerate docs/generated/PARAMETERS.md from the registry
 #   make compile-commands write compile_commands.json for clangd
 #   make format           apply .clang-format        make format-check  check only
@@ -32,12 +32,11 @@
 #   make info             print the resolved toolchain and linkage
 #   make help             this list
 #
-# Every target terminates on its own except `run`, which is the developer's to start.
+# Every target terminates on its own except the interactive `run` and `inspect` targets.
 #
 # On Windows the canonical build lives in build.sh; the targets below call it rather than
-# duplicating the hot-reload-safe link sequence. On Linux and macOS only the headless
-# targets work (tests, sanitizers, coverage, fuzzing) — that is what CI needs there, and
-# the game itself remains Windows-only.
+# duplicating the hot-reload-safe link sequence. Linux CI validates the headless targets
+# (tests, sanitizers, coverage, fuzzing); the interactive game remains Windows-only.
 
 # ------------------------------------------------------------------------------- host --
 
@@ -45,15 +44,15 @@ ifeq ($(MSYSTEM),UCRT64)
     DRIFTY_HOST := ucrt64
 else
     UNAME_S := $(shell uname -s 2>/dev/null)
-    ifneq (,$(filter Linux Darwin,$(UNAME_S)))
+ifneq (,$(filter Linux Darwin,$(UNAME_S)))
         DRIFTY_HOST := posix
-    else
+else
         DRIFTY_HOST := unsupported
-    endif
+endif
 endif
 
 ifeq ($(DRIFTY_HOST),unsupported)
-    $(error Run make from an MSYS2 UCRT64 shell (or use build.bat / mk.bat), or from Linux/macOS for the headless targets.)
+$(error Run make from an MSYS2 UCRT64 shell (or use build.bat / mk.bat), or from Linux for the headless targets.)
 endif
 
 # --------------------------------------------------------------------------- toolchain --
@@ -63,15 +62,15 @@ ifeq ($(DRIFTY_HOST),ucrt64)
 CC := gcc
 CC_PATH := $(shell command -v $(CC) 2>/dev/null)
 ifeq ($(findstring /ucrt64/bin/,$(CC_PATH)),)
-    $(error refusing non-UCRT64 compiler '$(CC_PATH)'. Use build.bat or the UCRT64 shell.)
+$(error refusing non-UCRT64 compiler '$(CC_PATH)'. Use build.bat or the UCRT64 shell.)
 endif
 
 PKGCONFIG := $(shell command -v pkg-config 2>/dev/null)
 ifeq ($(PKGCONFIG),)
-    $(error pkg-config not found. Run scripts/setup_windows.ps1.)
+$(error pkg-config not found. Run scripts/setup_windows.ps1.)
 endif
 ifeq ($(shell pkg-config --exists raylib 2>/dev/null && echo yes),)
-    $(error pkg-config cannot find raylib. Run scripts/setup_windows.ps1.)
+$(error pkg-config cannot find raylib. Run scripts/setup_windows.ps1.)
 endif
 
 RAYLIB_CFLAGS := $(shell pkg-config --cflags raylib)
@@ -282,8 +281,7 @@ dev: windows-only
 	./build.sh
 
 run: dev
-	@echo "Launching $(EXE_DEBUG). This does not return until you close the window."
-	@echo "Coding agents must never run this target — rebuild with 'make dev' instead."
+	@echo "Launching $(EXE_DEBUG). This returns only after you close the window."
 	./$(EXE_DEBUG)
 
 release: windows-only
@@ -513,19 +511,16 @@ gallery: windows-only dev
 cards: tests
 	@./$(EXE_TESTS) --dump-corpus-cards $(ARTIFACTS)/corpus-cards
 
-# The browser inspector. Serves tools/visual over artifacts/corpus-cards and blocks, so it is
-# an INTERACTIVE target — a coding agent must never invoke it (same rule as `run`).
+# The browser inspector serves tools/visual over artifacts/corpus-cards and blocks until the
+# operator stops it. `visual-diagnose` is the bounded automation path.
 inspect: cards
-	@echo "Serving the vehicle inspector. This does not return until you stop it."
-	@echo "Coding agents must never run this target — use 'make visual-diagnose' instead."
+	@echo "Serving the vehicle inspector. This returns only after you stop it."
 	@cd tools/visual && node serve.js
 
-# The agent-safe path: runs the Playwright suite, which starts and stops its own server and
-# exits on its own. Writes evidence to artifacts/visual/ — per-car cards, label maps, sweep
-# strips, and diagnostics.txt.
-#
-# EXPECTED TO FAIL while the grammar is being fixed. The failures are the diagnosis, not a
-# broken build, which is why this is not in `ci` and not in the required checks.
+# Bounded automation: runs the Playwright suite, starts and stops its own server, and writes
+# per-car cards, label maps, sweep strips, and diagnostics.txt under artifacts/visual/.
+# It remains diagnostic rather than a required CI gate; `|| true` preserves all evidence when
+# a measurement fails so the report can identify every defect in one run.
 visual-diagnose: cards
 	@cd tools/visual && npm install --silent && npx playwright test --reporter=list || true
 	@echo "visual-diagnose: evidence in $(ARTIFACTS)/visual/ (start with diagnostics.txt)"
@@ -594,8 +589,8 @@ profile: windows-only
 ci: format-check lint analyze test-physics regression sanitize coverage
 	@echo ""
 	@echo "==============================================="
-	@echo "ci: every required check passed locally."
-	@echo "Windows-only checks (screenshots, visual-test) are not part of the required set."
+	@echo "ci: core local checks passed; inspect any SKIP lines."
+	@echo "Hosted CI remains authoritative for matrix, workflow, Windows, linkage, and security checks."
 
 # ---------------------------------------------------------------------- editor support --
 

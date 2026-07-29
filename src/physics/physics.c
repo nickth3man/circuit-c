@@ -575,7 +575,14 @@ void physics_fixed_update(const VehicleSpec *spec, VehicleState *state, VehicleD
          * understeer (inside-rear propelling, outside-rear dragging) that breaks the drift
          * mechanics. Per-wheel slip ratios are re-enabled when the default differential moves
          * to LSD/OPEN (Phase 4 tuning), where rear-wheel speed differentiation eliminates the
-         * scrub. See docs/SPEC.md Phase 4 exit criteria. */
+         * scrub.
+         *
+         * Complete when:
+         *
+         * - [ ] Inside-wheel unloading and snap oversteer are observable in telemetry.
+         * - [ ] One wheel on grass produces asymmetric yaw torque.
+         * - [ ] Differential mode changes power-oversteer behavior measurably.
+         * - [ ] All Phase 3 scenarios still pass, with reviewed and re-baselined CSV deltas. */
         const bool front = i <= WHEEL_FRONT_RIGHT;
         wheel->slipRatio =
             tire_slip_ratio(wheel->angularVelocityRadS, vehicle_wheel_radius_m(spec, i),

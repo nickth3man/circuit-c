@@ -1,7 +1,7 @@
 /*
  * units.h — the single boundary between simulation meters and render pixels.
  *
- * COORDINATE AND SIGN CONVENTION (docs/SPEC.md, "Coordinate and sign convention").
+ * COORDINATE AND SIGN CONVENTION.
  * Every equation in this project obeys it:
  *
  *   Body X            forward (nose direction)
@@ -13,6 +13,17 @@
  *   Slip angle        positive when contact-point velocity points left of wheel heading
  *   Lateral force     always opposes the slip angle
  *   Slip ratio        positive when wheel surface speed exceeds ground speed
+ *
+ * Body-to-world rotation (body X axis is `(cos h, sin h)`, body Y axis is `(-sin h, cos h)`):
+ *
+ *     world_vx = vx * cos(heading) - vy * sin(heading)
+ *     world_vy = vx * sin(heading) + vy * cos(heading)
+ *
+ * Consequences that must hold in the implementation:
+ *
+ * - A positive (left) steering input from straight forward travel produces positive yaw rate.
+ * - Lateral tire force always opposes the corresponding slip angle.
+ * - No force is applied in both the body frame and the world frame.
  *
  * World meters -> render pixel space, which has +Y DOWN:
  *

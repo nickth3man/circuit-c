@@ -8,7 +8,13 @@
  * drifty_tests share it, so the tested behaviour is the shipped behaviour.
  *
  * It is NOT compiled into the hot-reloadable game module: the loop lives with the platform
- * layer, as docs/SPEC.md requires.
+ * layer.
+ *
+ * The accumulator is capped in **substeps**, not only in frame time. Clamping frame time to
+ * 0.25 s still permits 30 physics steps at 120 Hz, which is not a sufficient guard.
+ *
+ * The loop lives in the platform layer (`main.c`), which owns the `Game` block and calls into
+ * the game module through the reloadable interface described in hotreload.h.
  *
  * The fixed-update callback is passed in as an argument. It is never stored anywhere
  * persistent, so this does not violate the reload-safety rule against function pointers in

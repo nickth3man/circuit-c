@@ -7,7 +7,6 @@ load-transfer behaviour, not because a state machine reaches in and changes forc
 
 **Windows only.** The supported development environment is **MSYS2 UCRT64**.
 
-- Full specification: [docs/SPEC.md](docs/SPEC.md)
 - Reference index: [docs/SOURCES.md](docs/SOURCES.md)
 - Agent-facing workflow rules: [AGENTS.md](AGENTS.md)
 - Vehicle-appearance contract: [docs/CAR_VISUAL.md](docs/CAR_VISUAL.md)
@@ -61,10 +60,9 @@ quadratic aerodynamic drag and per-wheel rolling resistance.
 The headless runner covers 54 scenarios. (The check count is not quoted here — it moves with
 every parameter added, and `./build/tests/drifty_tests.exe` prints the current total.) Eight reviewed
 Phase 3 CSV baselines cover acceleration/braking load transfer, coast-down, skidpad, step
-steer, lift-off, transition, and a catchable drift.
-[docs/PHASE3_VALIDATION.md](docs/PHASE3_VALIDATION.md) records the equations, numerical
-handling results, acceptance checklist, baseline classification, and the deterministic replay
-checksum accepted at that phase.
+steer, lift-off, transition, and a catchable drift. They live in `tests/baselines/`;
+`mk regression` compares a fresh run against them, and `mk baselines` re-records them only
+when the model changed on purpose and the accepted deltas have been written down.
 
 ## Prerequisites (Windows / MSYS2 UCRT64)
 
@@ -290,7 +288,7 @@ mk.bat                          run a Makefile target inside MSYS2 UCRT64 from c
 scripts/setup_windows.ps1       idempotent MSYS2 UCRT64 bootstrap
 scripts/validate_hotreload.sh   harness + failed-compile preservation
 scripts/setup_ruleset.sh        branch ruleset via gh; prints unless given --apply
-docs/SPEC.md, docs/SOURCES.md   specification and reference index
+docs/SOURCES.md                 technical reference index
 docs/DEVTOOLS.md                the development shell: lab, inspector, reports, targets
 docs/CI.md                      workflows, required checks, and why the gates are shaped so
 docs/generated/PARAMETERS.md              generated from the tunable registry

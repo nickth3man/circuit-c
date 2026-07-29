@@ -1,13 +1,29 @@
 /*
  * config.h — simulation, numerical infrastructure, and presentation constants.
  *
- * Rules enforced by this file (docs/SPEC.md, "Units, Coordinate System, and Conventions"):
+ * Rules enforced by this file:
  *
  *   - All physical values are SI. Every unit-bearing constant states its unit in its name
  *     or in a trailing comment. Constants with no unit are dimensionless ratios and say so.
  *   - PIXELS_PER_METER is a render scale. It is consumed only by units.h helpers and by
  *     rendering code. No simulation quantity may be derived from it. This is a regression
  *     test (tests/scenarios/core_tests.c, scenario "renderscale").
+ *
+ * | Quantity | Unit | Suffix convention |
+ * |----------|------|-------------------|
+ * | Position, length, CG height | meters | `...M` |
+ * | Linear velocity | meters/second | `...Mps` |
+ * | Linear acceleration | meters/second² | `...Mps2` |
+ * | Mass | kilograms | `...Kg` |
+ * | Force | newtons | `...N` |
+ * | Torque | newton-meters | `...Nm` |
+ * | Yaw inertia | kg·m² | `...KgM2` |
+ * | Angle (heading, steering, slip) | radians | `...Rad` |
+ * | Angular velocity (yaw, wheel) | radians/second | `...RadS` |
+ * | Time | seconds | `...S` |
+ *
+ * Every physics constant carries its unit in its name or in a trailing comment. Constants
+ * without units are dimensionless ratios and must be documented as such.
  *
  * Phase 2 added nonlinear tires, rear-wheel drive, wheel rotation, physical brakes, and
  * combined slip. Phase 3 adds longitudinal load transfer from a filtered previous-step

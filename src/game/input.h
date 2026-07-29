@@ -4,7 +4,7 @@
  * This header is raylib-free so the headless harness can build and drive Input timelines
  * without a window. Keyboard polling lives in input.c behind !DRIFTY_HEADLESS.
  *
- * Lifetime contract (docs/SPEC.md, "One-shot input consumption"):
+ * Lifetime contract:
  *
  *   - Held controls are sampled once per render frame and stay valid for every fixed
  *     substep of that frame.
@@ -13,6 +13,11 @@
  *     to the next frame. game_fixed_update() reads them and calls input_clear_oneshots()
  *     before returning, so a single-frame press is acted on exactly once even when eight
  *     substeps run in that frame.
+ *
+ * `game_fixed_update` reads the one-shot flags, acts on them, and clears them before
+ * returning. A single-frame reset press therefore resets exactly once even when eight
+ * substeps run in that frame. Held controls (`steer`, `throttle`, `brake`, `handbrake`)
+ * remain valid for every substep of the frame.
  *
  * Steering follows the left-positive convention: left key -> +1, right key -> -1.
  */

@@ -11,7 +11,6 @@ each one exists, and which rules a change must not break.
 
 - `docs/generated/CORPUS.md` — the 100 demonstration vehicles, generated
 - `docs/generated/PARAMETERS.md` — the tunable registry, generated
-- `docs/plans/PLAN.md`, `docs/plans/ROADMAP.md` — the remaining work on this system
 
 ---
 
@@ -79,7 +78,7 @@ All are bounded to `[0, 1]`, none is produced from noise, and each cites its inp
 ## Frames and units
 
 Everything in `CarVisual` is **metres in the body frame**: `+X` forward (nose), `+Y` left,
-origin at the **centre of mass**. This is the `docs/SPEC.md` and `src/core/units.h` convention.
+origin at the **centre of mass**. This is the `src/core/units.h` convention.
 Consumers apply their own metres-to-pixels scale.
 
 ### The layout frame is not the body frame

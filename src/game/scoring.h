@@ -31,8 +31,19 @@ struct Game;
  *   MIN_DRIFT_SPEED_MPS, MIN_DRIFT_ANGLE_RAD, MIN_REAR_SLIP_RAD,
  *   MIN_DRIFT_YAW_RATE_RADS, SPIN_CUTOFF_RAD.
  *
- * A scoring drift requires ALL seven conditions to be true. See docs/SPEC.md for the
- * full list.
+ * Rear slip angle alone would classify creeping, reversing, spinning in place, crashing, and
+ * facing backwards as drifting.
+ *
+ * ALL of these must hold:
+ *
+ *   speedMps                    >= MIN_DRIFT_SPEED_MPS
+ *   fabsf(bodySideslipRad)      >= MIN_DRIFT_ANGLE_RAD
+ *   fabsf(rear slip angle)      >= MIN_REAR_SLIP_RAD
+ *   fabsf(yawRateRadS)          >= MIN_DRIFT_YAW_RATE_RADS
+ *   vehicle is on a valid (scoring) surface
+ *   not crashed (no barrier impact within CRASH_LOCKOUT_S)
+ *   not reversing (velocityLongitudinalMps > 0)
+ *   fabsf(bodySideslipRad)      <= SPIN_CUTOFF_RAD
  */
 bool scoring_classify(const VehicleState *state, VehicleDerived *derived,
                       float crashLockoutTimerS);
