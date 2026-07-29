@@ -23,6 +23,36 @@ static float tire_unloaded_radius_m(float sectionWidthMm, float aspectPct, float
     return rimDiameterIn * 0.0254f * 0.5f + (sectionWidthMm * 0.001f) * (aspectPct * 0.01f);
 }
 
+static bool integer_in_range(float value, int minimum, int maximum)
+{
+    return isfinite(value) && value >= (float)minimum && value <= (float)maximum &&
+           floorf(value) == value;
+}
+
+static bool zero_or_range(float value, float minimum, float maximum)
+{
+    return isfinite(value) && (value == 0.0f || (value >= minimum && value <= maximum));
+}
+
+float vehicle_effective_drag_coefficient(const VehicleSpec *spec)
+{
+    if (spec == NULL || !isfinite(spec->dragCoefficient) || spec->dragCoefficient < 0.0f)
+        return 0.0f;
+    if (!isfinite(spec->windscreenRakeRad) ||
+        spec->windscreenRakeRad < VEH_WINDSCREEN_RAKE_MIN_RAD ||
+        spec->windscreenRakeRad > VEH_WINDSCREEN_RAKE_MAX_RAD)
+        return spec->dragCoefficient;
+
+    /* Bayindirli & Celik measured roughly 0.4% Cd reduction per added degree of windscreen
+     * inclination on a bus (IJAET 9(3), 2020). 0.004/deg = 0.229183/rad. Keep the published
+     * slope as a fixed derivation, not a hidden tunable, and bound extrapolation to +/-10%. */
+    const float cdPerRad = 0.2291831181f;
+    const float factor = fminf(
+        fmaxf(1.0f - cdPerRad * (spec->windscreenRakeRad - VEH_WINDSCREEN_RAKE_RAD), 0.90f),
+        1.10f);
+    return spec->dragCoefficient * factor;
+}
+
 void vehicle_spec_refresh_derived(VehicleSpec *spec)
 {
     if (spec == NULL) return;
@@ -106,6 +136,17 @@ void vehicle_spec_set_default(VehicleSpec *spec)
     spec->shoulderXM = VEH_SHOULDER_X_M;
     spec->fenderFlareFrontM = VEH_FENDER_FLARE_FRONT_M;
     spec->fenderFlareRearM = VEH_FENDER_FLARE_REAR_M;
+    spec->roofStartXM = VEH_ROOF_START_X_M;
+    spec->roofEndXM = VEH_ROOF_END_X_M;
+    spec->roofWidthM = VEH_ROOF_WIDTH_M;
+    spec->windscreenRakeRad = VEH_WINDSCREEN_RAKE_RAD;
+    spec->backlightRakeRad = VEH_BACKLIGHT_RAKE_RAD;
+    spec->sideWindowCount = VEH_SIDE_WINDOW_COUNT;
+    spec->quarterWindowLengthM = VEH_QUARTER_WINDOW_LENGTH_M;
+    spec->sunroofLengthM = VEH_SUNROOF_LENGTH_M;
+    spec->doorCount = VEH_DOOR_COUNT;
+    spec->cabinRows = VEH_CABIN_ROWS;
+    spec->roofType = VEH_ROOF_TYPE;
 
     spec->massEngineKg = MASS_ENGINE_KG;
     spec->massEngineXM = MASS_ENGINE_X_M;
@@ -250,6 +291,27 @@ bool vehicle_spec_is_valid(const VehicleSpec *spec)
     if (!(isfinite(spec->shoulderXM))) return false;
     if (!(isfinite(spec->fenderFlareFrontM) && spec->fenderFlareFrontM >= 0.0f)) return false;
     if (!(isfinite(spec->fenderFlareRearM) && spec->fenderFlareRearM >= 0.0f)) return false;
+    if (!(isfinite(spec->roofStartXM) && isfinite(spec->roofEndXM) &&
+          spec->roofStartXM > spec->roofEndXM))
+        return false;
+    if (!(isfinite(spec->roofWidthM) && spec->roofWidthM > 0.0f &&
+          spec->roofWidthM <= spec->widthOverallM))
+        return false;
+    if (!(isfinite(spec->windscreenRakeRad) &&
+          spec->windscreenRakeRad >= VEH_WINDSCREEN_RAKE_MIN_RAD &&
+          spec->windscreenRakeRad <= VEH_WINDSCREEN_RAKE_MAX_RAD))
+        return false;
+    if (!(isfinite(spec->backlightRakeRad) &&
+          spec->backlightRakeRad >= VEH_BACKLIGHT_RAKE_MIN_RAD &&
+          spec->backlightRakeRad <= VEH_BACKLIGHT_RAKE_MAX_RAD))
+        return false;
+    if (!integer_in_range(spec->sideWindowCount, 2, 6)) return false;
+    if (!zero_or_range(spec->quarterWindowLengthM, 0.2f, 0.4f)) return false;
+    if (!zero_or_range(spec->sunroofLengthM, 0.4f, 1.0f)) return false;
+    if (!(spec->doorCount == 2.0f || spec->doorCount == 4.0f || spec->doorCount == 5.0f))
+        return false;
+    if (!integer_in_range(spec->cabinRows, 1, 3)) return false;
+    if (!integer_in_range(spec->roofType, VEH_ROOF_FIXED, VEH_ROOF_CONVERTIBLE)) return false;
     if (!(isfinite(spec->wheelRadiusFrontM) && spec->wheelRadiusFrontM > 0.0f)) return false;
     if (!(isfinite(spec->wheelRadiusRearM) && spec->wheelRadiusRearM > 0.0f)) return false;
     if (!(isfinite(spec->wheelInertiaKgM2) && spec->wheelInertiaKgM2 > 0.0f)) return false;

@@ -436,48 +436,47 @@ static void render(const CarVisual *v, const RasterTarget *t, CarRasterPart part
                            CAR_LABEL_BODY_SHADE);
     }
 
-    /* ========================================================== L3: cabin roof =====
+    /* ========================================================== L3: greenhouse =====
      *
-     * Taller bodies (heightVisual high) get a proportionally larger roof panel. */
-    if (v->cabinLengthM > 0.0f) {
-        fill_oriented_rect(t, v->cabinCentreXM, 0.0f, v->roofLengthM, 2.0f * v->cabinHalfWidthM,
-                           0.0f, v->cabin, CAR_LABEL_CABIN);
+     * A dark opening is laid down first. Fixed-roof panels cover it completely, targa
+     * panels leave their derived centre gap, and convertibles leave the opening exposed.
+     * All geometry was decided by car_visual_derive(). */
+    fill_oriented_rect(t, 0.5f * (v->roofStartXM + v->roofEndXM), 0.0f, v->roofLengthM,
+                       v->roofWidthM, 0.0f, v->glass, CAR_LABEL_GLASS);
+    for (int i = 0; i < v->roofPanelCount; i++) {
+        fill_oriented_rect(t, v->roofPanels[i].centreXM, 0.0f, v->roofPanels[i].lengthM,
+                           v->roofWidthM, 0.0f, v->cabin, CAR_LABEL_CABIN);
+    }
+    /* L3 body-coloured roof highlight; every L4 glass feature is painted afterwards. */
+    for (int i = 0; i < v->roofPanelCount; i++) {
+        fill_oriented_rect(t, v->roofPanels[i].centreXM, 0.0f,
+                           v->roofPanels[i].lengthM * v->roofHighlightLengthScale,
+                           v->roofHighlightWidthM, 0.0f, v->body, CAR_LABEL_BODY);
     }
 
-    /* ============================================================= L4: glass =====
-     *
-     * Normal cars: two glass bands (windscreen front, backlight rear).
-     * Van/bus (vanWindowWeight > 0.05f, sideWindowCount >= 2): segmented glass band
-     * along the greenhouse with sideWindowCount segments.
-     * The glass band's half-width is decided by the grammar (v->glassHalfWidthM), not here. */
-    if (v->cabinLengthM > 0.0f) {
-        const float glassWidthFrac =
-            (v->cabinHalfWidthM > 1e-6f) ? (v->glassHalfWidthM / v->cabinHalfWidthM) : 0.0f;
+    /* ============================================================= L4: glass ===== */
 
-        if (v->vanWindowWeight > 0.05f && v->sideWindowCount >= 2) {
-            /* Segmented side-window band: N glass panes separated by slim pillars. */
-            const float segLen = v->cabinLengthM / (float)v->sideWindowCount;
-            const float pillarM = maxf(0.02f, onePx);
-            for (int s = 0; s < v->sideWindowCount; s++) {
-                const float segX = v->backlightXM + segLen * (0.5f + (float)s);
-                const float glassLen = segLen - pillarM;
-                if (glassLen > 0.0f) {
-                    fill_oriented_rect(t, segX, 0.0f, glassLen,
-                                       2.0f * v->cabinHalfWidthM * glassWidthFrac, 0.0f,
-                                       v->glass, CAR_LABEL_GLASS);
-                }
-            }
-        } else {
-            /* Two glass bands: windscreen forward, backlight rear. */
-            const float bandLen = 0.26f * v->cabinLengthM;
-            fill_oriented_rect(t, v->windscreenXM - 0.5f * bandLen, 0.0f, bandLen,
-                               2.0f * v->cabinHalfWidthM * glassWidthFrac, 0.0f, v->glass,
-                               CAR_LABEL_GLASS);
-            fill_oriented_rect(t, v->backlightXM + 0.5f * bandLen, 0.0f, bandLen,
-                               2.0f * v->cabinHalfWidthM * (glassWidthFrac - 0.06f), 0.0f,
+    const float sideY = 0.5f * (v->roofWidthM - v->sideWindowBandWidthM);
+    for (int i = 0; i < v->sideWindowCount; i++) {
+        for (int side = -1; side <= 1; side += 2) {
+            fill_oriented_rect(t, v->sideWindows[i].centreXM, (float)side * sideY,
+                               v->sideWindows[i].lengthM, v->sideWindowBandWidthM, 0.0f,
                                v->glass, CAR_LABEL_GLASS);
         }
     }
+    for (int side = -1; side <= 1; side += 2) {
+        fill_oriented_rect(t, v->quarterWindow.centreXM, (float)side * sideY,
+                           v->quarterWindow.lengthM, v->sideWindowBandWidthM, 0.0f, v->glass,
+                           CAR_LABEL_QUARTER_WINDOW);
+    }
+    fill_oriented_rect(t, v->windscreenXM - 0.5f * v->windscreenLengthM, 0.0f,
+                       v->windscreenLengthM, 2.0f * v->glassHalfWidthM, 0.0f, v->glass,
+                       CAR_LABEL_GLASS);
+    fill_oriented_rect(t, v->backlightXM + 0.5f * v->backlightLengthM, 0.0f,
+                       v->backlightLengthM, 1.88f * v->glassHalfWidthM, 0.0f, v->glass,
+                       CAR_LABEL_GLASS);
+    fill_oriented_rect(t, v->sunroof.centreXM, 0.0f, v->sunroof.lengthM, 0.56f * v->roofWidthM,
+                       0.0f, v->glass, CAR_LABEL_SUNROOF);
 
     /* ============================================================== L4b: cage ===== */
     if (v->hasCage && v->cabinLengthM > 0.0f) {

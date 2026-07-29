@@ -118,6 +118,8 @@ typedef enum {
     CAR_LABEL_BODY_SHADE,
     CAR_LABEL_CABIN,
     CAR_LABEL_GLASS,
+    CAR_LABEL_QUARTER_WINDOW,
+    CAR_LABEL_SUNROOF,
     CAR_LABEL_TIRE,
     CAR_LABEL_TIRE_SIDEWALL, /* sidewall ring between tread and rim */
     CAR_LABEL_RIM,

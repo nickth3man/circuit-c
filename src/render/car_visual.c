@@ -335,50 +335,36 @@ void car_visual_derive(const VehicleSpec *spec, CarVisual *out)
 
     /* ---- greenhouse ------------------------------------------------------------------
      *
-     * [rule] The glasshouse spans the band between the two glass stations the registry
-     * declares — body.cowl_x (windscreen foot) and body.backlight_x (rear glass foot) —
-     * converted out of the layout frame. Two properties matter and are asserted by the
-     * `corpus` scenario, so they are built in rather than hoped for:
-     *
-     *   1. EVERY value of either station moves the cabin. An earlier version only honoured
-     *      the explicit stations when cowl led backlight by 0.40 m and silently fell back to
-     *      a CG-derived cabin otherwise, which made whole stretches of body.backlight_x's
-     *      declared range render identically. The band is now taken between the stations in
-     *      whichever order they arrive: its centre and its length both track both stations
-     *      across the full [-2, 2] m range.
-     *   2. It never inverts or vanishes. A band shorter than CV_MIN_CABIN_M is opened out
-     *      symmetrically about its centre, then the whole band — length preserved — is slid
-     *      inside the hull.
-     *
-     * Cabin width is a fraction of the body half-width that grows with height: a bus is
-     * glasshouse almost edge to edge, a supercar is a narrow canopy. */
+     * The cowl/backlight band still packages the occupants, while the visible roof and
+     * glass are now explicit Phase C geometry. Longitudinal primaries use the layout frame
+     * and are converted once here. The rasterizer consumes only these derived dimensions. */
     {
-        const float cowlX = layout_to_body_x(spec, spec->cowlXM);
-        const float backX = layout_to_body_x(spec, spec->backlightXM);
-
+        const float packageBiasM = CV_CABIN_FORWARD_BIAS * out->lengthM;
+        const float cowlX = layout_to_body_x(spec, spec->cowlXM) + packageBiasM;
+        const float backX = layout_to_body_x(spec, spec->backlightXM) + packageBiasM;
         float lo = fminf(cowlX, backX);
         float hi = fmaxf(cowlX, backX);
 
-        /* [rule] Offset the station-controlled band forward by a body-length-scaled package
-         * bias. Both cowl_x and backlight_x still move their respective edge one-for-one. */
-        const float packageShiftM = CV_CABIN_FORWARD_BIAS * out->lengthM;
-        lo += packageShiftM;
-        hi += packageShiftM;
-
-        /* [rule] The driver has to remain inside the shifted glasshouse. Where
-         * mass.driver_x sits outside it, stretch the nearer end to contain the driver. */
-        {
-            const float driverX = layout_to_body_x(spec, spec->massDriverXM);
-            if (driverX < lo) lo = driverX;
-            if (driverX > hi) hi = driverX;
-        }
+        /* [rule] Rows package rearward from the driver's declared layout-frame station.
+         * One row needs only the driver's seat; each additional row reserves 0.38 m behind
+         * it. This makes cabin_rows observable while preserving mass.driver_x as the anchor.
+         *
+         * The row window carries the SAME forward package bias as the glass stations. It is
+         * a contributor to one band, not a second band: bias one contributor and not the
+         * other and the wider of the two wins, which on most vehicles is the row window —
+         * it then drags the whole greenhouse back onto the CG and the "cabin sits off-centre"
+         * grammar statement fails on two thirds of the fleet. */
+        const int cabinRows = (int)clampf(roundf(spec->cabinRows), 1.0f, 3.0f);
+        const float driverX = layout_to_body_x(spec, spec->massDriverXM) + packageBiasM;
+        const float rowRearX = driverX - (0.25f + 0.38f * (float)(cabinRows - 1));
+        lo = fminf(lo, rowRearX);
+        hi = fmaxf(hi, driverX + 0.25f);
 
         if (hi - lo < CV_MIN_CABIN_M) {
             const float centre = 0.5f * (lo + hi);
             lo = centre - 0.5f * CV_MIN_CABIN_M;
             hi = centre + 0.5f * CV_MIN_CABIN_M;
         }
-        /* Slide, then clamp: a band longer than the body becomes the body. */
         const float bandLen = hi - lo;
         if (bandLen >= out->lengthM) {
             lo = tailX;
@@ -398,20 +384,96 @@ void car_visual_derive(const VehicleSpec *spec, CarVisual *out)
         out->windscreenXM = hi;
         out->cabinLengthM = hi - lo;
         out->cabinCentreXM = 0.5f * (lo + hi);
+        out->cabinRows = cabinRows;
 
-        /* [rule] How much of the plan area the roof covers is the strongest top-down cue for
-         * body height there is, and it is a real one: a tall van has near-vertical sides, so
-         * its roof is almost the full footprint, while a low car's roof is a narrow canopy
-         * inset from wide shoulders. Reads heightOverallM via heightVisual. */
         const float cabinFrac = lerpf(0.40f, 1.00f, out->heightVisual);
         out->cabinHalfWidthM = halfW * cabinFrac;
-
-        /* [rule] The roof plate runs past the glass band on a near-vertical-sided body and
-         * falls short of it on a fastback whose backlight lies almost flat. Reads
-         * cabinLengthM and heightVisual. */
-        out->roofLengthM = out->cabinLengthM * lerpf(0.68f, 1.22f, out->heightVisual);
-        /* [rule] Deep side glass on a tall body, a shallow letterbox on a low one. */
         out->glassHalfWidthM = out->cabinHalfWidthM * lerpf(0.60f, 1.00f, out->heightVisual);
+
+        /* [identity] Explicit roof stations and full physical width. Valid specs need no
+         * correction; clamps keep derivation total for live-edited partial specs. */
+        out->roofStartXM = clampf(layout_to_body_x(spec, spec->roofStartXM), tailX, noseX);
+        out->roofEndXM = clampf(layout_to_body_x(spec, spec->roofEndXM), tailX, noseX);
+        if (out->roofStartXM < out->roofEndXM) {
+            const float swap = out->roofStartXM;
+            out->roofStartXM = out->roofEndXM;
+            out->roofEndXM = swap;
+        }
+        out->roofLengthM = out->roofStartXM - out->roofEndXM;
+        out->roofWidthM = clampf(spec->roofWidthM, 0.10f, maxf(out->widthM, 0.10f));
+
+        /* [rule] Plan projection of a raked screen: visible rise * tan(angle from vertical).
+         * More rake exposes more glass from above; a taller body also has a taller screen.
+         * Across the registered height range the rises move 0.18..0.58 m front and
+         * 0.14..0.46 m rear, preserving the established height corpus axis in L4 glass. */
+        const float windscreenRake = (isfinite(spec->windscreenRakeRad) &&
+                                      spec->windscreenRakeRad >= VEH_WINDSCREEN_RAKE_MIN_RAD &&
+                                      spec->windscreenRakeRad <= VEH_WINDSCREEN_RAKE_MAX_RAD)
+                                         ? spec->windscreenRakeRad
+                                         : VEH_WINDSCREEN_RAKE_RAD;
+        const float backlightRake = (isfinite(spec->backlightRakeRad) &&
+                                     spec->backlightRakeRad >= VEH_BACKLIGHT_RAKE_MIN_RAD &&
+                                     spec->backlightRakeRad <= VEH_BACKLIGHT_RAKE_MAX_RAD)
+                                        ? spec->backlightRakeRad
+                                        : VEH_BACKLIGHT_RAKE_RAD;
+        const float windscreenRiseM = 0.18f + 0.40f * out->heightVisual;
+        const float backlightRiseM = 0.14f + 0.32f * out->heightVisual;
+        out->windscreenLengthM = clampf(windscreenRiseM * tanf(windscreenRake), 0.06f, 0.85f);
+        out->backlightLengthM = clampf(backlightRiseM * tanf(backlightRake), 0.04f, 0.75f);
+
+        out->sideWindowCount =
+            (int)clampf(roundf(spec->sideWindowCount), 2.0f, (float)CAR_SIDE_WINDOWS_MAX);
+        out->doorCount = (int)roundf(spec->doorCount);
+        out->roofType = (int)clampf(roundf(spec->roofType), (float)VEH_ROOF_FIXED,
+                                    (float)VEH_ROOF_CONVERTIBLE);
+        /* [rule] Side panes are plan-view glass inset inside the declared roof envelope.
+         * Capping at 45% of roof width keeps both strips disjoint and inside the hull. */
+        out->sideWindowBandWidthM = fminf(0.30f, 0.45f * out->roofWidthM);
+
+        /* [rule] L3 body-coloured highlight. Its maximum is the central roof width left
+         * between the two L4 side-pane bands, so later glass never needs to be overpainted. */
+        const float centralRoofM =
+            maxf(out->roofWidthM - 2.0f * out->sideWindowBandWidthM, 0.0f);
+        out->roofHighlightWidthM = centralRoofM * out->heightVisual;
+        out->roofHighlightLengthScale = 1.0f;
+
+        /* [rule] Pane and pillar positions are fully decided here. The side-glass span
+         * follows the occupant package, so cabin_rows extends it rearward from driver_x.
+         * Door count changes the visible structural pillar width. */
+        {
+            const float pillarM = (out->doorCount == 2)   ? 0.04f
+                                  : (out->doorCount == 4) ? 0.14f
+                                                          : 0.24f;
+            const float sideStartX = fminf(out->roofEndXM, out->backlightXM);
+            const float sideEndX = fmaxf(out->roofStartXM, out->windscreenXM);
+            const float sideSpanM = maxf(sideEndX - sideStartX, 0.0f);
+            const float segmentM = sideSpanM / (float)out->sideWindowCount;
+            for (int i = 0; i < out->sideWindowCount; i++) {
+                out->sideWindows[i].centreXM = sideStartX + segmentM * ((float)i + 0.5f);
+                out->sideWindows[i].lengthM = maxf(segmentM - pillarM, 0.0f);
+            }
+        }
+
+        out->quarterWindow.lengthM = clampf(spec->quarterWindowLengthM, 0.0f, 0.40f);
+        out->quarterWindow.centreXM = out->roofEndXM - 0.5f * out->quarterWindow.lengthM;
+        out->sunroof.lengthM = clampf(spec->sunroofLengthM, 0.0f, out->roofLengthM);
+        out->sunroof.centreXM = 0.5f * (out->roofStartXM + out->roofEndXM);
+
+        /* [rule] Fixed roofs keep one continuous body-coloured panel. Targa roofs leave a
+         * central removable opening; convertibles declare no roof panel. */
+        if (out->roofType == VEH_ROOF_FIXED && out->roofLengthM > 0.0f) {
+            out->roofPanelCount = 1;
+            out->roofPanels[0].centreXM = 0.5f * (out->roofStartXM + out->roofEndXM);
+            out->roofPanels[0].lengthM = out->roofLengthM;
+        } else if (out->roofType == VEH_ROOF_TARGA && out->roofLengthM > 0.0f) {
+            const float openingM = fminf(0.30f, 0.45f * out->roofLengthM);
+            const float panelM = 0.5f * (out->roofLengthM - openingM);
+            out->roofPanelCount = 2;
+            out->roofPanels[0].centreXM = out->roofEndXM + 0.5f * panelM;
+            out->roofPanels[0].lengthM = panelM;
+            out->roofPanels[1].centreXM = out->roofStartXM - 0.5f * panelM;
+            out->roofPanels[1].lengthM = panelM;
+        }
     }
 
     /* ---- emergent form weights (some feed the hull, so they precede it) ---- */
@@ -757,7 +819,7 @@ void car_visual_derive(const VehicleSpec *spec, CarVisual *out)
      * and everything that is not paint is a true neutral. */
     out->body = hsv_to_color(hue, sat, val, 255);
     out->bodyShade = shade(out->body, 0.78f);
-    out->cabin = shade(out->body, 0.42f);
+    out->cabin = shade(out->body, 0.92f);
     out->outline = hsv_to_color(hue, clampf(sat * 0.85f, 0.0f, 1.0f), 0.13f, 255);
     out->glass = (Color){ 46, 47, 50, 255 };
     out->tire = (Color){ 26, 26, 28, 255 };
@@ -848,6 +910,30 @@ uint32_t car_visual_bake_key(const CarVisual *v)
     key_f32(&h, v->backlightXM);
     key_f32(&h, v->roofLengthM);
     key_f32(&h, v->glassHalfWidthM);
+    key_f32(&h, v->roofStartXM);
+    key_f32(&h, v->roofEndXM);
+    key_f32(&h, v->roofWidthM);
+    key_f32(&h, v->windscreenLengthM);
+    key_f32(&h, v->backlightLengthM);
+    key_f32(&h, v->sideWindowBandWidthM);
+    key_f32(&h, v->roofHighlightWidthM);
+    key_f32(&h, v->roofHighlightLengthScale);
+    key_f32(&h, v->quarterWindow.centreXM);
+    key_f32(&h, v->quarterWindow.lengthM);
+    key_f32(&h, v->sunroof.centreXM);
+    key_f32(&h, v->sunroof.lengthM);
+    key_i32(&h, v->doorCount);
+    key_i32(&h, v->cabinRows);
+    key_i32(&h, v->roofType);
+    key_i32(&h, v->roofPanelCount);
+    for (int i = 0; i < CAR_ROOF_PANELS_MAX; i++) {
+        key_f32(&h, v->roofPanels[i].centreXM);
+        key_f32(&h, v->roofPanels[i].lengthM);
+    }
+    for (int i = 0; i < CAR_SIDE_WINDOWS_MAX; i++) {
+        key_f32(&h, v->sideWindows[i].centreXM);
+        key_f32(&h, v->sideWindows[i].lengthM);
+    }
 
     for (int i = 0; i < WHEEL_COUNT; i++) {
         const CarWheelVisual *w = &v->wheels[i];
@@ -951,7 +1037,20 @@ uint32_t car_visual_bake_key(const CarVisual *v)
                                                                         X(tow_hook_diameter)  \
                                                                             X(hood_pin_diameter) \
                                                                                 X(heading_length) \
-                                                                                    X(heading_half_width)
+                                                                                    X(heading_half_width) \
+                                                                                        X(roof_start_x) \
+                                                                                            X(roof_end_x) \
+                                                                                                X(roof_width) \
+                                                                                                    X(windscreen_length) \
+                                                                                                        X(backlight_length) \
+                                                                                                            X(side_window_band_width) \
+                                                                                                                X(quarter_window_length) \
+                                                                                                                    X(sunroof_length) \
+                                                                                                                        X(door_count) \
+                                                                                                                            X(cabin_rows) \
+                                                                                                                                X(roof_type) \
+                                                                                                                                    X(roof_highlight_width) \
+                                                                                                                                        X(roof_highlight_length)
 // clang-format on
 
 #define X_ENUM(name) CAR_SIG_##name,
@@ -1066,6 +1165,20 @@ int car_visual_signature(const CarVisual *v, float *out, int cap)
     out[CAR_SIG_hood_pin_diameter] = v->hoodPinDiameterM;
     out[CAR_SIG_heading_length] = v->headingLengthM;
     out[CAR_SIG_heading_half_width] = v->headingHalfWidthM;
+    /* ---- Phase C greenhouse components (appended) ---- */
+    out[CAR_SIG_roof_start_x] = v->roofStartXM;
+    out[CAR_SIG_roof_end_x] = v->roofEndXM;
+    out[CAR_SIG_roof_width] = v->roofWidthM;
+    out[CAR_SIG_windscreen_length] = v->windscreenLengthM;
+    out[CAR_SIG_backlight_length] = v->backlightLengthM;
+    out[CAR_SIG_side_window_band_width] = v->sideWindowBandWidthM;
+    out[CAR_SIG_quarter_window_length] = v->quarterWindow.lengthM;
+    out[CAR_SIG_sunroof_length] = v->sunroof.lengthM;
+    out[CAR_SIG_door_count] = (float)v->doorCount * CAR_SIG_LEVEL_STEP;
+    out[CAR_SIG_cabin_rows] = (float)v->cabinRows * CAR_SIG_LEVEL_STEP;
+    out[CAR_SIG_roof_type] = (float)v->roofType * CAR_SIG_LEVEL_STEP;
+    out[CAR_SIG_roof_highlight_width] = v->roofHighlightWidthM;
+    out[CAR_SIG_roof_highlight_length] = v->roofLengthM * v->roofHighlightLengthScale;
 
     return CAR_SIG_COUNT;
 }

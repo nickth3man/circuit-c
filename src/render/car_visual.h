@@ -84,6 +84,13 @@
  * enough to express a wedge, a brick, a teardrop and a hipped muscle car while staying legible
  * at the ~13 px/m the game actually draws at. */
 #define CAR_HULL_STATIONS 9
+#define CAR_SIDE_WINDOWS_MAX 6
+#define CAR_ROOF_PANELS_MAX 2
+
+typedef struct {
+    float centreXM;
+    float lengthM;
+} CarVisualSegment;
 
 typedef struct {
     float xM;         /* body-space X, +X forward */
@@ -151,16 +158,27 @@ typedef struct {
     float cabinCentreXM;
     float cabinLengthM;
     float cabinHalfWidthM;
-    float windscreenXM; /* forward edge of the glass */
-    float backlightXM;  /* rear edge of the glass */
-    /* The roof panel and glass band are DRAWN dimensions, so they are decided here rather
-     * than in the rasterizer — car_visual.c is the only place a styling decision may live,
-     * and a rule kept in car_visual_raster.c would be invisible to the signature and so to
-     * every test that reads it. Both read heightOverallM via heightVisual. */
-    float roofLengthM; /* [rule] roof panel along X; reads cabinLengthM, heightVisual */
-    float
-        glassHalfWidthM; /* [rule] glass band half-width; reads cabinHalfWidthM, heightVisual */
-
+    float windscreenXM; /* forward foot of the glass */
+    float backlightXM;  /* rear foot of the glass */
+    float roofStartXM;  /* [identity] forward roof edge, converted from layout frame */
+    float roofEndXM;    /* [identity] aft roof edge, converted from layout frame */
+    float roofWidthM;   /* [identity] full physical roof width */
+    float roofLengthM;  /* [identity] roofStartXM - roofEndXM */
+    float glassHalfWidthM;
+    float windscreenLengthM;        /* [rule] plan projection from windscreen rake */
+    float backlightLengthM;         /* [rule] plan projection from backlight rake */
+    float roofHighlightWidthM;      /* [rule] in-hull body-height cue within roof panels */
+    float roofHighlightLengthScale; /* [rule] body-height cue, 0..1 of each panel */
+    CarVisualSegment roofPanels[CAR_ROOF_PANELS_MAX];
+    int roofPanelCount;
+    CarVisualSegment sideWindows[CAR_SIDE_WINDOWS_MAX];
+    int sideWindowCount;
+    float sideWindowBandWidthM;
+    CarVisualSegment quarterWindow;
+    CarVisualSegment sunroof;
+    int doorCount;
+    int cabinRows;
+    int roofType;
     /* ---- wheels ---- */
     CarWheelVisual wheels[WHEEL_COUNT];
     float archFlareM; /* [rule] shared derived flare, before the declared per-axle add */
@@ -196,8 +214,7 @@ typedef struct {
                                             the greenhouse. 0 = no bed. */
     float pickupBedWeight;   /* [rule] 0..1 expression strength; reads bedLengthM */
     float vanWindowWeight;   /* [rule] 0..1; reads heightOverallM, cowlXM, backlightXM */
-    int sideWindowCount; /* [rule] 2..6 glass segments; reads heightOverallM, cowlXM, backlightXM */
-    float openWheelWeight; /* [rule] 0..1; reads trackWidth[Front|Rear]M vs widthOverallM */
+    float openWheelWeight;   /* [rule] 0..1; reads trackWidth[Front|Rear]M vs widthOverallM */
     float
         raceDetailWeight; /* [rule] 0..1; composite of low mass/size, high grip, strong aero */
     bool hasTowHook;      /* [rule] race detail marker; reads raceDetailWeight */

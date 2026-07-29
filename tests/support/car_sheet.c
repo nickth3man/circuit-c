@@ -488,6 +488,9 @@ static const unsigned char kLabelColour[CAR_LABEL_COUNT][3] = {
     { 0x2c, 0x5f, 0x94 }, /* BODY_SHADE   */
     { 0x8f, 0x6a, 0xd8 }, /* CABIN        */
     { 0xc9, 0xa8, 0xff }, /* GLASS        */
+    { 0x72, 0xd5, 0xc4 }, /* QUARTER_WINDOW*/
+    { 0x58, 0xb0, 0xe8 }, /* SUNROOF      */
+
     { 0x3a, 0x3f, 0x48 }, /* TIRE         */
     { 0x5a, 0x60, 0x6b }, /* TIRE_SIDEWALL*/
     { 0xb9, 0xc0, 0xcc }, /* RIM          */
@@ -570,10 +573,11 @@ bool car_sheet_write_cards(const char *outDir, float pxPerM)
 
     fprintf(json, "{\n  \"pxPerM\": %.4f,\n  \"labelNames\": [", pxPerM);
     static const char *kLabelName[CAR_LABEL_COUNT] = {
-        "empty",   "body",    "body_shade", "cabin",    "glass",     "tire",   "tire_sidewall",
-        "rim",     "disc",    "arch",       "wing",     "splitter",  "canard", "mirror",
-        "exhaust", "bed",     "hood_bulge", "tow_hook", "hood_pins", "lamp",   "cage",
-        "stripe",  "heading", "outline",    "shadow"
+        "empty",      "body",     "body_shade",    "cabin",  "glass",   "quarter_window",
+        "sunroof",    "tire",     "tire_sidewall", "rim",    "disc",    "arch",
+        "wing",       "splitter", "canard",        "mirror", "exhaust", "bed",
+        "hood_bulge", "tow_hook", "hood_pins",     "lamp",   "cage",    "stripe",
+        "heading",    "outline",  "shadow"
     };
     for (int i = 0; i < CAR_LABEL_COUNT; i++) {
         fprintf(json, "%s\"%s\"", (i ? ", " : ""), kLabelName[i]);

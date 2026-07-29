@@ -104,6 +104,26 @@
 #define VEH_SHOULDER_X_M (-0.90f) /* layout frame (axle midpoint origin, +X forward) */
 #define VEH_FENDER_FLARE_FRONT_M 0.0f
 #define VEH_FENDER_FLARE_REAR_M 0.0f
+
+/* Phase C greenhouse primaries. Longitudinal stations use the layout frame; all other
+ * geometry is SI. The roof defaults reproduce the pre-Phase-C stock roof exactly:
+ * 0.890 m long x 0.924 m wide at 13.2 px/m. roof_width is the full physical width, so
+ * tumblehome inset is (widthOverallM - roofWidthM) / 2. */
+#define VEH_ROOF_START_X_M 0.8185f
+#define VEH_ROOF_END_X_M (-0.0715f)
+#define VEH_ROOF_WIDTH_M 0.9240f
+#define VEH_WINDSCREEN_RAKE_RAD 0.7853981634f     /* 45 deg from vertical */
+#define VEH_WINDSCREEN_RAKE_MIN_RAD 0.3490658504f /* 20 deg */
+#define VEH_WINDSCREEN_RAKE_MAX_RAD 1.2217304764f /* 70 deg */
+#define VEH_BACKLIGHT_RAKE_RAD 0.7853981634f      /* 45 deg from vertical */
+#define VEH_BACKLIGHT_RAKE_MIN_RAD 0.2617993878f  /* 15 deg */
+#define VEH_BACKLIGHT_RAKE_MAX_RAD 1.3089969390f  /* 75 deg */
+#define VEH_SIDE_WINDOW_COUNT 2.0f
+#define VEH_QUARTER_WINDOW_LENGTH_M 0.0f
+#define VEH_SUNROOF_LENGTH_M 0.0f
+#define VEH_DOOR_COUNT 4.0f
+#define VEH_CABIN_ROWS 2.0f
+#define VEH_ROOF_TYPE 0.0f /* 0=fixed, 1=targa, 2=convertible */
 /* Derived readout default: the staged refresh computes exactly this sum. */
 #define VEH_LENGTH_OVERALL_M (VEH_WHEELBASE_M + VEH_FRONT_OVERHANG_M + VEH_REAR_OVERHANG_M)
 /* Frontal area fill of width*height that recovers FRONTAL_AREA_M2 at stock. */

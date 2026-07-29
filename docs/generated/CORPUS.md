@@ -37,11 +37,11 @@ Every entry is a pure function of its index in `src/dev/car_corpus.c`. Appearanc
 | 29 | sweep | `sweep_body_width_overall_2` | body.width_overall = 2.075 m (step 3/5) |
 | 30 | sweep | `sweep_body_width_overall_3` | body.width_overall = 2.337 m (step 4/5) |
 | 31 | sweep | `sweep_body_width_overall_4` | body.width_overall = 2.600 m (step 5/5) |
-| 32 | sweep | `sweep_body_height_overall_0` | body.height_overall = 1.000 m (step 1/5) |
-| 33 | sweep | `sweep_body_height_overall_1` | body.height_overall = 1.962 m (step 2/5) |
-| 34 | sweep | `sweep_body_height_overall_2` | body.height_overall = 2.375 m (step 3/5) |
-| 35 | sweep | `sweep_body_height_overall_3` | body.height_overall = 2.787 m (step 4/5) |
-| 36 | sweep | `sweep_body_height_overall_4` | body.height_overall = 3.200 m (step 5/5) |
+| 32 | sweep | `sweep_body_track_rear_0` | body.track_rear = 1.000 m (step 1/5) |
+| 33 | sweep | `sweep_body_track_rear_1` | body.track_rear = 1.700 m (step 2/5) |
+| 34 | sweep | `sweep_body_track_rear_2` | body.track_rear = 2.000 m (step 3/5) |
+| 35 | sweep | `sweep_body_track_rear_3` | body.track_rear = 2.300 m (step 4/5) |
+| 36 | sweep | `sweep_body_track_rear_4` | body.track_rear = 2.600 m (step 5/5) |
 | 37 | sweep | `sweep_body_front_overhang_0` | body.front_overhang = 0.200 m (step 1/5) |
 | 38 | sweep | `sweep_body_front_overhang_1` | body.front_overhang = 1.206 m (step 2/5) |
 | 39 | sweep | `sweep_body_front_overhang_2` | body.front_overhang = 1.638 m (step 3/5) |

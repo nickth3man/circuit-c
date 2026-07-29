@@ -36,6 +36,8 @@ typedef enum {
     DIFF_LSD         /* torque-biasing clutch: biasRatio + preload            */
 } DifferentialMode;
 
+typedef enum { VEH_ROOF_FIXED = 0, VEH_ROOF_TARGA, VEH_ROOF_CONVERTIBLE } VehicleRoofType;
+
 typedef struct {
     Vector2 localPositionM;
     float steerAngleRad;
@@ -70,6 +72,19 @@ typedef struct {
     float shoulderXM;        /* layout-frame station of maximum body width */
     float fenderFlareFrontM; /* arch flare proud of the hull, front axle (m) */
     float fenderFlareRearM;  /* arch flare proud of the hull, rear axle (m) */
+
+    /* ---- greenhouse (primary; Phase C) ---- */
+    float roofStartXM;          /* forward roof edge, layout frame */
+    float roofEndXM;            /* aft roof edge, layout frame */
+    float roofWidthM;           /* full physical roof width */
+    float windscreenRakeRad;    /* angle from vertical; also modifies effective Cd */
+    float backlightRakeRad;     /* angle from vertical */
+    float sideWindowCount;      /* integer 2..6 */
+    float quarterWindowLengthM; /* 0 or 0.2..0.4 m */
+    float sunroofLengthM;       /* 0 or 0.4..1.0 m */
+    float doorCount;            /* exactly 2, 4, or 5 */
+    float cabinRows;            /* integer 1..3; packages rearward from massDriverXM */
+    float roofType;             /* VehicleRoofType stored as float for the registry */
 
     /* ---- mass particles (layout frame: axle midpoint origin, +X forward) ---- */
     float massEngineKg, massEngineXM, massEngineZM;
@@ -283,6 +298,8 @@ void vehicle_spec_set_default(VehicleSpec *spec);
  * suspension → brakes). Safe to call repeatedly; does nothing on NULL. */
 void vehicle_spec_refresh_derived(VehicleSpec *spec);
 bool vehicle_spec_is_valid(const VehicleSpec *spec);
+/* Base dragCoefficient adjusted by the bounded, default-neutral windscreen-rake factor. */
+float vehicle_effective_drag_coefficient(const VehicleSpec *spec);
 void vehicle_state_reset(const VehicleSpec *spec, VehicleState *state, VehicleDerived *derived,
                          VehicleRenderState *renderState);
 

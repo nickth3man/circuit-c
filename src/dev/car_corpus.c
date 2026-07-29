@@ -86,7 +86,7 @@ static const SweepAxis kSweepAxes[SWEEP_AXES] = {
     { "mass.engine_x", "engine station: CG, layout read, hood bulge" },
     { "body.wheelbase", "axle span and the body length that follows it" },
     { "body.width_overall", "silhouette width and fender flare" },
-    { "body.height_overall", "roof share of the plan area, glass, side windows" },
+    { "body.track_rear", "rear stance: hub stations, arches, and wheel containment" },
     { "body.front_overhang", "nose length ahead of the front axle" },
     { "body.track_front", "front stance: track against body width" },
     { "body.shoulder_x", "station of maximum width: where the body is widest" },
@@ -166,6 +166,81 @@ static const SweepAxis kSweepAxes[SWEEP_AXES] = {
  * parameter can express on a 2.4 m bus. Both keys are therefore designated visual drivers in
  * the `car-visual` sensitivity table instead, where they are perturbed across their whole
  * declared range from stock, and the archetypes exercise them as authored proportions.
+ */
+
+/* WHY body.height_overall LEFT THIS TABLE IN PHASE C, AND WHY body.track_rear TOOK THE SLOT.
+ *
+ * The aero.lift_rear story a fourth time, and again caused by a deliberate change rather than
+ * by a bug. Before Phase C the roof plane was INFERRED from overall height: a taller body
+ * grew a larger roof share of the plan area, so this axis moved the roof panel, the glass
+ * band and the side-window run together. Phase C made those stations explicit
+ * ([identity] body.roof_start_x / roof_end_x / roof_width, plus the two rakes), which is what
+ * lets a bus and a coupe declare their greenhouses rather than deriving them from a single
+ * scalar — and left body.height_overall moving only the `height_visual` signature component.
+ * Measured with `drifty_tests --measure-sweep body.height_overall` after that change:
+ *
+ *     pair 0-1  pixels 0.0521  L2 0.5806  Linf 0.4185 m
+ *     pair 1-2  pixels 0.0295  L2 0.2582  Linf 0.1793 m   (pixels below the 0.030 floor)
+ *     pair 2-3  pixels 0.0446  L2 0.2645  Linf 0.1793 m
+ *     pair 3-4  pixels 0.0718  L2 0.2720  Linf 0.1793 m
+ *
+ * and step 0 measured 0.0226 of pixels against archetype_00_stock_baseline — the pair the
+ * corpus scenario reported. One component moving cannot separate five cars from a fleet of a
+ * hundred, however large that one component's excursion is: the pixel metric is a FRACTION of
+ * a shared silhouette, and above the roof line a taller body adds no plan area at all.
+ *
+ * FOUR CANDIDATES WERE MEASURED FOR THE SLOT AND REJECTED BEFORE ONE PASSED.
+ *
+ * The three Phase C greenhouse keys are the obvious replacements, being the keys that took
+ * height_overall's jobs, and none of them can carry a row:
+ *
+ *   - body.roof_start_x cannot even be generated. Its declared range is -4..4 m so the axis
+ *     can express a roof on a bus, but step 0 puts the forward roof edge at -4 m, behind the
+ *     tail of the stock car, and vehicle_spec_is_valid() rejects it. A sweep row varies
+ *     exactly one key, so there is no way to grow the body to fit the station.
+ *   - body.windscreen_rake moves one component, windscreen_length, and misses every floor on
+ *     all four adjacent pairs: the widest is pair 3-4 at 0.0200 of pixels, L2 0.2676, and the
+ *     largest excursion anywhere in the row is 0.0330 against stock. A plan projection of a
+ *     raked screen is a band a few pixels deep; it cannot separate five cars.
+ *   - body.cabin_rows has three legal states, 1..3. Five steps over three values duplicate:
+ *     steps 0 and 1 measured 0.0000 of pixels apart, as did steps 3 and 4. An integer key
+ *     with fewer states than the sweep has steps fails by construction, not by margin.
+ *
+ *   - body.cowl_x is the fourth, and its failure is the most instructive. It looked certain —
+ *     it is the windscreen station, so cabin length, the rear glass station and the deck
+ *     behind it move together. But the greenhouse band is the UNION of the declared glass
+ *     stations and the occupant row window packaged rearward from mass.driver_x. Once the
+ *     cowl falls behind the driver, the row window is the wider of the two and the union
+ *     stops depending on the cowl at all. Step 2 lands at cowl_x = -0.5 m, behind the stock
+ *     driver station, and came out geometrically identical to stock where it matters:
+ *     L2 0.1527 against the 0.25 floor. Widening the range cannot help, because the masked
+ *     region is the whole half of the axis behind the driver and it grows with the range.
+ *
+ * body.track_rear takes the slot. It clears all three floors on every adjacent pair:
+ *
+ *     pair 0-1  pixels 0.2449  L2 0.8533  Linf 0.7000 m   (worst component track_rear)
+ *     pair 1-2  pixels 0.2734  L2 0.7990  Linf 0.6693 m   (open_wheel_weight)
+ *     pair 2-3  pixels 0.1609  L2 0.3504  Linf 0.3000 m   (track_rear)
+ *     pair 3-4  pixels 0.1525  L2 0.3511  Linf 0.3000 m   (track_rear)
+ *
+ * and its nearest neighbour anywhere in the fleet is 0.1544 of pixels with L2 0.3640. It is
+ * rear stance: the hub stations, the rear arches and the flare that follows them all move,
+ * and past a threshold the body stops containing the wheels and open_wheel_weight fires too.
+ * body.track_front already holds a slot, and the two are not the same axis — a fleet where
+ * every vehicle has parallel tracks is exactly the fleet that reads as one car. Note the two
+ * upper pairs sit at 1.4x the L2 floor rather than the 3x the lower pairs enjoy: the axis is
+ * accepted with that margin recorded, not assumed to be comfortable.
+ *
+ * mass.driver_x also clears every floor, by the widest margin of anything tried (worst
+ * adjacent pair 0.3236 of pixels, L2 0.8553), and is NOT used. It is a longitudinal mass
+ * station, and mass.engine_x already holds that slot; a second one buys margin by measuring
+ * the same thing twice.
+ *
+ * body.height_overall and body.cowl_x both stay designated visual drivers in the `car-visual`
+ * sensitivity table, perturbed across their whole declared ranges, and body.height_overall
+ * remains a Halton dimension in the sampled block, so the fleet still spans it. What neither
+ * can do is carry five mutually distinct cars, and asserting otherwise would mean lowering a
+ * corpus-wide threshold to accommodate one row.
  */
 
 /* ---- sweep value computation ----

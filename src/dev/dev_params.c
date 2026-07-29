@@ -78,6 +78,40 @@ static const DevParameter g_params[] = {
     { "body.fender_flare_rear", "Body", "m", SPEC_OFFSET(fenderFlareRearM),
       VEH_FENDER_FLARE_REAR_M, 0.0f, 0.15f, 0.002f, false, false, 1,
       "Rear arch flare proud of the hull over the wheel arch; 0 = none. 0..0.15 m = 0..2 px." },
+    /* Phase C greenhouse. Longitudinal stations remain in the layout frame. Rake angles are
+     * SI radians; comments state the degree envelope used by vehicle measurements. */
+    { "body.roof_start_x", "Body", "m", SPEC_OFFSET(roofStartXM), VEH_ROOF_START_X_M, -4.0f,
+      4.0f, 0.01f, false, false, 1,
+      "Forward roof edge, layout frame; -4..4 m moves over 106 px." },
+    { "body.roof_end_x", "Body", "m", SPEC_OFFSET(roofEndXM), VEH_ROOF_END_X_M, -4.0f, 4.0f,
+      0.01f, false, false, 1, "Aft roof edge, layout frame; -4..4 m moves over 106 px." },
+    { "body.roof_width", "Body", "m", SPEC_OFFSET(roofWidthM), VEH_ROOF_WIDTH_M, 0.3f, 2.3f,
+      0.01f, false, false, 1,
+      "Full physical roof width; 0.3..2.3 m = 4..30 px. Tumblehome inset is "
+      "(body width - roof width)/2." },
+    { "body.windscreen_rake", "Body", "rad", SPEC_OFFSET(windscreenRakeRad),
+      VEH_WINDSCREEN_RAKE_RAD, VEH_WINDSCREEN_RAKE_MIN_RAD, VEH_WINDSCREEN_RAKE_MAX_RAD, 0.01f,
+      false, false, 1,
+      "A-pillar angle from vertical, 20..70 deg; moves glass by ~7 px and feeds effective "
+      "Cd." },
+    { "body.backlight_rake", "Body", "rad", SPEC_OFFSET(backlightRakeRad),
+      VEH_BACKLIGHT_RAKE_RAD, VEH_BACKLIGHT_RAKE_MIN_RAD, VEH_BACKLIGHT_RAKE_MAX_RAD, 0.01f,
+      false, false, 1, "Rear-screen angle from vertical, 15..75 deg; moves glass by ~6 px." },
+    { "body.side_window_count", "Body", "", SPEC_OFFSET(sideWindowCount), VEH_SIDE_WINDOW_COUNT,
+      2.0f, 6.0f, 1.0f, false, false, 1,
+      "Side-glass segment count; exact integer 2..6, each segment about 8..10 px." },
+    { "body.quarter_window", "Body", "m", SPEC_OFFSET(quarterWindowLengthM),
+      VEH_QUARTER_WINDOW_LENGTH_M, 0.0f, 0.4f, 0.02f, false, false, 1,
+      "Quarter glass aft of the rear door; 0 = none, otherwise 0.2..0.4 m = 3..5 px." },
+    { "body.sunroof_length", "Body", "m", SPEC_OFFSET(sunroofLengthM), VEH_SUNROOF_LENGTH_M,
+      0.0f, 1.0f, 0.05f, false, false, 1,
+      "Roof glass length; 0 = none, otherwise 0.4..1.0 m = 5..13 px." },
+    { "body.door_count", "Body", "", SPEC_OFFSET(doorCount), VEH_DOOR_COUNT, 2.0f, 5.0f, 1.0f,
+      false, false, 1, "Door count; exact domain 2, 4, or 5; drives visible pillars." },
+    { "body.cabin_rows", "Body", "", SPEC_OFFSET(cabinRows), VEH_CABIN_ROWS, 1.0f, 3.0f, 1.0f,
+      false, false, 1, "Seat rows; exact integer 1..3, packaged rearward from mass.driver_x." },
+    { "body.roof_type", "Body", "", SPEC_OFFSET(roofType), VEH_ROOF_TYPE, 0.0f, 2.0f, 1.0f,
+      false, false, 1, "Roof enum: 0=fixed, 1=targa, 2=convertible." },
     { "body.drag_coefficient", "Body", "", SPEC_OFFSET(dragCoefficient), DRAG_COEFFICIENT, 0.1f,
       1.2f, 0.01f, false, false, 1, "Cd in 0.5*rho*Cd*A*v^2." },
     { "body.rolling_resistance", "Body", "", SPEC_OFFSET(rollingResistanceCoefficient),
@@ -403,6 +437,25 @@ void dev_params_refresh_derived(VehicleSpec *spec)
     vehicle_spec_refresh_derived(spec);
 }
 
+static float normalize_discrete_value(const DevParameter *param, float value)
+{
+    if (param == NULL) return value;
+    if (strcmp(param->name, "body.side_window_count") == 0 ||
+        strcmp(param->name, "body.cabin_rows") == 0 ||
+        strcmp(param->name, "body.roof_type") == 0) {
+        return roundf(value);
+    }
+    if (strcmp(param->name, "body.door_count") == 0) {
+        const float rounded = roundf(value);
+        return rounded == 3.0f ? 4.0f : rounded;
+    }
+    if (strcmp(param->name, "body.quarter_window") == 0 && value > 0.0f && value < 0.2f)
+        return 0.2f;
+    if (strcmp(param->name, "body.sunroof_length") == 0 && value > 0.0f && value < 0.4f)
+        return 0.4f;
+    return value;
+}
+
 bool dev_param_set(VehicleSpec *spec, const DevParameter *param, float value)
 {
     if (spec == NULL || param == NULL) return false;
@@ -410,7 +463,7 @@ bool dev_param_set(VehicleSpec *spec, const DevParameter *param, float value)
     if (!isfinite(value)) return false;
     if (value < param->minimum) value = param->minimum;
     if (value > param->maximum) value = param->maximum;
-    *spec_field(spec, param) = value;
+    *spec_field(spec, param) = normalize_discrete_value(param, value);
     dev_params_refresh_derived(spec);
     return true;
 }
@@ -578,7 +631,7 @@ static int apply_one_assignment(VehicleSpec *spec, const char *key, float value,
     }
     if (value < param->minimum) value = param->minimum;
     if (value > param->maximum) value = param->maximum;
-    *spec_field(spec, param) = value;
+    *spec_field(spec, param) = normalize_discrete_value(param, value);
     return 1;
 }
 

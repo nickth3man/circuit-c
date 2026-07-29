@@ -995,6 +995,26 @@ static void scenario_resistance(void)
     }
 
     {
+        VehicleSpec upright = spec;
+        VehicleSpec raked = spec;
+        upright.windscreenRakeRad = VEH_WINDSCREEN_RAKE_MIN_RAD;
+        raked.windscreenRakeRad = VEH_WINDSCREEN_RAKE_MAX_RAD;
+        const float uprightCd = vehicle_effective_drag_coefficient(&upright);
+        const float neutralCd = vehicle_effective_drag_coefficient(&spec);
+        const float rakedCd = vehicle_effective_drag_coefficient(&raked);
+        check(uprightCd > neutralCd && neutralCd > rakedCd,
+              "increased windscreen rake reduces effective Cd monotonically");
+        check_near((double)neutralCd, (double)spec.dragCoefficient, 1e-7,
+                   "default windscreen rake preserves the declared Cd exactly");
+
+        VehicleSpec partial = spec;
+        partial.windscreenRakeRad = 0.0f;
+        check_near((double)vehicle_effective_drag_coefficient(&partial),
+                   (double)partial.dragCoefficient, 1e-7,
+                   "out-of-domain rake on a partial spec preserves base Cd");
+    }
+
+    {
         /* Near zero it stays finite and small rather than dividing by a vanishing speed. */
         bool finite = true;
         float previousN = 0.0f;

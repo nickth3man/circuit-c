@@ -156,8 +156,11 @@ Vector2 physics_aero_drag_body_n(const VehicleSpec *spec, float velocityLongitud
     if (spec == NULL || !isfinite(velocityLongitudinalMps) || !isfinite(velocityLateralMps)) {
         return (Vector2){ 0.0f, 0.0f };
     }
-    if (!(isfinite(spec->dragCoefficient) && spec->dragCoefficient >= 0.0f &&
-          isfinite(spec->frontalAreaM2) && spec->frontalAreaM2 >= 0.0f)) {
+    if (!(isfinite(spec->frontalAreaM2) && spec->frontalAreaM2 >= 0.0f)) {
+        return (Vector2){ 0.0f, 0.0f };
+    }
+    const float effectiveCd = vehicle_effective_drag_coefficient(spec);
+    if (!(isfinite(effectiveCd) && effectiveCd >= 0.0f)) {
         return (Vector2){ 0.0f, 0.0f };
     }
 
@@ -165,8 +168,8 @@ Vector2 physics_aero_drag_body_n(const VehicleSpec *spec, float velocityLongitud
                                  velocityLateralMps * velocityLateralMps);
     if (!(speedMps > RESISTANCE_EPSILON_MPS)) return (Vector2){ 0.0f, 0.0f };
 
-    const float dragN = 0.5f * AIR_DENSITY_KGM3 * spec->dragCoefficient * spec->frontalAreaM2 *
-                        speedMps * speedMps;
+    const float dragN =
+        0.5f * AIR_DENSITY_KGM3 * effectiveCd * spec->frontalAreaM2 * speedMps * speedMps;
     if (!isfinite(dragN)) return (Vector2){ 0.0f, 0.0f };
     if (magnitudeN != NULL) *magnitudeN = dragN;
 

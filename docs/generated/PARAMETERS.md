@@ -25,6 +25,17 @@ generates the Physics Lab sliders and the tuning-profile format.
 | `body.shoulder_x` | -0.9 | m | -2 .. 2 | 0.01 | advanced | — | — | Station of maximum body width, layout frame (axle midpoint origin). Same convention as cowl_x/backlight_x; moves the widest point over ~53 px of body length at stock. |
 | `body.fender_flare_front` | 0 | m | 0 .. 0.12 | 0.002 | advanced | — | — | Front arch flare proud of the hull over the wheel arch; 0 = none. 0..0.12 m = 0..1.6 px. |
 | `body.fender_flare_rear` | 0 | m | 0 .. 0.15 | 0.002 | advanced | — | — | Rear arch flare proud of the hull over the wheel arch; 0 = none. 0..0.15 m = 0..2 px. |
+| `body.roof_start_x` | 0.8185 | m | -4 .. 4 | 0.01 | advanced | — | — | Forward roof edge, layout frame; -4..4 m moves over 106 px. |
+| `body.roof_end_x` | -0.0715 | m | -4 .. 4 | 0.01 | advanced | — | — | Aft roof edge, layout frame; -4..4 m moves over 106 px. |
+| `body.roof_width` | 0.924 | m | 0.3 .. 2.3 | 0.01 | advanced | — | — | Full physical roof width; 0.3..2.3 m = 4..30 px. Tumblehome inset is (body width - roof width)/2. |
+| `body.windscreen_rake` | 0.785398 | rad | 0.349066 .. 1.22173 | 0.01 | advanced | — | — | A-pillar angle from vertical, 20..70 deg; moves glass by ~7 px and feeds effective Cd. |
+| `body.backlight_rake` | 0.785398 | rad | 0.261799 .. 1.309 | 0.01 | advanced | — | — | Rear-screen angle from vertical, 15..75 deg; moves glass by ~6 px. |
+| `body.side_window_count` | 2 | — | 2 .. 6 | 1 | advanced | — | — | Side-glass segment count; exact integer 2..6, each segment about 8..10 px. |
+| `body.quarter_window` | 0 | m | 0 .. 0.4 | 0.02 | advanced | — | — | Quarter glass aft of the rear door; 0 = none, otherwise 0.2..0.4 m = 3..5 px. |
+| `body.sunroof_length` | 0 | m | 0 .. 1 | 0.05 | advanced | — | — | Roof glass length; 0 = none, otherwise 0.4..1.0 m = 5..13 px. |
+| `body.door_count` | 4 | — | 2 .. 5 | 1 | advanced | — | — | Door count; exact domain 2, 4, or 5; drives visible pillars. |
+| `body.cabin_rows` | 2 | — | 1 .. 3 | 1 | advanced | — | — | Seat rows; exact integer 1..3, packaged rearward from mass.driver_x. |
+| `body.roof_type` | 0 | — | 0 .. 2 | 1 | advanced | — | — | Roof enum: 0=fixed, 1=targa, 2=convertible. |
 | `body.drag_coefficient` | 0.32 | — | 0.1 .. 1.2 | 0.01 | advanced | — | — | Cd in 0.5*rho*Cd*A*v^2. |
 | `body.rolling_resistance` | 0.015 | — | 0 .. 0.06 | 0.001 | advanced | — | — | Rolling resistance coefficient. |
 | `body.load_filter_rate` | 20 | Hz | 1 .. 60 | 0.5 | expert | — | — | Load-transfer accel filter corner frequency. |

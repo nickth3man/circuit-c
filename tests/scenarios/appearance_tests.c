@@ -58,19 +58,31 @@
  * At file scope because two assertions use the list — the sensitivity sweep and the bake-key
  * coverage check — and a driver that only one of them knew about would be a gap. */
 static const char *const kVisualDrivers[] = {
-    "body.wheelbase",           /* axle span, and the body length that follows it   */
-    "body.front_overhang",      /* nose length                                      */
-    "body.rear_overhang",       /* tail length                                      */
-    "body.width_overall",       /* silhouette width and fender flare                */
-    "body.height_overall",      /* roof share of the plan area, glass band, windows */
-    "body.cowl_x",              /* windscreen station                               */
-    "body.backlight_x",         /* rear glass station, and the deck behind it       */
-    "body.bed_length",          /* open cargo bed; declared, not inferred           */
-    "body.nose_width",          /* foremost hull station: the drawn nose width       */
-    "body.tail_width",          /* rearmost hull station: the drawn tail width       */
-    "body.shoulder_x",          /* where the body reaches its maximum width          */
-    "body.fender_flare_front",  /* declared front arch flare, on top of the derived  */
-    "body.fender_flare_rear",   /* declared rear arch flare                          */
+    "body.wheelbase",          /* axle span, and the body length that follows it   */
+    "body.front_overhang",     /* nose length                                      */
+    "body.rear_overhang",      /* tail length                                      */
+    "body.width_overall",      /* silhouette width and fender flare                */
+    "body.height_overall",     /* roof share of the plan area, glass band, windows */
+    "body.cowl_x",             /* windscreen station                               */
+    "body.backlight_x",        /* rear glass station, and the deck behind it       */
+    "body.bed_length",         /* open cargo bed; declared, not inferred           */
+    "body.nose_width",         /* foremost hull station: the drawn nose width       */
+    "body.tail_width",         /* rearmost hull station: the drawn tail width       */
+    "body.shoulder_x",         /* where the body reaches its maximum width          */
+    "body.fender_flare_front", /* declared front arch flare, on top of the derived  */
+    "body.fender_flare_rear",  /* declared rear arch flare                          */
+    "body.roof_start_x",       /* explicit forward roof station                     */
+    "body.roof_end_x",         /* explicit aft roof station                         */
+    "body.roof_width",         /* full physical roof width                          */
+    "body.windscreen_rake",    /* top-down windscreen projection                    */
+    "body.backlight_rake",     /* top-down rear-screen projection                   */
+    "body.side_window_count",  /* declared pane segmentation                        */
+    "body.quarter_window",     /* declared rear quarter glass                       */
+    "body.sunroof_length",     /* declared roof glass                               */
+    "body.door_count",         /* pillar arrangement                                */
+    "body.cabin_rows",         /* rearward package from mass.driver_x               */
+    "body.roof_type",          /* fixed, targa, or convertible roof panels          */
+
     "body.track_front",         /* front stance                                     */
     "body.track_rear",          /* rear stance                                      */
     "body.ride_height_front",   /* front arch clearance                             */
@@ -122,6 +134,25 @@ static bool cv_visual_fields_sane(const CarVisual *v)
     CV_NN(v->cabinHalfWidthM);
     CV_FIN(v->windscreenXM);
     CV_FIN(v->backlightXM);
+    CV_FIN(v->roofStartXM);
+    CV_FIN(v->roofEndXM);
+    CV_NN(v->roofWidthM);
+    CV_NN(v->roofLengthM);
+    CV_NN(v->windscreenLengthM);
+    CV_NN(v->backlightLengthM);
+    CV_NN(v->sideWindowBandWidthM);
+    CV_NN(v->roofHighlightWidthM);
+    CV_01(v->roofHighlightLengthScale);
+    CV_NN(v->quarterWindow.lengthM);
+    CV_NN(v->sunroof.lengthM);
+    for (int i = 0; i < CAR_ROOF_PANELS_MAX; i++) {
+        CV_FIN(v->roofPanels[i].centreXM);
+        CV_NN(v->roofPanels[i].lengthM);
+    }
+    for (int i = 0; i < CAR_SIDE_WINDOWS_MAX; i++) {
+        CV_FIN(v->sideWindows[i].centreXM);
+        CV_NN(v->sideWindows[i].lengthM);
+    }
 
     for (int i = 0; i < WHEEL_COUNT; i++) {
         CV_FIN(v->wheels[i].centreM.x);
@@ -391,6 +422,45 @@ static void scenario_car_visual(void)
         car_visual_derive(&hi, &vhi);
         check(vhi.cabinHalfWidthM > vlo.cabinHalfWidthM,
               "a taller body roofs over more of its own plan area");
+
+        vehicle_spec_set_default(&lo);
+        hi = lo;
+        lo.windscreenRakeRad = VEH_WINDSCREEN_RAKE_MIN_RAD;
+        hi.windscreenRakeRad = VEH_WINDSCREEN_RAKE_MAX_RAD;
+        car_visual_derive(&lo, &vlo);
+        car_visual_derive(&hi, &vhi);
+        check(vhi.windscreenLengthM > vlo.windscreenLengthM,
+              "more windscreen rake exposes more glass from directly above");
+
+        vehicle_spec_set_default(&lo);
+        hi = lo;
+        lo.cabinRows = 1.0f;
+        hi.cabinRows = 3.0f;
+        car_visual_derive(&lo, &vlo);
+        car_visual_derive(&hi, &vhi);
+        check(vhi.backlightXM < vlo.backlightXM && vhi.cabinLengthM > vlo.cabinLengthM,
+              "additional cabin rows extend the package rearward from mass.driver_x");
+
+        vehicle_spec_set_default(&lo);
+        lo.roofWidthM = 1.13f;
+        car_visual_derive(&lo, &vlo);
+        check(fabsf(vlo.roofWidthM - lo.roofWidthM) < 1e-6f,
+              "drawn roof width equals the declared full physical width");
+
+        vehicle_spec_set_default(&lo);
+        lo.roofType = (float)VEH_ROOF_FIXED;
+        car_visual_derive(&lo, &vlo);
+        lo.roofType = (float)VEH_ROOF_TARGA;
+        car_visual_derive(&lo, &vhi);
+        check(vlo.roofPanelCount == 1 && vhi.roofPanelCount == 2,
+              "roof type derives fixed and targa panel arrangements");
+
+        vehicle_spec_set_default(&lo);
+        lo.windscreenRakeRad = NAN;
+        lo.backlightRakeRad = NAN;
+        car_visual_derive(&lo, &vlo);
+        check(isfinite(vlo.windscreenLengthM) && isfinite(vlo.backlightLengthM),
+              "invalid live-edited rake values fall back to finite default projections");
     }
 
     /* --- sensitivity ------------------------------------------------------------------

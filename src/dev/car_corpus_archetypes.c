@@ -100,6 +100,15 @@ static const DevParamAssignment kArch1[] = {
     A("body.nose_width", 0.87f),
     A("body.tail_width", 1.15f),
     A("body.shoulder_x", -0.66f),
+    A("body.roof_start_x", 0.7505f),
+    A("body.roof_end_x", -0.1654f),
+    A("body.roof_width", 0.7974f),
+    A("body.windscreen_rake", 0.9599f),
+    A("body.backlight_rake", 0.8727f),
+    A("body.side_window_count", 2.0f),
+    A("body.door_count", 2.0f),
+    A("body.cabin_rows", 1.0f),
+
 };
 
 /* --------------------------------------------------------------------- 2: Compact -----
@@ -132,6 +141,16 @@ static const DevParamAssignment kArch2[] = {
     A("body.nose_width", 0.99f),
     A("body.tail_width", 1.29f),
     A("body.shoulder_x", -0.72f),
+    A("body.roof_start_x", 0.8045f),
+    A("body.roof_end_x", -0.1114f),
+    A("body.roof_width", 0.9398f),
+    A("body.windscreen_rake", 0.8727f),
+    A("body.backlight_rake", 0.7854f),
+    A("body.side_window_count", 4.0f),
+    A("body.sunroof_length", 0.50f),
+    A("body.door_count", 5.0f),
+    A("body.cabin_rows", 2.0f),
+
 };
 
 /* --------------------------------------------------------------------- 3: Coupé ------
@@ -164,6 +183,17 @@ static const DevParamAssignment kArch3[] = {
     A("body.nose_width", 1.00f),
     A("body.tail_width", 1.32f),
     A("body.shoulder_x", -0.88f),
+    A("body.roof_start_x", 0.8864f),
+    A("body.roof_end_x", 0.1467f),
+    A("body.roof_width", 0.9070f),
+    A("body.windscreen_rake", 1.2217f),
+    A("body.backlight_rake", 1.1345f),
+    A("body.side_window_count", 2.0f),
+    A("body.quarter_window", 0.25f),
+    A("body.door_count", 2.0f),
+    A("body.cabin_rows", 1.0f),
+    A("body.roof_type", 1.0f),
+
 };
 
 /* --------------------------------------------------------------------- 4: Sedan -------
@@ -196,6 +226,17 @@ static const DevParamAssignment kArch4[] = {
     A("body.nose_width", 1.06f),
     A("body.tail_width", 1.38f),
     A("body.shoulder_x", -0.91f),
+    A("body.roof_start_x", 1.0230f),
+    A("body.roof_end_x", -0.0090f),
+    A("body.roof_width", 1.0224f),
+    A("body.windscreen_rake", 0.7854f),
+    A("body.backlight_rake", 0.6981f),
+    A("body.side_window_count", 4.0f),
+    A("body.quarter_window", 0.30f),
+    A("body.sunroof_length", 0.65f),
+    A("body.door_count", 4.0f),
+    A("body.cabin_rows", 2.0f),
+
 };
 
 /* ------------------------------------------------------------------ 5: Sports Car ---
@@ -231,6 +272,16 @@ static const DevParamAssignment kArch5[] = {
     A("body.nose_width", 1.06f),
     A("body.tail_width", 1.27f),
     A("body.shoulder_x", -0.87f),
+    A("body.roof_start_x", 0.6710f),
+    A("body.roof_end_x", 0.0669f),
+    A("body.roof_width", 0.8800f),
+    A("body.windscreen_rake", 1.2217f),
+    A("body.backlight_rake", 1.1345f),
+    A("body.side_window_count", 2.0f),
+    A("body.door_count", 2.0f),
+    A("body.cabin_rows", 1.0f),
+    A("body.roof_type", 1.0f),
+
 };
 
 /* ------------------------------------------------------------------- 6: Supercar -----
@@ -273,6 +324,16 @@ static const DevParamAssignment kArch6[] = {
     A("body.shoulder_x", -0.99f),
     A("body.fender_flare_front", 0.060f),
     A("body.fender_flare_rear", 0.090f),
+    A("body.roof_start_x", 0.6044f),
+    A("body.roof_end_x", -0.0175f),
+    A("body.roof_width", 0.9376f),
+    A("body.windscreen_rake", 1.2217f),
+    A("body.backlight_rake", 1.2217f),
+    A("body.side_window_count", 2.0f),
+    A("body.door_count", 2.0f),
+    A("body.cabin_rows", 1.0f),
+    A("body.roof_type", 2.0f),
+
 };
 
 /* ---------------------------------------------------------------- 7: Muscle Car ----
@@ -309,6 +370,15 @@ static const DevParamAssignment kArch7[] = {
     A("body.shoulder_x", -0.97f),
     A("body.fender_flare_front", 0.040f),
     A("body.fender_flare_rear", 0.070f),
+    A("body.roof_start_x", 0.9430f),
+    A("body.roof_end_x", 0.2211f),
+    A("body.roof_width", 1.0446f),
+    A("body.windscreen_rake", 1.0472f),
+    A("body.backlight_rake", 0.9599f),
+    A("body.side_window_count", 2.0f),
+    A("body.door_count", 2.0f),
+    A("body.cabin_rows", 1.0f),
+
 };
 
 /* ---------------------------------------------------------------- 8: GT3 Race Car ---
@@ -351,6 +421,15 @@ static const DevParamAssignment kArch8[] = {
     A("body.shoulder_x", -1.01f),
     A("body.fender_flare_front", 0.080f),
     A("body.fender_flare_rear", 0.110f),
+    A("body.roof_start_x", 0.6160f),
+    A("body.roof_end_x", -0.0700f),
+    A("body.roof_width", 0.9826f),
+    A("body.windscreen_rake", 1.1345f),
+    A("body.backlight_rake", 1.0472f),
+    A("body.side_window_count", 2.0f),
+    A("body.door_count", 2.0f),
+    A("body.cabin_rows", 1.0f),
+
 };
 
 /* ----------------------------------------------------------------- 9: Rally Car -----
@@ -392,6 +471,15 @@ static const DevParamAssignment kArch9[] = {
     A("body.shoulder_x", -0.75f),
     A("body.fender_flare_front", 0.050f),
     A("body.fender_flare_rear", 0.060f),
+    A("body.roof_start_x", 0.8315f),
+    A("body.roof_end_x", 0.0294f),
+    A("body.roof_width", 1.0196f),
+    A("body.windscreen_rake", 0.8727f),
+    A("body.backlight_rake", 0.7854f),
+    A("body.side_window_count", 4.0f),
+    A("body.door_count", 4.0f),
+    A("body.cabin_rows", 2.0f),
+
 };
 
 /* -------------------------------------------------------------- 10: Open-Wheel / F1 --
@@ -434,6 +522,16 @@ static const DevParamAssignment kArch10[] = {
     A("body.nose_width", 0.80f),
     A("body.tail_width", 0.95f),
     A("body.shoulder_x", -0.96f),
+    A("body.roof_start_x", 0.3742f),
+    A("body.roof_end_x", -0.1182f),
+    A("body.roof_width", 0.5966f),
+    A("body.windscreen_rake", 1.2217f),
+    A("body.backlight_rake", 1.2217f),
+    A("body.side_window_count", 2.0f),
+    A("body.door_count", 2.0f),
+    A("body.cabin_rows", 1.0f),
+    A("body.roof_type", 2.0f),
+
 };
 
 /* -------------------------------------------------------------- 11: Drift Car ------
@@ -477,6 +575,15 @@ static const DevParamAssignment kArch11[] = {
     A("body.shoulder_x", -0.87f),
     A("body.fender_flare_front", 0.050f),
     A("body.fender_flare_rear", 0.100f),
+    A("body.roof_start_x", 0.8094f),
+    A("body.roof_end_x", 0.1416f),
+    A("body.roof_width", 0.9416f),
+    A("body.windscreen_rake", 1.1345f),
+    A("body.backlight_rake", 1.0472f),
+    A("body.side_window_count", 2.0f),
+    A("body.door_count", 2.0f),
+    A("body.cabin_rows", 1.0f),
+
 };
 
 /* ------------------------------------------------------------------- 12: Pickup ------
@@ -516,6 +623,15 @@ static const DevParamAssignment kArch12[] = {
     A("body.shoulder_x", -0.79f),
     A("body.fender_flare_front", 0.030f),
     A("body.fender_flare_rear", 0.050f),
+    A("body.roof_start_x", 1.3370f),
+    A("body.roof_end_x", 0.2579f),
+    A("body.roof_width", 1.2632f),
+    A("body.windscreen_rake", 0.6981f),
+    A("body.backlight_rake", 0.6109f),
+    A("body.side_window_count", 2.0f),
+    A("body.door_count", 2.0f),
+    A("body.cabin_rows", 1.0f),
+
 };
 
 /* ---------------------------------------------------------------------- 13: Van ------
@@ -550,6 +666,16 @@ static const DevParamAssignment kArch13[] = {
     A("body.nose_width", 1.21f),
     A("body.tail_width", 1.68f),
     A("body.shoulder_x", -0.68f),
+    A("body.roof_start_x", 1.5097f),
+    A("body.roof_end_x", -0.2637f),
+    A("body.roof_width", 1.4414f),
+    A("body.windscreen_rake", 0.5236f),
+    A("body.backlight_rake", 0.4363f),
+    A("body.side_window_count", 5.0f),
+    A("body.quarter_window", 0.30f),
+    A("body.door_count", 5.0f),
+    A("body.cabin_rows", 3.0f),
+
 };
 
 /* ---------------------------------------------------------------------- 14: Bus ------
@@ -587,6 +713,16 @@ static const DevParamAssignment kArch14[] = {
     A("body.nose_width", 1.39f),
     A("body.tail_width", 2.02f),
     A("body.shoulder_x", -1.44f),
+    A("body.roof_start_x", 3.0946f),
+    A("body.roof_end_x", -1.1845f),
+    A("body.roof_width", 2.1496f),
+    A("body.windscreen_rake", 0.3491f),
+    A("body.backlight_rake", 0.3491f),
+    A("body.side_window_count", 6.0f),
+    A("body.sunroof_length", 1.00f),
+    A("body.door_count", 5.0f),
+    A("body.cabin_rows", 3.0f),
+
 };
 
 /* ---------------------------------------------------------------- 15: Limousine -----
@@ -619,6 +755,17 @@ static const DevParamAssignment kArch15[] = {
     A("body.nose_width", 1.10f),
     A("body.tail_width", 1.48f),
     A("body.shoulder_x", -1.06f),
+    A("body.roof_start_x", 1.1893f),
+    A("body.roof_end_x", -0.3094f),
+    A("body.roof_width", 1.0822f),
+    A("body.windscreen_rake", 0.7854f),
+    A("body.backlight_rake", 0.6981f),
+    A("body.side_window_count", 6.0f),
+    A("body.quarter_window", 0.35f),
+    A("body.sunroof_length", 1.00f),
+    A("body.door_count", 5.0f),
+    A("body.cabin_rows", 3.0f),
+
 };
 
 /* ---------------------------------------------------------------- 16: Box Truck -----
@@ -652,6 +799,14 @@ static const DevParamAssignment kArch16[] = {
     A("body.nose_width", 1.28f),
     A("body.tail_width", 1.87f),
     A("body.shoulder_x", -1.08f),
+    A("body.roof_start_x", 2.4341f),
+    A("body.roof_end_x", -0.9840f),
+    A("body.roof_width", 1.9130f),
+    A("body.windscreen_rake", 0.4363f),
+    A("body.backlight_rake", 0.3491f),
+    A("body.side_window_count", 3.0f),
+    A("body.door_count", 2.0f),
+    A("body.cabin_rows", 1.0f),
 };
 
 /* ---- archetype table ---- */
