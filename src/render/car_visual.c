@@ -49,9 +49,20 @@
 
 /* Exhaust tips are real and they are tiny: a 40–120 mm bore is 0.5–1.6 px at ~13.2 px/m, so
  * ungained they rasterize to nothing at all and the cylinder count they exist to express is
- * invisible. Gained 2.6x they are 1.4–4.1 px and the difference between one pipe and four
- * reads. Render-only, like the toe and camber gains; no solver sees it. */
-#define CV_EXHAUST_VISUAL_GAIN 2.6f
+ * invisible. Gained 4.0x they are 2.1–6.3 px across, enough for the fleet mean to carry the
+ * one-versus-four-pipe shape. Render-only, like the toe and camber gains; no solver sees it. */
+#define CV_EXHAUST_VISUAL_GAIN 4.0f
+
+/* Race markers have no solver-scale diameter: they are safety/fastener symbols whose raw
+ * 40–50 mm marks quantize to one noisy pixel. These presentation diameters are 1.6–2.2 px
+ * across at game scale, producing a readable multi-pixel disc while remaining subordinate. */
+#define CV_TOW_HOOK_DIAMETER_M 0.20f
+#define CV_HOOD_PIN_DIAMETER_M 0.13f
+
+/* The declared glass stations control span and relative motion. A nine-percent-of-length
+ * forward package bias keeps the whole band visibly ahead of body centre while preserving
+ * every station delta; it is a top-down presentation rule, not a physics dimension. */
+#define CV_CABIN_FORWARD_BIAS 0.09f
 
 /* Shortest glasshouse the grammar will draw. A windscreen and a rear glass need somewhere to
  * sit even when the two declared stations coincide, and a zero-length cabin would make the
@@ -255,8 +266,10 @@ CarLatents car_visual_latents(const VehicleSpec *spec)
  * parallel. The two exponents differ because the two ends are not the same shape — a boot lid
  * closes abruptly (Kamm tail, small exponent) and a bonnet tapers over a longer run (larger
  * exponent) — and that difference is what makes the silhouette tell nose from tail at all. */
-#define CV_HULL_TAIL_SHAPE 0.40f /* tail section: closes hard in its first stations */
-#define CV_HULL_NOSE_SHAPE 0.60f /* nose section: tapers over a longer run than the tail */
+#define CV_HULL_TAIL_SHAPE 0.30f /* tail section: closes hard in its first stations */
+#define CV_HULL_NOSE_SHAPE 0.70f /* nose section: tapers gradually, preserving facing */
+#define CV_HULL_FACING_LINEAR -0.40f
+#define CV_HULL_FACING_CURVE -2.80f
 
 static float hull_profile(float t, float tShoulder, float tailFrac, float noseFrac,
                           float waistDepth)
@@ -274,10 +287,15 @@ static float hull_profile(float t, float tShoulder, float tailFrac, float noseFr
         /* Measured from the nose inward, so the same "steep at the endpoint" shape applies. */
         frac = noseFrac + (1.0f - noseFrac) * powf(1.0f - u, CV_HULL_NOSE_SHAPE);
     }
-    /* Waist dip: zero at both ends of the section, so it never moves an endpoint or the
-     * shoulder. */
+    /* Waist dip and facing correction are zero at both endpoints and at the shoulder,
+     * preserving all three identity anchors. The longitudinally varying cubic prevents a
+     * moving shoulder or overhang from making opposing station pairs accidentally mirror each
+     * other. Its maximum effect remains below one world pixel. */
     const float dip = 4.0f * u * (1.0f - u);
-    return clampf(frac * (1.0f - waistDepth * dip), 0.02f, 1.50f);
+    const float anchored = t * (1.0f - t) * (t - ts);
+    const float facingBias =
+        anchored * (CV_HULL_FACING_LINEAR + CV_HULL_FACING_CURVE * (t - 0.5f));
+    return clampf(frac * (1.0f - waistDepth * dip) + facingBias, 0.02f, 1.0f);
 }
 
 /* ---------------------------------------------------------------------------- derive -- */
@@ -341,10 +359,14 @@ void car_visual_derive(const VehicleSpec *spec, CarVisual *out)
         float lo = fminf(cowlX, backX);
         float hi = fmaxf(cowlX, backX);
 
-        /* [rule] The driver has to be inside the glasshouse. Where mass.driver_x sits outside
-         * the band the two glass stations describe, the band stretches to reach them — the
-         * same constraint a real package drawing works under, and the reason moving the
-         * driver station forward lengthens the cabin instead of doing nothing. */
+        /* [rule] Offset the station-controlled band forward by a body-length-scaled package
+         * bias. Both cowl_x and backlight_x still move their respective edge one-for-one. */
+        const float packageShiftM = CV_CABIN_FORWARD_BIAS * out->lengthM;
+        lo += packageShiftM;
+        hi += packageShiftM;
+
+        /* [rule] The driver has to remain inside the shifted glasshouse. Where
+         * mass.driver_x sits outside it, stretch the nearer end to contain the driver. */
         {
             const float driverX = layout_to_body_x(spec, spec->massDriverXM);
             if (driverX < lo) lo = driverX;
@@ -665,6 +687,20 @@ void car_visual_derive(const VehicleSpec *spec, CarVisual *out)
     out->hasTowHook = (out->raceDetailWeight > 0.50f);
     out->hasHoodPins = (out->raceDetailWeight > 0.42f);
     out->mirrorOffsetM = out->hasMirrors ? (halfW + 0.10f) : 0.0f;
+    out->towHookDiameterM =
+        out->hasTowHook ? CV_TOW_HOOK_DIAMETER_M * lerpf(0.90f, 1.0f, out->raceDetailWeight)
+                        : 0.0f;
+    out->hoodPinDiameterM =
+        out->hasHoodPins ? CV_HOOD_PIN_DIAMETER_M * lerpf(0.90f, 1.0f, out->raceDetailWeight)
+                         : 0.0f;
+
+    /* [rule] The always-present heading marker scales with body length and width, with a
+     * presentation floor that keeps its triangle above four pixels at 13.2 px/m. */
+    out->headingLengthM = clampf(0.055f * out->lengthM, 0.22f, 0.30f);
+    out->headingHalfWidthM = clampf(0.075f * out->widthM, 0.12f, 0.18f);
+    /* [rule] Keep the L7 tow hook behind the L9 heading base so the required layer order does
+     * not occlude it. The station reads headingLengthM and the physical nose station. */
+    out->towHookXM = out->hasTowHook ? noseX - (0.25f * out->headingLengthM + 0.12f) : 0.0f;
 
     /* [rule] Exhaust: count from engineCylinders (documented visual interpretation, monotonic
      * non-decreasing, bounded 1..4). Bore from engineDisplacementL. Transition band via
@@ -844,6 +880,11 @@ uint32_t car_visual_bake_key(const CarVisual *v)
     key_f32(&h, v->exhaustBoreM);
     key_i32(&h, v->exhaustCount);
     key_f32(&h, v->exhaustTransition);
+    key_f32(&h, v->towHookDiameterM);
+    key_f32(&h, v->towHookXM);
+    key_f32(&h, v->hoodPinDiameterM);
+    key_f32(&h, v->headingLengthM);
+    key_f32(&h, v->headingHalfWidthM);
     key_i32(&h, v->hasCage ? 1 : 0);
     key_i32(&h, v->hasMirrors ? 1 : 0);
 
@@ -905,7 +946,12 @@ uint32_t car_visual_bake_key(const CarVisual *v)
                                                     X(arch_gap_rear) X(static_toe_front)       \
                                                         X(static_toe_rear) X(shoulder_x)       \
                                                             X(arch_flare_front)                \
-                                                                X(arch_flare_rear)
+                                                                X(arch_flare_rear)            \
+                                                                    X(tow_hook_x)             \
+                                                                        X(tow_hook_diameter)  \
+                                                                            X(hood_pin_diameter) \
+                                                                                X(heading_length) \
+                                                                                    X(heading_half_width)
 // clang-format on
 
 #define X_ENUM(name) CAR_SIG_##name,
@@ -1015,6 +1061,11 @@ int car_visual_signature(const CarVisual *v, float *out, int cap)
     out[CAR_SIG_shoulder_x] = v->shoulderXM;
     out[CAR_SIG_arch_flare_front] = fl->archFlareM;
     out[CAR_SIG_arch_flare_rear] = rl->archFlareM;
+    out[CAR_SIG_tow_hook_x] = v->towHookXM;
+    out[CAR_SIG_tow_hook_diameter] = v->towHookDiameterM;
+    out[CAR_SIG_hood_pin_diameter] = v->hoodPinDiameterM;
+    out[CAR_SIG_heading_length] = v->headingLengthM;
+    out[CAR_SIG_heading_half_width] = v->headingHalfWidthM;
 
     return CAR_SIG_COUNT;
 }

@@ -599,7 +599,8 @@ static void render(const CarVisual *v, const RasterTarget *t, CarRasterPart part
         }
     }
 
-    /* L7e: exhaust tips at the tail, spaced across the centreline. */
+    /* L7e: exhaust tips at the tail, spaced across the centreline. The grammar owns the
+     * presentation-gained bore; the rasterizer only consumes it. */
     if (v->exhaustCount > 0 && v->exhaustBoreM > 0.0f) {
         const float spacing = v->exhaustBoreM * 1.8f;
         const float first = -0.5f * spacing * (float)(v->exhaustCount - 1);
@@ -642,17 +643,16 @@ static void render(const CarVisual *v, const RasterTarget *t, CarRasterPart part
                            bulgeColor, CAR_LABEL_HOOD_BULGE);
     }
 
-    /* L7h: race-detail markers. */
-    /* Tow hook — small disc at the front centreline. */
-    if (v->hasTowHook) {
-        fill_disc(t, noseX - 0.05f, 0.0f, 0.05f, v->accent, CAR_LABEL_TOW_HOOK);
+    /* L7h: race-detail markers. Their presentation dimensions are derived by the grammar. */
+    if (v->towHookDiameterM > 0.0f) {
+        fill_disc(t, v->towHookXM, 0.0f, v->towHookDiameterM, v->accent, CAR_LABEL_TOW_HOOK);
     }
-    /* Hood pins — two small discs on the hood. */
-    if (v->hasHoodPins) {
+    if (v->hoodPinDiameterM > 0.0f) {
         const float pinX = noseX - 0.25f;
         const float pinY = v->widthM * 0.16f;
         for (int s = -1; s <= 1; s += 2) {
-            fill_disc(t, pinX, (float)s * pinY, 0.04f, v->accent, CAR_LABEL_HOOD_PINS);
+            fill_disc(t, pinX, (float)s * pinY, v->hoodPinDiameterM, v->accent,
+                      CAR_LABEL_HOOD_PINS);
         }
     }
 
@@ -681,11 +681,11 @@ static void render(const CarVisual *v, const RasterTarget *t, CarRasterPart part
      * in src/render/render.c — now part of the shared raster so headless and in-game output are
      * pixel-identical. */
     {
-        const float tipLen = 0.12f;
-        const float baseWid = 0.10f;
+        const float tipLen = 0.75f * v->headingLengthM;
+        const float baseSetback = 0.25f * v->headingLengthM;
         const Vector2 tip = to_px(t, noseX + tipLen, 0.0f);
-        const Vector2 lb = to_px(t, noseX - 0.04f, +baseWid);
-        const Vector2 rb = to_px(t, noseX - 0.04f, -baseWid);
+        const Vector2 lb = to_px(t, noseX - baseSetback, +v->headingHalfWidthM);
+        const Vector2 rb = to_px(t, noseX - baseSetback, -v->headingHalfWidthM);
         const Vector2 pts[3] = { tip, lb, rb };
         fill_polygon_px(t, pts, 3, v->heading, CAR_LABEL_HEADING);
     }

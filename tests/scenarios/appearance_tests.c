@@ -143,6 +143,11 @@ static bool cv_visual_fields_sane(const CarVisual *v)
     CV_NN(v->mirrorOffsetM);
     CV_NN(v->exhaustBoreM);
     if (v->exhaustCount < 0) return false;
+    CV_NN(v->towHookDiameterM);
+    CV_FIN(v->towHookXM);
+    CV_NN(v->hoodPinDiameterM);
+    CV_NN(v->headingLengthM);
+    CV_NN(v->headingHalfWidthM);
 
     CV_01(v->latents.mass01);
     CV_01(v->latents.size01);

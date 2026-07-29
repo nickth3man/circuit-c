@@ -147,12 +147,12 @@ Two consequences discipline the whole feature list:
 | Arch flare | track vs `bodyHalfWidthM`, mean tire width, arch gap, `openWheelWeight` | rule |
 | Brake disc | `brakeDiscRadius[Front\|Rear]M`, scaled by `maxBrakeTorqueNm` | rule |
 | Spoke count | `wheelInertiaKgM2` | rule |
-| Greenhouse band | `cowlXM`, `backlightXM`, `massDriverXM` (all layout frame) | rule |
+| Greenhouse band | `cowlXM`, `backlightXM`, `massDriverXM` (layout frame), plus the 9%-of-body-length forward package bias | rule |
 | Cabin width | `heightOverallM` via `heightVisual` × `bodyHalfWidthM` | rule |
 | Roof panel length | `cabinLengthM`, `heightVisual` | rule |
 | Glass band width | `cabinHalfWidthM`, `heightVisual` | rule |
-| Nose taper | `sport01`, `aero01`, front downforce demand, `dragCoefficient`, `heightVisual` | rule |
-| Tail taper | `sport01`, `mass01`, rear aero (signed), `dragCoefficient`, `heightVisual` | rule |
+| Nose taper | `noseWidthM`, `shoulderXM`, `widthOverallM`; gradual nose exponent plus anchored sub-pixel facing correction | identity/rule |
+| Tail taper | `tailWidthM`, `shoulderXM`, `widthOverallM`; abrupt Kamm-tail exponent plus anchored sub-pixel facing correction | identity/rule |
 | Waist pinch | `sport01` | rule |
 | Wing span / chord | `aeroLiftCoefRear` (signed), `aeroRefAreaRearM2` | rule |
 | Splitter | front downforce demand: `aeroLiftCoefFront`, `aeroRefAreaFrontM2` | rule |
@@ -164,7 +164,8 @@ Two consequences discipline the whole feature list:
 | Pickup bed weight | `bedLengthM` (expression strength for the drawn width) | rule |
 | Van/bus windows, segment count | `heightVisual` × greenhouse span | rule |
 | Open-wheel weight | `trackWidth[Front\|Rear]M` vs `widthOverallM` | rule |
-| Race details (cage, mirrors, tow hook, hood pins) | mass-per-length, `grip01`, downforce, `strip01` | rule |
+| Race details (cage, mirrors, tow hook, hood pins) | mass-per-length, `grip01`, downforce, `strip01`; marker diameters are presentation-gained and tow-hook X clears the heading base | rule |
+| Heading marker geometry | overall body length and width, with a four-pixel presentation floor | rule |
 | Stripes | `strip01` | rule |
 | Wheel static angle | `suspToe[Front\|Rear]Rad`, presentation-gained | rule |
 | Camber stance | `suspCamber[Front\|Rear]Rad`, presentation-gained | rule |
@@ -226,12 +227,25 @@ documented, render-only** amplification. No solver reads any of them.
 | `CV_TOE_VISUAL_GAIN` | 8.0 | static toe ~0.15° ⇒ ~0.01 px of tire-edge arc | ungained, static toe is invisible; the gained pair creates ~1 px of toe-in/out divergence that reads as a steering-geometry cue |
 | `CV_CAMBER_VISUAL_GAIN` | 4.0 | camber ~1.5° ⇒ cos reduction of 0.99966, ~0.001 px | ungained, camber has no drawn consequence at all; gained, it narrows the drawn footprint enough to read as stance |
 | `CV_REST_ANGLE_GAIN` | 6.0 | legacy Ackermann-derived rest angle | kept for consistency until every preset has migrated to the per-axle `suspToe` primaries |
-| `CV_EXHAUST_VISUAL_GAIN` | 2.6 | tip bore 40–120 mm ⇒ 0.5–1.6 px | ungained, exhaust tips rasterize to *nothing*, and the cylinder count they exist to express is invisible; gained, one pipe against four reads |
-| `steerVisualGain` (render.c) | 1.25 | — | pre-existing; makes steer unmistakable at top-down scale. The physics angle is untouched |
+| `CV_EXHAUST_VISUAL_GAIN` | 4.0 | tip bore 40–120 mm ⇒ 0.5–1.6 px | ungained, exhaust tips rasterize to *nothing*; gained, the 4.9 px fleet mean carries one pipe against four |
+| `CV_TOW_HOOK_DIAMETER_M` | 0.20 m | a 50 mm safety marker quantized to one pixel | a 2.6 px diameter plus a station clear of L9 produces a 5.0 px mean cluster |
+| `CV_HOOD_PIN_DIAMETER_M` | 0.13 m | a 40 mm fastener quantized to one or two pixels per pair | the gained pair averages 4.1 px and remains subordinate to the hood |
+| `headingLengthM`, `headingHalfWidthM` | 0.22–0.30 m, 0.12–0.18 m | the old fixed triangle averaged 3.0 px | body-scaled dimensions with floors average 6.4 px, preserving the gameplay cue |
+| `steerVisualGain` (`render_vehicle.c`) | 1.25 | — | pre-existing; makes steer unmistakable at top-down scale. The physics angle is untouched |
 
 `CV_MIN_CABIN_M` (0.35 m) is not a gain but a floor: a windscreen and a rear glass need
 somewhere to sit even when the two declared stations coincide, and a zero-length cabin would
 make the roof, glass and side-window layers degenerate.
+
+`CV_CABIN_FORWARD_BIAS` shifts the station-controlled greenhouse forward by 9% of overall
+body length before driver containment and hull clamping. It preserves every `cowl_x` and
+`backlight_x` delta while preventing a symmetric bathtub read; it is a package-presentation
+rule, not a solver dimension.
+
+The two `CV_HULL_FACING_*` coefficients add a longitudinally varying cubic below one world
+pixel. The correction is exactly zero at the nose, tail and declared shoulder, so the three
+identity anchors remain exact while intermediate station pairs cannot become mirror-symmetric
+as shoulder position or overhang changes.
 
 ---
 
@@ -308,6 +322,9 @@ shadow can never inflate the distinctness ratio.
 
 **The heading marker stays.** The gold nose wedge is a gameplay affordance for top-down
 heading legibility, not decoration. The nose *shape* is derived; the marker sits on top.
+
+The L7 tow hook is derived behind the L9 triangle's base. This preserves the fixed layer order
+without letting the always-on heading affordance overwrite the hook's entire pixel cluster.
 
 ### Composable parts
 

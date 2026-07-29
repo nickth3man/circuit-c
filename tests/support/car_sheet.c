@@ -684,16 +684,20 @@ bool car_sheet_write_cards(const char *outDir, float pxPerM)
                     "\"backlightX\":%.4f,\"roofLength\":%.4f,\"glassHalfWidth\":%.4f,"
                     "\"archFlare\":%.4f,\"wingSpan\":%.4f,\"wingChord\":%.4f,\"wingX\":%.4f,"
                     "\"splitterProtrusion\":%.4f,\"canardStrength\":%.4f,\"exhaustBore\":%.4f,"
-                    "\"exhaustCount\":%d,\"hoodBulge\":%.4f,\"pickupBed\":%.4f,"
-                    "\"vanWindow\":%.4f,\"sideWindows\":%d,\"openWheel\":%.4f,"
-                    "\"raceDetail\":%.4f,\"stripe\":%.4f,\"heightVisual\":%.4f},\n",
+                    "\"exhaustCount\":%d,\"towHookX\":%.4f,\"towHookDiameter\":%.4f,"
+                    "\"hoodPinDiameter\":%.4f,\"headingLength\":%.4f,\"headingHalfWidth\":%.4f,"
+                    "\"hoodBulge\":%.4f,\"pickupBed\":%.4f,\"vanWindow\":%.4f,"
+                    "\"sideWindows\":%d,\"openWheel\":%.4f,\"raceDetail\":%.4f,"
+                    "\"stripe\":%.4f,\"heightVisual\":%.4f},\n",
                     v.lengthM, v.widthM, v.wheelbaseM, v.frontOverhangM, v.rearOverhangM,
                     v.cabinCentreXM, v.cabinLengthM, v.cabinHalfWidthM, v.windscreenXM,
                     v.backlightXM, v.roofLengthM, v.glassHalfWidthM, v.archFlareM, v.wingSpanM,
                     v.wingChordM, v.wingXM, v.splitterProtrusionM, v.canardStrength,
-                    v.exhaustBoreM, v.exhaustCount, v.hoodBulgeStrength, v.pickupBedWeight,
-                    v.vanWindowWeight, v.sideWindowCount, v.openWheelWeight, v.raceDetailWeight,
-                    v.stripeWeight, v.heightVisual);
+                    v.exhaustBoreM, v.exhaustCount, v.towHookXM, v.towHookDiameterM,
+                    v.hoodPinDiameterM, v.headingLengthM, v.headingHalfWidthM,
+                    v.hoodBulgeStrength, v.pickupBedWeight, v.vanWindowWeight,
+                    v.sideWindowCount, v.openWheelWeight, v.raceDetailWeight, v.stripeWeight,
+                    v.heightVisual);
             fprintf(json, "      \"hull\": ");
             json_hull(json, &v);
             fprintf(json, ",\n      \"wheels\": ");

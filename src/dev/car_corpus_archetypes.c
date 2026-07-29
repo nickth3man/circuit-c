@@ -567,6 +567,7 @@ static const DevParamAssignment kArch14[] = {
     A("body.track_rear", 2.00f),
     A("body.width_overall", 2.40f),
     A("body.height_overall", 2.80f),
+    A("body.drag_coefficient", 0.38f), /* bluff commercial body; exercises aero01 range */
     A("body.front_overhang", 1.50f),
     A("body.rear_overhang", 2.00f),
     A("body.ride_height_front", 0.250f),

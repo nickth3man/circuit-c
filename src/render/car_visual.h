@@ -75,9 +75,9 @@
 #define CV_REST_ANGLE_GAIN \
     6.0f /* legacy: pre-Phase-2 Ackermann rest-angle amplification;
                                          kept for consistency until toe migration completes */
-/* car_visual.c defines two more of its own — CV_EXHAUST_VISUAL_GAIN for exhaust tip bore, and
- * CV_MIN_CABIN_M for the shortest glasshouse the grammar will draw. They are internal to the
- * grammar: no consumer needs them, so they are not part of this contract. */
+/* car_visual.c defines the remaining internal presentation constants: exhaust and race-marker
+ * visibility gains, the minimum cabin span and forward package bias, and sub-pixel hull-facing
+ * corrections. Consumers receive only the resulting CarVisual dimensions. */
 
 /* Longitudinal stations of the hull half-outline, tail (index 0) to nose (last). The outline
  * is mirrored across the centreline, so a car is always laterally symmetric. Nine stations is
@@ -181,6 +181,11 @@ typedef struct {
     float exhaustBoreM;      /* [rule] exhaust bore; reads engineDisplacementL */
     int exhaustCount;        /* [rule] exhaust count 1..4; reads engineCylinders */
     float exhaustTransition; /* [rule] 0..1 smooth transition between count levels */
+    float towHookDiameterM; /* [rule] presentation-gained race marker; reads raceDetailWeight */
+    float towHookXM;        /* [rule] marker station clear of the L9 heading triangle */
+    float hoodPinDiameterM; /* [rule] presentation-gained race marker; reads raceDetailWeight */
+    float headingLengthM;   /* [rule] gameplay marker length; reads overall body length */
+    float headingHalfWidthM; /* [rule] gameplay marker half-width; reads overall body width */
     bool hasCage;
     bool hasMirrors;
 
