@@ -40,8 +40,10 @@ void render_shutdown(void);
  * would not. No simulation runs; the pose is fixed with the front wheels turned so lock,
  * Ackermann and static toe are all visible at once.
  *
- * Bake-draw-DISCARD, one car at a time: reviewing a hundred vehicles never holds more than a
- * single car's textures on the GPU.
+ * One page — sixteen cars — is baked, drawn, and then released once `EndDrawing` has
+ * submitted the batch: reviewing a hundred vehicles never holds more than a page of
+ * textures on the GPU. Unloading between the draw calls and the flush would leave raylib's
+ * deferred batch pointing at freed texture ids, which is why the release is deferred.
  *
  * `page` is 1-based. Out-of-range pages draw the page-count notice and nothing else, so
  * `--gallery-page 99` is a readable no-op rather than an empty screen.
