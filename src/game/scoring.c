@@ -13,6 +13,7 @@
 #include "core/config.h"
 #include "game/game.h"
 #include "core/math_utils.h"
+#include "world/track.h"
 
 /* -------------------------------------------------------------------------------------
  * Classification
@@ -79,9 +80,13 @@ void scoring_update(struct Game *game, float dt)
         const float speedFactor = clampf((speedMps - MIN_DRIFT_SPEED_MPS) /
                                              (SCORE_SPEED_REF_MPS - MIN_DRIFT_SPEED_MPS),
                                          0.0f, 1.0f);
-
-        /* lineFactor is a placeholder for racing-line quality; always 1.0 for now. */
-        const float lineFactor = 1.0f;
+        /* lineFactor: 1.0 on centreline, 0.0 at or beyond the track edge. */
+        float segHalfWidthM = 0.0f;
+        const float distToCenterM = track_distance_to_centerline_m(
+            &game->track, game->vehicle.positionM, &segHalfWidthM);
+        const float lineFactor = (game->track.isParkingLot || segHalfWidthM <= 0.0f)
+                                     ? 1.0f
+                                     : clampf(1.0f - distToCenterM / segHalfWidthM, 0.0f, 1.0f);
 
         game->driftTimeS += dt;
 

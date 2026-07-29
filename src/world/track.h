@@ -37,6 +37,11 @@ void track_init(Track *track); /* allocate + populate the oval */
 void track_free(Track *track); /* free nodes, zero the struct */
 SurfaceId Track_SurfaceAt(const Track *track, Vector2 pointM);
 
+/* Distance from pointM to the nearest centreline segment, in metres.
+ * Returns 0.0f if track is NULL or has no nodes. Optionally writes
+ * the half-width of that segment to *halfWidthM when non-NULL. */
+float track_distance_to_centerline_m(const Track *track, Vector2 pointM, float *halfWidthM);
+
 /* Advance checkpoint/lap state based on the car crossing a gate this tick.
  * prevPosM/currPosM in world meters, the car's position at start and end of the tick.
  * Returns true if a checkpoint was passed. Forward-only: reverse crossings are ignored. */

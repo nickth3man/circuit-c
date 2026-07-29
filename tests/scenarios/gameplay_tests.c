@@ -106,7 +106,32 @@ static void scenario_track_surface(void)
         check(uninitSurf == SURFACE_ASPHALT,
               "Track_SurfaceAt(uninitialised, ...) returns ASPHALT (got %d)", (int)uninitSurf);
     }
-
+    /* Track distance-to-centerline: on a centreline node, distance should be ~0. */
+    {
+        float hw = 0.0f;
+        const float d = track_distance_to_centerline_m(&track, track.nodes[0].centerM, &hw);
+        check(fabsf(d) < 0.01f, "centreline dist at node 0 ~0 (got %.2f)", (double)d);
+        check(fabsf(hw - 4.0f) < 0.01f, "half-width at node 0 ~4 (got %.2f)", (double)hw);
+    }
+    /* Outside: y=100 is 25 m above lot top at y=75. */
+    {
+        float hw = 0.0f;
+        const float d = track_distance_to_centerline_m(&track, (Vector2){ 0, 100 }, &hw);
+        check(d > 20.0 && d < 30.0, "centreline dist outside lot ~25 m");
+    }
+    /* NULL/uninit: returns 0. */
+    {
+        float hw = -1.0f;
+        Track dummy;
+        memset(&dummy, 0, sizeof(dummy));
+        check_near((double)track_distance_to_centerline_m(NULL, (Vector2){ 0, 0 }, &hw), 0.0,
+                   0.0, "NULL dist=0");
+        check_near((double)hw, 0.0, 0.0, "NULL hw=0");
+        hw = -1.0f;
+        check_near((double)track_distance_to_centerline_m(&dummy, (Vector2){ 0, 0 }, &hw), 0.0,
+                   0.0, "uninit dist=0");
+        check_near((double)hw, 0.0, 0.0, "uninit hw=0");
+    }
     /* Free and verify clean. */
     track_free(&track);
     check(track.nodes == NULL, "track_free: nodes is NULL");

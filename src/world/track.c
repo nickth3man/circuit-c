@@ -140,6 +140,21 @@ SurfaceId Track_SurfaceAt(const Track *track, Vector2 pointM)
     return track->offTrackSurfaceId;
 }
 
+float track_distance_to_centerline_m(const Track *track, Vector2 pointM, float *halfWidthM)
+{
+    if (track == NULL || track->nodes == NULL || track->count <= 0) {
+        if (halfWidthM != NULL) *halfWidthM = 0.0f;
+        return 0.0f;
+    }
+    int closestIdx = 0;
+    const float dSq =
+        nearest_centerline_distance_sq(track->nodes, track->count, pointM, &closestIdx);
+    if (halfWidthM != NULL) {
+        *halfWidthM = track->nodes[closestIdx].halfWidthM;
+    }
+    return sqrtf(dSq);
+}
+
 /* --------------- checkpoint crossing ------------------------------------------------------
  *
  * A gate is a line segment at each TrackNode, perpendicular to the centreline, spanning the
