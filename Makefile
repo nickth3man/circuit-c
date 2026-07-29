@@ -131,7 +131,8 @@ BUILD_DEFINES = -DDRIFTY_BUILD_COMMIT=\"$(BUILD_COMMIT)\" \
 # consumed by both Make and POSIX shell.
 
 SHARED_SRCS := src/game/input.c src/core/math_utils.c src/dev/dev_scenario.c src/game/profile.c src/render/car_visual.c src/render/car_visual_raster.c
-DEV_SRCS    := src/dev/dev_params.c src/dev/dev_presets.c src/dev/dev_replay.c src/dev/dev_state.c src/dev/failure_bundle.c src/dev/car_corpus.c
+DEV_SRCS    := src/dev/dev_params.c src/dev/dev_presets.c src/dev/dev_replay.c src/dev/dev_state.c \
+               src/dev/failure_bundle.c src/dev/car_corpus.c src/dev/car_corpus_archetypes.c
 DEV_UI_SRCS := src/dev/dev_lab.c
 GAME_SRCS   := src/game/game.c src/game/audio.c src/physics/auto_transmission.c src/game/particle.c src/physics/vehicle.c \
                src/physics/physics.c src/physics/tire.c src/physics/drivetrain.c src/physics/surface.c src/world/track.c \
