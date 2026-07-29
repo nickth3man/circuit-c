@@ -118,7 +118,7 @@ artifact someone actually downloads to *look* at the fleet, and burying it under
 CSVs makes it useless. It uploads on success and failure alike, because a distinctness
 failure is exactly when the pictures are needed.
 
-The same job also regenerates `docs/CORPUS.md` and diffs it against the committed copy, so
+The same job also regenerates `docs/generated/CORPUS.md` and diffs it against the committed copy, so
 the generated corpus table cannot quietly rot away from the code that produces it.
 
 ## What is deliberately not in CI
@@ -132,5 +132,5 @@ and the `corpus` scenario are the gates, and both run here.
 GPU vendors and drivers to make a pixel comparison flaky; hosted Windows runners have no GPU
 at all. `mk visual-test` runs on the developer's machine instead. See `tests/visual/README.md`.
 
-**The interactive game.** Nothing in CI launches `drifty.exe` beyond the bounded
+**The interactive game.** Nothing in CI launches `build/dev/drifty.exe` beyond the bounded
 `--capture-scene` and `--smoke-test` modes, which exit on their own.

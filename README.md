@@ -24,27 +24,27 @@ of its physics parameters — there is no hand-authored art for any vehicle. Tha
 built the parameter registry expansion, the appearance grammar, a 100-vehicle demonstration
 corpus, the production texture path, and the in-game gallery. See
 [docs/CAR_VISUAL.md](docs/CAR_VISUAL.md) for the contract and
-[docs/CORPUS.md](docs/CORPUS.md) for the fleet.
+[docs/generated/CORPUS.md](docs/generated/CORPUS.md) for the fleet.
 
 The running game uses a deterministic planar rigid-body vehicle in SI units:
 
 | System | State |
 |--------|-------|
-| SI units, coordinate and sign convention | `src/units.h`, `src/config.h` |
-| Math helpers (`clampf`, `lerpf`, `smooth_to`, `wrap_angle`, `smoothstep`, `lerp_angle`) | `src/math_utils.h/.c` |
-| Fixed 120 Hz timestep with substep cap and backlog-drop counter | `src/timestep.h/.c`, driven by `src/main.c` |
-| Held controls vs one-shot commands, consumed exactly once | `src/input.h/.c` |
-| Deterministic fixed-tick input recording and playback | `src/replay.h/.c` |
-| CSV telemetry writer | `src/telemetry.h/.c` |
-| Platform-owned `Game` block, hot-reloadable game module | `src/main.c`, `src/hotreload_windows.c`, `src/game.h/.c` |
-| Headless test executable | `tests/physics_tests.c` |
-| Windowless hot-reload harness | `tests/hotreload_harness.c` |
-| Bounded visual smoke test | `drifty.exe --smoke-test` |
-| Canonical vehicle specification/state/diagnostics | `src/vehicle.h/.c` |
-| Steering, contact kinematics, tire forces, body integration | `src/physics.h/.c` |
-| Normalized nonlinear lateral/longitudinal tire curves and friction ellipse | `src/tire.h/.c` |
-| Engine curve, signed gearing, RWD torque, brakes, handbrake, wheel integration | `src/drivetrain.h/.c` |
-| Interpolated body, four wheels, HUD, debug vectors | `src/render.h/.c` |
+| SI units, coordinate and sign convention | `src/core/units.h`, `src/core/config.h` |
+| Math helpers (`clampf`, `lerpf`, `smooth_to`, `wrap_angle`, `smoothstep`, `lerp_angle`) | `src/core/math_utils.h/.c` |
+| Fixed 120 Hz timestep with substep cap and backlog-drop counter | `src/platform/timestep.h/.c`, driven by `src/platform/main.c` |
+| Held controls vs one-shot commands, consumed exactly once | `src/game/input.h/.c` |
+| Deterministic fixed-tick input recording and playback | `src/game/replay.h/.c` |
+| CSV telemetry writer | `src/game/telemetry.h/.c` |
+| Platform-owned `Game` block, hot-reloadable game module | `src/platform/main.c`, `src/platform/hotreload_windows.c`, `src/game/game.h/.c` |
+| Headless test executable | `tests/test_main.c` + `tests/scenarios/`, `tests/support/` |
+| Windowless hot-reload harness | `tests/hotreload/hotreload_harness.c` |
+| Bounded visual smoke test | `build/dev/drifty.exe --smoke-test` |
+| Canonical vehicle specification/state/diagnostics | `src/physics/vehicle.h/.c` |
+| Steering, contact kinematics, tire forces, body integration | `src/physics/physics.h/.c` |
+| Normalized nonlinear lateral/longitudinal tire curves and friction ellipse | `src/physics/tire.h/.c` |
+| Engine curve, signed gearing, RWD torque, brakes, handbrake, wheel integration | `src/physics/drivetrain.h/.c` |
+| Interpolated body, four wheels, HUD, debug vectors | `src/render/render.h/.c` |
 
 Front and rear lateral force use `-mu * Fz * sin(C * atan(B * alpha))`; longitudinal force
 uses the same normalized form with wheel slip ratio. Engine torque is interpolated from a
@@ -59,7 +59,7 @@ CG geometry, propagates the dynamic loads into tire capacity, and applies separa
 quadratic aerodynamic drag and per-wheel rolling resistance.
 
 The headless runner covers 54 scenarios. (The check count is not quoted here — it moves with
-every parameter added, and `./drifty_tests.exe` prints the current total.) Eight reviewed
+every parameter added, and `./build/tests/drifty_tests.exe` prints the current total.) Eight reviewed
 Phase 3 CSV baselines cover acceleration/braking load transfer, coast-down, skidpad, step
 steer, lift-off, transition, and a catchable drift.
 [docs/PHASE3_VALIDATION.md](docs/PHASE3_VALIDATION.md) records the equations, numerical
@@ -135,21 +135,21 @@ frame budget, writes a screenshot, and exits.
 ### Running
 
 ```bat
-drifty.exe                 rem development build; start once and leave it running
-drifty.exe --smoke-test    rem bounded visual verification; exits on its own
-drifty_release.exe         rem release build
-drifty_tests.exe           rem headless tests; run from the repository root
-drifty_hotreload_harness.exe
+build/dev/drifty.exe                 rem development build; start once and leave it running
+build/dev/drifty.exe --smoke-test    rem bounded visual verification; exits on its own
+build/release/drifty_release.exe         rem release build
+build/tests/drifty_tests.exe           rem headless tests; run from the repository root
+build/dev/drifty_hotreload_harness.exe
 ```
 
-`drifty_tests.exe` writes CSV telemetry to `telemetry/` relative to the working directory,
+`build/tests/drifty_tests.exe` writes CSV telemetry to `artifacts/telemetry/` relative to the working directory,
 so run it from the repository root. It accepts `--list`, `--scenario NAME`, and `-v`.
 
 ## Linkage
 
 ### Development (hot reload)
 
-`drifty.exe` and `build/game.dll` both link the MSYS2 **shared** raylib import library and
+`build/dev/drifty.exe` and `build/dev/game.dll` both link the MSYS2 **shared** raylib import library and
 therefore both import `libraylib.dll` (MSYS2's DLL name). The build copies:
 
 - `libraylib.dll`
@@ -162,7 +162,7 @@ Never compile raylib sources into `game.dll`.
 
 ### Release
 
-`drifty_release.exe` compiles platform + game into one executable with `DRIFTY_HOT_RELOAD`
+`build/release/drifty_release.exe` compiles platform + game into one executable with `DRIFTY_HOT_RELOAD`
 undefined. It links `libraylib.a` statically and does **not** import `libraylib.dll` or
 `game.dll`. With the current MSYS2 raylib package, the static archive still references
 shared GLFW, so `glfw3.dll` is copied next to the release executable. That is a package
@@ -171,21 +171,21 @@ limitation, not a project DLL.
 ### Verify imports
 
 ```bash
-objdump -p drifty.exe | grep -i "DLL Name"
-objdump -p build/game.dll | grep -i "DLL Name"
-objdump -p drifty_tests.exe | grep -i "DLL Name"
-objdump -p drifty_release.exe | grep -i "DLL Name"
+objdump -p build/dev/drifty.exe | grep -i "DLL Name"
+objdump -p build/dev/game.dll | grep -i "DLL Name"
+objdump -p build/tests/drifty_tests.exe | grep -i "DLL Name"
+objdump -p build/release/drifty_release.exe | grep -i "DLL Name"
 ```
 
 Expected: development artifacts import `libraylib.dll`; tests and release do not.
 
 ## Hot-reload workflow
 
-The game is a thin platform layer (`drifty.exe`) plus a hot-reloadable game module
-(`build/game.dll`). The platform layer owns the window, the raylib context, the `Game`
+The game is a thin platform layer (`build/dev/drifty.exe`) plus a hot-reloadable game module
+(`build/dev/game.dll`). The platform layer owns the window, the raylib context, the `Game`
 allocation, and the fixed-timestep loop. Everything else lives in the module.
 
-1. Run `drifty.exe` once and leave it open.
+1. Run `build/dev/drifty.exe` once and leave it open.
 2. Edit game code.
 3. Run `build.bat` (or `./build.sh` in UCRT64). It rebuilds the module always, rebuilds the
    executable only when it is not already running, and returns in well under a second.
@@ -195,11 +195,11 @@ allocation, and the fixed-timestep loop. Everything else lives in the module.
 The loader never unloads a working module until a replacement has been proven good. A
 compile error cannot close the running game.
 
-Automated validation without leaving `drifty.exe` running:
+Automated validation without leaving `build/dev/drifty.exe` running:
 
 ```bat
 build.bat --hotreload-harness
-drifty_hotreload_harness.exe
+build/dev/drifty_hotreload_harness.exe
 ```
 
 Or the fuller script (harness + failed-compile preservation):
@@ -211,13 +211,13 @@ Or the fuller script (harness + failed-compile preservation):
 
 ### When a restart is required
 
-Hot reload cannot handle these. Restart `drifty.exe` after:
+Hot reload cannot handle these. Restart `build/dev/drifty.exe` after:
 
 - A change to the layout of `Game` or anything it contains.
-- **Adding a field to `VehicleSpec`** (`src/vehicle.h`) — it lives inside `Game`, so this is
+- **Adding a field to `VehicleSpec`** (`src/physics/vehicle.h`) — it lives inside `Game`, so this is
   the same layout change. Worth its own line because every new tunable parameter is a field
   on it, so this is the restart trigger you will hit most often.
-- A change to `src/main.c`, `src/timestep.c`, or `src/hotreload_windows.c`.
+- A change to `src/platform/main.c`, `src/platform/timestep.c`, or `src/platform/hotreload_windows.c`.
 - A change to `GAME_ENTRY_POINTS`.
 
 ### Reload-safety rules for game code
@@ -254,23 +254,23 @@ instead of the latter, since it starts and stops its own server.
 
 Press **F2** in the running game for the Physics Lab: scenario selector, pause and single
 step, live sliders for every tunable in the registry with its default and unit — currently
-123, listed in [docs/PARAMETERS.md](docs/PARAMETERS.md) — tuning profiles, overlay toggles,
+123, listed in [docs/generated/PARAMETERS.md](docs/generated/PARAMETERS.md) — tuning profiles, overlay toggles,
 an eight-channel scope with a baseline ghost, and an invariant panel. **F3** opens the replay
 inspector.
 
 ![The Physics Lab](tests/visual/baseline/physics_lab.png)
 
-Every tunable is defined once, in `src/dev_params.c`, and that one definition generates the
+Every tunable is defined once, in `src/dev/dev_params.c`, and that one definition generates the
 sliders, the profile format, the telemetry metadata, and
-[docs/PARAMETERS.md](docs/PARAMETERS.md).
+[docs/generated/PARAMETERS.md](docs/generated/PARAMETERS.md).
 
 ## Known limitations
 
 - **Changing the `Game` struct layout requires a restart.** Inherent to the technique.
-- **Restart `drifty.exe` once for the development-tool layout.** `Game` now carries the
+- **Restart `build/dev/drifty.exe` once for the development-tool layout.** `Game` now carries the
   Physics Lab's state (`DevState`); restart the executable once after updating, and ordinary
   module-only hot reload preserves state as usual after that.
-- **Restart `drifty.exe` once for the Phase 2 layout.** Canonical vehicle diagnostics and
+- **Restart `build/dev/drifty.exe` once for the Phase 2 layout.** Canonical vehicle diagnostics and
   reverse gearing changed persistent structure layout; normal code-only hot reload works
   after that restart.
 - **Every new tunable parameter costs one restart.** A parameter is a field on `VehicleSpec`,
@@ -293,54 +293,54 @@ scripts/setup_ruleset.sh        branch ruleset via gh; prints unless given --app
 docs/SPEC.md, docs/SOURCES.md   specification and reference index
 docs/DEVTOOLS.md                the development shell: lab, inspector, reports, targets
 docs/CI.md                      workflows, required checks, and why the gates are shaped so
-docs/PARAMETERS.md              generated from the tunable registry
+docs/generated/PARAMETERS.md              generated from the tunable registry
 docs/CAR_VISUAL.md              the vehicle-appearance contract and the fidelity budget
-docs/CORPUS.md                  the 100 demonstration vehicles, generated from car_corpus.c
-src/main.c                      platform layer: window, Game allocation, fixed-timestep loop
-src/timestep.h/.c               the accumulator, isolated so the harness can assert it
-src/hotreload.h                 GAME_ENTRY_POINTS, the one authoritative entry-point list
-src/hotreload_windows.c         LoadLibrary / GetProcAddress loader
-src/game.h/.c                   the Game block and the reloadable entry points
-src/config.h                    default constants, every physical value unit-bearing
-src/units.h                     world<->render conversion and the coordinate convention
-src/math_utils.h/.c             scalar helpers raymath.h does not provide
-src/input.h/.c                  held controls and one-shot commands
-src/replay.h/.c                 deterministic fixed-tick input timeline
-src/telemetry.h/.c              CSV row writer, no raylib dependency
-src/vehicle.h/.c                canonical vehicle data and initialization
-src/tire.h/.c                   pure nonlinear curves, slip ratio, combined-friction limit
-src/drivetrain.h/.c             pure engine/gearing/torque/wheel dynamics
-src/auto_transmission.h/.c      automatic shift logic over the drivetrain
-src/physics.h/.c                pure Phase 3 integration and fixed-update owner
-src/collision.h/.c              swept body collision against track geometry
-src/surface.h/.c                surface types by SurfaceId, resolved at point of use
-src/track.h/.c                  track layout and surface regions
-src/scoring.h/.c                drift scoring, combo, and run results
-src/particle.h/.c               skidmarks and tire smoke
-src/audio.h/.c                  engine, screech, and impact playback
-src/car_visual.h/.c             the appearance grammar: VehicleSpec -> CarVisual, raylib-free
-src/car_visual_raster.h/.c      CPU rasterizer, feature-label maps, nose-up rotation
-src/car_corpus.h/.c             the 100 demonstration vehicles as pure functions of an index
-src/render.h/.c                 interpolation, sprite bake/compose, HUD, vectors, tire plots
-src/dev_params.h/.c             the one tunable registry: sliders, profiles, docs, metadata
-src/dev_presets.h/.c            hand-designed vehicle presets
-src/dev_scenario.h/.c           scripted maneuvers, shared by the lab and the headless runner
-src/dev_state.h/.c              lab state inside Game: scope, trajectory, invariant monitor
-src/dev_lab.h/.c                the raygui Physics Lab (development builds only)
-src/dev_replay.h/.c             durable replay timelines and the inspector's event markers
-src/failure_bundle.h/.c         reproducible failure directories
-src/profile.h/.c                zone instrumentation: off, built-in timers, or Tracy
-src/build_info.h                commit, branch, dirty flag, compiler, flags, platform
-tests/physics_tests.c           headless scenario runner
-tests/hotreload_harness.c       windowless hot-reload validation
+docs/generated/CORPUS.md                  the 100 demonstration vehicles, generated from car_corpus.c
+src/platform/main.c                      platform layer: window, Game allocation, fixed-timestep loop
+src/platform/timestep.h/.c               the accumulator, isolated so the harness can assert it
+src/platform/hotreload.h                 GAME_ENTRY_POINTS, the one authoritative entry-point list
+src/platform/hotreload_windows.c         LoadLibrary / GetProcAddress loader
+src/game/game.h/.c                   the Game block and the reloadable entry points
+src/core/config.h                    default constants, every physical value unit-bearing
+src/core/units.h                     world<->render conversion and the coordinate convention
+src/core/math_utils.h/.c             scalar helpers raymath.h does not provide
+src/game/input.h/.c                  held controls and one-shot commands
+src/game/replay.h/.c                 deterministic fixed-tick input timeline
+src/game/telemetry.h/.c              CSV row writer, no raylib dependency
+src/physics/vehicle.h/.c                canonical vehicle data and initialization
+src/physics/tire.h/.c                   pure nonlinear curves, slip ratio, combined-friction limit
+src/physics/drivetrain.h/.c             pure engine/gearing/torque/wheel dynamics
+src/physics/auto_transmission.h/.c      automatic shift logic over the drivetrain
+src/physics/physics.h/.c                pure Phase 3 integration and fixed-update owner
+src/world/collision.h/.c              swept body collision against track geometry
+src/physics/surface.h/.c                surface types by SurfaceId, resolved at point of use
+src/world/track.h/.c                  track layout and surface regions
+src/game/scoring.h/.c                drift scoring, combo, and run results
+src/game/particle.h/.c               skidmarks and tire smoke
+src/game/audio.h/.c                  engine, screech, and impact playback
+src/render/car_visual.h/.c             the appearance grammar: VehicleSpec -> CarVisual, raylib-free
+src/render/car_visual_raster.h/.c      CPU rasterizer, feature-label maps, nose-up rotation
+src/dev/car_corpus.h/.c             the 100 demonstration vehicles as pure functions of an index
+src/render/render.h/.c                 interpolation, sprite bake/compose, HUD, vectors, tire plots
+src/dev/dev_params.h/.c             the one tunable registry: sliders, profiles, docs, metadata
+src/dev/dev_presets.h/.c            hand-designed vehicle presets
+src/dev/dev_scenario.h/.c           scripted maneuvers, shared by the lab and the headless runner
+src/dev/dev_state.h/.c              lab state inside Game: scope, trajectory, invariant monitor
+src/dev/dev_lab.h/.c                the raygui Physics Lab (development builds only)
+src/dev/dev_replay.h/.c             durable replay timelines and the inspector's event markers
+src/dev/failure_bundle.h/.c         reproducible failure directories
+src/game/profile.h/.c                zone instrumentation: off, built-in timers, or Tracy
+src/platform/build_info.h                commit, branch, dirty flag, compiler, flags, platform
+tests/test_main.c             headless scenario runner (scenarios under tests/scenarios/)
+tests/hotreload/              windowless hot-reload validation
 tests/baselines/                reviewed deterministic scenario CSV baselines
 tests/visual/                   deterministic scene baselines and the RMSE gate
 tools/*.py                      telemetry comparison, plots, summaries, HTML reports
 tools/visual/                   browser appearance inspector and its Playwright measurements
-tuning/corpus/                  the corpus exported as tuning profiles; checked in, and the
+data/vehicles/corpus/                  the corpus exported as tuning profiles; checked in, and the
                                 `corpus` scenario asserts it round-trips
 fuzz/fuzz_*.c                   libFuzzer targets for the parsers and the tire functions
 third_party/raygui/             vendored raygui, development builds only
-telemetry/                      generated CSV / smoke screenshot (gitignored)
-artifacts/                      reports, screenshots, failure bundles (gitignored)
+artifacts/                      telemetry CSV, reports, screenshots, replays,
+                                failure bundles, cards, gallery (all gitignored)
 ```

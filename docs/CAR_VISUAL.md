@@ -9,9 +9,9 @@ This document is the contract. It states what every drawn feature reads, what is
 physics and what is a stated interpretation, where the render-only amplifications are and why
 each one exists, and which rules a change must not break.
 
-- `docs/CORPUS.md` — the 100 demonstration vehicles, generated
-- `docs/PARAMETERS.md` — the tunable registry, generated
-- `plans/PLAN.md`, `plans/ROADMAP.md` — the remaining work on this system
+- `docs/generated/CORPUS.md` — the 100 demonstration vehicles, generated
+- `docs/generated/PARAMETERS.md` — the tunable registry, generated
+- `docs/plans/PLAN.md`, `docs/plans/ROADMAP.md` — the remaining work on this system
 
 ---
 
@@ -19,29 +19,29 @@ each one exists, and which rules a change must not break.
 
 ```
 VehicleSpec ─► car_visual_derive() ─► CarVisual ─► car_raster_draw_part() ─► RGBA8
-               src/car_visual.c                    src/car_visual_raster.c      │
+               src/render/car_visual.c                    src/render/car_visual_raster.c      │
                THE GRAMMAR                         THE RASTERIZER               │
                      │                                                          │
                      ├─► car_visual_signature()  the diagnostic feature vector  │
                      └─► car_visual_bake_key()   the texture cache key          │
                                                                                 │
                               ┌─────────────────────────────────────────────────┤
-                    tests/car_sheet.c                                   src/render.c
+                    tests/car_sheet.c                                   src/render/render.c
                     headless PNG contact sheet                    Texture2D, drawn rotated
                     (no GPU, no window, CI-safe)                   (the same pixels)
 ```
 
 Four rules make this work, and each one is load-bearing:
 
-1. **`src/car_visual.c` is the only place a styling decision may live.** `src/render.c` and
+1. **`src/render/car_visual.c` is the only place a styling decision may live.** `src/render/render.c` and
    the contact-sheet writer are dumb consumers; neither may invent geometry. A rule kept in
    the rasterizer would be invisible to the signature, and therefore to every test that reads
    it — this has happened once already (the roof and glass rules) and was moved.
 
 2. **`car_visual.c` and `car_visual_raster.c` are raylib-free.** They include `raylib.h` for
-   the `Color` and `Vector2` *types* and call no raylib function, exactly as `src/units.h`
+   the `Color` and `Vector2` *types* and call no raylib function, exactly as `src/core/units.h`
    does. That is what lets both live in `SHARED_SRCS` and be linked into the headless
-   `drifty_tests.exe`. It matters because `render.c` stubs its whole draw path out under
+   `build/tests/drifty_tests.exe`. It matters because `render.c` stubs its whole draw path out under
    `DRIFTY_HEADLESS`: anything decided there is unverifiable.
 
 3. **One rasterizer, two consumers.** The contact sheet and the in-game sprite come from the
@@ -78,13 +78,13 @@ All are bounded to `[0, 1]`, none is produced from noise, and each cites its inp
 ## Frames and units
 
 Everything in `CarVisual` is **metres in the body frame**: `+X` forward (nose), `+Y` left,
-origin at the **centre of mass**. This is the `docs/SPEC.md` and `src/units.h` convention.
+origin at the **centre of mass**. This is the `docs/SPEC.md` and `src/core/units.h` convention.
 Consumers apply their own metres-to-pixels scale.
 
 ### The layout frame is not the body frame
 
 The registry states mass particles and glass stations in the **layout frame**, whose origin is
-the **axle midpoint** (`src/vehicle.h`, `src/dev_params.c`: *"layout frame (axle midpoint
+the **axle midpoint** (`src/physics/vehicle.h`, `src/dev/dev_params.c`: *"layout frame (axle midpoint
 origin)"*). `vehicle.c` derives the CG from those same particles, so the offset between the
 two frames is exactly
 
@@ -255,7 +255,7 @@ span, pattern — is a deterministic function of `stripeWeight` and the body ext
 
 ## The bake key: canonical serialization
 
-`car_visual_bake_key()` is the texture cache key. `src/render.c` rebakes its GPU textures when
+`car_visual_bake_key()` is the texture cache key. `src/render/render.c` rebakes its GPU textures when
 it changes and does nothing when it does not.
 
 Three rules:
@@ -339,7 +339,7 @@ the kind of bug a still screenshot hides.
 ### Metres to pixels
 
 `to_px()` maps `+X` forward to increasing pixel X and `+Y` left to *decreasing* pixel Y — the
-same mapping as `src/units.h`. A consumer wanting the nose-up orientation of the reference
+same mapping as `src/core/units.h`. A consumer wanting the nose-up orientation of the reference
 sheets rotates the finished buffer by an exact 90°, which is an index permutation and
 therefore lossless.
 
@@ -350,7 +350,7 @@ to hint them.
 
 ### The scale chain
 
-`src/config.h` reconciles the five numbers end to end. Summary:
+`src/core/config.h` reconciles the five numbers end to end. Summary:
 
 | | | |
 |---|---|---|
@@ -477,16 +477,16 @@ newer build still loads. Parsing is deliberately defensive — it is a fuzz targ
 ## Commands
 
 ```bash
-./build.sh --tests && ./drifty_tests.exe --scenario car-visual   # grammar: purity, sensitivity, monotonicity, scale
-./drifty_tests.exe --scenario corpus                              # corpus: validity, round-trip, all-pairs distinctness
+./build.sh --tests && ./build/tests/drifty_tests.exe --scenario car-visual   # grammar: purity, sensitivity, monotonicity, scale
+./build/tests/drifty_tests.exe --scenario corpus                              # corpus: validity, round-trip, all-pairs distinctness
 
-./drifty_tests.exe --generate-corpus tuning/corpus                # export the fleet as tuning profiles
-./drifty_tests.exe --dump-corpus-index docs/CORPUS.md             # the corpus table
-./drifty_tests.exe --dump-corpus-sheet artifacts/gallery          # headless PNG contact sheet + index.html
+./build/tests/drifty_tests.exe --generate-corpus data/vehicles/corpus                # export the fleet as tuning profiles
+./build/tests/drifty_tests.exe --dump-corpus-index docs/generated/CORPUS.md             # the corpus table
+./build/tests/drifty_tests.exe --dump-corpus-sheet artifacts/gallery          # headless PNG contact sheet + index.html
 ```
 
 `artifacts/gallery/index.html` is the primary human acceptance check, and **it works without a
-GPU, a window, or `drifty.exe`**. Compare it side by side against
+GPU, a window, or `build/dev/drifty.exe`**. Compare it side by side against
 `resources/sprite_examples/bk_cars1.a.png` to judge whether the range is being hit.
 
 ```bash
@@ -494,7 +494,7 @@ mk gallery      # the in-game gallery, every page, through the production textur
 mk visual-test  # whole-scene regression against tests/visual/baseline
 ```
 
-`drifty.exe --gallery-page N` is bounded and exits on its own, like every capture here. The
+`build/dev/drifty.exe --gallery-page N` is bounded and exits on its own, like every capture here. The
 gallery is a **human-review artifact, deliberately not a GPU regression baseline**: a hundred
 cars behind an RMSE gate, on hardware that rasterizes differently per vendor, is a maintenance
 sinkhole with no CI value. The headless sheet and the `corpus` scenario are the actual gates.
@@ -525,7 +525,7 @@ makes no drivability claim at all.
 - No geometric feature may be generated from a hash of raw spec data. Colour is the single
   stated exception.
 - No `body.type` enum, no per-archetype drawing branch, no per-car art asset.
-- No styling decision outside `src/car_visual.c`.
+- No styling decision outside `src/render/car_visual.c`.
 - `CarVisual` stays a stack local. Never in `Game`, never in `DevState`.
 - GPU textures are released in `game_pre_reload` and re-acquired after, the `audio.c` pattern.
 - Float determinism holds only **within one binary** (`game.dll` at `-O0`, `drifty_tests` at

@@ -1260,13 +1260,12 @@ the physics translation units and never calls `InitWindow` — physics code call
 functions, so no window, GL context, or audio device is required.
 
 ```bash
-gcc -O2 -Wall -Wextra -std=c11 -DDRIFTY_HEADLESS \
-    src/physics.c src/vehicle.c src/tire.c src/drivetrain.c src/math_utils.c \
-    tests/physics_tests.c -o drifty_tests -lm
+build.bat --tests            # or ./build.sh --tests; sources come from the Makefile manifest
+./build/tests/drifty_tests.exe
 ```
 
 Each scenario drives the vehicle from a scripted input timeline at a fixed 120 Hz and
-writes one CSV file per scenario to `telemetry/`. Every CSV row carries at minimum:
+writes one CSV file per scenario to `artifacts/telemetry/`. Every CSV row carries at minimum:
 time, position, heading, body velocities, yaw rate, body sideslip, front/rear slip angle,
 front/rear slip ratio, front/rear normal load, per-wheel `Fx`/`Fy`/`frictionUsage`, wheel
 angular velocities, engine RPM, gear, and total yaw torque.
@@ -1319,39 +1318,77 @@ peak lateral force is within tolerance of mu * Fz
 drifty/
 ├── Makefile
 ├── build.sh / build.bat        # Hot-reload dev build; always terminates immediately
+├── mk.bat                      # `make` from any Windows shell (enters UCRT64)
 ├── scripts/
 │   ├── setup_windows.ps1       # Idempotent MSYS2 UCRT64 bootstrap
 │   └── validate_hotreload.sh   # Windowless harness + failed-compile preservation
 ├── README.md
 ├── docs/
 │   ├── SPEC.md                 # This document
-│   └── SOURCES.md              # Technical reference index
+│   ├── SOURCES.md              # Technical reference index
+│   ├── generated/              # PARAMETERS.md, CORPUS.md — generated, never hand-edited
+│   └── plans/                  # PLAN.md, ROADMAP.md
 ├── src/
-│   │  --- platform layer (drifty.exe; rarely changes, not hot-reloadable) ---
-│   ├── main.c                  # Entry point, window init, Game allocation, fixed-timestep loop
-│   ├── hotreload.h             # GAME_ENTRY_POINTS list, shared by both layers
-│   ├── hotreload_windows.c     # LoadLibrary / GetProcAddress / FreeLibrary
-│   │  --- game module (game.dll; hot-reloadable) ---
-│   ├── game.c                  # Entry point implementations, state machine, update dispatch
-│   ├── game.h                  # Game struct
-│   ├── config.h                # All tunables, with units
-│   ├── math_utils.h/.c         # clampf, lerpf, smooth_to, wrap_angle, smoothstep, lerp_angle
-│   ├── units.h                 # PIXELS_PER_METER and world<->render conversion helpers
-│   ├── input.h/.c              # Held controls + one-shot commands
-│   ├── vehicle.h/.c            # VehicleSpec/State/Derived, spec presets
-│   ├── physics.h/.c            # Fixed update order, body dynamics, integration, low-speed blend
-│   ├── tire.h/.c               # Lateral/longitudinal curves, combined-friction limit
-│   ├── drivetrain.h/.c         # Engine curve, gearing, wheel dynamics, brakes, handbrake
-│   ├── surface.h/.c            # SurfaceSpec table and Surface_Get lookup
-│   ├── track.h/.c              # Track geometry, surface query, collision, checkpoints
-│   ├── particle.h/.c           # Fixed-size particle pool, smoke trails
-│   ├── render.h/.c             # Camera, interpolation, draw order, HUD, debug overlay
-│   └── scoring.h/.c            # Drift classification, score, combo, persistence
+│   ├── platform/               # --- platform layer (drifty.exe; not hot-reloadable) ---
+│   │   ├── main.c              # Entry point, window init, Game allocation, fixed-timestep loop
+│   │   ├── hotreload.h         # GAME_ENTRY_POINTS list, shared by both layers
+│   │   ├── hotreload_windows.c # LoadLibrary / GetProcAddress / FreeLibrary
+│   │   ├── timestep.h/.c       # The accumulator, isolated so the harness can assert it
+│   │   └── build_info.h        # Commit/branch/dirty provenance baked into the binary
+│   ├── core/                   # --- conventions every other domain depends on ---
+│   │   ├── config.h            # All tunables, with units
+│   │   ├── math_utils.h/.c     # clampf, lerpf, smooth_to, wrap_angle, smoothstep, lerp_angle
+│   │   └── units.h             # PIXELS_PER_METER and world<->render conversion helpers
+│   ├── physics/                # --- the vehicle model; raylib-free, headless-linkable ---
+│   │   ├── vehicle.h/.c        # VehicleSpec/State/Derived, spec presets
+│   │   ├── physics.h/.c        # Fixed update order, body dynamics, integration, low-speed blend
+│   │   ├── tire.h/.c           # Lateral/longitudinal curves, combined-friction limit
+│   │   ├── drivetrain.h/.c     # Engine curve, gearing, wheel dynamics, brakes, handbrake
+│   │   ├── auto_transmission.h/.c  # Shift scheduling
+│   │   └── surface.h/.c        # SurfaceSpec table and Surface_Get lookup
+│   ├── world/
+│   │   ├── track.h/.c          # Track geometry, surface query, checkpoints
+│   │   └── collision.h/.c      # Barrier response
+│   ├── game/                   # --- orchestration and per-frame systems ---
+│   │   ├── game.c              # Entry point implementations, state machine, update dispatch
+│   │   ├── game.h              # Game struct
+│   │   ├── input.h/.c          # Held controls + one-shot commands
+│   │   ├── replay.h/.c         # Deterministic input recording and playback
+│   │   ├── audio.h/.c          # Engine and tire audio
+│   │   ├── particle.h/.c       # Fixed-size particle pool, smoke trails
+│   │   ├── scoring.h/.c        # Drift classification, score, combo, persistence
+│   │   ├── profile.h/.c        # Zone timers
+│   │   └── telemetry.h/.c      # CSV writer and the row built from Game
+│   ├── render/                 # --- everything drawn; render.c is raylib-only ---
+│   │   ├── render.h/.c         # Camera, interpolation, draw order, HUD, debug overlay
+│   │   ├── car_visual.h/.c     # VehicleSpec -> CarVisual appearance grammar (raylib-free)
+│   │   └── car_visual_raster.h/.c  # CarVisual -> pixels (raylib-free)
+│   └── dev/                    # --- development tooling; see docs/DEVTOOLS.md ---
+│       ├── dev_params.h/.c     # The tunable registry
+│       ├── dev_lab.h/.c        # The raygui Physics Lab (development builds only)
+│       ├── dev_presets.h/.c    # Named spec presets
+│       ├── dev_replay.h/.c     # Replay inspector
+│       ├── dev_scenario.h/.c   # Scripted input timelines
+│       ├── dev_state.h/.c      # DevState, part of Game in every configuration
+│       ├── car_corpus.h/.c     # The 100 demonstration vehicles
+│       └── failure_bundle.h/.c # The inspectable directory a failing scenario writes
 ├── tests/
-│   ├── physics_tests.c         # Headless scenario runner
-│   ├── hotreload_harness.c     # Windowless hot-reload validation
-│   └── baselines/              # Committed CSV baselines (empty in Phase 0; filled from Phase 1)
-├── telemetry/                  # Generated CSV / smoke screenshot (gitignored)
+│   ├── test_main.c             # Argument parsing, group iteration, summary and exit code
+│   ├── test_commands.h/.c      # --benchmark, --dump-*, --generate-corpus, --verify-*
+│   ├── test_scenarios.h        # The scenario registry contract
+│   ├── scenarios/              # Scenario bodies, one file per domain
+│   ├── support/                # Check harness, appearance metrics, fixtures, contact sheet
+│   ├── hotreload/              # Windowless hot-reload validation harness
+│   ├── baselines/              # Committed CSV baselines
+│   └── visual/                 # Deterministic scene baselines
+├── data/                       # Reviewed, tracked, non-code inputs
+│   ├── input/                  # gamecontrollerdb.txt
+│   └── vehicles/               # Reviewed tuning profiles and the corpus export
+├── build/                      # Every generated binary (gitignored)
+│   ├── dev/                    # drifty.exe, game.dll, runtime DLLs
+│   ├── tests/                  # drifty_tests.exe
+│   └── release/                # drifty_release.exe
+├── artifacts/                  # All ephemeral run evidence (gitignored)
 └── assets/                     # Car textures, sounds (Phase 6)
 ```
 
@@ -1375,7 +1412,7 @@ is no watcher daemon and no server to start or supervise.
 
 | Layer | Contents | Lifetime |
 |-------|----------|----------|
-| **Platform** (`drifty.exe`) | Window, raylib context, `Game` allocation, fixed-timestep loop, DLL loading | Started once by the developer, left running |
+| **Platform** (`build/dev/drifty.exe`) | Window, raylib context, `Game` allocation, fixed-timestep loop, DLL loading | Started once by the developer, left running |
 | **Game module** (`game.dll`) | Everything else, including all physics | Rebuilt and swapped in freely while the game runs |
 
 The platform layer owns the `Game` memory block. On reload it hands the same pointer back to
@@ -1389,7 +1426,7 @@ line, and the platform layer's function-pointer table and symbol lookups stay in
 automatically.
 
 ```c
-// src/hotreload.h
+// src/platform/hotreload.h
 #define GAME_ENTRY_POINTS \
     ENTRY(game_init,          void,  Game *)        /* first-time setup */ \
     ENTRY(game_pre_reload,    void,  Game *)        /* release anything DLL-owned */ \
@@ -1412,7 +1449,7 @@ bool Game_ReloadModule(void);
 The platform side expands the same list into definitions and lookups:
 
 ```c
-// src/hotreload_windows.c
+// src/platform/hotreload_windows.c
 #define ENTRY(name, ...) name##_t *name = NULL;
 GAME_ENTRY_POINTS
 #undef ENTRY
@@ -1471,11 +1508,11 @@ set -e
 # Always rebuild the game module. Write to a temp name first: the linker briefly
 # leaves a zero-length file in place, and the running game would load that.
 gcc -O0 -g -Wall -Wextra -std=c11 -shared -fPIC -DDRIFTY_HOT_RELOAD \
-    src/game.c src/physics.c src/tire.c src/drivetrain.c src/vehicle.c \
-    src/surface.c src/track.c src/particle.c src/render.c src/scoring.c \
-    src/input.c src/math_utils.c \
-    -o build/game_tmp.dll $(pkg-config --cflags --libs raylib)
-mv build/game_tmp.dll build/game.dll
+    src/game/game.c src/physics/physics.c src/physics/tire.c src/physics/drivetrain.c src/physics/vehicle.c \
+    src/physics/surface.c src/world/track.c src/game/particle.c src/render/render.c src/game/scoring.c \
+    src/game/input.c src/core/math_utils.c \
+    -o build/dev/game_tmp.tmp $(pkg-config --cflags --libs raylib)
+mv build/dev/game_tmp.tmp build/dev/game.dll
 
 # If the game is already running, that is all there is to do.
 if tasklist 2>/dev/null | grep -qi drifty.exe; then
@@ -1484,14 +1521,14 @@ if tasklist 2>/dev/null | grep -qi drifty.exe; then
 fi
 
 gcc -O0 -g -Wall -Wextra -std=c11 -DDRIFTY_HOT_RELOAD \
-    src/main.c src/hotreload_windows.c \
-    -o drifty.exe $(pkg-config --cflags --libs raylib)
-echo "Built drifty.exe — run it and leave it running."
+    src/platform/main.c src/platform/hotreload_windows.c \
+    -o build/dev/drifty.exe $(pkg-config --cflags --libs raylib)
+echo "Built build/dev/drifty.exe — run it and leave it running."
 ```
 
 The resulting loop:
 
-1. The developer runs `./drifty.exe` once and leaves it open.
+1. The developer runs `./build/dev/drifty.exe` once and leaves it open.
 2. Code is edited — by hand or by an agent.
 3. `./build.sh` runs. It returns in well under a second.
 4. The running game notices the new module and swaps it in, keeping its state.
@@ -1826,7 +1863,7 @@ build.bat
 ```
 
 Bounded visual smoke test (creates the window, runs a fixed frame budget, writes
-`telemetry/phase0_smoke.png`, exits):
+`artifacts/screenshots/phase0_smoke.png`, exits):
 
 ```bash
 ./build.sh --smoke-test

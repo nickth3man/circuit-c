@@ -14,8 +14,8 @@ Top-down 2D drift driving simulator written in C with raylib 6.0.
 | [docs/DEVTOOLS.md](docs/DEVTOOLS.md) | The development shell: Physics Lab, replay inspector, failure bundles, telemetry reports, the vehicle corpus and gallery, and the one-command make targets. |
 | [docs/CI.md](docs/CI.md) | The workflows, the required checks, and why the gates are shaped as they are. |
 | [docs/CAR_VISUAL.md](docs/CAR_VISUAL.md) | The vehicle-appearance contract — what every drawn feature reads, the render-only gains, the raster layer order, and the rules a change must not break. |
-| [docs/CORPUS.md](docs/CORPUS.md) | The 100 demonstration vehicles, generated from `src/car_corpus.c`. |
-| [docs/PARAMETERS.md](docs/PARAMETERS.md) | The tunable registry, generated. |
+| [docs/generated/CORPUS.md](docs/generated/CORPUS.md) | The 100 demonstration vehicles, generated from `src/dev/car_corpus.c`. |
+| [docs/generated/PARAMETERS.md](docs/generated/PARAMETERS.md) | The tunable registry, generated. |
 
 ## Current phase
 
@@ -52,16 +52,16 @@ Development links shared raylib (`libraylib.dll`). Release links `libraylib.a` s
 (still needs `glfw3.dll` with the current MSYS2 package). Verify rather than assuming:
 
 ```bash
-objdump -p build/game.dll | grep -i "DLL Name"
+objdump -p build/dev/game.dll | grep -i "DLL Name"
 ```
 
-`libraylib.dll` must appear for development artifacts. The same check on `drifty_tests.exe`
-and `drifty_release.exe` must show no `libraylib.dll` entry.
+`libraylib.dll` must appear for development artifacts. The same check on `build/tests/drifty_tests.exe`
+and `build/release/drifty_release.exe` must show no `libraylib.dll` entry.
 
 ## Development Workflow — Hot Reload
 
-The game runs as a thin platform layer (`drifty.exe`) plus a hot-reloadable game module
-(`build/game.dll`). The developer starts the executable once and leaves it running; agents
+The game runs as a thin platform layer (`build/dev/drifty.exe`) plus a hot-reloadable game module
+(`build/dev/game.dll`). The developer starts the executable once and leaves it running; agents
 rebuild the module, and the running game swaps it in without losing state.
 
 **The only build command you need for game edits:**
@@ -70,18 +70,18 @@ rebuild the module, and the running game swaps it in without losing state.
 build.bat
 ```
 
-It rebuilds `build/game.dll` always, and rebuilds `drifty.exe` only when the executable is
+It rebuilds `build/dev/game.dll` always, and rebuilds `build/dev/drifty.exe` only when the executable is
 not already running. **It always terminates in under a second.**
 
 ### Rules
 
-- **Never start, launch, or supervise `drifty.exe` yourself** for interactive sessions. The
+- **Never start, launch, or supervise `build/dev/drifty.exe` yourself** for interactive sessions. The
   developer owns that process. Launching it would block indefinitely.
 - **Exceptions — bounded, self-exiting, and allowed:**
-  - `build.bat --smoke-test` / `drifty.exe --smoke-test` — a fixed frame budget, then exit.
-  - `drifty.exe --capture-scene NAME` — renders one deterministic scene and exits.
+  - `build.bat --smoke-test` / `build/dev/drifty.exe --smoke-test` — a fixed frame budget, then exit.
+  - `build/dev/drifty.exe --capture-scene NAME` — renders one deterministic scene and exits.
     `mk screenshots` and `mk visual-test` are built on it.
-  - `drifty.exe --gallery-page N` — draws one corpus page and exits. `mk gallery` uses it.
+  - `build/dev/drifty.exe --gallery-page N` — draws one corpus page and exits. `mk gallery` uses it.
   - `mk cards` and `mk visual-diagnose` — fully headless; `visual-diagnose` starts and stops
     its own server.
 - **Never run a file watcher** (`watchexec`, `nodemon`, `--watch` flags) or any command that
@@ -112,7 +112,7 @@ mk visual-diagnose       # appearance measurements + evidence into artifacts/vis
 **Two targets an agent must never invoke**, both because they block rather than because they
 are dangerous:
 
-- **`mk run`** launches `drifty.exe` and does not return. Rebuild with `build.bat` (or
+- **`mk run`** launches `build/dev/drifty.exe` and does not return. Rebuild with `build.bat` (or
   `mk dev`) and let the running game pick the module up.
 - **`mk inspect`** serves the browser inspector and does not return. Use `mk visual-diagnose`
   instead: it starts and stops its own server, exits on its own, and writes the same evidence
@@ -130,10 +130,10 @@ the install command instead of failing. That is expected locally; CI installs al
 ### For physics work, prefer the headless loop
 
 ```bash
-./build.sh --tests && ./drifty_tests.exe
+./build.sh --tests && ./build/tests/drifty_tests.exe
 ```
 
-This terminates, writes CSV telemetry to `telemetry/`, and needs no window. It is the better
+This terminates, writes CSV telemetry to `artifacts/telemetry/`, and needs no window. It is the better
 feedback loop for equations and tuning. Run it from the repository root — the telemetry path
 is relative.
 
@@ -141,28 +141,28 @@ Vehicle appearance has its own headless loop — `mk visual-diagnose`, see
 [Measuring appearance](#measuring-appearance-not-just-gating-it). Reserve hot reload for the
 things that genuinely need a running window: feel, camera, and HUD.
 
-`./drifty_tests.exe --list` prints the scenario table; the suite currently runs 54 scenarios.
+`./build/tests/drifty_tests.exe --list` prints the scenario table; the suite currently runs 54 scenarios.
 The check count is deliberately not quoted here — it moves with every parameter added, and a
 hand-maintained copy of a generated number is only ever a stale number.
 
 Alongside the physics coverage — acceleration filter, load transfer, resistance, acceleration
 and braking load, skidpad sweep, step steer, lift-off, transition, catchable drift — the
 `car-visual` and `corpus` scenarios gate the vehicle appearance system (see
-[Vehicle appearance](#vehicle-appearance)). Generated telemetry is written under `telemetry/`;
+[Vehicle appearance](#vehicle-appearance)). Generated telemetry is written under `artifacts/telemetry/`;
 `tests/baselines/` holds the reviewed baselines that `mk regression` compares against.
 
 Other modes of the same executable:
 
 ```bash
-./drifty_tests.exe --scenario skidpad      # one scenario
-./drifty_tests.exe --dump-params docs/PARAMETERS.md
-./drifty_tests.exe --benchmark 240000      # fixed-update throughput
-./drifty_tests.exe --no-bundle             # do not write artifacts/failure-* on failure
+./build/tests/drifty_tests.exe --scenario skidpad      # one scenario
+./build/tests/drifty_tests.exe --dump-params docs/generated/PARAMETERS.md
+./build/tests/drifty_tests.exe --benchmark 240000      # fixed-update throughput
+./build/tests/drifty_tests.exe --no-bundle             # do not write artifacts/failure-* on failure
 
-./drifty_tests.exe --generate-corpus tuning/corpus          # REQUIRED after car_corpus.c edits
-./drifty_tests.exe --dump-corpus-cards artifacts/corpus-cards  # per-car PNG + label map + JSON
-./drifty_tests.exe --dump-corpus-metrics artifacts/metrics.csv # latents + signatures as CSV
-./drifty_tests.exe --dump-corpus-index docs/CORPUS.md       # the corpus table
+./build/tests/drifty_tests.exe --generate-corpus data/vehicles/corpus          # REQUIRED after car_corpus.c edits
+./build/tests/drifty_tests.exe --dump-corpus-cards artifacts/corpus-cards  # per-car PNG + label map + JSON
+./build/tests/drifty_tests.exe --dump-corpus-metrics artifacts/metrics.csv # latents + signatures as CSV
+./build/tests/drifty_tests.exe --dump-corpus-index docs/generated/CORPUS.md       # the corpus table
 ```
 
 A failing scenario writes `artifacts/failure-<scenario>-<timestamp>/` containing the input
@@ -174,20 +174,20 @@ several failures at once, `failure.txt` names only the first, which is often not
 informative one. Re-run that scenario with `--no-bundle` and read stdout to see the rest:
 
 ```bash
-./drifty_tests.exe --scenario corpus --no-bundle
+./build/tests/drifty_tests.exe --scenario corpus --no-bundle
 ```
 
 ### When a restart is required
 
-Tell the developer to restart `drifty.exe` after any of these — hot reload cannot handle
+Tell the developer to restart `build/dev/drifty.exe` after any of these — hot reload cannot handle
 them:
 
 - A change to the layout of `Game` or anything it contains (the existing memory block
-  becomes invalid). **The development-tool state (`DevState`, src/dev_state.h) is part of
+  becomes invalid). **The development-tool state (`DevState`, src/dev/dev_state.h) is part of
   `Game` in every build configuration**, deliberately: making it conditional would make two
   separately compiled binaries disagree about the layout of the block they share. Adding a
   field to it is therefore a restart, like any other layout change.
-- **Adding a field to `VehicleSpec` (src/vehicle.h)** — it lives inside `Game`, so this is
+- **Adding a field to `VehicleSpec` (src/physics/vehicle.h)** — it lives inside `Game`, so this is
   the same layout change as above. Called out by name because it is the most frequently
   edited struct in the project: every new tunable parameter is a field on it, and every one
   of them costs the developer one restart.
@@ -218,7 +218,7 @@ A car's appearance is a **pure, total, deterministic function of its physics par
 There is no hand-authored art for any vehicle. [docs/CAR_VISUAL.md](docs/CAR_VISUAL.md) is the
 full contract — what every drawn feature reads, where the render-only gains are and why, the
 raster layer order and pivots, and the scale chain. Read it before touching
-`src/car_visual.c`, `src/car_visual_raster.c`, `src/car_corpus.c`, or `draw_vehicle()`.
+`src/render/car_visual.c`, `src/render/car_visual_raster.c`, `src/dev/car_corpus.c`, or `draw_vehicle()`.
 
 These are the rules that a change must not break, and each one exists because breaking it
 would silently destroy a property a test is protecting:
@@ -230,8 +230,8 @@ would silently destroy a property a test is protecting:
   metric so that shape has to carry the result.
 - **No `body.type` enum, no per-archetype drawing branch, no per-car art asset.** A pickup, a
   bus and an open-wheel car are regions of parameter space, not cases in a switch.
-- **No styling decision outside `src/car_visual.c`.** `render.c` stubs its whole draw path out
-  under `DRIFTY_HEADLESS`, so anything decided there is unreachable from `drifty_tests.exe`
+- **No styling decision outside `src/render/car_visual.c`.** `render.c` stubs its whole draw path out
+  under `DRIFTY_HEADLESS`, so anything decided there is unreachable from `build/tests/drifty_tests.exe`
   and unverifiable. `car_visual.c` and `car_visual_raster.c` are raylib-*free* — they use the
   `Color`/`Vector2` types and call no raylib function — which is what keeps them linkable into
   the headless test binary.
@@ -248,18 +248,18 @@ would silently destroy a property a test is protecting:
 The gates, all headless and all bounded:
 
 ```bash
-./drifty_tests.exe --scenario car-visual   # purity, sensitivity, monotonicity, scale independence
-./drifty_tests.exe --scenario corpus       # validity, profile round-trip, all-pairs distinctness
-./drifty_tests.exe --dump-corpus-sheet artifacts/gallery   # then open index.html and look
+./build/tests/drifty_tests.exe --scenario car-visual   # purity, sensitivity, monotonicity, scale independence
+./build/tests/drifty_tests.exe --scenario corpus       # validity, profile round-trip, all-pairs distinctness
+./build/tests/drifty_tests.exe --dump-corpus-sheet artifacts/gallery   # then open index.html and look
 ```
 
-### After changing `src/car_corpus.c`, regenerate the profiles
+### After changing `src/dev/car_corpus.c`, regenerate the profiles
 
 ```bash
-./drifty_tests.exe --generate-corpus tuning/corpus
+./build/tests/drifty_tests.exe --generate-corpus data/vehicles/corpus
 ```
 
-`tuning/corpus/**.txt` is **checked in**, and the `corpus` scenario asserts that every
+`data/vehicles/corpus/**.txt` is **checked in**, and the `corpus` scenario asserts that every
 profile round-trips to the spec the code produces. Edit an archetype or a sweep axis without
 regenerating and you get:
 
@@ -273,7 +273,8 @@ after a registry change — the export is not optional bookkeeping, it is part o
 ### The three distinctness floors
 
 Every **pair** of corpus vehicles must clear all three of these at once
-(`tests/physics_tests.c`):
+(`tests/scenarios/appearance_tests.c` and the constants in
+`tests/support/appearance_metrics.h`):
 
 | floor | constant | meaning |
 |---|---|---|
@@ -318,11 +319,11 @@ artifact, deliberately not a GPU regression baseline.
 After changing build scripts, wrappers, or linkage:
 
 1. `build.bat --clean`
-2. `build.bat --tests` && `drifty_tests.exe`
+2. `build.bat --tests` && `build/tests/drifty_tests.exe`
 3. `build.bat`
 4. `build.bat --release`
-5. Import inspection with `objdump -p` on `drifty.exe`, `build/game.dll`,
-   `drifty_tests.exe`, `drifty_release.exe`
+5. Import inspection with `objdump -p` on `build/dev/drifty.exe`, `build/dev/game.dll`,
+   `build/tests/drifty_tests.exe`, `build/release/drifty_release.exe`
 6. `./scripts/validate_hotreload.sh` (UCRT64)
 7. `build.bat --smoke-test`
 
@@ -337,9 +338,9 @@ units must not call any raylib function, which is what keeps `drifty_tests` head
 
 ## Tunables
 
-Every tunable physical parameter is registered once in `src/dev_params.c` with its default,
+Every tunable physical parameter is registered once in `src/dev/dev_params.c` with its default,
 unit, range, and description, and that registry generates the Physics Lab sliders, the tuning
-profile format, the telemetry metadata, and `docs/PARAMETERS.md`. Changing a constant in
+profile format, the telemetry metadata, and `docs/generated/PARAMETERS.md`. Changing a constant in
 `config.h` without updating the registry fails the `params` scenario, on purpose.
 
 After changing the registry, run `mk params-doc` to regenerate the documentation table.
@@ -349,22 +350,22 @@ After changing the registry, run `mk params-doc` to regenerate the documentation
 Adding a tunable is more than a registry row. Use `body.cowl_x` as the worked template — it
 is a plain metre-valued geometry key that exercises every step.
 
-1. **`src/config.h`** — the default constant.
-2. **`src/vehicle.h`** — the `float` field on `VehicleSpec`. *(Restart required; see above.)*
-3. **`src/vehicle.c`** — set it in `vehicle_spec_set_default()`, and validate it in
+1. **`src/core/config.h`** — the default constant.
+2. **`src/physics/vehicle.h`** — the `float` field on `VehicleSpec`. *(Restart required; see above.)*
+3. **`src/physics/vehicle.c`** — set it in `vehicle_spec_set_default()`, and validate it in
    `vehicle_spec_is_valid()` if it must be finite or non-negative.
-4. **`src/dev_params.c`** — the `g_params[]` row. Enums ride as floats with `step = 1.0f`,
+4. **`src/dev/dev_params.c`** — the `g_params[]` row. Enums ride as floats with `step = 1.0f`,
    exactly like `drive.diff_mode` and `drive.layout`.
 5. **Migration alias** — only when the key *replaces* something previously derived, so old
    profiles and presets still load.
-6. **`src/car_visual.h`** — a `CarVisual` field, if the parameter produces drawn geometry.
-7. **`src/car_visual.c`** — consume it in `car_visual_derive()`, labelled `[identity]` or
+6. **`src/render/car_visual.h`** — a `CarVisual` field, if the parameter produces drawn geometry.
+7. **`src/render/car_visual.c`** — consume it in `car_visual_derive()`, labelled `[identity]` or
    `[rule]` per the taxonomy in `docs/CAR_VISUAL.md`.
 8. **`car_visual_bake_key()`** — add the field.
 9. **`CAR_SIGNATURE_COMPONENTS`** — add a component if it should count toward distinctness.
-10. **`src/car_visual_raster.c`** — draw it, with a `CarRasterLabel` if it is a genuinely new
+10. **`src/render/car_visual_raster.c`** — draw it, with a `CarRasterLabel` if it is a genuinely new
     feature, so it shows up in the label map and the pixel histogram.
-11. **`kVisualDrivers[]`** (`tests/physics_tests.c`) and the feature-mapping table in
+11. **`kVisualDrivers[]`** (`tests/scenarios/appearance_tests.c`) and the feature-mapping table in
     `docs/CAR_VISUAL.md`; then `mk params-doc`.
 
 **Step 8 fails silently.** Omit it and everything still compiles, the slider still moves, the
@@ -374,7 +375,7 @@ change. Nothing turns red. The only thing that catches it is the bake-key assert
 undetected.** If you add only one of the two, add 11.
 
 If the parameter feeds the appearance system at all, finish with
-`./drifty_tests.exe --generate-corpus tuning/corpus` when you also touched `car_corpus.c`.
+`./build/tests/drifty_tests.exe --generate-corpus data/vehicles/corpus` when you also touched `car_corpus.c`.
 
 ## Cloned Dependency Source
 

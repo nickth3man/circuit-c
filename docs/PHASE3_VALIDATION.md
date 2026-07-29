@@ -69,7 +69,7 @@ were validated before handling. The documented default `B`, `C`, `mu`, engine, b
 handbrake, and steering values passed every objective maneuver, including transition and
 catch recovery. No tunable default was changed merely to make Phase 3 pass.
 
-`tuning/default.txt` and `tuning/phase3-candidate.txt` are therefore intentionally identical.
+`data/vehicles/default.txt` and `data/vehicles/phase3-candidate.txt` are therefore intentionally identical.
 The latter is a named review checkpoint, not a claim that two different parameter sets were
 tested. There are no accepted tunable changes to list (`old == new` for all 46 parameters).
 

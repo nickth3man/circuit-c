@@ -23,13 +23,13 @@ F5  pause / resume             F8  capture the current run as the baseline ghost
 ```
 
 The lab is built with [raygui](../third_party/README.md), vendored from the raylib source
-tree this project already builds against. It is compiled into `build/game.dll` only when
+tree this project already builds against. It is compiled into `build/dev/game.dll` only when
 `DRIFTY_DEV_TOOLS` is defined — the default for development builds, never for
 `build.sh --release` or the headless tests.
 
 What it contains:
 
-- **Scenario selector** — the same table the headless runner uses (`src/dev_scenario.c`):
+- **Scenario selector** — the same table the headless runner uses (`src/dev/dev_scenario.c`):
   free drive, accel, skidpad, step-steer, lift-off, power-oversteer, handbrake-entry,
   transition, brake-corner, coast-down. Start resets the simulation, rewinds the recording,
   and clears the scope, so a run always begins from a known state.
@@ -39,7 +39,7 @@ What it contains:
 - **Live sliders** for every tunable, generated from the registry, with the current value,
   the default, the unit, the allowed range, and a per-parameter reset button. A modified
   parameter is marked with `*`.
-- **Tuning profiles** — named, saved to `tuning/<name>.txt`, loaded back, or reset wholesale.
+- **Tuning profiles** — named, saved to `data/vehicles/<name>.txt`, loaded back, or reset wholesale.
 - **Overlay toggles** — forces, velocity, slip, loads, contact points, trajectory, ghost,
   scope.
 - **A scrolling scope** with eight channels: body sideslip, yaw rate, steering, throttle,
@@ -50,9 +50,9 @@ What it contains:
 
 ### The parameter registry
 
-Every tunable is described exactly once, in `src/dev_params.c`, and that one description
+Every tunable is described exactly once, in `src/dev/dev_params.c`, and that one description
 generates the sliders, the profile format, the reset behaviour, the telemetry metadata, and
-[docs/PARAMETERS.md](PARAMETERS.md).
+[docs/generated/PARAMETERS.md](generated/PARAMETERS.md).
 
 ```c
 typedef struct {
@@ -83,7 +83,7 @@ mk params-doc
 
 ## 2. The replay inspector
 
-Press **F3**. The input timeline that `src/replay.c` already records becomes something you
+Press **F3**. The input timeline that `src/game/replay.c` already records becomes something you
 can scrub.
 
 - a timeline with event markers — throttle, brake, handbrake, shifts, resets, steering
@@ -94,7 +94,7 @@ can scrub.
 - save and load `replays/<name>.bin`;
 - **export a failure bundle** from the current state.
 
-Replay files are versioned and defensively parsed (`src/dev_replay.c`); `fuzz/fuzz_replay.c`
+Replay files are versioned and defensively parsed (`src/dev/dev_replay.c`); `fuzz/fuzz_replay.c`
 exists precisely because these files travel between builds.
 
 ---
@@ -126,10 +126,10 @@ Disable with `--no-bundle`, relocate with `--artifacts DIR`.
 Standard library Python only — no package install, on any machine, in any CI job.
 
 ```bash
-python tools/summarize_run.py telemetry/scenario_skidpad.csv
-python tools/compare_telemetry.py tests/baselines/scenario_skidpad.csv telemetry/scenario_skidpad.csv
-python tools/plot_telemetry.py telemetry/scenario_skidpad.csv --out artifacts/plots
-python tools/make_report.py telemetry/scenario_skidpad.csv \
+python tools/telemetry/summarize_run.py artifacts/telemetry/scenario_skidpad.csv
+python tools/telemetry/compare_telemetry.py tests/baselines/scenario_skidpad.csv artifacts/telemetry/scenario_skidpad.csv
+python tools/telemetry/plot_telemetry.py artifacts/telemetry/scenario_skidpad.csv --out artifacts/plots
+python tools/telemetry/make_report.py artifacts/telemetry/scenario_skidpad.csv \
     --baseline tests/baselines/scenario_skidpad.csv --out artifacts/report.html
 ```
 
@@ -201,7 +201,7 @@ configuration it is really built in.
 `.vscode/` carries shared `tasks.json`, `launch.json`, `settings.json`, and
 `extensions.json`: build, test, run one scenario, generate a report, full verification, and
 five debug configurations — including **attach to the running game**, which is the one that
-matters when the developer has left `drifty.exe` open.
+matters when the developer has left `build/dev/drifty.exe` open.
 
 `.clang-format` encodes the style the codebase already uses. Read the adoption note at the
 top of it before running `mk format` over the tree: the CI check starts advisory on purpose.
@@ -223,7 +223,7 @@ DRIFTY_ZONE_END(physics);
 ```
 
 - **default** — the macros compile to nothing.
-- **`-DDRIFTY_PROFILE`** — the built-in accumulating timers in `src/profile.c`; a table of
+- **`-DDRIFTY_PROFILE`** — the built-in accumulating timers in `src/game/profile.c`; a table of
   calls, total, mean, and worst is printed at shutdown. No dependency at all.
 - **`-DDRIFTY_TRACY`** — the same call sites forwarded to Tracy. Vendor the distribution into
   `third_party/tracy/` (so that `third_party/tracy/public/TracyClient.cpp` exists) and
@@ -242,7 +242,7 @@ mk screenshots     # artifacts/screenshots/*.png
 mk visual-test     # RMSE comparison against tests/visual/baseline/
 ```
 
-`drifty.exe --capture-scene NAME` does not run the normal frame loop: it steps the simulation
+`build/dev/drifty.exe --capture-scene NAME` does not run the normal frame loop: it steps the simulation
 with an exact fixed dt, draws one frame at interpolation alpha 0, writes a PNG, and exits.
 raygui controls are locked during a capture so the image does not depend on where the mouse
 happens to be. The four scenes are `debug_overlay`, `tire_curves`, `drift_hud`, and
@@ -255,17 +255,17 @@ This gate is local rather than CI — see `tests/visual/README.md` for why.
 ## 9. The vehicle corpus and gallery
 
 Appearance is derived from physics parameters alone — see
-[CAR_VISUAL.md](CAR_VISUAL.md) for the grammar and [CORPUS.md](CORPUS.md) for the fleet.
+[CAR_VISUAL.md](CAR_VISUAL.md) for the grammar and [CORPUS.md](generated/CORPUS.md) for the fleet.
 
-The headless path needs no GPU, no window, and no `drifty.exe`, so it works on any machine
+The headless path needs no GPU, no window, and no `build/dev/drifty.exe`, so it works on any machine
 and in CI:
 
 ```bash
-./drifty_tests.exe --scenario car-visual                 # grammar gates
-./drifty_tests.exe --scenario corpus                     # fleet gates
-./drifty_tests.exe --dump-corpus-sheet artifacts/gallery # contact sheet + index.html
-./drifty_tests.exe --dump-corpus-index docs/CORPUS.md    # the corpus table
-./drifty_tests.exe --generate-corpus tuning/corpus       # export the fleet as tuning profiles
+./build/tests/drifty_tests.exe --scenario car-visual                 # grammar gates
+./build/tests/drifty_tests.exe --scenario corpus                     # fleet gates
+./build/tests/drifty_tests.exe --dump-corpus-sheet artifacts/gallery # contact sheet + index.html
+./build/tests/drifty_tests.exe --dump-corpus-index docs/generated/CORPUS.md    # the corpus table
+./build/tests/drifty_tests.exe --generate-corpus data/vehicles/corpus       # export the fleet as tuning profiles
 ```
 
 `artifacts/gallery/index.html` is the primary human acceptance check for the appearance
@@ -276,7 +276,7 @@ The in-game path renders the same fleet through the production texture path:
 
 ```bash
 mk gallery                    # all pages -> artifacts/gallery-ingame/page_N.png
-drifty.exe --gallery-page 3   # one page; bounded and self-exiting, like every capture here
+build/dev/drifty.exe --gallery-page 3   # one page; bounded and self-exiting, like every capture here
 ```
 
 The gallery is a human-review artifact and deliberately **not** a GPU regression baseline: a
