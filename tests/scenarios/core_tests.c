@@ -808,6 +808,40 @@ static void scenario_replay_bundle_seed_reproduction(void)
     free(game);
 }
 
+/*
+ * scenario_multi_failure_bundle_capture — asserts that a scenario failing several checks in
+ * one run has all of them recorded, not just the first, once failure_bundle_write() is
+ * extended to accept multiple failing checks.
+ *
+ * Inherited from PLAN_TESTING_OVERHAUL.md Track A2 (not a fresh arXiv finding this round):
+ * "the current `--no-bundle` path loses artifact coverage... a scenario that fails 3 checks
+ * in one run drops a bundle whose summary.json lists all 3, not 1." Confirmed still true by
+ * reading the current FailureBundle struct (dev/failure_bundle.h): `failureText` is a single
+ * `const char *` and `checksFailed` is a bare count, so today's bundle can name the first
+ * failing check and count the rest, but cannot name them.
+ *
+ * TODO(scenario-scaffold): this scenario cannot be implemented against the current
+ * FailureBundle struct as-is -- the implementer must first extend `failureText` (or add a
+ * new field) to hold multiple failing-check messages, and thread that through
+ * failure_bundle_write() and the runner's `--no-bundle` capture path in test_main.c. Only
+ * then can this scenario deliberately trigger 3 distinct failing checks in one scripted run,
+ * capture the resulting bundle, and assert its summary.json (or equivalent) names all 3, not
+ * just the first. Do not assume a `--replay-bundle <dir>`-style loader already exists either
+ * (see scenario_replay_bundle_seed_reproduction's TODO, Track F2) -- check test_main.c's
+ * current `--help` output before citing a flag as already wired.
+ */
+static void scenario_multi_failure_bundle_capture(void)
+{
+    Game *game = alloc_game();
+    game_init(game);
+
+    check(vehicle_spec_is_valid(&game->spec),
+          "spec is valid before multi-failure-bundle-capture scaffold runs");
+    /* TODO(scenario-scaffold): replace once FailureBundle supports multiple failing checks. */
+
+    free(game);
+}
+
 static const TestScenario kCoreScenarios[] = {
     { "math", "clampf, lerpf, smooth_to, wrap_angle, smoothstep, lerp_angle", scenario_math },
     { "units", "world<->render conversion and the heading sign convention", scenario_units },
@@ -824,6 +858,9 @@ static const TestScenario kCoreScenarios[] = {
     { "replay-bundle-seed-reproduction",
       "SCAFFOLD (TODO): reload a failure bundle and reproduce its failing checksum",
       scenario_replay_bundle_seed_reproduction },
+    { "multi-failure-bundle-capture",
+      "SCAFFOLD (TODO): capture all failing checks in one run, not just the first",
+      scenario_multi_failure_bundle_capture },
 };
 
 TestScenarioGroup test_core_scenarios(void)

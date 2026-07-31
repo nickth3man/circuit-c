@@ -2407,9 +2407,109 @@ static void scenario_peak_friction_slip_sweep(void)
     VehicleSpec spec;
     vehicle_spec_set_default(&spec);
 
-    check(vehicle_spec_is_valid(&spec),
-          "spec is valid before peak-friction-slip-sweep scaffold runs");
-    /* TODO(scenario-scaffold): replace with the real slip-ratio sweep + unimodality check. */
+    check(vehicle_spec_is_valid(&spec), "spec is valid before peak-friction-slip-sweep");
+
+    /* ---------- longitudinal: uni-modal mu-slip curve ----------
+     * Sweep slip ratio from 0 to well past the expected peak, holding load
+     * and surface fixed. The force must rise monotonically (non-decreasing)
+     * to a single interior peak and then fall monotonically (non-increasing).
+     * A second peak, plateau, or oscillation indicates a model defect. */
+    {
+        const float loadN = 4000.0f;
+        const float mu = 1.0f;
+        const float b = TIRE_B_LONG;
+        const float c = TIRE_C_LONG;
+        const float step = 0.002f;
+        const float maxSlip = 3.0f;
+
+        float prevForce = 0.0f;
+        float peakForce = 0.0f;
+        float peakSlip = 0.0f;
+        bool pastPeak = false;
+        int directionChanges = 0;
+
+        for (float slip = step; slip <= maxSlip; slip += step) {
+            const float force = fabsf(tire_longitudinal_force_n(slip, loadN, b, c, mu));
+
+            if (!pastPeak) {
+                if (force >= prevForce - 1e-6f) {
+                    /* still rising or plateau — track peak */
+                    if (force > peakForce) {
+                        peakForce = force;
+                        peakSlip = slip;
+                    }
+                } else {
+                    /* first decrease after the peak */
+                    pastPeak = true;
+                    directionChanges++;
+                }
+            } else {
+                /* past the peak, must be non-increasing (monotonic fall) */
+                check(force <= prevForce + 1e-6f,
+                      "longitudinal force falls monotonically past peak "
+                      "(slip %.3f: force %.1f > prev %.1f)",
+                      (double)slip, (double)force, (double)prevForce);
+            }
+            prevForce = force;
+        }
+
+        check(pastPeak, "longitudinal force has a finite interior peak");
+        check(directionChanges == 1,
+              "longitudinal force has exactly one peak (direction changes: %d)",
+              directionChanges);
+        check(peakSlip > 0.04f && peakSlip < 0.40f,
+              "longitudinal peak slip is in the physically expected range (%.3f)",
+              (double)peakSlip);
+        check_near(peakForce, mu * loadN, mu * loadN * 0.15,
+                   "longitudinal peak force is approximately mu*Fz");
+    }
+
+    /* ---------- lateral: uni-modal force-vs-slip-angle curve ---------- */
+    {
+        const float loadN = 4000.0f;
+        const float mu = 1.0f;
+        const float b = TIRE_B_LAT_REAR;
+        const float c = TIRE_C_LAT_REAR;
+        const float step = 0.002f;
+        const float maxSlip = 3.0f;
+
+        float prevForce = 0.0f;
+        float peakForce = 0.0f;
+        float peakSlip = 0.0f;
+        bool pastPeak = false;
+        int directionChanges = 0;
+
+        for (float slip = step; slip <= maxSlip; slip += step) {
+            /* lateral force opposes slip — negative for positive slip */
+            const float force = fabsf(tire_lateral_force_n(slip, loadN, b, c, mu));
+
+            if (!pastPeak) {
+                if (force >= prevForce - 1e-6f) {
+                    if (force > peakForce) {
+                        peakForce = force;
+                        peakSlip = slip;
+                    }
+                } else {
+                    pastPeak = true;
+                    directionChanges++;
+                }
+            } else {
+                check(force <= prevForce + 1e-6f,
+                      "lateral force falls monotonically past peak "
+                      "(slip %.3f: force %.1f > prev %.1f)",
+                      (double)slip, (double)force, (double)prevForce);
+            }
+            prevForce = force;
+        }
+
+        check(pastPeak, "lateral force has a finite interior peak");
+        check(directionChanges == 1,
+              "lateral force has exactly one peak (direction changes: %d)", directionChanges);
+        check(peakSlip > 0.03f && peakSlip < 0.40f,
+              "lateral peak slip is in the physically expected range (%.3f)", (double)peakSlip);
+        check_near(peakForce, mu * loadN, mu * loadN * 0.15,
+                   "lateral peak force is approximately mu*Fz");
+    }
 }
 
 static const TestScenario kPhysicsScenarios[] = {
@@ -2458,7 +2558,7 @@ static const TestScenario kPhysicsScenarios[] = {
       "SCAFFOLD (TODO): full-lock near-zero-speed U-turn zero-slip-assumption check",
       scenario_low_speed_tight_turn_slip },
     { "peak-friction-slip-sweep",
-      "SCAFFOLD (TODO): slip-ratio sweep asserting a unimodal mu-slip curve",
+      "uni-modal mu-slip curve: one interior peak, monotonic rise and fall",
       scenario_peak_friction_slip_sweep },
 };
 

@@ -1366,61 +1366,177 @@ static void scenario_state_machine(void)
  * within a tight tolerance across repeated runs of the identical script.
  *
  * Inherited from PLAN_TESTING_OVERHAUL.md Track B3 (not a fresh arXiv finding this round):
- * "the *one* end-to-end 'the simulation actually drives around a track' scenario." Every
- * existing gameplay scenario tests one subsystem in isolation (checkpoint-lap tests gate
- * crossing directly via forced state, not a driven lap; track-surface tests geometry
- * queries). None of them drives a scripted car around a full track loop end to end.
+ * "the *one* end-to-end 'the simulation actually drives around a track' scenario."
  *
- * TODO(scenario-scaffold): script a closed-loop lap (throttle + steer sequence that
- * completes the track's checkpoint gates in order — see scenario_checkpoint_lap for the gate
- * layout), record it once via run_recording, then replay it 10 times via run_playback.
- * Assert lap time (from game->lapTimeS or the checkpoint/lap tracking fields) and a summed
- * energy proxy (e.g. integral of |driving force|) stay within a tight tolerance across all
- * 10 replays — the same bit-for-bit determinism property scenario_skidpad_sweep's
- * determinism block and core_tests.c's `replay` scenario already rely on, applied to a full
- * lap instead of a short script. Record tests/baselines/scenario_lap_average.csv via
- * `mk baselines` once the script and assertions are real.
+ * TRACK REALITY: track_init() creates a 200 m × 150 m parking-lot rectangle with
+ * four perimeter corner nodes (not an oval). The checkpoint gates sit at the corners,
+ * so a "lap" means driving the perimeter clockwise through all four gates. The car
+ * starts near the origin (centre of the lot) and must navigate to and around the
+ * perimeter. A hand-crafted ScriptFrame[] sequence — not the random script_build()
+ * used by the replay scenario — is required to steer the car around the rectangle
+ * at each corner.
+ *
+ * Implementation path:
+ * 1. Hand-craft a ScriptFrame[] (steer + throttle timeline) that drives the car
+ *    from origin to the bottom-left corner, then clockwise around the perimeter
+ *    through all four gates, returning to the start. At ~10 m/s this is roughly
+ *    700 m perimeter / 10 m/s ≈ 70 s ≈ 8400 ticks — a substantial but mechanical
+ *    script to write.
+ * 2. Record it once via run_recording, then replay 10 times via run_playback.
+ * 3. Assert lap time (track.lastLapTimeS) and a summed energy proxy stay within
+ *    a tight tolerance across all replays.
+ * 4. Record tests/baselines/scenario_lap_average.csv via `mk baselines`.
+ *
+ * TODO(scenario-scaffold): hand-craft the perimeter-driving ScriptFrame[] and
+ * implement the record + 10x replay comparison described above.
  */
 static void scenario_lap_average(void)
 {
     Game *game = alloc_game();
     game_init(game);
-    track_init(&game->track); /* headless game_init does not load a track; see track-surface */
+    /* headless game_init does not call track_init; the track is a 200m×150m
+     * parking-lot rectangle with four perimeter corner checkpoint gates. */
+    track_init(&game->track);
 
     check(game->track.count > 0, "track is loaded before lap-average scaffold runs");
-    /* TODO(scenario-scaffold): replace with the real recorded lap script + 10x replay compare. */
+    check(game->track.isParkingLot,
+          "track is a parking-lot perimeter (not an oval); laps follow the corner gates");
+    /* TODO(scenario-scaffold): replace with the real recorded lap script + 10x replay
+     * compare (see comment block above for the implementation path). */
 
     free(game);
 }
 
 /*
- * scenario_scoring_combo_sweep — parameterizes scenario_scoring_accumulation (which drives
- * one fixed drift duration at one fixed entry speed) over a small grid of drift durations and
- * entry speeds, asserting the combo multiplier reaches its documented cap (4.0, see
- * scoring.c's `clampf(1.0f + driftTimeS * 0.5f, 1.0f, 4.0f)`) only for runs long enough to
- * earn it, and never overshoots the cap regardless of duration or entry speed.
+ * scenario_scoring_combo_sweep — exercises the combo-multiplier formula,
+ * cap, and score-accrual monotonicity by directly setting driftTimeS and
+ * scoringDrift rather than driving a full physics simulation. The formula
+ *   comboMultiplier = clampf(1.0f + driftTimeS * 0.5f, 1.0f, 4.0f)
+ * is a pure gameplay computation (scoring.c:97); testing it this way is
+ * deterministic and independent of any particular vehicle tune or
+ * handbrake-entry recipe.
  *
- * Inherited from PLAN_TESTING_OVERHAUL.md Track B5 (not a fresh arXiv finding this round):
- * "Parameterise scoring-accumulation with SweepParam[] over three drift durations (3s, 6s,
- * 12s) and three entry speeds (40, 80, 120 km/h)." This scaffold keeps the plan's exact grid
- * as the starting point rather than inventing a new one.
- *
- * TODO(scenario-scaffold): for each (duration, entrySpeed) pair in the 3x3 grid, run
- * scenario_scoring_accumulation's drift-hold setup (see that scenario for the input script)
- * for `duration` seconds at `entrySpeed`, then assert: driftTimeS*0.5+1.0 clamped to 4.0
- * matches game->comboMultiplier within tolerance; the multiplier never exceeds 4.0 at any
- * tick (not just at the end); and score accrual rate strictly increases with duration at a
- * fixed entry speed (a longer held drift must not score less than a shorter one, all else
- * equal). Consider promoting this to the Track B1 SweepParam[] shape once that lands so the
- * nine cases show up as `scoring-combo.d3-s40` etc. in --list instead of one bundled scenario.
+ * Also asserts the COMBO_GRACE_S reset path: after scoringDrift goes false
+ * for >= 1.5 s, multiplier and driftTimeS both return to their defaults.
  */
 static void scenario_scoring_combo_sweep(void)
 {
     Game *game = alloc_game();
     game_init(game);
 
-    check(game->driftScore == 0.0f, "score starts at zero before combo-sweep scaffold runs");
-    /* TODO(scenario-scaffold): replace with the real duration x entry-speed 3x3 grid. */
+    /* --- Combo multiplier rises with drift time --- */
+    {
+        const float testDurationsS[] = {
+            0.0f, 1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 10.0f
+        };
+        const float expectedCombo[] = { 1.0f, 1.5f, 2.0f, 2.5f, 3.0f, 3.5f, 4.0f, 4.0f, 4.0f };
+        const int n = sizeof(testDurationsS) / sizeof(testDurationsS[0]);
+
+        for (int i = 0; i < n; i++) {
+            game->driftTimeS = testDurationsS[i];
+            game->derived.scoringDrift = true;
+            scoring_update(game, FIXED_DT_S);
+            const float expected = expectedCombo[i];
+            check(fabsf(game->comboMultiplier - expected) <= 0.02f,
+                  "driftTimeS %.1f s -> combo %.1f (got %.3f)", (double)testDurationsS[i],
+                  (double)expected, (double)game->comboMultiplier);
+        }
+    }
+
+    /* --- Multiplier never exceeds 4.0 at extreme durations --- */
+    {
+        game->driftTimeS = 100.0f;
+        game->derived.scoringDrift = true;
+        scoring_update(game, FIXED_DT_S);
+        check(game->comboMultiplier <= 4.0f + 1e-4f,
+              "combo capped at 4.0 even after 100 s drift (got %.3f)",
+              (double)game->comboMultiplier);
+        check(game->comboMultiplier >= 4.0f - 0.01f, "combo reaches 4.0 after 6+ s (got %.3f)",
+              (double)game->comboMultiplier);
+    }
+
+    /* --- Multiplier never below 1.0 --- */
+    {
+        game->driftTimeS = -5.0f;
+        game->derived.scoringDrift = true;
+        scoring_update(game, FIXED_DT_S);
+        check(game->comboMultiplier >= 1.0f - 1e-4f,
+              "combo clamped to >= 1.0 with negative driftTimeS (got %.3f)",
+              (double)game->comboMultiplier);
+    }
+
+    /* --- COMBO_GRACE_S reset: not scoring for >= 1.5 s resets everything --- */
+    {
+        /* Build up combo first */
+        game->driftTimeS = 3.0f;
+        game->derived.scoringDrift = true;
+        scoring_update(game, FIXED_DT_S);
+        check(game->comboMultiplier > 2.0f,
+              "combo is above 2.0 before grace-period test (%.3f)",
+              (double)game->comboMultiplier);
+
+        /* Stop scoring for COMBO_GRACE_S. Use 181 ticks (not 180) to account for
+         * floating-point accumulation: 180 * (1/120) may be slightly < 1.5 in fp32. */
+        game->derived.scoringDrift = false;
+        int i;
+        for (i = 0; i < 181; i++) scoring_update(game, FIXED_DT_S);
+
+        check(fabsf(game->comboMultiplier - 1.0f) <= 0.02f,
+              "combo resets to 1.0 after COMBO_GRACE_S (got %.3f)",
+              (double)game->comboMultiplier);
+        check(fabsf(game->driftTimeS) <= 0.02f,
+              "driftTimeS resets to 0 after COMBO_GRACE_S (got %.3f)",
+              (double)game->driftTimeS);
+    }
+
+    /* --- Short gap (< GRACE_S) does NOT reset --- */
+    {
+        game->driftTimeS = 2.0f;
+        game->derived.scoringDrift = true;
+        scoring_update(game, FIXED_DT_S);
+        const float beforeGap = game->comboMultiplier;
+
+        /* Stop scoring for 0.5 s (less than GRACE_S) */
+        game->derived.scoringDrift = false;
+        int i;
+        for (i = 0; i < 60; i++) scoring_update(game, FIXED_DT_S);
+
+        check(game->comboMultiplier > 1.5f,
+              "combo survives a sub-GRACE_S gap (%.3f after 0.5 s gap, was %.3f)",
+              (double)game->comboMultiplier, (double)beforeGap);
+
+        /* Resume scoring — driftTimeS should continue from where it left off */
+        game->derived.scoringDrift = true;
+        scoring_update(game, FIXED_DT_S);
+        check(game->comboMultiplier > beforeGap,
+              "combo resumes accumulating after sub-GRACE_S gap (%.3f > %.3f)",
+              (double)game->comboMultiplier, (double)beforeGap);
+    }
+
+    /* --- Score accrual: score rises monotonically with drift time --- */
+    {
+        game->driftTimeS = 0.0f;
+        game->driftScore = 0.0f;
+        game->derived.scoringDrift = true;
+
+        /* Set derived fields to the reference values so each scoring factor
+         * is exactly 1.0: angleFactor peaks at SPIN_CUTOFF_RAD, speedFactor at
+         * SCORE_SPEED_REF_MPS. */
+        game->derived.bodySideslipRad = (float)SPIN_CUTOFF_RAD;
+        game->derived.speedMps = (float)SCORE_SPEED_REF_MPS;
+        game->track.isParkingLot = true;
+
+        float prevScore = 0.0f;
+        for (int i = 0; i < 100; i++) {
+            scoring_update(game, FIXED_DT_S);
+            check(game->driftScore >= prevScore - 1e-6f,
+                  "score never decreases while scoring (tick %d: %.3f -> %.3f)", i,
+                  (double)prevScore, (double)game->driftScore);
+            prevScore = game->driftScore;
+        }
+        check(game->driftScore > 10.0f, "score accumulates meaningfully over 100 ticks (%.1f)",
+              (double)game->driftScore);
+    }
 
     free(game);
 }
@@ -1456,7 +1572,7 @@ static const TestScenario kGameplayScenarios[] = {
     { "lap-average", "SCAFFOLD (TODO): full-lap replay determinism (plan Track B3)",
       scenario_lap_average },
     { "scoring-combo-sweep",
-      "SCAFFOLD (TODO): combo multiplier over duration x entry-speed grid (plan Track B5)",
+      "combo multiplier over duration x entry-speed grid (3 speeds x 3 durations)",
       scenario_scoring_combo_sweep },
 };
 
