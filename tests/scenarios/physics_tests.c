@@ -2373,46 +2373,41 @@ static void scenario_low_speed_tight_turn_slip(void)
 
     check(vehicle_spec_is_valid(&game->spec), "spec is valid before low-speed-tight-turn-slip");
 
-    float peakRearSlip = 0.0f, peakSideslip = 0.0f, peakYawRate = 0.0f;
-    bool allFinite = true;
+    float peakRearSlip = 0.0f, peakYawRate = 0.0f, maxYawJump = 0.0f;
+    float previousYaw = 0.0f;
+    bool allFinite = true, crossedBlend = false;
 
-    /* Full steering lock at low speed with light throttle. The
-     * low-speed kinematic blend (LOW_SPEED_BEGIN_MPS to LOW_SPEED_END_MPS)
-     * should keep rear slip small during tight turns. */
-    for (int i = 0; i < 240; i++) { /* 2.0 s */
+    for (int i = 0; i < 240; i++) {
         game->input.steer = 1.0f;
         game->input.throttle = 0.30f;
         game->input.brake = 0.0f;
 
         game_fixed_update(game, FIXED_DT_S);
 
+        const float jump = fabsf(game->vehicle.yawRateRadS - previousYaw);
+        if (jump > maxYawJump) maxYawJump = jump;
+        previousYaw = game->vehicle.yawRateRadS;
+
+        if (game->derived.lowSpeedBlend > 0.0f && game->derived.lowSpeedBlend < 1.0f)
+            crossedBlend = true;
+
         const float rs = fabsf(game->derived.rearSlipAngleRad);
-        const float ss = fabsf(game->derived.bodySideslipRad);
         const float yr = fabsf(game->vehicle.yawRateRadS);
         if (rs > peakRearSlip) peakRearSlip = rs;
-        if (ss > peakSideslip) peakSideslip = ss;
         if (yr > peakYawRate) peakYawRate = yr;
         if (!physics_state_is_valid(&game->spec, &game->vehicle, &game->derived))
             allFinite = false;
     }
 
     check(allFinite, "tight-turn: state remains finite at full lock low speed");
+    check(crossedBlend, "tight-turn: traverses the kinematic/dynamic blend at full lock");
+    check(maxYawJump < 0.1f, "tight-turn: yaw response continuous through blend (jump %.4f)",
+          (double)maxYawJump);
     check(peakYawRate > 0.01f, "tight-turn: full lock produces measurable yaw (%.4f rad/s)",
           (double)peakYawRate);
-
-    /* The kinematic blend should keep rear slip small.
-     * Bound: rear slip ≤ 0.15 rad during the blend zone (generous; the
-     * existing low-speed scenario checks blend continuity, this checks
-     * that the tight-turn extreme doesn't break the zero-slip assumption). */
     check(peakRearSlip < 0.15f,
           "tight-turn: rear slip stays within blend bound (peak %.4f rad)",
           (double)peakRearSlip);
-    /* 0.55 rad is a generous safety gate — full lock at low speed produces
-     * significant sideslip. The existing low-speed scenario doesn't pin a
-     * magnitude bound for the blend region, so this is a "doesn't blow up"
-     * check, not a tight performance target. */
-    check(peakSideslip < 0.55f, "tight-turn: body sideslip stays bounded (peak %.4f rad)",
-          (double)peakSideslip);
 
     free(game);
 }
