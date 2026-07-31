@@ -1589,6 +1589,162 @@ static void scenario_steer_speed_feel(void)
     free(game);
 }
 
+/*
+ * scenario_lane_change — ISO 3888-1 projected double lane-change (Track B2 of
+ * PLAN_TESTING_OVERHAUL.md; closes gap G6, "no standardized maneuvers").
+ *
+ * Reference: ISO 3888-1 double lane-change; steer-only projection per the plan's resolved
+ * default (§6.4): no body_y input, lateral excursion is the *result* of steer + speed +
+ * wheelbase, not an input. Scenario-based standardized maneuvers are also the load-bearing
+ * idea in "Ad Hoc HLA Simulation Model Derived From a Model-Based Traffic Scenario"
+ * (Reiher & Hahn, arXiv:2208.06234) — a scenario is a declared parameter set replayed
+ * deterministically, not a bespoke one-off script.
+ *
+ * TODO(scenario-scaffold): drive step-steer to +0.1 rad, hold 0.5 s, return to 0, then
+ * mirror to -0.1 rad (see ScriptFrame in scenario_shared.h for the input timeline shape).
+ * Assert: peak sideslip angle and peak yaw rate stay under an analytical envelope derived
+ * from steer input + speed + wheelbase (config.h wheelbase constants); no cone-equivalent
+ * "gate" is crossed early/late relative to the commanded path. Record a new baseline via
+ * `mk baselines` once the assertions are real; do not leave this scaffold registered as a
+ * passing gate in CI once other scenarios depend on lane-change stability.
+ */
+static void scenario_lane_change(void)
+{
+    Game *game = alloc_game();
+    game_init(game);
+    set_vehicle_rolling_speed(game, 20.0f);
+
+    check(vehicle_spec_is_valid(&game->spec), "spec is valid before lane-change scaffold runs");
+    /* TODO(scenario-scaffold): replace with the real ISO 3888-1 timeline and envelope checks. */
+
+    free(game);
+}
+
+/*
+ * scenario_fishhook — NHTSA fishhook rollover-propensity maneuver, projected to 2D
+ * (Track B2 of PLAN_TESTING_OVERHAUL.md; closes gap G6).
+ *
+ * Reference: NHTSA "Light Vehicle Dynamic Rollover Propensity" Phases IV-VI (fishhook).
+ * Drifty is top-down 2D so rollover itself is out of scope; the useful projection is the
+ * yaw-rate/sideslip transient the maneuver provokes: ramp-steer to +0.2 rad over 0.3 s, hold
+ * 0.5 s, then return and mirror to the opposite lock. This is the same class of "ramp then
+ * release" input that the lift-off and transition scenarios already probe, but at a larger
+ * amplitude and asymmetric timing.
+ *
+ * TODO(scenario-scaffold): build the ramp/hold/return/mirror ScriptFrame timeline; assert
+ * peak yaw rate and peak sideslip stay within the same handling-limit envelope referenced by
+ * scenario_lane_change, and that the vehicle recovers to near-zero sideslip within a bounded
+ * number of ticks after the second lock releases (no sustained spin).
+ */
+static void scenario_fishhook(void)
+{
+    Game *game = alloc_game();
+    game_init(game);
+    set_vehicle_rolling_speed(game, 20.0f);
+
+    check(vehicle_spec_is_valid(&game->spec), "spec is valid before fishhook scaffold runs");
+    /* TODO(scenario-scaffold): replace with the real ramp/hold/return/mirror timeline. */
+
+    free(game);
+}
+
+/*
+ * scenario_brake_turn_sweep — braking-in-a-turn at multiple radii and brake pressures
+ * (Track B2 of PLAN_TESTING_OVERHAUL.md; extends the existing brake-corner scenario with a
+ * sweep instead of one hard-coded case).
+ *
+ * Reference: Persson, "Rubber friction and tire dynamics" (arXiv:1007.2713) — the combined
+ * braking+cornering mu-slip curve is the physical quantity being exercised here; a single
+ * radius/pressure sample (the existing brake-corner scenario) cannot show whether the
+ * combined-slip friction ellipse holds across the operating range, only at one point on it.
+ *
+ * TODO(scenario-scaffold): reuse set_vehicle_rolling_speed to enter a steady corner at three
+ * radii, then apply brake pressure at three levels per radius (nine combinations). Assert
+ * combined longitudinal+lateral force stays within the friction-circle bound (see
+ * check_run_invariants' friction-budget check in test_harness.c) at every sample, and that
+ * higher brake pressure at a given radius monotonically reduces achievable lateral
+ * acceleration. Consider promoting this to the Track B1 SweepParam[] shape once that lands.
+ */
+static void scenario_brake_turn_sweep(void)
+{
+    Game *game = alloc_game();
+    game_init(game);
+    set_vehicle_rolling_speed(game, 16.0f);
+
+    check(vehicle_spec_is_valid(&game->spec),
+          "spec is valid before brake-turn-sweep scaffold runs");
+    /* TODO(scenario-scaffold): replace with the real radius x brake-pressure sweep. */
+
+    free(game);
+}
+
+/*
+ * scenario_constant_radius_drift — steady-state circular drift with a fixed center, held
+ * indefinitely at constant sideslip and yaw rate.
+ *
+ * Reference: Yang, Lu, Yang & Mo, "A Hierarchical Control Framework for Drift Maneuvering of
+ * Autonomous Vehicles" (arXiv:2109.06730) — constant-radius drift with a fixed center is
+ * used there as the canonical drift-control benchmark ("common training task for drift
+ * enthusiasts"). Drifty is a *drift* simulator and currently has no scenario that grades
+ * "can the model sustain a steady drift", only entry (catchable-drift) and cornering
+ * (skidpad) at non-saturated slip.
+ *
+ * TODO(scenario-scaffold): script throttle + opposite-lock steer to establish and hold a
+ * drift (large negative/positive sideslip with matching countersteer) for several seconds at
+ * a fixed commanded radius. Assert the trajectory center stays within a tolerance band (the
+ * "fixed center" property from the reference), sideslip angle and yaw rate reach a steady
+ * value (derivative near zero) rather than diverging or decaying back to grip, and
+ * stateChecksum determinism holds across a repeat run (same pattern as scenario_skidpad's
+ * determinism block).
+ */
+static void scenario_constant_radius_drift(void)
+{
+    Game *game = alloc_game();
+    game_init(game);
+    set_vehicle_rolling_speed(game, 15.0f);
+
+    check(vehicle_spec_is_valid(&game->spec),
+          "spec is valid before constant-radius-drift scaffold runs");
+    /* TODO(scenario-scaffold): replace with the real throttle+countersteer drift-hold timeline. */
+
+    free(game);
+}
+
+/*
+ * scenario_drift_recovery_envelope — asserts the vehicle state stays inside (or, when pushed
+ * past it, exits and is later brought back inside) the phase-plane recoverable region.
+ *
+ * Reference: Dallas, Talbot, Suminaka, Thompson, Lew, Orosz & Subosits, "Control Barrier
+ * Functions for Shared Control and Vehicle Safety" (arXiv:2503.19994) defines the "maximal
+ * phase recoverable ellipse" in the sideslip-angle/yaw-rate phase plane as the boundary of
+ * states from which the vehicle can still be brought back to controlled driving. Gan, Song,
+ * Yang et al., "Dual-Envelope Constrained Nonlinear MPC for ... Drifting" (arXiv:2604.07342)
+ * extends this to a *dual* envelope: an outer recoverable set and an inner non-drifting
+ * stability region, both reshaped by steering and yaw-moment coupling. No existing Drifty
+ * scenario has a phase-plane oracle; check_run_invariants checks scalar bounds (friction
+ * budget, max speed) but never the joint (sideslip, yaw rate) state.
+ *
+ * TODO(scenario-scaffold): compute or approximate the recoverable-set boundary for the
+ * current spec (start from a simple ellipse fit against known-recoverable catchable-drift
+ * samples if a closed-form saddle-point model is out of scope). Drive a script that pushes
+ * the vehicle toward the boundary from both sides — once within the recoverable set (must
+ * return to near-zero sideslip under countersteer) and once past it (spin-out is the expected,
+ * accepted outcome, not a failure) — and assert the model's behavior matches which side of
+ * the envelope the state was on when the corrective input was applied.
+ */
+static void scenario_drift_recovery_envelope(void)
+{
+    Game *game = alloc_game();
+    game_init(game);
+    set_vehicle_rolling_speed(game, 15.0f);
+
+    check(vehicle_spec_is_valid(&game->spec),
+          "spec is valid before drift-recovery-envelope scaffold runs");
+    /* TODO(scenario-scaffold): replace with the real phase-plane envelope push/recover timeline. */
+
+    free(game);
+}
+
 static const TestScenario kHandlingScenarios[] = {
     { "accel-load", "acceleration transfers load rearward; capacity follows",
       scenario_accel_load },
@@ -1624,6 +1780,17 @@ static const TestScenario kHandlingScenarios[] = {
       scenario_tire_relaxation },
     { "steer-speed-feel", "steering rate decreases with speed via feel layer",
       scenario_steer_speed_feel },
+    { "lane-change", "SCAFFOLD (TODO): ISO 3888-1 projected double lane-change",
+      scenario_lane_change },
+    { "fishhook", "SCAFFOLD (TODO): NHTSA fishhook rollover-propensity maneuver",
+      scenario_fishhook },
+    { "brake-turn-sweep", "SCAFFOLD (TODO): brake pressure x corner radius sweep",
+      scenario_brake_turn_sweep },
+    { "constant-radius-drift", "SCAFFOLD (TODO): steady-state fixed-center drift hold",
+      scenario_constant_radius_drift },
+    { "drift-recovery-envelope",
+      "SCAFFOLD (TODO): sideslip/yaw-rate recoverable phase-plane envelope",
+      scenario_drift_recovery_envelope },
 };
 
 TestScenarioGroup test_handling_scenarios(void)
