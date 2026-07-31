@@ -1359,6 +1359,72 @@ static void scenario_state_machine(void)
     free(game);
 }
 
+/*
+ * scenario_lap_average — drives a full track loop via the recorded ScriptFrame/replay path
+ * (see scenario_shared.h's run_recording/run_playback, already used by core_tests.c's
+ * `replay` scenario), completes several laps, and asserts per-lap time and total energy stay
+ * within a tight tolerance across repeated runs of the identical script.
+ *
+ * Inherited from PLAN_TESTING_OVERHAUL.md Track B3 (not a fresh arXiv finding this round):
+ * "the *one* end-to-end 'the simulation actually drives around a track' scenario." Every
+ * existing gameplay scenario tests one subsystem in isolation (checkpoint-lap tests gate
+ * crossing directly via forced state, not a driven lap; track-surface tests geometry
+ * queries). None of them drives a scripted car around a full track loop end to end.
+ *
+ * TODO(scenario-scaffold): script a closed-loop lap (throttle + steer sequence that
+ * completes the track's checkpoint gates in order — see scenario_checkpoint_lap for the gate
+ * layout), record it once via run_recording, then replay it 10 times via run_playback.
+ * Assert lap time (from game->lapTimeS or the checkpoint/lap tracking fields) and a summed
+ * energy proxy (e.g. integral of |driving force|) stay within a tight tolerance across all
+ * 10 replays — the same bit-for-bit determinism property scenario_skidpad_sweep's
+ * determinism block and core_tests.c's `replay` scenario already rely on, applied to a full
+ * lap instead of a short script. Record tests/baselines/scenario_lap_average.csv via
+ * `mk baselines` once the script and assertions are real.
+ */
+static void scenario_lap_average(void)
+{
+    Game *game = alloc_game();
+    game_init(game);
+    track_init(&game->track); /* headless game_init does not load a track; see track-surface */
+
+    check(game->track.count > 0, "track is loaded before lap-average scaffold runs");
+    /* TODO(scenario-scaffold): replace with the real recorded lap script + 10x replay compare. */
+
+    free(game);
+}
+
+/*
+ * scenario_scoring_combo_sweep — parameterizes scenario_scoring_accumulation (which drives
+ * one fixed drift duration at one fixed entry speed) over a small grid of drift durations and
+ * entry speeds, asserting the combo multiplier reaches its documented cap (4.0, see
+ * scoring.c's `clampf(1.0f + driftTimeS * 0.5f, 1.0f, 4.0f)`) only for runs long enough to
+ * earn it, and never overshoots the cap regardless of duration or entry speed.
+ *
+ * Inherited from PLAN_TESTING_OVERHAUL.md Track B5 (not a fresh arXiv finding this round):
+ * "Parameterise scoring-accumulation with SweepParam[] over three drift durations (3s, 6s,
+ * 12s) and three entry speeds (40, 80, 120 km/h)." This scaffold keeps the plan's exact grid
+ * as the starting point rather than inventing a new one.
+ *
+ * TODO(scenario-scaffold): for each (duration, entrySpeed) pair in the 3x3 grid, run
+ * scenario_scoring_accumulation's drift-hold setup (see that scenario for the input script)
+ * for `duration` seconds at `entrySpeed`, then assert: driftTimeS*0.5+1.0 clamped to 4.0
+ * matches game->comboMultiplier within tolerance; the multiplier never exceeds 4.0 at any
+ * tick (not just at the end); and score accrual rate strictly increases with duration at a
+ * fixed entry speed (a longer held drift must not score less than a shorter one, all else
+ * equal). Consider promoting this to the Track B1 SweepParam[] shape once that lands so the
+ * nine cases show up as `scoring-combo.d3-s40` etc. in --list instead of one bundled scenario.
+ */
+static void scenario_scoring_combo_sweep(void)
+{
+    Game *game = alloc_game();
+    game_init(game);
+
+    check(game->driftScore == 0.0f, "score starts at zero before combo-sweep scaffold runs");
+    /* TODO(scenario-scaffold): replace with the real duration x entry-speed 3x3 grid. */
+
+    free(game);
+}
+
 static const TestScenario kGameplayScenarios[] = {
     { "track-surface", "track geometry, init/free life-cycle, and per-point surface query",
       scenario_track_surface },
@@ -1387,6 +1453,11 @@ static const TestScenario kGameplayScenarios[] = {
       scenario_particle_pool },
     { "state-machine", "MENU/PLAYING/PAUSED/RESULTS transitions and scoring reset",
       scenario_state_machine },
+    { "lap-average", "SCAFFOLD (TODO): full-lap replay determinism (plan Track B3)",
+      scenario_lap_average },
+    { "scoring-combo-sweep",
+      "SCAFFOLD (TODO): combo multiplier over duration x entry-speed grid (plan Track B5)",
+      scenario_scoring_combo_sweep },
 };
 
 TestScenarioGroup test_gameplay_scenarios(void)

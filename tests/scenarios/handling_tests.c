@@ -1745,6 +1745,93 @@ static void scenario_drift_recovery_envelope(void)
     free(game);
 }
 
+/*
+ * scenario_understeer_gradient_sweep — measures the explicit understeer gradient
+ * K = d(front road-wheel angle needed) / d(lateral acceleration) across a speed sweep,
+ * rather than tabulating raw per-speed outputs the way scenario_skidpad_sweep does.
+ *
+ * NOT a duplicate of skidpad-sweep: skidpad-sweep holds *steer input* constant and reports
+ * yaw/ay/radius at four *speed targets* as a table with no derived slope or classification.
+ * This scenario instead holds *lateral acceleration* constant per sample (varying steer to
+ * reach it) and reports whether the required steer angle grows faster than the neutral-steer
+ * (Ackermann, low-speed) prediction — i.e. it computes and asserts on the single scalar
+ * gradient K, and classifies the car as understeer/neutral/oversteer, which no existing
+ * scenario does.
+ *
+ * Reference: Han, Park, Sankar, Nam & Choi, "Model Predictive Control Framework for
+ * Improving Vehicle Cornering Performance Using Handling Characteristics" (arXiv:1904.09302)
+ * — the controller's whole strategy is built on *monitoring* how far the vehicle is biased
+ * into understeer, which presupposes a scenario that can measure that bias number in the
+ * first place. Production vehicles are deliberately tuned understeer for safety; this
+ * scenario is the regression check that Drifty's default spec (and, longer term, the corpus)
+ * stays on the understeer side of neutral unless a spec is deliberately tuned otherwise.
+ *
+ * TODO(scenario-scaffold): at several steady lateral-accelerations (e.g. 2, 4, 6 m/s^2),
+ * find (via the existing skidpad steady-state technique) the steer input that holds each ay,
+ * record the resulting front road-wheel angle, and fit K = d(delta)/d(ay) minus the
+ * low-speed/Ackermann term. Assert K > 0 (understeer) for the default spec, and assert the
+ * sign/magnitude is monotonic across the sweep (no sign flip mid-range, which would indicate
+ * a numerical or model discontinuity rather than genuine progressive oversteer).
+ */
+static void scenario_understeer_gradient_sweep(void)
+{
+    Game *game = alloc_game();
+    game_init(game);
+    set_vehicle_rolling_speed(game, 12.0f);
+
+    check(vehicle_spec_is_valid(&game->spec),
+          "spec is valid before understeer-gradient-sweep scaffold runs");
+    /* TODO(scenario-scaffold): replace with the real ay-held-constant steer search + K fit. */
+
+    free(game);
+}
+
+/*
+ * scenario_yaw_stability_recovery_margin — measures, as a baseline oracle (no controller
+ * exists yet), how far yaw rate and sideslip diverge from their pre-transition values when
+ * road friction drops suddenly mid-corner (asphalt -> SURFACE_SNOW), and how many ticks the
+ * open-loop model takes to re-settle once the driver's steer/throttle inputs are held fixed.
+ *
+ * NOT a duplicate of lift-off: scenario_lift_off holds surface constant and changes
+ * *throttle* mid-corner to show the resulting load shift. This scenario holds throttle/steer
+ * constant and changes the *surface* mid-corner (asphalt -> snow, per SurfaceId in
+ * vehicle.h and SurfaceSpec in surface.h, following the per-wheel injection pattern already
+ * used by scenario_per_surface_asymmetry) to show the resulting friction-budget shock. The
+ * two scenarios probe different causal inputs (throttle vs. mu) even though both watch load
+ * and sideslip.
+ *
+ * Reference: Emirler & Guvenc, "Model Predictive Vehicle Yaw Stability Control via
+ * Integrated Active Front Wheel Steering and Individual Braking" (arXiv:2210.10225) —
+ * defines lateral stability as keeping yaw rate near a friction-aware reference and sideslip
+ * near zero; the controller in that paper needs exactly the "how far off, how fast does it
+ * grow, how long to recover" numbers this scenario is meant to produce. Drifty has no such
+ * controller (by design, arcade physics), so this scenario's role is to record the *current*
+ * open-loop margin as a committed baseline other scenarios and any future assist feature can
+ * be compared against, not to assert the vehicle self-corrects.
+ *
+ * TODO(scenario-scaffold): establish a steady corner on asphalt (reuse the
+ * scenario_lateral_load_transfer setup), then switch every wheel's surfaceId to
+ * SURFACE_SNOW mid-corner (track_free + explicit surfaceId assignment, as in
+ * scenario_per_surface_asymmetry) while holding steer/throttle fixed. Record peak
+ * sideslip/yaw-rate deviation from the pre-transition steady value and the tick count before
+ * both re-settle within a tolerance (or explicitly do not, if the model saturates and spins
+ * — that is an acceptable, asserted-on outcome, not a failure). This is a measurement
+ * scenario: the assertions are on determinism and boundedness (isfinite, no runaway), not on
+ * "the car stays in control."
+ */
+static void scenario_yaw_stability_recovery_margin(void)
+{
+    Game *game = alloc_game();
+    game_init(game);
+    set_vehicle_rolling_speed(game, 14.0f);
+
+    check(vehicle_spec_is_valid(&game->spec),
+          "spec is valid before yaw-stability-recovery-margin scaffold runs");
+    /* TODO(scenario-scaffold): replace with the real asphalt->snow mid-corner transition. */
+
+    free(game);
+}
+
 static const TestScenario kHandlingScenarios[] = {
     { "accel-load", "acceleration transfers load rearward; capacity follows",
       scenario_accel_load },
@@ -1791,6 +1878,12 @@ static const TestScenario kHandlingScenarios[] = {
     { "drift-recovery-envelope",
       "SCAFFOLD (TODO): sideslip/yaw-rate recoverable phase-plane envelope",
       scenario_drift_recovery_envelope },
+    { "understeer-gradient-sweep",
+      "SCAFFOLD (TODO): explicit understeer coefficient K across an ay sweep",
+      scenario_understeer_gradient_sweep },
+    { "yaw-stability-recovery-margin",
+      "SCAFFOLD (TODO): mid-corner asphalt->snow open-loop recovery baseline",
+      scenario_yaw_stability_recovery_margin },
 };
 
 TestScenarioGroup test_handling_scenarios(void)
