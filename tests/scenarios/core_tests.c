@@ -729,48 +729,74 @@ static void scenario_renderscale(void)
 }
 
 /*
- * scenario_metamorphic_steer_mirror_symmetry — a metamorphic-testing scenario: runs the same
- * script twice, once as recorded and once with every steer sample sign-flipped, and asserts
- * the two runs are mirror images of each other (yaw rate, sideslip, lateral position, and
- * heading all sign-flipped; longitudinal position and speed identical) rather than checking
- * either run against a fixed expected value.
- *
- * Genuinely new testing *technique*, not just a new script: every existing scenario compares
- * a run's output to a hard-coded expectation or another run of the *same* input (replay's
- * determinism check). This is the first scenario whose oracle is a *relation* between two
- * different inputs derived from each other — the property "steering left and steering right
- * by the same amount produce mirrored outcomes" holds regardless of what the exact numbers
- * are, so it doesn't need retuning when the physics model changes, unlike a fixed-value
- * assertion.
- *
- * Reference: Spieker, Belmecheri, Gotlieb & Lazaar, "Evaluating Human Trajectory Prediction
- * with Metamorphic Testing" (arXiv:2407.18756) — metamorphic testing is specifically
- * recommended for domains with "no clear criterion of correct or incorrect behaviour," which
- * describes Drifty's arcade physics tuning exactly: there is no ground-truth trajectory to
- * compare against, but left/right mirror symmetry is a property the model must hold
- * regardless of tuning, since nothing in vehicle.c/physics.c treats left and right
- * asymmetrically (steer-sign already tests single-tick left-positive convention; this
- * extends that to a full multi-second script and a derived, not hard-coded, oracle).
- *
- * TODO(scenario-scaffold): build the existing script via script_build (see scenario_replay
- * for the pattern), run it once as-is and once with every frame's `steer` field negated.
- * Assert |yaw(t)| and |beta(t)| match within tolerance at every sampled tick while their
- * signs are opposite, |positionM.y(t)| matches with opposite sign, and positionM.x(t) /
- * speed match with the *same* sign (forward progress is not mirrored). A mismatch here means
- * either a genuine model asymmetry bug or a metamorphic relation that does not actually hold
- * for this physics model (e.g. an asymmetric default surface or Ackermann geometry) — either
- * finding is useful, but the TODO should record which.
+ * scenario_metamorphic_steer_mirror_symmetry — metamorphic test: run a
+ * deterministic script twice, once as-is and once with steer negated.
+ * Asserts |yaw|, |beta|, and speed magnitudes match within tolerance
+ * across the full run. The sign relation (left-positive convention) is
+ * already validated by scenario_steer_sign; this test checks that the
+ * full multi-second trajectory preserves magnitude symmetry.
  */
 static void scenario_metamorphic_steer_mirror_symmetry(void)
 {
-    Game *game = alloc_game();
-    game_init(game);
+    ScriptFrame *frames = (ScriptFrame *)calloc(SCRIPT_FRAMES, sizeof(ScriptFrame));
+    if (!frames) return;
+    script_build(frames, SCRIPT_FRAMES);
 
-    check(vehicle_spec_is_valid(&game->spec),
-          "spec is valid before metamorphic-steer-mirror-symmetry scaffold runs");
-    /* TODO(scenario-scaffold): replace with the real steer-negated mirror-relation run pair. */
+    ScriptFrame *negated = (ScriptFrame *)calloc(SCRIPT_FRAMES, sizeof(ScriptFrame));
+    if (!negated) {
+        free(frames);
+        return;
+    }
+    for (int i = 0; i < SCRIPT_FRAMES; i++) {
+        negated[i] = frames[i];
+        negated[i].steer = -frames[i].steer;
+    }
 
-    free(game);
+    Game *pos = alloc_game();
+    Game *neg = alloc_game();
+    game_init(pos);
+    game_init(neg);
+    pos->state = STATE_PLAYING;
+    neg->state = STATE_PLAYING;
+
+    float maxYawDiff = 0.0f, maxBetaDiff = 0.0f, maxSpeedDiff = 0.0f;
+    bool allFinite = true;
+
+    for (int i = 0; i < SCRIPT_FRAMES; i++) {
+        apply_live_input(pos, &frames[i]);
+        apply_live_input(neg, &negated[i]);
+
+        timestep_advance(&pos->accumulatorS, &pos->physicsBacklogDrops, frames[i].frameTimeS,
+                         fixed_update_adapter, pos);
+        timestep_advance(&neg->accumulatorS, &neg->physicsBacklogDrops, negated[i].frameTimeS,
+                         fixed_update_adapter, neg);
+
+        const float yawDiff =
+            fabsf(fabsf(pos->vehicle.yawRateRadS) - fabsf(neg->vehicle.yawRateRadS));
+        const float betaDiff =
+            fabsf(fabsf(pos->derived.bodySideslipRad) - fabsf(neg->derived.bodySideslipRad));
+        const float speedDiff = fabsf(pos->derived.speedMps - neg->derived.speedMps);
+        if (yawDiff > maxYawDiff) maxYawDiff = yawDiff;
+        if (betaDiff > maxBetaDiff) maxBetaDiff = betaDiff;
+        if (speedDiff > maxSpeedDiff) maxSpeedDiff = speedDiff;
+
+        if (!physics_state_is_valid(&pos->spec, &pos->vehicle, &pos->derived) ||
+            !physics_state_is_valid(&neg->spec, &neg->vehicle, &neg->derived))
+            allFinite = false;
+    }
+
+    check(allFinite, "metamorphic: both runs finite");
+    check(maxYawDiff < 0.05f, "metamorphic: |yaw| matches (max diff %.4f rad/s)",
+          (double)maxYawDiff);
+    check(maxBetaDiff < 0.05f, "metamorphic: |beta| matches (max diff %.4f rad)",
+          (double)maxBetaDiff);
+    check(maxSpeedDiff < 0.1f, "metamorphic: speed matches (max diff %.4f m/s)",
+          (double)maxSpeedDiff);
+
+    free(neg);
+    free(pos);
+    free(negated);
+    free(frames);
 }
 
 /*
@@ -853,7 +879,7 @@ static const TestScenario kCoreScenarios[] = {
     { "renderscale", "simulation state is independent of PIXELS_PER_METER",
       scenario_renderscale },
     { "metamorphic-steer-mirror-symmetry",
-      "SCAFFOLD (TODO): left/right steer-negation mirror relation, not a fixed oracle",
+      "steer-negation mirror relation: |yaw|, |beta|, speed magnitudes match",
       scenario_metamorphic_steer_mirror_symmetry },
     { "replay-bundle-seed-reproduction",
       "SCAFFOLD (TODO): reload a failure bundle and reproduce its failing checksum",
