@@ -2350,13 +2350,12 @@ static void scenario_cross_spec_invariant_reproducibility(void)
  * misses. Drifty's arcade model is not held to that paper's accuracy bar, but the finding
  * motivates a scenario that actually measures the deviation instead of assuming it away.
  *
- * TODO(scenario-scaffold): from rest or a low cruise speed, command full steering lock and a
- * light throttle to trace a tight U-turn (a scripted three-point-turn style sequence is also
- * reasonable). Record rear-wheel lateral slip / sideslip angle across the maneuver and assert
- * it stays isfinite and within a documented small-angle bound consistent with the low-speed
- * kinematic blend's assumptions (see `low-speed`'s existing blend-continuity checks for the
- * blend threshold), flagging (not necessarily failing on) any point where the dynamic model
- * measurably disagrees with the zero-slip approximation.
+ * WHAT IT DOES. Starts just above LOW_SPEED_BEGIN_MPS so the kinematic/dynamic blend is
+ * active, then holds full steering lock and light throttle for two seconds. It records rear
+ * slip angle and yaw rate across the maneuver and asserts the state stays finite, that the run
+ * actually traverses the blend (rather than sitting on one side of it and proving nothing),
+ * that yaw response is continuous through the blend, and that rear slip stays inside the
+ * small-angle bound the blend's zero-slip assumption relies on.
  */
 static void scenario_low_speed_tight_turn_slip(void)
 {
@@ -2425,11 +2424,11 @@ static void scenario_low_speed_tight_turn_slip(void)
  * scenario is the test-side equivalent: deliberately sweep the model's slip-ratio domain
  * rather than only sampling the mild-driving region the other physics scenarios stay in.
  *
- * TODO(scenario-scaffold): call tire_force() (see the `tire` scenario for the calling
- * convention) across a dense sweep of slip ratios from 0 to well past the expected peak,
- * holding load and surface fixed. Assert the resulting force curve rises monotonically then
- * falls monotonically (a single interior maximum, i.e. unimodal), and that the peak slip
- * ratio location falls within the physically expected range documented in tire.c/tire.h.
+ * WHAT IT DOES. Sweeps slip ratio from 0 to 3.0 in 0.002 steps at a fixed load and mu,
+ * asserting the longitudinal force rises to a single interior maximum and then falls
+ * monotonically — a second peak, plateau, or oscillation is a model defect — and that the peak
+ * lands in the slip range tire.h documents. The lateral curve gets the same treatment over
+ * slip angle.
  */
 static void scenario_peak_friction_slip_sweep(void)
 {

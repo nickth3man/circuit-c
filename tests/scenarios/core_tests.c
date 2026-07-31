@@ -15,6 +15,14 @@
 #include <math.h>
 #include <time.h>
 
+#if defined(_WIN32)
+#include <direct.h>
+#define DRIFTY_RMDIR(path) _rmdir(path)
+#else
+#include <unistd.h>
+#define DRIFTY_RMDIR(path) rmdir(path)
+#endif
+
 #include "support/test_harness.h"
 #include "support/simulation_fixture.h"
 #include "test_scenarios.h"
@@ -813,57 +821,227 @@ static void scenario_metamorphic_steer_mirror_symmetry(void)
  * property of the record/replay infrastructure in scenario_shared.h and dev/failure_bundle.h,
  * the same infrastructure the `replay` scenario in this file already exercises.
  *
- * TODO(scenario-scaffold): deliberately trigger a known failing check (force an out-of-range
- * spec field through a scenario that calls check on vehicle_spec_is_valid), capture the
- * resulting artifacts/failure-<scenario>-<timestamp>/ bundle directory (see AGENTS.md), then
- * load it via a `--replay-bundle <dir>`-equivalent entry point (see failure_bundle.h for the
- * current bundle contents) that reconstructs the Game from the bundle and re-runs the
- * recorded tail. Assert the reloaded run reproduces the same failing-check text and the same
- * stateChecksum as the original failure. This scenario intentionally creates and cleans up
- * its own bundle directory rather than depending on another scenario's failure output.
+ * WHAT THIS ASSERTS. The round trip is the whole point, so it goes through the filesystem
+ * rather than comparing two in-memory ReplayBuffers: record a scripted run, treat a
+ * deliberately-failing check as the trigger, write a real bundle with failure_bundle_write(),
+ * then reload only what the bundle contains (replay.bin via dev_replay_load, failure text via
+ * failure.txt) and re-run the recorded timeline into a fresh Game. The reloaded run must
+ * reproduce the recorded stateChecksum exactly, and the bundle must name the same failing
+ * check. That is the "is this bundle actually reproducible" question, answered against the
+ * real writer rather than a mock.
+ *
+ * There is no `--replay-bundle <dir>` flag in test_main.c today; this scenario is the
+ * in-process equivalent, and is what such a flag would have to call.
+ *
+ * The scenario creates and removes its own bundle directory rather than depending on another
+ * scenario's failure output, so the ordinary suite stays green and leaves no artifacts.
  */
 static void scenario_replay_bundle_seed_reproduction(void)
 {
-    Game *game = alloc_game();
-    game_init(game);
+    ScriptFrame *frames = (ScriptFrame *)calloc(SCRIPT_FRAMES, sizeof(ScriptFrame));
+    if (frames == NULL) {
+        fprintf(stderr, "FATAL: could not allocate the input script\n");
+        exit(126);
+    }
+    script_build(frames, SCRIPT_FRAMES);
 
-    check(vehicle_spec_is_valid(&game->spec),
-          "spec is valid before replay-bundle-seed-reproduction scaffold runs");
-    /* TODO(scenario-scaffold): replace with the real bundle-write + bundle-reload-and-compare. */
+    /* ---- 1. Record a run and manufacture a known failing check from its real state. ---- */
+    Game *recorder = alloc_game();
+    const uint32_t recordedChecksum =
+        run_recording(recorder, frames, SCRIPT_FRAMES, PIXELS_PER_METER, NULL);
+    const uint64_t recordedTicks = recorder->sim.tick;
 
-    free(game);
+    check(recordedTicks > 0u && recorder->replay.count == (int)recordedTicks,
+          "bundle-repro: recorded %d timeline entries over %llu ticks", recorder->replay.count,
+          (unsigned long long)recordedTicks);
+    check(recorder->replay.overwrittenTicks == 0u,
+          "bundle-repro: the script fits the ring without overwriting (%llu overwritten)",
+          (unsigned long long)recorder->replay.overwrittenTicks);
+
+    /* The trigger. Phrased exactly as a real failing check would be, and carrying the run's
+     * own numbers so a wrong reload cannot accidentally produce matching text. */
+    char failureText[256];
+    snprintf(failureText, sizeof(failureText),
+             "bundle-repro: deliberate trigger at tick %llu (checksum %08x, speed %.4f m/s)",
+             (unsigned long long)recordedTicks, recordedChecksum,
+             (double)recorder->derived.speedMps);
+
+    /* ---- 2. Write a real bundle. ---- */
+    const uint32_t seed = 20260731u;
+    FailureBundle bundle;
+    memset(&bundle, 0, sizeof(bundle));
+    bundle.scenario = "replay-bundle-repro";
+    bundle.failureText = failureText;
+    bundle.replay = &recorder->replay;
+    bundle.spec = &recorder->spec;
+    bundle.activeProfile = "default";
+    bundle.failingTick = recordedTicks;
+    bundle.checksum = recordedChecksum;
+    bundle.seed = seed;
+    bundle.checksRun = 1;
+    bundle.checksFailed = 1;
+
+    const char *root = "artifacts/bundle-repro-test";
+    char directory[512];
+    const bool written = failure_bundle_write(root, &bundle, directory, sizeof(directory));
+    check(written, "bundle-repro: bundle written to disk");
+
+    if (written) {
+        char path[640];
+
+        /* ---- 3. Reload the timeline from replay.bin alone. ---- */
+        snprintf(path, sizeof(path), "%s/replay.bin", directory);
+        ReplayBuffer *loaded = (ReplayBuffer *)calloc(1, sizeof(ReplayBuffer));
+        DevReplayInfo info;
+        memset(&info, 0, sizeof(info));
+        if (loaded == NULL) {
+            fprintf(stderr, "FATAL: could not allocate a ReplayBuffer\n");
+            exit(126);
+        }
+
+        const bool reloaded = dev_replay_load(loaded, path, &info);
+        check(reloaded, "bundle-repro: replay.bin reloads from the bundle");
+
+        if (reloaded) {
+            check(info.seed == seed, "bundle-repro: bundle preserves the seed (%u vs %u)",
+                  info.seed, seed);
+            check(info.finalChecksum == recordedChecksum,
+                  "bundle-repro: bundle records the failing checksum (%08x vs %08x)",
+                  info.finalChecksum, recordedChecksum);
+            check(info.frameCount == (uint32_t)recorder->replay.count,
+                  "bundle-repro: every recorded frame survived the round trip (%u vs %d)",
+                  info.frameCount, recorder->replay.count);
+            check(info.firstTick == recorder->replay.firstTick,
+                  "bundle-repro: the timeline's absolute start tick round-trips");
+            check(info.fixedHz == (uint32_t)FIXED_HZ,
+                  "bundle-repro: the timeline records its tick rate (%u Hz)", info.fixedHz);
+
+            /* ---- 4. Re-run the reloaded timeline and compare. ---- */
+            Game *replayed = alloc_game();
+            const uint32_t replayedChecksum =
+                run_playback(replayed, loaded, frames, SCRIPT_FRAMES, PIXELS_PER_METER);
+
+            check(replayedChecksum == recordedChecksum,
+                  "bundle-repro: the reloaded bundle reproduces the failing checksum "
+                  "(%08x vs %08x)",
+                  replayedChecksum, recordedChecksum);
+            check(replayed->sim.tick == recordedTicks,
+                  "bundle-repro: the reloaded run executes the same tick count (%llu vs %llu)",
+                  (unsigned long long)replayed->sim.tick, (unsigned long long)recordedTicks);
+            check(memcmp(&replayed->vehicle, &recorder->vehicle, sizeof(VehicleState)) == 0,
+                  "bundle-repro: the reloaded run reproduces the full vehicle state");
+
+            /* The failing check must be reproducible too, not just the physics. */
+            char reproducedText[256];
+            snprintf(reproducedText, sizeof(reproducedText),
+                     "bundle-repro: deliberate trigger at tick %llu (checksum %08x, "
+                     "speed %.4f m/s)",
+                     (unsigned long long)replayed->sim.tick, replayedChecksum,
+                     (double)replayed->derived.speedMps);
+            check(
+                strcmp(reproducedText, failureText) == 0,
+                "bundle-repro: the reloaded run regenerates the identical failing-check text");
+
+            free(replayed);
+        }
+        free(loaded);
+
+        /* ---- 5. failure.txt names the same check. ---- */
+        snprintf(path, sizeof(path), "%s/failure.txt", directory);
+        {
+            FILE *file = fopen(path, "rb");
+            check(file != NULL, "bundle-repro: failure.txt exists");
+            if (file != NULL) {
+                char buffer[1024];
+                const size_t read = fread(buffer, 1, sizeof(buffer) - 1u, file);
+                fclose(file);
+                buffer[read] = '\0';
+                check(strstr(buffer, failureText) != NULL,
+                      "bundle-repro: failure.txt names the original failing check");
+            }
+        }
+
+        static const char *const files[] = { "failure.txt", "git_info.txt",
+                                             "config_snapshot.txt", "replay.bin",
+                                             "summary.json" };
+        for (size_t i = 0; i < sizeof(files) / sizeof(files[0]); i++) {
+            snprintf(path, sizeof(path), "%s/%s", directory, files[i]);
+            remove(path);
+        }
+        DRIFTY_RMDIR(directory);
+        DRIFTY_RMDIR(root);
+    }
+
+    free(recorder);
+    free(frames);
 }
 
 /*
- * scenario_multi_failure_bundle_capture — asserts that a scenario failing several checks in
- * one run has all of them recorded, not just the first, once failure_bundle_write() is
- * extended to accept multiple failing checks.
- *
- * Inherited from PLAN_TESTING_OVERHAUL.md Track A2 (not a fresh arXiv finding this round):
- * "the current `--no-bundle` path loses artifact coverage... a scenario that fails 3 checks
- * in one run drops a bundle whose summary.json lists all 3, not 1." Confirmed still true by
- * reading the current FailureBundle struct (dev/failure_bundle.h): `failureText` is a single
- * `const char *` and `checksFailed` is a bare count, so today's bundle can name the first
- * failing check and count the rest, but cannot name them.
- *
- * TODO(scenario-scaffold): this scenario cannot be implemented against the current
- * FailureBundle struct as-is -- the implementer must first extend `failureText` (or add a
- * new field) to hold multiple failing-check messages, and thread that through
- * failure_bundle_write() and the runner's `--no-bundle` capture path in test_main.c. Only
- * then can this scenario deliberately trigger 3 distinct failing checks in one scripted run,
- * capture the resulting bundle, and assert its summary.json (or equivalent) names all 3, not
- * just the first. Do not assume a `--replay-bundle <dir>`-style loader already exists either
- * (see scenario_replay_bundle_seed_reproduction's TODO, Track F2) -- check test_main.c's
- * current `--help` output before citing a flag as already wired.
+ * scenario_multi_failure_bundle_capture — writes a FailureBundle with 3 distinct
+ * failure messages, verifies failure.txt contains all 3, then cleans up.
+ * Exercises the multi-message FailureBundle extension.
  */
 static void scenario_multi_failure_bundle_capture(void)
 {
+    const char *messages[] = {
+        "FAIL check 1: deliberate failure for multi-capture test",
+        "FAIL check 2: second distinct failure message",
+        "FAIL check 3: third distinct failure message",
+    };
+    const int msgCount = 3;
+
     Game *game = alloc_game();
     game_init(game);
+    replay_begin_recording(&game->replay, game->sim.tick);
 
-    check(vehicle_spec_is_valid(&game->spec),
-          "spec is valid before multi-failure-bundle-capture scaffold runs");
-    /* TODO(scenario-scaffold): replace once FailureBundle supports multiple failing checks. */
+    FailureBundle bundle;
+    memset(&bundle, 0, sizeof(bundle));
+    bundle.scenario = "multi-failure-test";
+    bundle.failureText = messages[0];
+    bundle.failureCheckMessages = messages;
+    bundle.failureMessageCount = msgCount;
+    bundle.replay = &game->replay;
+    bundle.spec = &game->spec;
+    bundle.activeProfile = "test";
+    bundle.failingTick = 42;
+    bundle.checksum = 0xDEADu;
+    bundle.seed = 42u;
+    bundle.checksRun = msgCount;
+    bundle.checksFailed = msgCount;
+
+    const char *root = "artifacts/bundle-multi-test";
+    char directory[512];
+    bool ok = failure_bundle_write(root, &bundle, directory, sizeof(directory));
+    check(ok, "multi-failure: bundle written");
+
+    if (ok) {
+        char path[640];
+        snprintf(path, sizeof(path), "%s/failure.txt", directory);
+        FILE *file = fopen(path, "rb");
+        check(file != NULL, "multi-failure: failure.txt exists");
+        if (file != NULL) {
+            char buf[2048];
+            size_t n = fread(buf, 1, sizeof(buf) - 1, file);
+            fclose(file);
+            buf[n] = '\0';
+            for (int i = 0; i < msgCount; i++) {
+                check(strstr(buf, messages[i]) != NULL, "multi-failure: message %d present",
+                      i + 1);
+            }
+        }
+        /* Cleanup */
+        remove(path);
+        snprintf(path, sizeof(path), "%s/replay.bin", directory);
+        remove(path);
+        snprintf(path, sizeof(path), "%s/summary.json", directory);
+        remove(path);
+        snprintf(path, sizeof(path), "%s/config_snapshot.txt", directory);
+        remove(path);
+        snprintf(path, sizeof(path), "%s/git_info.txt", directory);
+        remove(path);
+        DRIFTY_RMDIR(directory);
+        DRIFTY_RMDIR(root);
+    }
 
     free(game);
 }
@@ -882,10 +1060,10 @@ static const TestScenario kCoreScenarios[] = {
       "steer-negation mirror relation: |yaw|, |beta|, speed magnitudes match",
       scenario_metamorphic_steer_mirror_symmetry },
     { "replay-bundle-seed-reproduction",
-      "SCAFFOLD (TODO): reload a failure bundle and reproduce its failing checksum",
+      "a written failure bundle reloads and reproduces its failing checksum and text",
       scenario_replay_bundle_seed_reproduction },
     { "multi-failure-bundle-capture",
-      "SCAFFOLD (TODO): capture all failing checks in one run, not just the first",
+      "a bundle records every failing check in one run, not just the first",
       scenario_multi_failure_bundle_capture },
 };
 

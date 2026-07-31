@@ -1368,43 +1368,231 @@ static void scenario_state_machine(void)
  * Inherited from PLAN_TESTING_OVERHAUL.md Track B3 (not a fresh arXiv finding this round):
  * "the *one* end-to-end 'the simulation actually drives around a track' scenario."
  *
- * TRACK REALITY: track_init() creates a 200 m × 150 m parking-lot rectangle with
- * four perimeter corner nodes (not an oval). The checkpoint gates sit at the corners,
- * so a "lap" means driving the perimeter clockwise through all four gates. The car
- * starts near the origin (centre of the lot) and must navigate to and around the
- * perimeter. A hand-crafted ScriptFrame[] sequence — not the random script_build()
- * used by the replay scenario — is required to steer the car around the rectangle
- * at each corner.
+ * TRACK REALITY, MEASURED. track_init() builds a 200 m x 150 m parking-lot rectangle whose
+ * five nodes are the four corners plus a closing duplicate of the first, with checkpoint gates
+ * on the nodes and collision barriers 4 m either side of every segment. Two consequences were
+ * established by probing rather than by reading:
  *
- * Implementation path:
- * 1. Hand-craft a ScriptFrame[] (steer + throttle timeline) that drives the car
- *    from origin to the bottom-left corner, then clockwise around the perimeter
- *    through all four gates, returning to the start. At ~10 m/s this is roughly
- *    700 m perimeter / 10 m/s ≈ 70 s ≈ 8400 ticks — a substantial but mechanical
- *    script to write.
- * 2. Record it once via run_recording, then replay 10 times via run_playback.
- * 3. Assert lap time (track.lastLapTimeS) and a summed energy proxy stay within
- *    a tight tolerance across all replays.
- * 4. Record tests/baselines/scenario_lap_average.csv via `mk baselines`.
+ *   - The rectangle's *interior* is not drivable as a circuit. Each segment's inner barrier
+ *     spans the full side, so a car coming down the left corridor meets the bottom segment's
+ *     inner barrier head-on: the corners are walled off. The drivable route is the *outer*
+ *     lane, just outside the rectangle, where the corner pockets are clear of both adjacent
+ *     barrier segments. The waypoint ring below is (+/-102, +/-77) for that reason.
+ *   - A lap can never complete on this track. Node 4 duplicates node 0, so gate 4's forward
+ *     direction is a zero-length vector and track_update_checkpoints() returns false for it
+ *     forever. The car can cross gates 0 through 3 — the whole perimeter — and nextCheckpoint
+ *     reaches 4, but the fifth crossing that would roll over to lap 1 is unreachable. This
+ *     scenario therefore asserts full perimeter progress and does not assert a lap time; it
+ *     deliberately does not assert lap == 0 either, because that would enshrine the defect.
  *
- * TODO(scenario-scaffold): hand-craft the perimeter-driving ScriptFrame[] and
- * implement the record + 10x replay comparison described above.
+ * WHY THE SCRIPT IS GENERATED RATHER THAN HAND-TYPED. The scaffold called for a hand-crafted
+ * ScriptFrame[]. A closed-loop waypoint driver produces the same artefact — a fixed array of
+ * per-tick inputs — but is reproducible and re-tunable, and it is run once up front and then
+ * discarded: the record and replay passes consume only the frozen array, so the determinism
+ * comparison is over a fixed open-loop timeline exactly as intended.
+ *
+ * The route is tuned to 22 m/s on the straights, braking to 5 m/s 35 m before each corner.
+ * That is not arbitrary: slower corner entries hit no barriers but overrun REPLAY_CAPACITY_TICKS
+ * (7200 ticks = 60 s), and faster corner entries hit the barriers. The usable window is narrow,
+ * and a route that no longer fits the ring would silently truncate the timeline's head.
  */
+/* Put a freshly-initialised Game at the route's start pose, with the track loaded. Headless
+ * game_init() does not call track_init(), so every pass here does it explicitly. */
+static void lap_prepare_game(Game *game)
+{
+    game_init(game);
+    track_init(&game->track);
+    game->state = STATE_PLAYING;
+    game->vehicle.positionM = (Vector2){ -102.0f, -77.0f };
+    game->vehicle.headingRad = 0.0f; /* +X, along the bottom outer lane */
+    set_vehicle_rolling_speed(game, 8.0f);
+}
+
+/* One pass's observable outcome, compared between the recording and every replay. */
+typedef struct {
+    uint32_t checksum;
+    uint64_t ticks;
+    int nextCheckpoint;
+    int lap;
+    float posX, posY;
+    double energyProxy; /* sum of speed^2 per tick; proportional to kinetic energy */
+} LapRun;
+
 static void scenario_lap_average(void)
 {
-    Game *game = alloc_game();
-    game_init(game);
-    /* headless game_init does not call track_init; the track is a 200m×150m
-     * parking-lot rectangle with four perimeter corner checkpoint gates. */
-    track_init(&game->track);
+    /* Outer-lane waypoints: just outside the rectangle, inside each segment's 4 m barrier
+     * corridor, with the corner pockets clear of both adjacent barrier segments. */
+    static const Vector2 route[4] = {
+        { 102.0f, -77.0f }, { 102.0f, 77.0f }, { -102.0f, 77.0f }, { -102.0f, -77.0f }
+    };
+    const int lapTicks = 6900; /* 57.5 s: the full perimeter, inside the 7200-tick ring */
+    const int replayCount = 10;
 
-    check(game->track.count > 0, "track is loaded before lap-average scaffold runs");
-    check(game->track.isParkingLot,
-          "track is a parking-lot perimeter (not an oval); laps follow the corner gates");
-    /* TODO(scenario-scaffold): replace with the real recorded lap script + 10x replay
-     * compare (see comment block above for the implementation path). */
+    check(lapTicks < REPLAY_CAPACITY_TICKS,
+          "lap-average: the script fits the replay ring (%d of %d ticks)", lapTicks,
+          REPLAY_CAPACITY_TICKS);
 
-    free(game);
+    ScriptFrame *frames = (ScriptFrame *)calloc((size_t)lapTicks, sizeof(ScriptFrame));
+    if (frames == NULL) {
+        fprintf(stderr, "FATAL: could not allocate the lap script\n");
+        exit(126);
+    }
+
+    /* ---- 1. Generate the perimeter script with a closed-loop waypoint driver. ---- */
+    {
+        Game *pilot = alloc_game();
+        lap_prepare_game(pilot);
+
+        int target = 0, contactTicks = 0, reachedFinalGateAt = -1;
+        float maxAbsX = 0.0f, maxAbsY = 0.0f;
+
+        for (int i = 0; i < lapTicks; i++) {
+            const Vector2 waypoint = route[target];
+            const float dx = waypoint.x - pilot->vehicle.positionM.x;
+            const float dy = waypoint.y - pilot->vehicle.positionM.y;
+            const float distance = sqrtf(dx * dx + dy * dy);
+            if (distance < 6.0f) target = (target + 1) % 4;
+
+            const float bearing = atan2f(dy, dx);
+            const float headingError = wrap_angle(bearing - pilot->vehicle.headingRad);
+            const float wantedMps = (distance < 35.0f) ? 5.0f : 22.0f;
+            const float speedError = wantedMps - pilot->derived.speedMps;
+
+            pilot->input.steer = clampf(headingError * 2.0f, -1.0f, 1.0f);
+            pilot->input.throttle = clampf(speedError * 0.25f, 0.0f, 1.0f);
+            pilot->input.brake = clampf(-speedError * 0.20f, 0.0f, 0.6f);
+            pilot->input.handbrake = 0.0f;
+
+            frames[i].steer = pilot->input.steer;
+            frames[i].throttle = pilot->input.throttle;
+            frames[i].brake = pilot->input.brake;
+            frames[i].handbrake = 0.0f;
+            frames[i].frameTimeS = FIXED_DT_S;
+
+            game_fixed_update(pilot, FIXED_DT_S);
+
+            if (pilot->crashLockoutTimerS > 0.0f) contactTicks++;
+            if (reachedFinalGateAt < 0 && pilot->track.nextCheckpoint >= 4)
+                reachedFinalGateAt = i;
+            maxAbsX = fmaxf(maxAbsX, fabsf(pilot->vehicle.positionM.x));
+            maxAbsY = fmaxf(maxAbsY, fabsf(pilot->vehicle.positionM.y));
+        }
+
+        check(pilot->track.nextCheckpoint >= 4,
+              "lap-average: the script drives the whole perimeter (reached gate %d of %d)",
+              pilot->track.nextCheckpoint, pilot->track.count);
+        check(reachedFinalGateAt > 0 && reachedFinalGateAt < lapTicks,
+              "lap-average: the perimeter completes inside the script (%.1f s of %.1f s)",
+              (double)reachedFinalGateAt / (double)FIXED_HZ,
+              (double)lapTicks / (double)FIXED_HZ);
+        check(contactTicks == 0,
+              "lap-average: the route clears every barrier (%d ticks in crash lockout)",
+              contactTicks);
+        check(maxAbsX < 110.0f && maxAbsY < 85.0f,
+              "lap-average: the car stays in the outer lane (max |x| %.1f m, |y| %.1f m)",
+              (double)maxAbsX, (double)maxAbsY);
+
+        track_free(&pilot->track);
+        free(pilot);
+    }
+
+    /* ---- 2. Record the frozen script once. ---- */
+    LapRun recorded;
+    memset(&recorded, 0, sizeof(recorded));
+    ReplayBuffer *timeline = (ReplayBuffer *)calloc(1, sizeof(ReplayBuffer));
+    if (timeline == NULL) {
+        fprintf(stderr, "FATAL: could not allocate a ReplayBuffer\n");
+        exit(126);
+    }
+
+    {
+        Game *game = alloc_game();
+        lap_prepare_game(game);
+        replay_begin_recording(&game->replay, game->sim.tick);
+
+        for (int i = 0; i < lapTicks; i++) {
+            game->input.steer = frames[i].steer;
+            game->input.throttle = frames[i].throttle;
+            game->input.brake = frames[i].brake;
+            game->input.handbrake = frames[i].handbrake;
+            game_fixed_update(game, FIXED_DT_S);
+            recorded.energyProxy +=
+                (double)game->derived.speedMps * (double)game->derived.speedMps;
+        }
+
+        recorded.checksum = game->stateChecksum;
+        recorded.ticks = game->sim.tick;
+        recorded.nextCheckpoint = game->track.nextCheckpoint;
+        recorded.lap = game->track.lap;
+        recorded.posX = game->vehicle.positionM.x;
+        recorded.posY = game->vehicle.positionM.y;
+        *timeline = game->replay;
+
+        check(game->replay.count == lapTicks,
+              "lap-average: one timeline entry per tick (%d of %d)", game->replay.count,
+              lapTicks);
+        check(game->replay.overwrittenTicks == 0u,
+              "lap-average: the ring never overwrote the head (%llu overwritten)",
+              (unsigned long long)game->replay.overwrittenTicks);
+
+        track_free(&game->track);
+        free(game);
+    }
+
+    /* ---- 3. Replay the recorded timeline ten times and compare everything. ---- */
+    int matchingChecksums = 0, matchingCheckpoints = 0, matchingEnergy = 0, matchingPose = 0;
+
+    for (int r = 0; r < replayCount; r++) {
+        Game *game = alloc_game();
+        lap_prepare_game(game);
+
+        game->replay = *timeline;
+        if (!replay_begin_playback(&game->replay)) {
+            track_free(&game->track);
+            free(game);
+            continue;
+        }
+
+        LapRun run;
+        memset(&run, 0, sizeof(run));
+        for (int i = 0; i < lapTicks; i++) {
+            input_zero(&game->input);
+            game_fixed_update(game, FIXED_DT_S);
+            run.energyProxy += (double)game->derived.speedMps * (double)game->derived.speedMps;
+        }
+
+        if (game->stateChecksum == recorded.checksum && game->sim.tick == recorded.ticks)
+            matchingChecksums++;
+        if (game->track.nextCheckpoint == recorded.nextCheckpoint &&
+            game->track.lap == recorded.lap)
+            matchingCheckpoints++;
+        if (run.energyProxy == recorded.energyProxy) matchingEnergy++;
+        if (game->vehicle.positionM.x == recorded.posX &&
+            game->vehicle.positionM.y == recorded.posY)
+            matchingPose++;
+
+        track_free(&game->track);
+        free(game);
+    }
+
+    check(matchingChecksums == replayCount,
+          "lap-average: all %d replays reproduce the recorded checksum %08x (%d matched)",
+          replayCount, recorded.checksum, matchingChecksums);
+    check(matchingCheckpoints == replayCount,
+          "lap-average: all %d replays reproduce the checkpoint and lap state "
+          "(gate %d, lap %d; %d matched)",
+          replayCount, recorded.nextCheckpoint, recorded.lap, matchingCheckpoints);
+    check(matchingEnergy == replayCount,
+          "lap-average: all %d replays reproduce the summed energy proxy exactly "
+          "(%.6f; %d matched)",
+          replayCount, recorded.energyProxy, matchingEnergy);
+    check(matchingPose == replayCount,
+          "lap-average: all %d replays finish at the recorded position (%.4f, %.4f; "
+          "%d matched)",
+          replayCount, (double)recorded.posX, (double)recorded.posY, matchingPose);
+
+    free(timeline);
+    free(frames);
 }
 
 /*
@@ -1569,7 +1757,7 @@ static const TestScenario kGameplayScenarios[] = {
       scenario_particle_pool },
     { "state-machine", "MENU/PLAYING/PAUSED/RESULTS transitions and scoring reset",
       scenario_state_machine },
-    { "lap-average", "parking-lot perimeter lap replay determinism (scaffold, see comment)",
+    { "lap-average", "perimeter drive recorded once, replayed 10x: checksum, gates, energy",
       scenario_lap_average },
     { "scoring-combo-sweep",
       "combo multiplier over duration x entry-speed grid (3 speeds x 3 durations)",

@@ -25,8 +25,14 @@
 #include "physics/vehicle.h"
 
 typedef struct {
-    const char *scenario;       /* required; used in the directory name */
-    const char *failureText;    /* the failing check message, may be multi-line */
+    const char *scenario;    /* required; used in the directory name */
+    const char *failureText; /* the FIRST failing check; may be multi-line */
+    /* Every failing check of the run, oldest first, or NULL when only failureText is known.
+     * When set, failure.txt lists all of them one per line instead of just the first, which
+     * is what makes a multi-failure run diagnosable from its bundle alone. summary.json still
+     * carries failureText as its single "failure" field. */
+    const char **failureCheckMessages;
+    int failureMessageCount;    /* entries in failureCheckMessages; 0 when it is NULL */
     const char *telemetryPath;  /* CSV copied into the bundle, or NULL */
     const char *screenshotPath; /* PNG copied into the bundle, or NULL (headless runs) */
     const ReplayBuffer *replay; /* timeline written as replay.bin, or NULL */

@@ -78,14 +78,6 @@ static bool copy_file(const char *fromPath, const char *toPath)
     return (fclose(to) == 0) && ok;
 }
 
-static bool write_text_file(const char *path, const char *text)
-{
-    FILE *file = fopen(path, "wb");
-    if (file == NULL) return false;
-    if (text != NULL) fputs(text, file);
-    return fclose(file) == 0;
-}
-
 /* Minimal JSON string escaping: quotes, backslashes, and control characters. */
 static void write_json_string(FILE *out, const char *text)
 {
@@ -131,11 +123,27 @@ bool failure_bundle_write(const char *rootDir, const FailureBundle *bundle, char
     bool telemetryCopied = false;
     bool screenshotCopied = false;
 
-    /* failure.txt — the failing check, verbatim. */
+    /* failure.txt — all failing checks, one per line. */
     snprintf(path, sizeof(path), "%s/failure.txt", dir);
-    if (!write_text_file(path, bundle->failureText != NULL ? bundle->failureText
-                                                           : "(no failure text recorded)\n")) {
-        fprintf(stderr, "BUNDLE: could not write %s\n", path);
+    {
+        FILE *file = fopen(path, "wb");
+        if (file != NULL) {
+            if (bundle->failureCheckMessages != NULL && bundle->failureMessageCount > 0) {
+                for (int i = 0; i < bundle->failureMessageCount; i++) {
+                    fprintf(file, "%s\n",
+                            bundle->failureCheckMessages[i] != NULL
+                                ? bundle->failureCheckMessages[i]
+                                : "(empty)");
+                }
+            } else if (bundle->failureText != NULL) {
+                fprintf(file, "%s\n", bundle->failureText);
+            } else {
+                fprintf(file, "(no failure text recorded)\n");
+            }
+            fclose(file);
+        } else {
+            fprintf(stderr, "BUNDLE: could not write %s\n", path);
+        }
     }
 
     /* git_info.txt — how this binary was built. */
