@@ -602,6 +602,68 @@ static void scenario_checkpoint_lap(void)
     free(track.nodes);
 }
 
+/*
+ * lap-target-results: reaching RESULTS_TARGET_LAPS through a LIVE checkpoint crossing
+ * (not a hand-set game->state) transitions STATE_PLAYING -> STATE_RESULTS.
+ *
+ * checkpoint-lap already proves track_update_checkpoints() itself; state-machine already
+ * proves the RESULTS-state transitions once entered. Neither exercises the wiring
+ * between them in game.c ("if (game->track.lap >= RESULTS_TARGET_LAPS) ... state =
+ * STATE_RESULTS") firing inside a real tick. lap is pre-set to RESULTS_TARGET_LAPS - 1 so
+ * only the FINAL gate crossing is needed here — the crossing mechanics are
+ * checkpoint-lap's job, not this scenario's.
+ */
+static void scenario_lap_target_results(void)
+{
+    Game *game = alloc_game();
+    game_init(game);
+
+    /* Reuse checkpoint-lap's tiny 10x10 square track (4 gates, CCW). */
+    track_free(&game->track);
+    game->track.nodes = (TrackNode *)calloc(4, sizeof(TrackNode));
+    game->track.count = 4;
+    game->track.offTrackSurfaceId = SURFACE_GRASS;
+    game->track.nodes[0] = (TrackNode){ { 0.0f, 0.0f }, 2.0f, SURFACE_ASPHALT };
+    game->track.nodes[1] = (TrackNode){ { 10.0f, 0.0f }, 2.0f, SURFACE_ASPHALT };
+    game->track.nodes[2] = (TrackNode){ { 10.0f, 10.0f }, 2.0f, SURFACE_ASPHALT };
+    game->track.nodes[3] = (TrackNode){ { 0.0f, 10.0f }, 2.0f, SURFACE_ASPHALT };
+    game->track.nextCheckpoint = 3; /* the last gate: crossing it completes a lap */
+    game->track.lap = RESULTS_TARGET_LAPS - 1;
+    game->track.lapTimerS = 1.0f;
+
+    /* bestScore is deliberately huge so persistence_save_score's write-guard
+     * (driftScore <= bestScore) never fires: this scenario proves the STATE_RESULTS
+     * transition, not real APPDATA persistence (see highscore-persistence). */
+    game->driftScore = 500.0f;
+    game->bestScore = 1.0e8f;
+
+    check(game->state == STATE_PLAYING, "precondition: game starts in STATE_PLAYING");
+
+    /* Gate 3 is at (0,10), forward direction (0,-1): cross it moving -Y at x=1, exactly
+     * matching checkpoint-lap's own proven (10.1 -> 9.9) crossing. */
+    game->renderState.prevPositionM = (Vector2){ 1.0f, 10.1f };
+    game->vehicle.positionM = (Vector2){ 1.0f, 9.9f };
+    game->vehicle.headingRad = -1.57079632679f;
+    game->vehicle.velocityLongitudinalMps = 0.0f;
+    game->vehicle.velocityLateralMps = 0.0f;
+    game->vehicle.yawRateRadS = 0.0f;
+
+    game_fixed_update(game, FIXED_DT_S);
+
+    check(game->track.lap >= RESULTS_TARGET_LAPS,
+          "the crossing completes the target lap count (%d >= %d)", game->track.lap,
+          RESULTS_TARGET_LAPS);
+    check(game->state == STATE_RESULTS,
+          "reaching RESULTS_TARGET_LAPS transitions STATE_PLAYING -> STATE_RESULTS live, "
+          "not by a hand-set game->state (got %d)",
+          (int)game->state);
+    check(game->bestScore > 9.9e7f,
+          "bestScore is untouched: the driftScore <= bestScore save-guard held (%.1f)",
+          (double)game->bestScore);
+
+    free(game);
+}
+
 /* ------------------------------------------------------------------------------------- */
 /* Phase 6: Scoring scenarios                                                            */
 /* ------------------------------------------------------------------------------------- */
@@ -1300,6 +1362,8 @@ static void scenario_state_machine(void)
 static const TestScenario kGameplayScenarios[] = {
     { "track-surface", "track geometry, init/free life-cycle, and per-point surface query",
       scenario_track_surface },
+    { "lap-target-results", "reaching RESULTS_TARGET_LAPS live flips PLAYING to RESULTS",
+      scenario_lap_target_results },
     { "collision-barrier", "capsule barrier collision, swept test, impulse, and crash lockout",
       scenario_collision_barrier },
     { "collision-units",
