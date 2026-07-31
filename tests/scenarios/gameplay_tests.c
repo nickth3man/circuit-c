@@ -841,6 +841,108 @@ static void scenario_scoring_rejection(void)
 }
 
 /*
+ * crash-scoring-interaction: a REAL barrier impact (collision_resolve_track, not a
+ * hand-set crashLockoutTimerS) must suppress an active scoring drift, and scoring must
+ * resume once the lockout decays.
+ *
+ * Design note: velocity/yaw state is injected directly (matches scoring-rejection's
+ * style) rather than built up over a scripted maneuver, so this is a test of the
+ * scoring/collision GATE interaction, not of how any particular drift is initiated —
+ * changing drift-entry tuning elsewhere cannot make this scenario flaky. Tick 1 proves
+ * the injected state genuinely scores away from any wall; tick 2 teleports the same car
+ * onto a real track barrier and proves collision_resolve_track's lockout (not a manual
+ * override) suppresses it; the decay loop proves the lockout clears and the gate reopens.
+ */
+static void scenario_crash_scoring_interaction(void)
+{
+    Game *game = alloc_game();
+    game_init(game);
+    track_init(&game->track);
+    input_zero(&game->input);
+
+    /* --- Tick 1: injected state genuinely scores, no barrier nearby --- */
+    game->vehicle.positionM = (Vector2){ 0.0f, 0.0f };
+    game->vehicle.headingRad = 0.0f;
+    game->vehicle.velocityLongitudinalMps = 18.0f;
+    game->vehicle.velocityLateralMps = 6.0f;
+    game->vehicle.yawRateRadS = 0.6f;
+    game->renderState.prevPositionM = game->vehicle.positionM;
+    game->renderState.currPositionM = game->vehicle.positionM;
+    game->renderState.prevHeadingRad = game->vehicle.headingRad;
+    game->renderState.currHeadingRad = game->vehicle.headingRad;
+
+    game_fixed_update(game, FIXED_DT_S);
+
+    check(game->derived.scoringDrift,
+          "the injected state genuinely scores away from any barrier");
+    const float scoreAfterTick1 = game->driftScore;
+    check(scoreAfterTick1 > 0.0f, "score accumulates on the scoring tick (%.4f)",
+          (double)scoreAfterTick1);
+    check(game->crashLockoutTimerS <= 0.0f, "no lockout is active before any collision");
+
+    /* --- Approach: teleport near the bottom barrier (centreline y=-75, halfWidth 4) and
+     * coast straight at it — a purely axial approach so the impact is unambiguously
+     * head-on. One tick moves ~0.15 m at 18 m/s, so this closes the ~3.5 m gap over
+     * roughly 25 ticks; the loop stops the instant a real collision arms the lockout. --- */
+    const float speedMps = game->derived.speedMps;
+    game->vehicle.positionM = (Vector2){ 0.0f, -75.5f };
+    game->vehicle.headingRad = -1.57079632679f; /* face -Y, straight at the barrier */
+    game->vehicle.velocityLongitudinalMps = speedMps;
+    game->vehicle.velocityLateralMps = 0.0f;
+    game->renderState.prevPositionM = game->vehicle.positionM;
+    game->renderState.currPositionM = game->vehicle.positionM;
+    game->renderState.prevHeadingRad = game->vehicle.headingRad;
+    game->renderState.currHeadingRad = game->vehicle.headingRad;
+
+    bool hitBarrier = false;
+    int approachTicks;
+    for (approachTicks = 0; approachTicks < 60 && !hitBarrier; approachTicks++) {
+        game_fixed_update(game, FIXED_DT_S);
+        if (game->crashLockoutTimerS > 0.0f) hitBarrier = true;
+    }
+
+    check(hitBarrier, "a real barrier impact sets crashLockoutTimerS within %d ticks",
+          approachTicks);
+    check(!game->derived.scoringDrift,
+          "scoring_classify rejects the drift while the live lockout is active");
+
+    /* --- Decay: let the lockout run down under its own physics (no re-injection, so a
+     * re-collision would be a real finding, not masked). --- */
+    const float scoreAtImpact = game->driftScore;
+    bool scoringWhileLocked = false;
+    bool scoreRoseWhileLocked = false;
+    int decayTicks;
+    for (decayTicks = 0; decayTicks < 300 && game->crashLockoutTimerS > 0.0f; decayTicks++) {
+        game_fixed_update(game, FIXED_DT_S);
+        if (game->crashLockoutTimerS > 0.0f) {
+            if (game->derived.scoringDrift) scoringWhileLocked = true;
+            if (game->driftScore > scoreAtImpact + 1e-4f) scoreRoseWhileLocked = true;
+        }
+    }
+
+    check(!scoringWhileLocked, "scoringDrift never flips true while the lockout is active");
+    check(!scoreRoseWhileLocked, "driftScore never rises while the lockout is active");
+    check(game->crashLockoutTimerS <= 0.0f,
+          "crashLockoutTimerS decays back to zero within %d ticks", decayTicks);
+
+    /* --- Resumption: re-inject the same scoring-eligible state once the lockout has
+     * cleared and confirm the gate reopens. The barrier sits at the edge of the asphalt
+     * AABB (halfWidth extends the collision zone to y=-79, outside the y>=-75 scoring
+     * surface), so the car is moved back onto open asphalt first — this scenario tests
+     * whether the LOCKOUT gate reopens, not whether the impact site itself is drivable. */
+    game->vehicle.positionM = (Vector2){ 0.0f, 0.0f };
+    game->renderState.prevPositionM = game->vehicle.positionM;
+    game->renderState.currPositionM = game->vehicle.positionM;
+    game->vehicle.velocityLongitudinalMps = 18.0f;
+    game->vehicle.velocityLateralMps = 6.0f;
+    game->vehicle.yawRateRadS = 0.6f;
+    game_fixed_update(game, FIXED_DT_S);
+    check(game->derived.scoringDrift, "scoring resumes once the lockout has fully decayed");
+
+    free(game);
+}
+
+/*
  * scoring-determinism: prove that scoring state changes do not feed back into any
  * physical force. Three sub-proofs:
  *
@@ -1208,6 +1310,9 @@ static const TestScenario kGameplayScenarios[] = {
     { "scoring-rejection",
       "low speed, reverse, spin, crash, spin-cutoff, and off-asphalt rejected",
       scenario_scoring_rejection },
+    { "crash-scoring-interaction",
+      "a live barrier impact suppresses scoring; scoring resumes once it decays",
+      scenario_crash_scoring_interaction },
     { "scoring-determinism", "scoring state provably changes no physical force or checksum",
       scenario_scoring_determinism },
     { "highscore-persistence", "file load/save, garbage, range, and negative-value validated",
