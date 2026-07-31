@@ -1832,6 +1832,50 @@ static void scenario_yaw_stability_recovery_margin(void)
     free(game);
 }
 
+/*
+ * scenario_figure_eight_drift_transition — drifts a steady circular arc in one direction,
+ * then transitions through a straight counter-steer reversal into a steady drift in the
+ * *opposite* direction, tracing a figure-eight, and asserts the transition itself (not just
+ * the two steady states) stays within the friction budget and settles within a bounded tick
+ * count.
+ *
+ * NOT a duplicate of constant-radius-drift (round 1, single steady drift, one direction, one
+ * fixed center) or catchable-drift (single entry -> hold -> recover, never a second opposite
+ * drift). This scenario is the first to chain two opposite-handedness drifts through one
+ * continuous script, which exercises the countersteer reversal path (sideslip and yaw rate
+ * both crossing zero and changing sign under active driver input, not decaying passively)
+ * that neither existing scenario reaches.
+ *
+ * Reference: Zhao, Wu, Zhou, Zhao & Wu, "Steeringless Drifting: Differential-Torque Control
+ * of a Four-Wheel Independently Driven Vehicle" (arXiv:2607.24863) — the paper's validation
+ * explicitly includes "figure-eight drift tracking" as the maneuver that proves a drift
+ * controller generalises past a single steady-state circle. Drifty's steering-based model
+ * differs from the paper's differential-torque actuation, but the maneuver shape (and the
+ * reason it matters: a controller/model that only holds one steady drift may not handle the
+ * reversal) transfers directly.
+ *
+ * TODO(scenario-scaffold): script throttle + steer to establish a steady drift (reuse the
+ * constant-radius-drift setup once implemented, or catchable-drift's entry technique), hold
+ * for several seconds, then command a straight countersteer reversal through neutral steer
+ * into the opposite lock and hold a second steady drift of the opposite handedness. Assert:
+ * peak friction usage never exceeds budget through the reversal (not just in the two held
+ * states); sideslip and yaw rate each cross zero at most once per transition (no oscillation
+ * / hunting); and the second steady drift's magnitude is within tolerance of the first
+ * (mirrored, not degraded) once settled.
+ */
+static void scenario_figure_eight_drift_transition(void)
+{
+    Game *game = alloc_game();
+    game_init(game);
+    set_vehicle_rolling_speed(game, 15.0f);
+
+    check(vehicle_spec_is_valid(&game->spec),
+          "spec is valid before figure-eight-drift-transition scaffold runs");
+    /* TODO(scenario-scaffold): replace with the real drift/reverse/drift-opposite timeline. */
+
+    free(game);
+}
+
 static const TestScenario kHandlingScenarios[] = {
     { "accel-load", "acceleration transfers load rearward; capacity follows",
       scenario_accel_load },
@@ -1884,6 +1928,9 @@ static const TestScenario kHandlingScenarios[] = {
     { "yaw-stability-recovery-margin",
       "SCAFFOLD (TODO): mid-corner asphalt->snow open-loop recovery baseline",
       scenario_yaw_stability_recovery_margin },
+    { "figure-eight-drift-transition",
+      "SCAFFOLD (TODO): steady drift, countersteer reversal, opposite steady drift",
+      scenario_figure_eight_drift_transition },
 };
 
 TestScenarioGroup test_handling_scenarios(void)

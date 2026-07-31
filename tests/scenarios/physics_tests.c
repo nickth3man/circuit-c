@@ -2336,6 +2336,82 @@ static void scenario_cross_spec_invariant_reproducibility(void)
     free(game);
 }
 
+/*
+ * scenario_low_speed_tight_turn_slip — full-lock, near-zero-speed U-turn maneuvering (the
+ * kind the game's parking-lot track mode is built for, per Track.isParkingLot in
+ * world/track.h), asserting the model's lateral velocity/slip stays close to the low-speed
+ * zero-slip assumption other scenarios rely on, rather than drifting away from it the way a
+ * naive kinematic-bicycle blend might at very tight radii.
+ *
+ * NOT a duplicate of `low-speed` (physics_tests.c): that scenario checks continuity of the
+ * kinematic/dynamic blend along a single acceleration trajectory, not full-lock steering at
+ * near-zero forward speed. It also is not a duplicate of `rest` (stationary steering with no
+ * forward motion at all). This scenario is the missing middle case: slow but moving, at the
+ * steering angle limit, the exact regime the reference paper identifies as where the
+ * zero-slip assumption starts to measurably break down.
+ *
+ * Reference: Diener, Kalkkuhl & Enzweiler, "Lateral Velocity Model for Vehicle Parking
+ * Applications" (arXiv:2511.01369) — identifies a "systematic deviation from the zero-slip
+ * assumption" during low-speed parking-style maneuvers that the common zero-rear-slip model
+ * misses. Drifty's arcade model is not held to that paper's accuracy bar, but the finding
+ * motivates a scenario that actually measures the deviation instead of assuming it away.
+ *
+ * TODO(scenario-scaffold): from rest or a low cruise speed, command full steering lock and a
+ * light throttle to trace a tight U-turn (a scripted three-point-turn style sequence is also
+ * reasonable). Record rear-wheel lateral slip / sideslip angle across the maneuver and assert
+ * it stays isfinite and within a documented small-angle bound consistent with the low-speed
+ * kinematic blend's assumptions (see `low-speed`'s existing blend-continuity checks for the
+ * blend threshold), flagging (not necessarily failing on) any point where the dynamic model
+ * measurably disagrees with the zero-slip approximation.
+ */
+static void scenario_low_speed_tight_turn_slip(void)
+{
+    Game *game = alloc_game();
+    game_init(game);
+    set_vehicle_rolling_speed(game, 1.5f);
+
+    check(vehicle_spec_is_valid(&game->spec),
+          "spec is valid before low-speed-tight-turn-slip scaffold runs");
+    /* TODO(scenario-scaffold): replace with the real full-lock tight U-turn slip measurement. */
+
+    free(game);
+}
+
+/*
+ * scenario_peak_friction_slip_sweep — sweeps longitudinal slip ratio across a wide range at a
+ * fixed load and surface, locating where the tire's mu-slip curve peaks, and asserts the
+ * curve is unimodal (rises to one peak, then falls) rather than having a spurious second peak
+ * or a peak outside the physically expected slip range.
+ *
+ * NOT a duplicate of `tire` (physics_tests.c): that scenario checks the nonlinear curve shape
+ * and combined-friction ellipse at a handful of fixed sample points as unit-level checks on
+ * tire_force(). This scenario instead sweeps the *whole* slip-ratio domain and asserts a
+ * global shape property (unimodality, peak location) that a handful of fixed samples cannot
+ * establish on their own.
+ *
+ * Reference: Liang, Zhou, Huang & Li, "High-Slip-Ratio Control for Peak Tire-Road Friction
+ * Estimation Using Automated Vehicles" (arXiv:2603.09073) — the whole premise of the paper is
+ * that naturalistic (mild) driving under-excites slip and never reaches the peak-friction
+ * region, so peak mu can only be found by deliberately sweeping to high slip ratios. This
+ * scenario is the test-side equivalent: deliberately sweep the model's slip-ratio domain
+ * rather than only sampling the mild-driving region the other physics scenarios stay in.
+ *
+ * TODO(scenario-scaffold): call tire_force() (see the `tire` scenario for the calling
+ * convention) across a dense sweep of slip ratios from 0 to well past the expected peak,
+ * holding load and surface fixed. Assert the resulting force curve rises monotonically then
+ * falls monotonically (a single interior maximum, i.e. unimodal), and that the peak slip
+ * ratio location falls within the physically expected range documented in tire.c/tire.h.
+ */
+static void scenario_peak_friction_slip_sweep(void)
+{
+    VehicleSpec spec;
+    vehicle_spec_set_default(&spec);
+
+    check(vehicle_spec_is_valid(&spec),
+          "spec is valid before peak-friction-slip-sweep scaffold runs");
+    /* TODO(scenario-scaffold): replace with the real slip-ratio sweep + unimodality check. */
+}
+
 static const TestScenario kPhysicsScenarios[] = {
     { "telemetry", "CSV writer: stable header, row count, failure handling",
       scenario_telemetry },
@@ -2378,6 +2454,12 @@ static const TestScenario kPhysicsScenarios[] = {
     { "cross-spec-invariant-reproducibility",
       "SCAFFOLD (TODO): scripted maneuver replayed against corpus specs",
       scenario_cross_spec_invariant_reproducibility },
+    { "low-speed-tight-turn-slip",
+      "SCAFFOLD (TODO): full-lock near-zero-speed U-turn zero-slip-assumption check",
+      scenario_low_speed_tight_turn_slip },
+    { "peak-friction-slip-sweep",
+      "SCAFFOLD (TODO): slip-ratio sweep asserting a unimodal mu-slip curve",
+      scenario_peak_friction_slip_sweep },
 };
 
 TestScenarioGroup test_physics_scenarios(void)

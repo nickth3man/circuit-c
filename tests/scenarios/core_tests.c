@@ -728,6 +728,86 @@ static void scenario_renderscale(void)
     free(frames);
 }
 
+/*
+ * scenario_metamorphic_steer_mirror_symmetry — a metamorphic-testing scenario: runs the same
+ * script twice, once as recorded and once with every steer sample sign-flipped, and asserts
+ * the two runs are mirror images of each other (yaw rate, sideslip, lateral position, and
+ * heading all sign-flipped; longitudinal position and speed identical) rather than checking
+ * either run against a fixed expected value.
+ *
+ * Genuinely new testing *technique*, not just a new script: every existing scenario compares
+ * a run's output to a hard-coded expectation or another run of the *same* input (replay's
+ * determinism check). This is the first scenario whose oracle is a *relation* between two
+ * different inputs derived from each other — the property "steering left and steering right
+ * by the same amount produce mirrored outcomes" holds regardless of what the exact numbers
+ * are, so it doesn't need retuning when the physics model changes, unlike a fixed-value
+ * assertion.
+ *
+ * Reference: Spieker, Belmecheri, Gotlieb & Lazaar, "Evaluating Human Trajectory Prediction
+ * with Metamorphic Testing" (arXiv:2407.18756) — metamorphic testing is specifically
+ * recommended for domains with "no clear criterion of correct or incorrect behaviour," which
+ * describes Drifty's arcade physics tuning exactly: there is no ground-truth trajectory to
+ * compare against, but left/right mirror symmetry is a property the model must hold
+ * regardless of tuning, since nothing in vehicle.c/physics.c treats left and right
+ * asymmetrically (steer-sign already tests single-tick left-positive convention; this
+ * extends that to a full multi-second script and a derived, not hard-coded, oracle).
+ *
+ * TODO(scenario-scaffold): build the existing script via script_build (see scenario_replay
+ * for the pattern), run it once as-is and once with every frame's `steer` field negated.
+ * Assert |yaw(t)| and |beta(t)| match within tolerance at every sampled tick while their
+ * signs are opposite, |positionM.y(t)| matches with opposite sign, and positionM.x(t) /
+ * speed match with the *same* sign (forward progress is not mirrored). A mismatch here means
+ * either a genuine model asymmetry bug or a metamorphic relation that does not actually hold
+ * for this physics model (e.g. an asymmetric default surface or Ackermann geometry) — either
+ * finding is useful, but the TODO should record which.
+ */
+static void scenario_metamorphic_steer_mirror_symmetry(void)
+{
+    Game *game = alloc_game();
+    game_init(game);
+
+    check(vehicle_spec_is_valid(&game->spec),
+          "spec is valid before metamorphic-steer-mirror-symmetry scaffold runs");
+    /* TODO(scenario-scaffold): replace with the real steer-negated mirror-relation run pair. */
+
+    free(game);
+}
+
+/*
+ * scenario_replay_bundle_seed_reproduction — asserts that a failure bundle written by a
+ * failing scenario can be reloaded and replayed to reproduce the identical failing check and
+ * stateChecksum, closing the "is this bundle actually reproducible" question the current
+ * failure_bundle machinery leaves open.
+ *
+ * Inherited from PLAN_TESTING_OVERHAUL.md Track F1/F2 (not a fresh arXiv finding this round):
+ * "F1: extend failure_bundle to record the seeded random state and entire input timeline...
+ * F2: new `drifty_tests --replay-bundle <dir>` mode... A known-bad bundle on main fails with
+ * the same offending check text; a known-good bundle passes." Placed in core_tests.c (not
+ * gameplay, where round 2's plan-inherited scaffolds landed) because reproducibility is a
+ * property of the record/replay infrastructure in scenario_shared.h and dev/failure_bundle.h,
+ * the same infrastructure the `replay` scenario in this file already exercises.
+ *
+ * TODO(scenario-scaffold): deliberately trigger a known failing check (force an out-of-range
+ * spec field through a scenario that calls check on vehicle_spec_is_valid), capture the
+ * resulting artifacts/failure-<scenario>-<timestamp>/ bundle directory (see AGENTS.md), then
+ * load it via a `--replay-bundle <dir>`-equivalent entry point (see failure_bundle.h for the
+ * current bundle contents) that reconstructs the Game from the bundle and re-runs the
+ * recorded tail. Assert the reloaded run reproduces the same failing-check text and the same
+ * stateChecksum as the original failure. This scenario intentionally creates and cleans up
+ * its own bundle directory rather than depending on another scenario's failure output.
+ */
+static void scenario_replay_bundle_seed_reproduction(void)
+{
+    Game *game = alloc_game();
+    game_init(game);
+
+    check(vehicle_spec_is_valid(&game->spec),
+          "spec is valid before replay-bundle-seed-reproduction scaffold runs");
+    /* TODO(scenario-scaffold): replace with the real bundle-write + bundle-reload-and-compare. */
+
+    free(game);
+}
+
 static const TestScenario kCoreScenarios[] = {
     { "math", "clampf, lerpf, smooth_to, wrap_angle, smoothstep, lerp_angle", scenario_math },
     { "units", "world<->render conversion and the heading sign convention", scenario_units },
@@ -738,6 +818,12 @@ static const TestScenario kCoreScenarios[] = {
       scenario_replay },
     { "renderscale", "simulation state is independent of PIXELS_PER_METER",
       scenario_renderscale },
+    { "metamorphic-steer-mirror-symmetry",
+      "SCAFFOLD (TODO): left/right steer-negation mirror relation, not a fixed oracle",
+      scenario_metamorphic_steer_mirror_symmetry },
+    { "replay-bundle-seed-reproduction",
+      "SCAFFOLD (TODO): reload a failure bundle and reproduce its failing checksum",
+      scenario_replay_bundle_seed_reproduction },
 };
 
 TestScenarioGroup test_core_scenarios(void)
