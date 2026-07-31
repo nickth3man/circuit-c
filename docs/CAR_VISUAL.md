@@ -145,7 +145,6 @@ Two consequences discipline the whole feature list:
 | Arch gap | `rideHeight[Front\|Rear]M` + 0.35 × `suspTravel[Front\|Rear]M` | identity |
 | Arch flare | track vs `bodyHalfWidthM`, mean tire width, arch gap, `openWheelWeight` | rule |
 | Brake disc | `brakeDiscRadius[Front\|Rear]M`, scaled by `maxBrakeTorqueNm` | rule |
-| Spoke count | `wheelInertiaKgM2` | rule |
 | Greenhouse band | `cowlXM`, `backlightXM`, `massDriverXM` (layout frame), plus the 9%-of-body-length forward package bias | rule |
 | Cabin width | `heightOverallM` via `heightVisual` × `bodyHalfWidthM` | rule |
 | Roof panel length | `cabinLengthM`, `heightVisual` | rule |

@@ -550,10 +550,10 @@ static void json_wheels(FILE *f, const CarVisual *v)
         fprintf(f,
                 "%s{\"cx\":%.4f,\"cy\":%.4f,\"diameter\":%.4f,\"width\":%.4f,"
                 "\"rimDiameter\":%.4f,\"sidewall\":%.4f,\"disc\":%.4f,\"angle\":%.5f,"
-                "\"camberCos\":%.4f,\"poke\":%.4f,\"archGap\":%.4f,\"spokes\":%d}",
+                "\"camberCos\":%.4f,\"poke\":%.4f,\"archGap\":%.4f}",
                 (i ? "," : ""), w->centreM.x, w->centreM.y, w->diameterM, w->widthM,
                 w->rimDiameterM, w->sidewallHeightM, w->discDiameterM, w->staticAngleRad,
-                w->camberVisualCos, w->pokeM, w->archGapM, w->spokeCount);
+                w->camberVisualCos, w->pokeM, w->archGapM);
     }
     fprintf(f, "]");
 }

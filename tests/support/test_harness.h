@@ -43,4 +43,14 @@ void check_near(double actual, double expected, double tolerance, const char *wh
 void check_near_angle(float actual, float expected, float tolerance, const char *what);
 Game *alloc_game(void);
 
+/*
+ * check_run_invariants — the four structural checks every scripted scenario runs.
+ *
+ * Centralises: allFinite, !invariantFailed, friction budget (1+FRICTION_TOLERANCE),
+ * and MAX_SAFE_SPEED_MPS. The caller computes the peaks during its loop so the
+ * helper does not need tick-level state or a setup/teardown API.
+ */
+void check_run_invariants(const Game *game, const char *name, bool allFinite,
+                          float peakFrictionUsage, float peakSpeedMps);
+
 #endif /* DRIFTY_TEST_HARNESS_H */

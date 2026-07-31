@@ -24,6 +24,7 @@
 #include "render/car_visual_raster.h"
 #include "core/config.h"
 #include "dev/dev_params.h"
+#include "dev/dev_presets.h"
 #include "dev/dev_replay.h"
 #include "dev/dev_scenario.h"
 #include "dev/dev_state.h"
@@ -2051,6 +2052,234 @@ static void scenario_dev_replay(void)
           "event ticks are absolute, not window-relative");
 }
 
+/* ------------------------------------------------------------------------------------- */
+/* Scenario: auto-transmission — gear selection and arcade reverse state machine         */
+/* ------------------------------------------------------------------------------------- */
+
+static void scenario_auto_transmission(void)
+{
+    VehicleSpec spec;
+    VehicleState vs;
+    VehicleDerived derived;
+    Input io;
+    AutoTransmission at;
+
+    vehicle_spec_set_default(&spec);
+    memset(&vs, 0, sizeof(vs));
+    memset(&derived, 0, sizeof(derived));
+    input_zero(&io);
+    memset(&at, 0, sizeof(at));
+
+    /* Disabled: nothing changes. */
+    at.enabled = false;
+    at.driveState = AUTO_DRIVE;
+    vs.selectedGear = 2;
+    vs.engineRpm = spec.engineRedlineRpm;
+    io.throttle = 1.0f;
+    auto_transmission_update(&at, &vs, &spec, &derived, &io, FIXED_DT_S);
+    check(vs.selectedGear == 2, "disabled auto transmission does not change gear");
+    check(at.driveState == AUTO_DRIVE,
+          "disabled auto transmission does not change drive state");
+
+    /* Upshift near redline. */
+    at.enabled = true;
+    at.driveState = AUTO_DRIVE;
+    at.neutralTimer = 0.0f;
+    vs.selectedGear = 1;
+    vs.engineRpm = spec.engineRedlineRpm * 0.90f; /* above 0.85 upshift factor */
+    derived.speedMps = 10.0f;
+    io.throttle = 1.0f;
+    io.brake = 0.0f;
+    auto_transmission_update(&at, &vs, &spec, &derived, &io, FIXED_DT_S);
+    check(vs.selectedGear == 2, "high RPM upshifts from 1 to 2 (got %d)", vs.selectedGear);
+
+    /* Downshift at low RPM. */
+    vs.selectedGear = 3;
+    vs.engineRpm = spec.engineRedlineRpm * 0.20f; /* below 0.35 downshift factor */
+    auto_transmission_update(&at, &vs, &spec, &derived, &io, FIXED_DT_S);
+    check(vs.selectedGear == 2, "low RPM downshifts from 3 to 2 (got %d)", vs.selectedGear);
+
+    /* Brake-to-stop enters neutral. */
+    vs.selectedGear = 2;
+    vs.engineRpm = 2000.0f;
+    derived.speedMps = 0.2f; /* below AUTO_STOP_THRESHOLD_MPS 0.5 */
+    io.throttle = 0.0f;
+    io.brake = 1.0f;
+    auto_transmission_update(&at, &vs, &spec, &derived, &io, FIXED_DT_S);
+    check(at.driveState == AUTO_NEUTRAL, "brake-to-stop enters AUTO_NEUTRAL");
+    check(vs.selectedGear == 0, "brake-to-stop selects neutral gear");
+
+    /* Neutral delay + throttle returns to drive. */
+    at.driveState = AUTO_NEUTRAL;
+    at.neutralTimer = 0.0f;
+    vs.selectedGear = 0;
+    derived.speedMps = 0.0f;
+    io.throttle = 1.0f;
+    io.brake = 0.0f;
+    auto_transmission_update(&at, &vs, &spec, &derived, &io, 0.10f);
+    check(at.driveState == AUTO_NEUTRAL, "neutral waits for AUTO_NEUTRAL_DELAY_S");
+    check_near((double)io.throttle, 0.0, 1e-6, "neutral zeroes throttle after the check");
+    io.throttle = 1.0f;
+    auto_transmission_update(&at, &vs, &spec, &derived, &io, 0.10f); /* total 0.20 > 0.15 */
+    check(at.driveState == AUTO_DRIVE, "neutral + throttle returns to AUTO_DRIVE");
+    check(vs.selectedGear == 1, "neutral + throttle selects first gear");
+
+    /* Neutral delay + brake enters reverse. */
+    at.driveState = AUTO_NEUTRAL;
+    at.neutralTimer = 0.20f;
+    vs.selectedGear = 0;
+    io.throttle = 0.0f;
+    io.brake = 1.0f;
+    auto_transmission_update(&at, &vs, &spec, &derived, &io, FIXED_DT_S);
+    check(at.driveState == AUTO_REVERSE, "neutral + brake enters AUTO_REVERSE");
+    check(vs.selectedGear == -1, "neutral + brake selects reverse gear");
+
+    /* Reverse swaps throttle/brake pedals. */
+    at.driveState = AUTO_REVERSE;
+    vs.selectedGear = -1;
+    derived.speedMps = 3.0f;
+    io.throttle = 0.25f; /* original up-pedal = brake in reverse */
+    io.brake = 0.80f;    /* original down-pedal = throttle in reverse */
+    auto_transmission_update(&at, &vs, &spec, &derived, &io, FIXED_DT_S);
+    check_near((double)io.throttle, 0.80, 1e-6, "reverse maps brake pedal to throttle");
+    check_near((double)io.brake, 0.25, 1e-6, "reverse maps throttle pedal to brake");
+    check(at.driveState == AUTO_REVERSE, "moving reverse does not exit on swapped pedals");
+
+    /* Reverse brake-to-stop uses the original throttle pedal before the swap. */
+    at.driveState = AUTO_REVERSE;
+    vs.selectedGear = -1;
+    derived.speedMps = 0.1f;
+    io.throttle = 1.0f; /* original up-pedal while nearly stopped */
+    io.brake = 0.0f;
+    auto_transmission_update(&at, &vs, &spec, &derived, &io, FIXED_DT_S);
+    check(at.driveState == AUTO_NEUTRAL, "reverse brake-to-stop returns to AUTO_NEUTRAL");
+    check(vs.selectedGear == 0, "reverse brake-to-stop selects neutral gear");
+}
+
+/* ------------------------------------------------------------------------------------- */
+/* Scenario: presets — registry shape and deterministic apply                            */
+/* ------------------------------------------------------------------------------------- */
+
+static void scenario_presets(void)
+{
+    const int count = dev_preset_count();
+    check(count == 10, "there are exactly ten driving presets (got %d)", count);
+
+    const DevPreset *stock = dev_preset_at(0);
+    check(stock != NULL, "preset 0 exists");
+    check(strcmp(stock->name, "Stock Baseline") == 0, "preset 0 is Stock Baseline");
+    check(dev_preset_at(-1) == NULL, "negative preset index is rejected");
+    check(dev_preset_at(count) == NULL, "out-of-range preset index is rejected");
+    check(dev_preset_apply(NULL, 1) == 0, "NULL spec apply is a no-op");
+
+    VehicleSpec dirty;
+    vehicle_spec_set_default(&dirty);
+    dirty.massKg = 2000.0f;
+    dirty.engineRedlineRpm = 5000.0f;
+    const int stockApplied = dev_preset_apply(&dirty, 0);
+    check(stockApplied == 0, "Stock Baseline applies zero overrides (got %d)", stockApplied);
+    VehicleSpec defaults;
+    vehicle_spec_set_default(&defaults);
+    check_near((double)dirty.massKg, (double)defaults.massKg, 1e-4,
+               "Stock Baseline restores massKg to the default");
+    check_near((double)dirty.engineRedlineRpm, (double)defaults.engineRedlineRpm, 1e-4,
+               "Stock Baseline restores engineRedlineRpm to the default");
+
+    VehicleSpec a, b;
+    vehicle_spec_set_default(&a);
+    vehicle_spec_set_default(&b);
+    a.massKg = 1800.0f;
+    b.massKg = 700.0f;
+    const int appliedA = dev_preset_apply(&a, 1);
+    const int appliedB = dev_preset_apply(&b, 1);
+    check(appliedA > 0, "Touge Hero applies a non-empty override set");
+    check(appliedA == appliedB,
+          "Touge Hero applies the same override count from any prior state");
+    check_near((double)a.massKg, 950.0, 1e-3, "Touge Hero sets massKg to 950");
+    check_near((double)b.massKg, 950.0, 1e-3, "Touge Hero mass is independent of prior tuning");
+    check_near((double)a.engineRedlineRpm, 8000.0, 1e-3, "Touge Hero sets redline to 8000");
+    check_near((double)a.massKg, (double)b.massKg, 1e-6,
+               "preset apply is deterministic across dirty starting specs");
+}
+
+/* ------------------------------------------------------------------------------------- */
+/* Scenario: dev-state — scope recording, markers, scenario control, invariant latch     */
+/* ------------------------------------------------------------------------------------- */
+
+static void scenario_dev_state(void)
+{
+    Game *game = alloc_game();
+    game_init(game);
+
+    check(game->dev.scopeCount == 0, "dev_state_init starts with an empty scope");
+    check(!game->dev.invariantFailed, "dev_state_init clears the invariant latch");
+    check(game->dev.markerCount == 0, "dev_state_init starts with no markers");
+
+    /* A normal fixed update records scope history and applied input. */
+    game->input.throttle = 0.55f;
+    game_fixed_update(game, FIXED_DT_S);
+    check(game->dev.scopeCount >= 1, "dev_state_record retains at least one scope sample");
+    check_near((double)game->dev.appliedInput.throttle, 0.55, 1e-6,
+               "dev_state_record stores the applied throttle");
+
+    /* Throttle edge should produce a marker. */
+    bool sawThrottleOn = false;
+    for (int i = 0; i < game->dev.markerCount; i++) {
+        if (game->dev.markers[i].kind == DEV_MARKER_THROTTLE_ON) sawThrottleOn = true;
+    }
+    check(sawThrottleOn, "throttle rising edge records DEV_MARKER_THROTTLE_ON");
+
+    /* Scenario start resets sim state and begins a reproducible run. */
+    const int accel = dev_scenario_find("accel");
+    check(accel > 0, "the accel scenario is registered");
+    game->vehicle.positionM.x = 42.0f;
+    game->dev.invariantFailed = true;
+    game->dev.invariantCount = 3;
+    snprintf(game->dev.invariantText, sizeof(game->dev.invariantText), "stale");
+    dev_state_scenario_start(game, accel);
+    check(game->dev.scenarioRunning, "scenario start marks the scenario as running");
+    check(game->dev.scenario == accel, "scenario start stores the scenario index");
+    check_near((double)game->vehicle.positionM.x, 0.0, 1e-6,
+               "scenario start resets the simulation");
+    check(!game->dev.invariantFailed, "scenario start clears a latched invariant");
+    check(game->dev.invariantCount == 0, "scenario start zeroes the invariant count");
+    check(game->dev.scopeCount == 0, "scenario start clears scope history");
+
+    dev_state_scenario_stop(game);
+    check(!game->dev.scenarioRunning, "scenario stop ends the scripted run");
+
+    /* Force a clear invariant violation through the public recorder. */
+    Input applied;
+    input_zero(&applied);
+    game->derived.speedMps = MAX_SAFE_SPEED_MPS + 25.0f;
+    dev_state_record(game, &applied);
+    check(game->dev.invariantFailed, "overspeed latches invariantFailed");
+    check(game->dev.invariantCount >= 1, "overspeed increments invariantCount");
+    /* physics_state_is_valid() rejects overspeed first; evaluate_invariants surfaces that. */
+    check(strstr(game->dev.invariantText, "physics_state_is_valid") != NULL,
+          "invariant text names physics_state_is_valid (got '%s')", game->dev.invariantText);
+
+    bool sawInvariant = false;
+    for (int i = 0; i < game->dev.markerCount; i++) {
+        if (game->dev.markers[i].kind == DEV_MARKER_INVARIANT) sawInvariant = true;
+    }
+    check(sawInvariant, "first invariant violation pushes DEV_MARKER_INVARIANT");
+
+    const uint64_t firstTick = game->dev.invariantTick;
+    const int countAfterFirst = game->dev.invariantCount;
+    game->derived.speedMps = MAX_SAFE_SPEED_MPS + 40.0f;
+    dev_state_record(game, &applied);
+    check(game->dev.invariantTick == firstTick, "later violations keep the first latch tick");
+    check(game->dev.invariantCount == countAfterFirst + 1,
+          "later violations still increment the cumulative count");
+
+    dev_state_clear_invariants(&game->dev);
+    check(!game->dev.invariantFailed, "clear_invariants drops the latch");
+    check(game->dev.invariantCount == 0, "clear_invariants zeroes the cumulative count");
+
+    free(game);
+}
+
 static const TestScenario kPhysicsScenarios[] = {
     { "telemetry", "CSV writer: stable header, row count, failure handling",
       scenario_telemetry },
@@ -2083,6 +2312,11 @@ static const TestScenario kPhysicsScenarios[] = {
     { "integration", "semi-implicit order and heading wrap", scenario_integration },
     { "fixed-rate", "direct stepping matches accumulator stepping", scenario_fixed_rate },
     { "params", "tunable registry, clamping, and tuning-profile round trip", scenario_params },
+    { "presets", "driving presets: count, bounds, and deterministic apply", scenario_presets },
+    { "auto-trans", "automatic transmission shifts and arcade reverse swap",
+      scenario_auto_transmission },
+    { "dev-state", "dev scope, markers, scenario control, invariant latch",
+      scenario_dev_state },
     { "devreplay", "durable replay timelines, malformed input, event markers",
       scenario_dev_replay },
 };

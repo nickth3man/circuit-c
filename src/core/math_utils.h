@@ -26,6 +26,9 @@ float clampf(float v, float lo, float hi);
 
 /* Linear interpolation. t is not clamped: t < 0 or t > 1 extrapolates. */
 float lerpf(float a, float b, float t);
+/* Maximum/minimum of two floats. */
+float maxf(float a, float b);
+float minf(float a, float b);
 
 /* Frame-rate independent exponential approach of current toward target.
  * rateHz is the reciprocal time constant in 1/seconds; dt is in seconds.

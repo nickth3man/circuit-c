@@ -14,6 +14,7 @@
 
 #include "test_harness.h"
 
+#include "core/config.h"
 #include "core/math_utils.h"
 
 static int g_checks = 0;
@@ -138,4 +139,18 @@ TestHarnessSnapshot test_harness_snapshot(void)
     snapshot.bundleHasTelemetry = g_bundleHasTelemetry;
     snapshot.bundleSeed = g_bundleSeed;
     return snapshot;
+}
+
+void check_run_invariants(const Game *game, const char *name, bool allFinite,
+                          float peakFrictionUsage, float peakSpeedMps)
+{
+    check(allFinite, "'%s' keeps every state variable finite", name);
+    check(!game->dev.invariantFailed, "'%s' violates no invariant%s%s", name,
+          game->dev.invariantFailed ? ": " : "",
+          game->dev.invariantFailed ? game->dev.invariantText : "");
+    check(peakFrictionUsage <= 1.0f + FRICTION_TOLERANCE,
+          "'%s' never exceeds the friction budget (peak %.4f)", name,
+          (double)peakFrictionUsage);
+    check(peakSpeedMps <= MAX_SAFE_SPEED_MPS,
+          "'%s' stays below MAX_SAFE_SPEED_MPS (peak %.2f m/s)", name, (double)peakSpeedMps);
 }

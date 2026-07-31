@@ -2,9 +2,9 @@
  * track.c — oval track geometry and surface queries.
  *
  * Hand-authors a stadium-shaped oval of 24 nodes. The bottom straight passes through the
- * world origin (0,0), so the car's default start position is on asphalt. The nodes array
- * is a literal in this file copied onto the heap by track_init, so the pointer in Game
- * survives hot reloads (it points to heap memory, not module static data).
+ * world origin (0,0), so the car's default start position is on asphalt. The nodes array is
+ * calloc'd here and freed by track_free(); it survives hot reloads because it is heap
+ * memory, not module static data.
  */
 #include "world/track.h"
 

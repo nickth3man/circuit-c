@@ -60,7 +60,6 @@ typedef struct {
 
 /* Registry access. The table is immutable and its order is stable. */
 int dev_params_count(void);
-const DevParameter *dev_params_all(void);
 const DevParameter *dev_param_at(int index);
 const DevParameter *dev_param_find(const char *name);
 

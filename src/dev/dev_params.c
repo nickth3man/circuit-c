@@ -366,11 +366,6 @@ int dev_params_count(void)
     return PARAM_COUNT;
 }
 
-const DevParameter *dev_params_all(void)
-{
-    return g_params;
-}
-
 const DevParameter *dev_param_at(int index)
 {
     if (index < 0 || index >= PARAM_COUNT) return NULL;

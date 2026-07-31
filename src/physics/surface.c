@@ -55,7 +55,7 @@ static const SurfaceSpec kSurfaces[SURFACE_COUNT] = {
 
 const SurfaceSpec *Surface_Get(SurfaceId id)
 {
-    if (id >= SURFACE_COUNT) {
+    if ((int)id < 0 || id >= SURFACE_COUNT) {
         id = SURFACE_ASPHALT;
     }
     return &kSurfaces[id];

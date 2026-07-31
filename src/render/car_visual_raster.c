@@ -49,15 +49,6 @@
 
 #define MAX_POLY_POINTS (2 * CAR_HULL_STATIONS + 8)
 
-static float maxf(float a, float b)
-{
-    return (a > b) ? a : b;
-}
-static float minf(float a, float b)
-{
-    return (a < b) ? a : b;
-}
-
 /* Where a fill writes. Either channel may be NULL. */
 typedef struct {
     unsigned char *rgba;
@@ -598,14 +589,17 @@ static void render(const CarVisual *v, const RasterTarget *t, CarRasterPart part
         }
     }
 
-    /* L7e: exhaust tips at the tail, spaced across the centreline. The grammar owns the
-     * presentation-gained bore; the rasterizer only consumes it. */
+    /* L7e: exhaust tips at the tail, spaced across the centreline. exhaustTransition scales
+     * the bore for area-continuity: at a count threshold the pipe count doubles while bore
+     * drops to sqrt(1/2), so total exhaust area stays continuous instead of popping. */
     if (v->exhaustCount > 0 && v->exhaustBoreM > 0.0f) {
-        const float spacing = v->exhaustBoreM * 1.8f;
+        const float boreScale = 0.70710678f + 0.29289322f * v->exhaustTransition;
+        const float bore = v->exhaustBoreM * boreScale;
+        const float spacing = bore * 1.8f;
         const float first = -0.5f * spacing * (float)(v->exhaustCount - 1);
         for (int i = 0; i < v->exhaustCount; i++) {
-            fill_disc(t, tailX + 0.5f * v->exhaustBoreM, first + spacing * (float)i,
-                      v->exhaustBoreM, (Color){ 70, 74, 82, 255 }, CAR_LABEL_EXHAUST);
+            fill_disc(t, tailX + 0.5f * bore, first + spacing * (float)i, bore,
+                      (Color){ 70, 74, 82, 255 }, CAR_LABEL_EXHAUST);
         }
     }
 

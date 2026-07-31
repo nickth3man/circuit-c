@@ -119,17 +119,6 @@ DevScopeChannel dev_scope_preset_channel(DevScopePreset preset, int slot)
     return g_scopePresets[preset][slot];
 }
 
-static const char *const g_markerNames[DEV_MARKER_KIND_COUNT] = {
-    "throttle",   "lift",          "brake",     "handbrake", "steer reversal",
-    "saturation", "peak transfer", "invariant", "recovery"
-};
-
-const char *dev_marker_name(DevMarkerKind kind)
-{
-    if (kind < 0 || kind >= DEV_MARKER_KIND_COUNT) return "?";
-    return g_markerNames[kind];
-}
-
 const char *dev_state_scope_name(DevScopeChannel channel)
 {
     if (channel < 0 || channel >= DEV_SCOPE_COUNT) return "?";

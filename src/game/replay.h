@@ -85,9 +85,6 @@ bool replay_next(ReplayBuffer *rb, Input *out);
 /* Leave playback or recording without discarding the retained frames. */
 void replay_stop(ReplayBuffer *rb);
 
-/* Frames not yet consumed by playback. Zero outside REPLAY_MODE_PLAYBACK. */
-int replay_remaining(const ReplayBuffer *rb);
-
 /* Wall-clock time in seconds of retained frame index i (0 = oldest). */
 double replay_frame_time_s(const ReplayBuffer *rb, int index);
 

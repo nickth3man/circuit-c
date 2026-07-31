@@ -204,15 +204,7 @@ static void run_scripted_scenario(const char *name)
     }
     if (opened) telemetry_close(&writer);
 
-    check(allFinite, "'%s' keeps every state variable finite", name);
-    check(!game->dev.invariantFailed, "'%s' violates no invariant%s%s", name,
-          game->dev.invariantFailed ? ": " : "",
-          game->dev.invariantFailed ? game->dev.invariantText : "");
-    check(peakFrictionUsage <= 1.0f + FRICTION_TOLERANCE,
-          "'%s' never exceeds the friction budget (peak %.4f)", name,
-          (double)peakFrictionUsage);
-    check(peakSpeedMps <= MAX_SAFE_SPEED_MPS,
-          "'%s' stays below MAX_SAFE_SPEED_MPS (peak %.2f m/s)", name, (double)peakSpeedMps);
+    check_run_invariants(game, name, allFinite, peakFrictionUsage, peakSpeedMps);
     check(game->sim.tick == (uint64_t)scenario->durationTicks, "'%s' ran its full %d ticks",
           name, scenario->durationTicks);
     check(!game->dev.scenarioRunning, "'%s' stopped itself at the end of its script", name);
@@ -1308,6 +1300,52 @@ static void scenario_lsd_diff(void)
 }
 
 /*
+ * locked-diff: a locked axle forces both rear wheels to share one omega.
+ *
+ * Phase 4 exit criterion: "diff mode changes power-oversteer behavior."
+ *
+ * With DIFF_LOCKED, even when one rear wheel is on grass the two rear omegas stay
+ * equalized — the defining property of a locked differential (contrast with open-diff).
+ */
+static void scenario_locked_diff(void)
+{
+    Game *game = alloc_game();
+    game_init(game);
+    /* Unload the track so the per-wheel surface query in game_fixed_update
+     * does not overwrite our explicit surfaceId assignment. */
+    track_free(&game->track);
+    game->spec.differentialMode = (float)DIFF_LOCKED;
+
+    /* Place the rear-left wheel on grass. */
+    game->vehicle.wheels[WHEEL_REAR_LEFT].surfaceId = SURFACE_GRASS;
+
+    /* Full throttle in 1st gear from low speed. */
+    game->vehicle.velocityLongitudinalMps = 2.0f;
+    const float initOmega = 2.0f / game->spec.wheelRadiusM;
+    for (int i = 0; i < WHEEL_COUNT; i++)
+        game->vehicle.wheels[i].angularVelocityRadS = initOmega;
+    game->input.throttle = 1.0f;
+    for (int i = 0; i < 180; i++) game_fixed_update(game, FIXED_DT_S);
+
+    const float omegaRL = game->vehicle.wheels[WHEEL_REAR_LEFT].angularVelocityRadS;
+    const float omegaRR = game->vehicle.wheels[WHEEL_REAR_RIGHT].angularVelocityRadS;
+
+    check_near((double)omegaRL, (double)omegaRR, 1e-4,
+               "locked diff equalizes rear wheel speeds");
+    {
+        double T0 = (double)game->derived.differentialTorqueNm[0];
+        double T1 = (double)game->derived.differentialTorqueNm[1];
+        char msg[128];
+        snprintf(msg, sizeof(msg),
+                 "locked diff distributes equal torque to both rear wheels (%.1f vs %.1f N·m)",
+                 T0, T1);
+        check_near(T0, T1, 10.0, msg);
+    }
+
+    free(game);
+}
+
+/*
  * ackermann-geometry: Ackermann steering steepens the inner wheel relative to the outer.
  *
  * Phase 4 feature demonstration.
@@ -1576,6 +1614,8 @@ static const TestScenario kHandlingScenarios[] = {
     { "open-diff", "open differential: speed differentiation, equal torque",
       scenario_open_diff },
     { "lsd-diff", "LSD: torque bias to higher-grip wheel, capped ratio", scenario_lsd_diff },
+    { "locked-diff", "locked differential: shared rear omega, equal torque",
+      scenario_locked_diff },
     { "ackermann", "Ackermann geometry: inner wheel steers more than outer",
       scenario_ackermann_geometry },
     { "load-sensitivity", "tire load sensitivity: heavier wheel has lower mu scale",

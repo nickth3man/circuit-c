@@ -105,8 +105,6 @@ typedef struct {
     float value; /* whatever the marker is about, in its own unit */
 } DevMarker;
 
-const char *dev_marker_name(DevMarkerKind kind);
-
 typedef struct {
     /* ------------------------------------------------------------------ lab presentation -- */
     bool labVisible;

@@ -160,6 +160,13 @@ static void scenario_math(void)
     check_near((double)clampf(-5.0f, 0.0f, 1.0f), 0.0, 0.0, "clampf clamps below");
     check_near((double)clampf(0.5f, 1.0f, 0.0f), 0.5, 0.0, "clampf tolerates swapped bounds");
     check_near((double)clampf(2.0f, 1.0f, 0.0f), 1.0, 0.0, "clampf clamps with swapped bounds");
+    /* maxf / minf */
+    check_near((double)maxf(3.0f, 5.0f), 5.0, 0.0, "maxf picks the larger");
+    check_near((double)maxf(5.0f, 3.0f), 5.0, 0.0, "maxf is order-independent");
+    check_near((double)maxf(-1.0f, -2.0f), -1.0, 0.0, "maxf with negatives");
+    check_near((double)minf(3.0f, 5.0f), 3.0, 0.0, "minf picks the smaller");
+    check_near((double)minf(5.0f, 3.0f), 3.0, 0.0, "minf is order-independent");
+    check_near((double)minf(-1.0f, -2.0f), -2.0, 0.0, "minf with negatives");
 
     /* lerpf */
     check_near((double)lerpf(0.0f, 10.0f, 0.25f), 2.5, 1e-6, "lerpf midpoint");
@@ -262,6 +269,19 @@ static void scenario_math(void)
         }
         check_near((double)travel, (double)fabsf(wrap_angle(-3.0f - 3.0f)), 1e-3,
                    "lerp_angle travels only the short-path arc length");
+    }
+    /* Surface_Get: every valid id resolves; out-of-range clamps to asphalt. */
+    {
+        for (SurfaceId id = SURFACE_ASPHALT; id < SURFACE_COUNT; id++) {
+            const SurfaceSpec *s = Surface_Get(id);
+            check(s != NULL, "Surface_Get(valid %d) is non-NULL", (int)id);
+            check(s->muLongitudinal > 0.0f, "Surface_Get(valid %d) has positive mu (got %.2f)",
+                  (int)id, (double)s->muLongitudinal);
+        }
+        const SurfaceSpec *asphalt = Surface_Get(SURFACE_ASPHALT);
+        check(Surface_Get(SURFACE_COUNT) == asphalt,
+              "Surface_Get(SURFACE_COUNT) falls back to asphalt");
+        check(Surface_Get((SurfaceId)100) == asphalt, "Surface_Get(100) falls back to asphalt");
     }
 }
 

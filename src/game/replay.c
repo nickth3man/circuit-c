@@ -107,12 +107,6 @@ void replay_stop(ReplayBuffer *rb)
     rb->mode = REPLAY_MODE_IDLE;
 }
 
-int replay_remaining(const ReplayBuffer *rb)
-{
-    if (rb == NULL || rb->mode != REPLAY_MODE_PLAYBACK) return 0;
-    return rb->count - rb->playbackCursor;
-}
-
 double replay_frame_time_s(const ReplayBuffer *rb, int index)
 {
     if (rb == NULL || index < 0 || index >= rb->count) return 0.0;

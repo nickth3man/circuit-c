@@ -19,6 +19,16 @@ float lerpf(float a, float b, float t)
     return a + (b - a) * t;
 }
 
+float maxf(float a, float b)
+{
+    return (a > b) ? a : b;
+}
+
+float minf(float a, float b)
+{
+    return (a < b) ? a : b;
+}
+
 float smooth_to(float current, float target, float rateHz, float dt)
 {
     if (dt <= 0.0f || rateHz <= 0.0f) return current;

@@ -120,7 +120,6 @@ typedef struct {
                                         again here would double-count it. */
     float archGapM;        /* [identity] wheel-arch clearance; reads rideHeight[Front|Rear]M
                                         + suspTravel[Front|Rear]M */
-    int spokeCount;        /* [rule] spoke count from wheelInertiaKgM2 */
     float archFlareM;      /* [rule] this arch's flare: the shared derived flare (track, tire
                                         width, arch gap, openWheelWeight) plus this axle's
                                         declared body.fender_flare_[front|rear]. The rasterizer
@@ -196,9 +195,11 @@ typedef struct {
     float splitterWidthM;    /* [rule] splitter width from front aero magnitude */
     float canardStrength;    /* [rule] 0..1; reads |aeroLiftCoefFront| × aeroRefAreaFrontM2 */
     float mirrorOffsetM;
-    float exhaustBoreM;      /* [rule] exhaust bore; reads engineDisplacementL */
-    int exhaustCount;        /* [rule] exhaust count 1..4; reads engineCylinders */
-    float exhaustTransition; /* [rule] 0..1 smooth transition between count levels */
+    float exhaustBoreM; /* [rule] exhaust bore; reads engineDisplacementL */
+    int exhaustCount;   /* [rule] exhaust count 1..4; reads engineCylinders */
+    float
+        exhaustTransition;  /* [rule] 0..1 within-tier fraction; scales pipe bore in the raster
+                                       so count × bore² stays continuous across thresholds */
     float towHookDiameterM; /* [rule] presentation-gained race marker; reads raceDetailWeight */
     float towHookXM;        /* [rule] marker station clear of the L9 heading triangle */
     float hoodPinDiameterM; /* [rule] presentation-gained race marker; reads raceDetailWeight */
@@ -259,6 +260,12 @@ CarLatents car_visual_latents(const VehicleSpec *spec);
  * meaning: at the ~13.2 px/m the game draws at (PIXELS_PER_METER 24 * CAMERA_BASE_ZOOM 0.55),
  * 0.08 m is almost exactly one screen pixel. Colour contributes nothing, by design — shape has
  * to carry the difference.
+ *
+ * INDEPENDENCE RULE: every component must measure an independent visible difference. A
+ * component that merely restates an upstream driver already represented by rendered geometry
+ * (e.g. a presence flag duplicating a diameter the rasterizer gates on, or the composite weight
+ * that drove it) inflates L2 distance without adding information. Such slots are retired to 0
+ * — never reordered — so the remaining components each carry a genuinely independent axis.
  */
 int car_visual_signature_count(void);
 const char *car_visual_signature_component_name(int index);

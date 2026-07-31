@@ -21,7 +21,7 @@ typedef struct {
 } TrackNode;
 
 typedef struct {
-    TrackNode *nodes; /* heap-allocated, platform-owned, survives reload */
+    TrackNode *nodes; /* heap-allocated, survives reload (plain heap, not module static) */
     int count;
     SurfaceId offTrackSurfaceId; /* surface returned when point is off-track */
     /* Parking lot mode: rectangular open area instead of laned road. */

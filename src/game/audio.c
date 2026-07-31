@@ -24,7 +24,8 @@
 #if !defined(DRIFTY_HEADLESS)
 
 #include "raylib.h"
-#include "core/config.h" /* FIXED_DT_S */
+#include "core/config.h"     /* FIXED_DT_S */
+#include "core/math_utils.h" /* canonical clampf/lerpf */
 
 /* ── file-static state (no Game layout change) ──────────────────────────── */
 
@@ -39,18 +40,6 @@ static double s_lastThudTime = -1.0;
 static float s_screechVolume = 0.0f;
 
 /* ── helpers ────────────────────────────────────────────────────────────── */
-
-static float clampf(float x, float lo, float hi)
-{
-    if (x < lo) return lo;
-    if (x > hi) return hi;
-    return x;
-}
-
-static float lerpf(float a, float b, float t)
-{
-    return a + (b - a) * t;
-}
 
 static Sound try_load_sound(const char *path, bool *ok)
 {

@@ -23,21 +23,6 @@
 #define DEV_REPLAY_HEADER_BYTES 64
 #define DEV_REPLAY_FRAME_BYTES 20
 
-const char *dev_replay_event_name(DevReplayEventKind kind)
-{
-    switch (kind) {
-        case DEV_REPLAY_EVENT_THROTTLE: return "throttle";
-        case DEV_REPLAY_EVENT_BRAKE: return "brake";
-        case DEV_REPLAY_EVENT_HANDBRAKE: return "handbrake";
-        case DEV_REPLAY_EVENT_SHIFT_UP: return "shift up";
-        case DEV_REPLAY_EVENT_SHIFT_DOWN: return "shift down";
-        case DEV_REPLAY_EVENT_RESET: return "reset";
-        case DEV_REPLAY_EVENT_STEER_REVERSAL: return "steer reversal";
-        case DEV_REPLAY_EVENT_COUNT: break;
-    }
-    return "?";
-}
-
 const ReplayFrame *dev_replay_frame_at(const ReplayBuffer *rb, int index)
 {
     if (rb == NULL || index < 0 || index >= rb->count) return NULL;

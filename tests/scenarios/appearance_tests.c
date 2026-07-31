@@ -162,7 +162,6 @@ static bool cv_visual_fields_sane(const CarVisual *v)
         CV_NN(v->wheels[i].rimDiameterM);
         CV_NN(v->wheels[i].discDiameterM);
         CV_FIN(v->wheels[i].staticAngleRad);
-        if (v->wheels[i].spokeCount < 0) return false;
     }
     CV_NN(v->archFlareM);
 
@@ -1080,11 +1079,120 @@ static void scenario_corpus(void)
         free(visuals);
     }
 }
+/* ------------------------------------------------------------------------------------- */
+/* Scenario: signature invariants — retired slots, exhaust continuity, independence */
+/* ------------------------------------------------------------------------------------- */
+
+/* CAR_SIG_* enum values are private to car_visual.c; look up indices by name instead. */
+static int sig_index_of(const char *name)
+{
+    const int n = car_visual_signature_count();
+    for (int i = 0; i < n; i++) {
+        if (strcmp(car_visual_signature_component_name(i), name) == 0) return i;
+    }
+    return -1;
+}
+
+static void scenario_signature_invariants(void)
+{
+    const int n = car_visual_signature_count();
+    const int idxSpoke = sig_index_of("spoke_level");
+    const int idxRaceDetail = sig_index_of("race_detail_weight");
+    const int idxTowFlag = sig_index_of("tow_hook_flag");
+    const int idxHoodFlag = sig_index_of("hood_pins_flag");
+    const int idxTowDia = sig_index_of("tow_hook_diameter");
+    const int idxHoodDia = sig_index_of("hood_pin_diameter");
+    check(idxSpoke >= 0 && idxRaceDetail >= 0 && idxTowFlag >= 0 && idxHoodFlag >= 0,
+          "retired signature component indices resolve by name");
+
+    /* spoke_level is retired — an invisible feature cannot earn distinctness. Two specs
+     * that differ ONLY in wheelInertiaKgM2 must share a bake key and a zero spoke_level. */
+    {
+        VehicleSpec lo, hi;
+        CarVisual vlo, vhi;
+        vehicle_spec_set_default(&lo);
+        vehicle_spec_set_default(&hi);
+        lo.wheelInertiaKgM2 = 0.30f; /* below the lowest spoke threshold */
+        hi.wheelInertiaKgM2 = 3.00f; /* above the highest spoke threshold */
+        car_visual_derive(&lo, &vlo);
+        car_visual_derive(&hi, &vhi);
+
+        float slo[CAR_SIGNATURE_MAX], shi[CAR_SIGNATURE_MAX];
+        car_visual_signature(&vlo, slo, n);
+        car_visual_signature(&vhi, shi, n);
+
+        check_near((double)slo[idxSpoke], 0.0, 0.0,
+                   "spoke_level is retired to 0 (low inertia)");
+        check_near((double)shi[idxSpoke], 0.0, 0.0,
+                   "spoke_level is retired to 0 (high inertia)");
+        check(car_visual_bake_key(&vlo) == car_visual_bake_key(&vhi),
+              "wheelInertiaKgM2 alone does not change the bake key (spokes not drawn)");
+        check_near((double)fabsf(slo[idxSpoke] - shi[idxSpoke]), 0.0, 0.0,
+                   "retired spoke_level contributes 0 to the signature distance");
+    }
+
+    /* exhaustTransition produces area-continuous bore scaling across count thresholds.
+     * count × bore² must stay continuous across the 4-cyl (1→2) and 8-cyl (2→4) boundaries. */
+    {
+        const float cylValues[] = { 3.9f, 4.1f, 7.9f, 8.1f };
+        float areas[4];
+        for (int i = 0; i < 4; i++) {
+            VehicleSpec s;
+            CarVisual v;
+            vehicle_spec_set_default(&s);
+            s.engineCylinders = cylValues[i];
+            car_visual_derive(&s, &v);
+            const float boreScale = 0.70710678f + 0.29289322f * v.exhaustTransition;
+            const float bore = v.exhaustBoreM * boreScale;
+            areas[i] = (float)v.exhaustCount * bore * bore;
+            check(v.exhaustTransition >= 0.0f && v.exhaustTransition <= 1.0f,
+                  "exhaustTransition at %.1f cyl is in [0,1] (got %.3f)", (double)cylValues[i],
+                  (double)v.exhaustTransition);
+        }
+        const float jump4 = fabsf(areas[0] - areas[1]) / (areas[0] + areas[1] + 1e-12f);
+        check(jump4 < 0.15f,
+              "exhaust area is continuous across the 4-cyl boundary (rel jump %.3f)",
+              (double)jump4);
+        const float jump8 = fabsf(areas[2] - areas[3]) / (areas[2] + areas[3] + 1e-12f);
+        check(jump8 < 0.15f,
+              "exhaust area is continuous across the 8-cyl boundary (rel jump %.3f)",
+              (double)jump8);
+    }
+
+    /* Retired race-detail slots are 0 across the whole corpus, but the rendered geometry
+     * (tow-hook/hood-pin diameters) still carries the visible signal where it exists. */
+    {
+        const int count = car_corpus_count();
+        bool allRetiredZero = true;
+        bool someRenderedGeometry = false;
+        for (int i = 0; i < count; i++) {
+            VehicleSpec s;
+            CarVisual v;
+            float sig[CAR_SIGNATURE_MAX];
+            if (!car_corpus_spec(i, &s)) continue;
+            car_visual_derive(&s, &v);
+            car_visual_signature(&v, sig, n);
+            if (sig[idxRaceDetail] != 0.0f || sig[idxTowFlag] != 0.0f ||
+                sig[idxHoodFlag] != 0.0f) {
+                allRetiredZero = false;
+            }
+            if (sig[idxTowDia] > 0.0f || sig[idxHoodDia] > 0.0f) {
+                someRenderedGeometry = true;
+            }
+        }
+        check(allRetiredZero,
+              "race_detail_weight, tow_hook_flag, hood_pins_flag are 0 across the corpus");
+        check(someRenderedGeometry,
+              "tow-hook/hood-pin rendered geometry still appears in the corpus");
+    }
+}
 
 static const TestScenario kAppearanceScenarios[] = {
     { "car-visual", "appearance is a pure, total function of VehicleSpec",
       scenario_car_visual },
     { "corpus", "every corpus vehicle is valid and visibly distinct", scenario_corpus },
+    { "signature-invariants", "retired invisible/collinear slots, exhaust area-continuity",
+      scenario_signature_invariants },
 };
 
 TestScenarioGroup test_appearance_scenarios(void)

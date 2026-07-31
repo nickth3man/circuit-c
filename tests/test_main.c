@@ -17,6 +17,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "test_commands.h"
 #include "test_scenarios.h"
@@ -28,7 +29,8 @@
 
 static void print_usage(const char *argv0)
 {
-    printf("usage: %s [--scenario NAME] [--list] [-v] [--no-bundle] [--artifacts DIR]\n",
+    printf("usage: %s [--scenario NAME] [--filter PATTERN] [--list] [-v] [--no-bundle] "
+           "[--artifacts DIR] [--junit [FILE]]\n",
            argv0);
     printf("       %s --dump-params [PATH]     write the parameter table as Markdown\n", argv0);
     printf("       %s --benchmark [TICKS]      fixed-update throughput, no telemetry\n", argv0);
@@ -47,6 +49,58 @@ static void print_usage(const char *argv0)
            argv0);
 }
 
+/* Write one XML-safe character; returns the number of bytes written. */
+static int xml_escape_char(char c, char *buf, size_t size)
+{
+    const char *replace;
+    int len;
+    switch (c) {
+        case '&':
+            replace = "&amp;";
+            len = 5;
+            break;
+        case '<':
+            replace = "&lt;";
+            len = 4;
+            break;
+        case '>':
+            replace = "&gt;";
+            len = 4;
+            break;
+        case '"':
+            replace = "&quot;";
+            len = 6;
+            break;
+        case '\'':
+            replace = "&apos;";
+            len = 6;
+            break;
+        default:
+            if ((unsigned char)c < 0x20) return 0;
+            if ((int)size > 0) {
+                buf[0] = c;
+                buf[1] = '\0';
+                return 1;
+            }
+            return 0;
+    }
+    if ((int)size < len + 1) return 0;
+    memcpy(buf, replace, (size_t)len);
+    buf[len] = '\0';
+    return len;
+}
+
+/* Copy text into buf with XML escaping. buf is always null-terminated. */
+static void xml_escape(const char *src, char *buf, size_t size)
+{
+    size_t pos = 0;
+    while (*src && pos + 1 < size) {
+        pos += (size_t)xml_escape_char(*src, buf + pos, size - pos);
+        src++;
+    }
+    buf[pos] = '\0';
+}
+
 int main(int argc, char **argv)
 {
     /* The declaration order here IS the run order, and it is the only thing that decides it. */
@@ -58,6 +112,12 @@ int main(int argc, char **argv)
 
     const char *only = NULL;
     const char *artifactsDir = "artifacts";
+    const char *filterPattern = NULL;
+    const char *junitPath = NULL;
+    const char *junitNames[128];
+    double junitTimes[128];
+    int junitFailures[128];
+    int junitCount = 0;
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--list") == 0) {
@@ -134,6 +194,22 @@ int main(int argc, char **argv)
             print_usage(argv[0]);
             return 0;
         }
+        if (strcmp(argv[i], "--filter") == 0) {
+            if (i + 1 >= argc) {
+                fprintf(stderr, "error: --filter needs a pattern\n");
+                return 2;
+            }
+            filterPattern = argv[++i];
+            continue;
+        }
+        if (strcmp(argv[i], "--junit") == 0) {
+            if (i + 1 < argc && argv[i + 1][0] != '-') {
+                junitPath = argv[++i];
+            } else {
+                junitPath = "artifacts/junit.xml";
+            }
+            continue;
+        }
         fprintf(stderr, "error: unrecognised argument '%s'\n", argv[i]);
         print_usage(argv[0]);
         return 2;
@@ -147,12 +223,17 @@ int main(int argc, char **argv)
         for (size_t s = 0; s < groups[g].count; s++) {
             const TestScenario *scenario = &groups[g].items[s];
             if (only != NULL && strcmp(only, scenario->name) != 0) continue;
+            if (filterPattern != NULL && strstr(scenario->name, filterPattern) == NULL)
+                continue;
 
             const TestHarnessSnapshot before = test_harness_snapshot();
 
             printf("[ %s ] %s\n", scenario->name, scenario->description);
             test_harness_clear_scenario();
+            const clock_t t0 = clock();
             scenario->run();
+            const clock_t t1 = clock();
+            const double elapsedS = (double)(t1 - t0) / CLOCKS_PER_SEC;
 
             const TestHarnessSnapshot after = test_harness_snapshot();
             const int scenarioChecks = after.checks - before.checks;
@@ -187,11 +268,53 @@ int main(int argc, char **argv)
             }
             printf("\n");
             ran++;
+
+            if (junitPath != NULL && junitCount < 128) {
+                junitNames[junitCount] = scenario->name;
+                junitTimes[junitCount] = elapsedS;
+                junitFailures[junitCount] = scenarioFailures;
+                junitCount++;
+            }
         }
     }
 
     /* Every pending bundle has been written above, so the retained Game can go now. */
     test_handling_cleanup();
+
+    if (junitPath != NULL) {
+        FILE *jf = fopen(junitPath, "w");
+        if (jf == NULL) {
+            fprintf(stderr, "error: could not write '%s'\n", junitPath);
+        } else {
+            double totalTime = 0.0;
+            int totalFailures = 0;
+            for (int i = 0; i < junitCount; i++) {
+                totalTime += junitTimes[i];
+                if (junitFailures[i] > 0) totalFailures++;
+            }
+            fprintf(jf, "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+            fprintf(jf,
+                    "<testsuite name=\"drifty_tests\" tests=\"%d\" failures=\"%d\" "
+                    "errors=\"0\" time=\"%.3f\">\n",
+                    junitCount, totalFailures, totalTime);
+            for (int i = 0; i < junitCount; i++) {
+                char escName[256];
+                xml_escape(junitNames[i], escName, sizeof(escName));
+                fprintf(jf, "  <testcase name=\"%s\" classname=\"Scenarios\" time=\"%.3f\">",
+                        escName, junitTimes[i]);
+                if (junitFailures[i] > 0) {
+                    fprintf(jf, "\n    <failure message=\"%d check(s) failed\"/>\n",
+                            junitFailures[i]);
+                    fprintf(jf, "  </testcase>\n");
+                } else {
+                    fprintf(jf, "</testcase>\n");
+                }
+            }
+            fprintf(jf, "</testsuite>\n");
+            fclose(jf);
+            printf("JUnit report: %s\n", junitPath);
+        }
+    }
 
     if (only != NULL && ran == 0) {
         fprintf(stderr, "error: no scenario named '%s' (try --list)\n", only);

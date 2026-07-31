@@ -78,11 +78,6 @@ static float u01(float v, float lo, float hi)
     return clampf((v - lo) / (hi - lo), 0.0f, 1.0f);
 }
 
-static float maxf(float a, float b)
-{
-    return (a > b) ? a : b;
-}
-
 /* ------------------------------------------------------------------- aero conventions --
  *
  * A lift coefficient is up-positive, so DOWNFORCE is the negative side of it. Wings,
@@ -608,14 +603,6 @@ void car_visual_derive(const VehicleSpec *spec, CarVisual *out)
     const float discDiaF = 2.0f * maxf(spec->brakeDiscRadiusFrontM, 0.0f) * torqueAugment;
     const float discDiaR = 2.0f * maxf(spec->brakeDiscRadiusRearM, 0.0f) * torqueAugment;
 
-    /* [rule] spoke count from wheel inertia. */
-    const float inertia = spec->wheelInertiaKgM2;
-    const int spokes = (inertia < 0.70f)   ? 10
-                       : (inertia < 1.00f) ? 8
-                       : (inertia < 1.40f) ? 6
-                       : (inertia < 2.00f) ? 5
-                                           : 4;
-
     /* [rule] static toe angle at rest × CV_TOE_VISUAL_GAIN. Reads suspToeFrontRad/RearRad.
      * This is presentation-gained: raw toe is ~0.15°, far below one pixel. */
     const float toeFrontRad = spec->suspToeFrontRad * CV_TOE_VISUAL_GAIN;
@@ -655,7 +642,6 @@ void car_visual_derive(const VehicleSpec *spec, CarVisual *out)
         w->rimWidthM = isFront ? rimWidF : rimWidR;
         w->sidewallHeightM = isFront ? sidewallF : sidewallR;
         w->discDiameterM = isFront ? discDiaF : discDiaR;
-        w->spokeCount = spokes;
         /* Static toe angle: front-left toes outward, front-right outward (mirrored).
          * Negative toe is toe-out. Left side: +left → outward. */
         w->staticAngleRad = isFront ? ((isLeft ? 1.0f : -1.0f) * toeFrontRad) : 0.0f;
@@ -765,16 +751,22 @@ void car_visual_derive(const VehicleSpec *spec, CarVisual *out)
     out->towHookXM = out->hasTowHook ? noseX - (0.25f * out->headingLengthM + 0.12f) : 0.0f;
 
     /* [rule] Exhaust: count from engineCylinders (documented visual interpretation, monotonic
-     * non-decreasing, bounded 1..4). Bore from engineDisplacementL. Transition band via
-     * exhaustTransition so count changes don't snap full-size. */
+     * non-decreasing, bounded 1..4). Bore from engineDisplacementL. exhaustTransition is the
+     * within-tier fraction (0 just above a count threshold, ramping to 1 at the next); the
+     * rasterizer scales pipe bore by it so count × bore² stays continuous across the 4- and
+     * 8-cylinder boundaries — a count change no longer pops full-size. */
     {
-        const float cyl01 = u01(spec->engineCylinders, 2.0f, 12.0f);
-        /* Smooth cylinder count prevents snapping across thresholds. */
         const int rawCount = (spec->engineCylinders <= 4.0f)   ? 1
                              : (spec->engineCylinders <= 8.0f) ? 2
                                                                : 4;
         out->exhaustCount = rawCount;
-        out->exhaustTransition = smoothstep(0.1f, 0.4f, cyl01);
+        if (rawCount == 1) {
+            out->exhaustTransition = 1.0f; /* single pipe: no incoming pipes to ramp */
+        } else if (rawCount == 2) {
+            out->exhaustTransition = smoothstep(4.0f, 8.0f, spec->engineCylinders);
+        } else {
+            out->exhaustTransition = smoothstep(8.0f, 12.0f, spec->engineCylinders);
+        }
         out->exhaustBoreM = (0.025f + 0.065f * u01(spec->engineDisplacementL, 0.5f, 8.0f)) *
                             CV_EXHAUST_VISUAL_GAIN;
     }
@@ -949,7 +941,6 @@ uint32_t car_visual_bake_key(const CarVisual *v)
         key_f32(&h, w->camberVisualCos);
         key_f32(&h, w->pokeM);
         key_f32(&h, w->archGapM);
-        key_i32(&h, w->spokeCount);
         key_f32(&h, w->archFlareM);
     }
     key_f32(&h, v->archFlareM);
@@ -1122,7 +1113,9 @@ int car_visual_signature(const CarVisual *v, float *out, int cap)
     out[CAR_SIG_mirror_offset] = v->mirrorOffsetM;
     out[CAR_SIG_exhaust_bore] = v->exhaustBoreM;
 
-    out[CAR_SIG_spoke_level] = (float)fl->spokeCount * CAR_SIG_LEVEL_STEP;
+    /* RETIRED: spokes were never drawn, so this slot earns no distinctness.
+     * The enum index is kept for signature compatibility; the value is always 0. */
+    out[CAR_SIG_spoke_level] = 0.0f;
     out[CAR_SIG_exhaust_level] = (float)v->exhaustCount * CAR_SIG_LEVEL_STEP;
     out[CAR_SIG_cage_flag] = v->hasCage ? CAR_SIG_LEVEL_STEP : 0.0f;
     out[CAR_SIG_mirror_flag] = v->hasMirrors ? CAR_SIG_LEVEL_STEP : 0.0f;
@@ -1136,10 +1129,14 @@ int car_visual_signature(const CarVisual *v, float *out, int cap)
     out[CAR_SIG_van_window_weight] = v->vanWindowWeight;
     out[CAR_SIG_side_window_count] = (float)v->sideWindowCount * CAR_SIG_LEVEL_STEP;
     out[CAR_SIG_open_wheel_weight] = v->openWheelWeight;
-    out[CAR_SIG_race_detail_weight] = v->raceDetailWeight;
+    /* RETIRED: these three were collinear around one driver (raceDetailWeight), whose effect
+     * the rendered cage/mirror/tow-hook/hood-pin geometry already carries. The two flags
+     * duplicated the diameters the rasterizer gates on (towHookDiameterM > 0,
+     * hoodPinDiameterM > 0). Indices kept for compatibility; values are always 0. */
+    out[CAR_SIG_race_detail_weight] = 0.0f;
     out[CAR_SIG_stripe_weight] = v->stripeWeight;
-    out[CAR_SIG_tow_hook_flag] = v->hasTowHook ? CAR_SIG_LEVEL_STEP : 0.0f;
-    out[CAR_SIG_hood_pins_flag] = v->hasHoodPins ? CAR_SIG_LEVEL_STEP : 0.0f;
+    out[CAR_SIG_tow_hook_flag] = 0.0f;
+    out[CAR_SIG_hood_pins_flag] = 0.0f;
     out[CAR_SIG_height_visual] = v->heightVisual;
     out[CAR_SIG_roof_length] = v->roofLengthM;
     out[CAR_SIG_glass_half_width] = v->glassHalfWidthM;

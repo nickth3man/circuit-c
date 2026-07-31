@@ -22,27 +22,26 @@
 /*  Boundary polyline helpers                                                              */
 /* ====================================================================================== */
 
-/* Closest point on segment a→b to point p, returned by value. */
-static Vector2 closest_point_on_segment(Vector2 p, Vector2 a, Vector2 b)
+/* Closest point on segment a→b to point p, and the squared distance to it.
+ * Robust for zero-length segments. */
+static Vector2 closest_point_and_dist_sq(Vector2 p, Vector2 a, Vector2 b, float *distSqOut)
 {
     const float dx = b.x - a.x;
     const float dy = b.y - a.y;
     const float lenSq = dx * dx + dy * dy;
-    if (lenSq < 1e-12f) return a;
-
-    float t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / lenSq;
-    if (t < 0.0f) t = 0.0f;
-    if (t > 1.0f) t = 1.0f;
-    return (Vector2){ a.x + t * dx, a.y + t * dy };
-}
-
-/* Squared distance from point p to segment a→b. */
-static float point_segment_sq(Vector2 p, Vector2 a, Vector2 b)
-{
-    const Vector2 q = closest_point_on_segment(p, a, b);
-    const float ex = p.x - q.x;
-    const float ey = p.y - q.y;
-    return ex * ex + ey * ey;
+    float t;
+    if (lenSq < 1e-12f) {
+        t = 0.0f;
+    } else {
+        t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / lenSq;
+        if (t < 0.0f) t = 0.0f;
+        if (t > 1.0f) t = 1.0f;
+    }
+    const Vector2 closest = { a.x + t * dx, a.y + t * dy };
+    const float ex = p.x - closest.x;
+    const float ey = p.y - closest.y;
+    *distSqOut = ex * ex + ey * ey;
+    return closest;
 }
 
 /* ====================================================================================== */
@@ -117,6 +116,85 @@ static Vector2 lerp_vec(Vector2 a, Vector2 b, float t)
 {
     return (Vector2){ a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t };
 }
+/* ====================================================================================== */
+/*  Contact resolution helper                                                              */
+/* ====================================================================================== */
+
+/* Resolves one circle-vs-barrier contact: penetration correction + impulse response.
+ *
+ * Penetration push moves the CG so the circle just touches the barrier. If the contact is
+ * approaching (vn < 0), a normal impulse reflects velocity with restitution and a tangential
+ * Coulomb-clamped friction impulse is applied; both update CG linear velocity and yaw rate.
+ * *vCgWorld is updated to the post-impulse world-frame CG velocity so a subsequent contact
+ * in the same substep sees the corrected velocity (no stale-data trap).
+ *
+ * Returns true if a contact was resolved (penetration corrected; impulse applied when
+ * approaching). Returns false if there is no penetration or the contact is degenerate. */
+static bool resolve_circle_barrier(const VehicleSpec *spec, VehicleState *state,
+                                   VehicleRenderState *renderState, Vector2 pos, float hdg,
+                                   Vector2 contactPt, float distSq, Vector2 pushN,
+                                   float radiusM, float rHalf, float muC, Vector2 *vCgWorld,
+                                   float *crashLockoutTimerS)
+{
+    const float dist = sqrtf(distSq);
+    const float pen = radiusM - dist;
+    if (!(pen > 0.0f) || !(dist > 1e-9f)) return false;
+
+    /* Penetration correction: push the CG along the push normal. */
+    state->positionM.x = pos.x + pushN.x * pen;
+    state->positionM.y = pos.y + pushN.y * pen;
+    state->headingRad = hdg;
+    renderState->currPositionM = state->positionM;
+    renderState->currHeadingRad = state->headingRad;
+
+    /* Contact-point velocity: v_CG + ω × r. */
+    const Vector2 rContact = { contactPt.x - pos.x, contactPt.y - pos.y };
+    const Vector2 vContact = contact_velocity_world(*vCgWorld, state->yawRateRadS, rContact);
+
+    /* Normal velocity (positive = separating, negative = approaching). */
+    const float vn = vContact.x * pushN.x + vContact.y * pushN.y;
+    if (vn >= 0.0f) return true; /* separating: push only, no impulse needed */
+
+    /* Tangential direction: rotate normal +90°. */
+    const Vector2 tang = { -pushN.y, pushN.x };
+    const float vt = vContact.x * tang.x + vContact.y * tang.y;
+
+    /* Effective mass for normal and tangential impulse. */
+    const float rXn = rContact.x * pushN.y - rContact.y * pushN.x;
+    const float rXt = rContact.x * tang.y - rContact.y * tang.x;
+    const float invMass = 1.0f / spec->massKg;
+    const float invInertia = 1.0f / spec->yawInertiaKgM2;
+    const float effMassN = 1.0f / (invMass + rXn * rXn * invInertia);
+    const float effMassT = 1.0f / (invMass + rXt * rXt * invInertia);
+
+    /* Normal impulse: reflect with restitution (Δv_n = -(1+e)·v_n). */
+    const float Jn = effMassN * (-(1.0f + rHalf) * vn);
+
+    /* Friction impulse, Coulomb-clamped to |Jt| ≤ μ·Jn. */
+    float Jt = -effMassT * vt;
+    const float JtMax = muC * Jn;
+    if (Jt > JtMax) Jt = JtMax;
+    if (Jt < -JtMax) Jt = -JtMax;
+
+    /* Total impulse in world frame, applied to CG linear velocity. */
+    const Vector2 J = { Jn * pushN.x + Jt * tang.x, Jn * pushN.y + Jt * tang.y };
+    const Vector2 vCgNew = { vCgWorld->x + J.x * invMass, vCgWorld->y + J.y * invMass };
+    world_vel_to_body(vCgNew, state->headingRad, &state->velocityLongitudinalMps,
+                      &state->velocityLateralMps);
+
+    /* Angular impulse: r × J. */
+    const float rXJ = rContact.x * J.y - rContact.y * J.x;
+    state->yawRateRadS += rXJ * invInertia;
+
+    /* Update the CG velocity for any subsequent contact in this substep. */
+    *vCgWorld = vCgNew;
+
+    /* Crash lockout on significant impact. */
+    if (crashLockoutTimerS != NULL && fabsf(vn) > COLLISION_LOCKOUT_THRESHOLD_MPS) {
+        *crashLockoutTimerS = CRASH_LOCKOUT_S;
+    }
+    return true;
+}
 
 /* ====================================================================================== */
 /*  Collision resolution — the main function                                               */
@@ -148,291 +226,84 @@ int collision_resolve_track(const VehicleSpec *spec, VehicleState *state,
     const float prevHdg = renderState->prevHeadingRad;
     const float currHdg = renderState->currHeadingRad;
 
-    /* World-frame CG velocity at start of tick (before physics integrated this step). */
-    const Vector2 vCgWorld =
+    /* World-frame CG velocity at start of tick. Mutable: each resolved contact updates it
+     * so a subsequent contact in the same substep uses the corrected velocity. */
+    Vector2 vCgWorld =
         world_velocity(state->velocityLongitudinalMps, state->velocityLateralMps, currHdg);
 
-    /* Build boundary segments from the track centreline.
-     *
-     * For each centreline segment i→j (j = (i+1)%count), create two boundary segments:
-     *   - Left boundary:  centreline + halfWidth * (-dir.y, +dir.x)  (the +90° offset)
-     *   - Right boundary: centreline - halfWidth * (-dir.y, +dir.x)  (the -90° offset)
-     *
-     * The "push" normal (pointing back onto the track) is:
-     *   - Left barrier:  (+dir.y, -dir.x)   — the -90° direction, back toward centreline
-     *   - Right barrier: (-dir.y, +dir.x)   — the +90° direction, back toward centreline
-     */
-
-    /* Substep sweep: check in small increments from prev→curr to catch the earliest contact. */
-    /* We check t = 0/COLLISION_SUBSTEPS through (COLLISION_SUBSTEPS-1)/COLLISION_SUBSTEPS,
-     * which is 6 substeps. We use substeps-1 for interpolation because t=1 is the end state
-     * that physics already produced — if the car ended inside a barrier, substep t < 1 should
-     * have caught it. */
+    /* Substep sweep: small increments from prev→curr catch the earliest contact.
+     * At the FIRST substep that finds penetration, ALL currently-penetrating circle/barrier
+     * pairs are resolved in deterministic order (front-then-rear, left-then-right, per
+     * segment), then the function returns the total contact count. We do NOT continue to
+     * later substeps: once state is mutated the prev→curr interpolation is stale. */
     for (int sub = 0; sub < COLLISION_SUBSTEPS; sub++) {
         const float t = (float)sub / (float)COLLISION_SUBSTEPS;
-        const Vector2 pos = lerp_vec(prevPos, currPos, t);
+        Vector2 pos = lerp_vec(prevPos, currPos, t);
         const float hdg = lerp_angle_simple(prevHdg, currHdg, t);
+        int contacts = 0;
 
-        /* World positions of the two capsule circles. */
-        const Vector2 frontWorld = world_from_body(bFront, pos, hdg);
-        const Vector2 rearWorld = world_from_body(bRear, pos, hdg);
-
-        /* Iterate over every centreline segment and check both boundaries. */
         const int n = track->count;
         for (int i = 0; i < n; i++) {
             const int j = (i + 1) % n;
             const TrackNode *ni = &track->nodes[i];
             const TrackNode *nj = &track->nodes[j];
 
-            /* Segment direction. */
+            /* Segment direction and left perpendicular. */
             const float segDx = nj->centerM.x - ni->centerM.x;
             const float segDy = nj->centerM.y - ni->centerM.y;
             const float segLen = sqrtf(segDx * segDx + segDy * segDy);
             if (segLen < 1e-12f) continue;
-
             const float invLen = 1.0f / segLen;
             const Vector2 dir = { segDx * invLen, segDy * invLen };
-            /* Left perpendicular: rotating +90°, i.e. (-dir.y, +dir.x). */
             const Vector2 perp = { -dir.y, dir.x };
 
-            /* Interpolate half-width between the two nodes. */
-            const float hw = ni->halfWidthM + (nj->halfWidthM - ni->halfWidthM) * 0.5f;
+            /* Two barriers: left (outside, +perp offset) and right (inside, -perp offset).
+             * Each barrier endpoint uses ITS node's half-width — not a shared midpoint — so
+             * a variable-width segment produces a diverging/converging barrier. */
+            const Vector2 barriers[2][2] = {
+                { /* left */ { ni->centerM.x + perp.x * ni->halfWidthM,
+                               ni->centerM.y + perp.y * ni->halfWidthM },
+                  { nj->centerM.x + perp.x * nj->halfWidthM,
+                    nj->centerM.y + perp.y * nj->halfWidthM } },
+                { /* right */ { ni->centerM.x - perp.x * ni->halfWidthM,
+                                ni->centerM.y - perp.y * ni->halfWidthM },
+                  { nj->centerM.x - perp.x * nj->halfWidthM,
+                    nj->centerM.y - perp.y * nj->halfWidthM } },
+            };
+            /* Push normal: left barrier pushes right (-90°), right pushes left (+90°). */
+            const Vector2 pushNs[2] = { { dir.y, -dir.x }, { -dir.y, dir.x } };
 
-            /* --- Left barrier (the "outside" boundary) --- */
-            {
-                const Vector2 pushN = { dir.y, -dir.x }; /* push onto track: right of segment */
+            for (int barrier = 0; barrier < 2; barrier++) {
+                const Vector2 bA = barriers[barrier][0];
+                const Vector2 bB = barriers[barrier][1];
+                const Vector2 pushN = pushNs[barrier];
 
-                const Vector2 bA = { ni->centerM.x + perp.x * hw, ni->centerM.y + perp.y * hw };
-                const Vector2 bB = { nj->centerM.x + perp.x * hw, nj->centerM.y + perp.y * hw };
+                /* Check front circle, then rear circle. After any resolution the CG has
+                 * moved and velocity changed, so recompute the circle position from the
+                 * updated pos and rely on the updated vCgWorld. */
+                for (int circle = 0; circle < 2; circle++) {
+                    const Vector2 bodyPt = (circle == 0) ? bFront : bRear;
+                    const Vector2 circleWorld = world_from_body(bodyPt, pos, hdg);
 
-                /* Check front circle, then rear, against this barrier segment. */
-                /* Front circle */
-                if (point_segment_sq(frontWorld, bA, bB) < radiusSq) {
-                    const Vector2 contactPt = closest_point_on_segment(frontWorld, bA, bB);
-                    const float dist = sqrtf(point_segment_sq(frontWorld, bA, bB));
-                    const float pen = radiusM - dist;
-                    if (pen > 0.0f && dist > 1e-9f) {
-                        /* Move the CG so the circle touches the barrier. */
-                        state->positionM.x = pos.x + pushN.x * pen;
-                        state->positionM.y = pos.y + pushN.y * pen;
-                        state->headingRad = hdg;
-                        renderState->currPositionM = state->positionM;
-                        renderState->currHeadingRad = state->headingRad;
+                    float distSq;
+                    const Vector2 contactPt =
+                        closest_point_and_dist_sq(circleWorld, bA, bB, &distSq);
 
-                        /* Impulse response at the contact point. */
-                        const Vector2 rContact = { contactPt.x - pos.x, contactPt.y - pos.y };
-                        const Vector2 vContact =
-                            contact_velocity_world(vCgWorld, state->yawRateRadS, rContact);
-
-                        /* Normal velocity (positive = separating, negative = approaching). */
-                        const float vn = vContact.x * pushN.x + vContact.y * pushN.y;
-                        if (vn < 0.0f) {
-                            /* Tangential direction: rotate normal +90°. */
-                            const Vector2 tang = { -pushN.y, pushN.x };
-                            const float vt = vContact.x * tang.x + vContact.y * tang.y;
-
-                            /* Effective mass for normal impulse. */
-                            /* r × n (2D cross product) */
-                            const float rXn = rContact.x * pushN.y - rContact.y * pushN.x;
-                            const float rXt = rContact.x * tang.y - rContact.y * tang.x;
-                            const float effMassN =
-                                1.0f / (1.0f / spec->massKg + rXn * rXn / spec->yawInertiaKgM2);
-                            const float effMassT =
-                                1.0f / (1.0f / spec->massKg + rXt * rXt / spec->yawInertiaKgM2);
-
-                            /* Normal impulse: reflect with restitution.
-                             * Δv_n = -(1 + e) * v_n  (v_n is negative when approaching,
-                             * so Δv_n is positive — we push away). */
-                            const float deltaVN = -(1.0f + rHalf) * vn;
-                            const float Jn = effMassN * deltaVN; /* Jn > 0 */
-
-                            /* Friction impulse, Coulomb-clamped. */
-                            float Jt = -effMassT * vt;
-                            const float JtMax = muC * Jn;
-                            if (Jt > JtMax) Jt = JtMax;
-                            if (Jt < -JtMax) Jt = -JtMax;
-
-                            /* Total impulse in world frame. */
-                            const Vector2 J = { Jn * pushN.x + Jt * tang.x,
-                                                Jn * pushN.y + Jt * tang.y };
-
-                            /* Apply to CG linear velocity. */
-                            const Vector2 vCgNew = { vCgWorld.x + J.x / spec->massKg,
-                                                     vCgWorld.y + J.y / spec->massKg };
-                            world_vel_to_body(vCgNew, state->headingRad,
-                                              &state->velocityLongitudinalMps,
-                                              &state->velocityLateralMps);
-
-                            /* Angular impulse: r × J. */
-                            const float rXJ = rContact.x * J.y - rContact.y * J.x;
-                            state->yawRateRadS += rXJ / spec->yawInertiaKgM2;
-
-                            /* Crash lockout on significant impact. */
-                            if (crashLockoutTimerS != NULL &&
-                                fabsf(vn) > COLLISION_LOCKOUT_THRESHOLD_MPS) {
-                                *crashLockoutTimerS = CRASH_LOCKOUT_S;
-                            }
-                            return 1;
-                        }
-                    }
-                }
-
-                /* Rear circle */
-                if (point_segment_sq(rearWorld, bA, bB) < radiusSq) {
-                    const Vector2 contactPt = closest_point_on_segment(rearWorld, bA, bB);
-                    const float dist = sqrtf(point_segment_sq(rearWorld, bA, bB));
-                    const float pen = radiusM - dist;
-                    if (pen > 0.0f && dist > 1e-9f) {
-                        state->positionM.x = pos.x + pushN.x * pen;
-                        state->positionM.y = pos.y + pushN.y * pen;
-                        state->headingRad = hdg;
-                        renderState->currPositionM = state->positionM;
-                        renderState->currHeadingRad = state->headingRad;
-
-                        const Vector2 rContact = { contactPt.x - pos.x, contactPt.y - pos.y };
-                        const Vector2 vContact =
-                            contact_velocity_world(vCgWorld, state->yawRateRadS, rContact);
-                        const float vn = vContact.x * pushN.x + vContact.y * pushN.y;
-                        if (vn < 0.0f) {
-                            const Vector2 tang = { -pushN.y, pushN.x };
-                            const float vt = vContact.x * tang.x + vContact.y * tang.y;
-                            const float rXn = rContact.x * pushN.y - rContact.y * pushN.x;
-                            const float rXt = rContact.x * tang.y - rContact.y * tang.x;
-                            const float effMassN =
-                                1.0f / (1.0f / spec->massKg + rXn * rXn / spec->yawInertiaKgM2);
-                            const float effMassT =
-                                1.0f / (1.0f / spec->massKg + rXt * rXt / spec->yawInertiaKgM2);
-                            const float deltaVN = -(1.0f + rHalf) * vn;
-                            const float Jn = effMassN * deltaVN;
-                            float Jt = -effMassT * vt;
-                            const float JtMax = muC * Jn;
-                            if (Jt > JtMax) Jt = JtMax;
-                            if (Jt < -JtMax) Jt = -JtMax;
-                            const Vector2 J = { Jn * pushN.x + Jt * tang.x,
-                                                Jn * pushN.y + Jt * tang.y };
-                            const Vector2 vCgNew = { vCgWorld.x + J.x / spec->massKg,
-                                                     vCgWorld.y + J.y / spec->massKg };
-                            world_vel_to_body(vCgNew, state->headingRad,
-                                              &state->velocityLongitudinalMps,
-                                              &state->velocityLateralMps);
-                            const float rXJ = rContact.x * J.y - rContact.y * J.x;
-                            state->yawRateRadS += rXJ / spec->yawInertiaKgM2;
-                            if (crashLockoutTimerS != NULL &&
-                                fabsf(vn) > COLLISION_LOCKOUT_THRESHOLD_MPS) {
-                                *crashLockoutTimerS = CRASH_LOCKOUT_S;
-                            }
-                            return 1;
-                        }
-                    }
-                }
-            }
-
-            /* --- Right barrier (the "inside" boundary) --- */
-            {
-                const Vector2 pushN = { -dir.y, dir.x }; /* push onto track: left of segment */
-
-                const Vector2 bA = { ni->centerM.x - perp.x * hw, ni->centerM.y - perp.y * hw };
-                const Vector2 bB = { nj->centerM.x - perp.x * hw, nj->centerM.y - perp.y * hw };
-
-                /* Front circle */
-                if (point_segment_sq(frontWorld, bA, bB) < radiusSq) {
-                    const Vector2 contactPt = closest_point_on_segment(frontWorld, bA, bB);
-                    const float dist = sqrtf(point_segment_sq(frontWorld, bA, bB));
-                    const float pen = radiusM - dist;
-                    if (pen > 0.0f && dist > 1e-9f) {
-                        state->positionM.x = pos.x + pushN.x * pen;
-                        state->positionM.y = pos.y + pushN.y * pen;
-                        state->headingRad = hdg;
-                        renderState->currPositionM = state->positionM;
-                        renderState->currHeadingRad = state->headingRad;
-
-                        const Vector2 rContact = { contactPt.x - pos.x, contactPt.y - pos.y };
-                        const Vector2 vContact =
-                            contact_velocity_world(vCgWorld, state->yawRateRadS, rContact);
-                        const float vn = vContact.x * pushN.x + vContact.y * pushN.y;
-                        if (vn < 0.0f) {
-                            const Vector2 tang = { -pushN.y, pushN.x };
-                            const float vt = vContact.x * tang.x + vContact.y * tang.y;
-                            const float rXn = rContact.x * pushN.y - rContact.y * pushN.x;
-                            const float rXt = rContact.x * tang.y - rContact.y * tang.x;
-                            const float effMassN =
-                                1.0f / (1.0f / spec->massKg + rXn * rXn / spec->yawInertiaKgM2);
-                            const float effMassT =
-                                1.0f / (1.0f / spec->massKg + rXt * rXt / spec->yawInertiaKgM2);
-                            const float deltaVN = -(1.0f + rHalf) * vn;
-                            const float Jn = effMassN * deltaVN;
-                            float Jt = -effMassT * vt;
-                            const float JtMax = muC * Jn;
-                            if (Jt > JtMax) Jt = JtMax;
-                            if (Jt < -JtMax) Jt = -JtMax;
-                            const Vector2 J = { Jn * pushN.x + Jt * tang.x,
-                                                Jn * pushN.y + Jt * tang.y };
-                            const Vector2 vCgNew = { vCgWorld.x + J.x / spec->massKg,
-                                                     vCgWorld.y + J.y / spec->massKg };
-                            world_vel_to_body(vCgNew, state->headingRad,
-                                              &state->velocityLongitudinalMps,
-                                              &state->velocityLateralMps);
-                            const float rXJ = rContact.x * J.y - rContact.y * J.x;
-                            state->yawRateRadS += rXJ / spec->yawInertiaKgM2;
-                            if (crashLockoutTimerS != NULL &&
-                                fabsf(vn) > COLLISION_LOCKOUT_THRESHOLD_MPS) {
-                                *crashLockoutTimerS = CRASH_LOCKOUT_S;
-                            }
-                            return 1;
-                        }
-                    }
-                }
-
-                /* Rear circle */
-                if (point_segment_sq(rearWorld, bA, bB) < radiusSq) {
-                    const Vector2 contactPt = closest_point_on_segment(rearWorld, bA, bB);
-                    const float dist = sqrtf(point_segment_sq(rearWorld, bA, bB));
-                    const float pen = radiusM - dist;
-                    if (pen > 0.0f && dist > 1e-9f) {
-                        state->positionM.x = pos.x + pushN.x * pen;
-                        state->positionM.y = pos.y + pushN.y * pen;
-                        state->headingRad = hdg;
-                        renderState->currPositionM = state->positionM;
-                        renderState->currHeadingRad = state->headingRad;
-
-                        const Vector2 rContact = { contactPt.x - pos.x, contactPt.y - pos.y };
-                        const Vector2 vContact =
-                            contact_velocity_world(vCgWorld, state->yawRateRadS, rContact);
-                        const float vn = vContact.x * pushN.x + vContact.y * pushN.y;
-                        if (vn < 0.0f) {
-                            const Vector2 tang = { -pushN.y, pushN.x };
-                            const float vt = vContact.x * tang.x + vContact.y * tang.y;
-                            const float rXn = rContact.x * pushN.y - rContact.y * pushN.x;
-                            const float rXt = rContact.x * tang.y - rContact.y * tang.x;
-                            const float effMassN =
-                                1.0f / (1.0f / spec->massKg + rXn * rXn / spec->yawInertiaKgM2);
-                            const float effMassT =
-                                1.0f / (1.0f / spec->massKg + rXt * rXt / spec->yawInertiaKgM2);
-                            const float deltaVN = -(1.0f + rHalf) * vn;
-                            const float Jn = effMassN * deltaVN;
-                            float Jt = -effMassT * vt;
-                            const float JtMax = muC * Jn;
-                            if (Jt > JtMax) Jt = JtMax;
-                            if (Jt < -JtMax) Jt = -JtMax;
-                            const Vector2 J = { Jn * pushN.x + Jt * tang.x,
-                                                Jn * pushN.y + Jt * tang.y };
-                            const Vector2 vCgNew = { vCgWorld.x + J.x / spec->massKg,
-                                                     vCgWorld.y + J.y / spec->massKg };
-                            world_vel_to_body(vCgNew, state->headingRad,
-                                              &state->velocityLongitudinalMps,
-                                              &state->velocityLateralMps);
-                            const float rXJ = rContact.x * J.y - rContact.y * J.x;
-                            state->yawRateRadS += rXJ / spec->yawInertiaKgM2;
-                            if (crashLockoutTimerS != NULL &&
-                                fabsf(vn) > COLLISION_LOCKOUT_THRESHOLD_MPS) {
-                                *crashLockoutTimerS = CRASH_LOCKOUT_S;
-                            }
-                            return 1;
+                    if (distSq < radiusSq) {
+                        if (resolve_circle_barrier(spec, state, renderState, pos, hdg,
+                                                   contactPt, distSq, pushN, radiusM, rHalf,
+                                                   muC, &vCgWorld, crashLockoutTimerS)) {
+                            contacts++;
+                            /* Stale-data guard: the push moved the CG, so subsequent
+                             * circles must be evaluated from the corrected position. */
+                            pos = state->positionM;
                         }
                     }
                 }
             }
         }
+
+        if (contacts > 0) return contacts;
     }
 
     return 0;

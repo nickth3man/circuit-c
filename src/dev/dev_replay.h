@@ -58,8 +58,6 @@ typedef struct {
     float value; /* the new value that triggered the marker */
 } DevReplayEvent;
 
-const char *dev_replay_event_name(DevReplayEventKind kind);
-
 /* Write the retained window of rb to path. label may be NULL. */
 bool dev_replay_save(const ReplayBuffer *rb, const char *path, const char *label, uint32_t seed,
                      uint32_t finalChecksum);
