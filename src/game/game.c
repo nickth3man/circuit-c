@@ -115,6 +115,13 @@ GAME_API void game_reset_sim(Game *game)
     game->autoTrans.neutralTimer = 0.0f;
 }
 
+GAME_API void game_apply_spec(Game *game, const VehicleSpec *spec)
+{
+    if (game == NULL || spec == NULL) return;
+    game->spec = *spec;
+    vehicle_state_reset(&game->spec, &game->vehicle, &game->derived, &game->renderState);
+}
+
 /* -------------------------------------------------------------------------------------
  * High-score persistence (Phase 6). Uses standard C file I/O so it works in both the
  * headless test executable and the full game. The directory is created if it does not

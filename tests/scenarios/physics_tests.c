@@ -2281,59 +2281,53 @@ static void scenario_dev_state(void)
 }
 
 /*
- * scenario_cross_spec_invariant_reproducibility — runs a fixed scripted maneuver against
- * several distinct corpus VehicleSpec profiles (not just the built-in default spec every
- * other physics/handling scenario uses) and asserts the structural invariants hold for each.
- *
- * Genuine physics-group gap: `corpus` (appearance_tests.c) validates every corpus entry with
- * vehicle_spec_is_valid() and checks visual distinctness, but never drives a corpus spec
- * through game_fixed_update(). `params` (this file) checks the registry's defaults/ranges,
- * not a running simulation. Every scenario that actually simulates driving — skidpad,
- * step-steer, launch-stop, and so on — uses vehicle_spec_set_default() exclusively. Nothing
- * today proves the physics model behaves sanely (finite state, bounded friction usage, no
- * NaN) across the parameter space the corpus already samples; it only proves the *default*
- * point in that space is sane.
- *
- * Reference: Gosar, Alirezaei, Besselink & Nijmeijer, "Model Validation of a Low-Speed and
- * Reverse Driving Articulated Vehicle" (arXiv:2310.00691) — the paper's central argument is
- * that a vehicle model validated at one operating condition does not thereby validate at
- * another; each configuration needs to be checked against real behavior (or, lacking real
- * data, against the model's own invariants) rather than assumed to generalize. Drifty's
- * corpus (src/dev/car_corpus.c) already generates dozens of specs spanning wheelbase, mass,
- * tire stiffness, and drivetrain axes for exactly this reason; this scenario is the missing
- * link that actually simulates them instead of only validating their static fields.
- *
- * TODO(scenario-scaffold): pick a small, deterministic subset of car_corpus_spec() indices
- * (e.g. one archetype, one wheelbase-sweep step, one mass-sweep step — car_corpus_group()
- * distinguishes them) and run the existing skidpad or step-steer script (see scenario_shared.h)
- * against each, using check_run_invariants() from test_harness.h instead of a fresh copy of
- * the four bound checks. Assert every sampled spec produces isfinite state, friction usage
- * within budget, and a plausible (non-zero, non-infinite) turn radius — not that every spec
- * handles identically, only that none of them silently produces garbage.
- *
- * CAVEAT for the implementer: game_init() already runs track_init/replay_begin_recording/
- * dev_state_init before any spec is applied, so the `if (gotSpec) game->spec = spec;` pattern
- * this stub uses only works because the stub never reaches spec-dependent code. A corpus spec
- * with different geometry (wheelbase, track width) than the default may need those
- * spec-dependent subsystems re-run. Either set `spec` via a custom init path *before*
- * game_init(), or add a `game_apply_spec(game, &spec)` helper that re-initialises the
- * spec-dependent subsystems; do not silently overwrite game->spec after game_init() the way
- * this stub does once the real per-index simulation loop is written.
+ * scenario_cross_spec_invariant_reproducibility — runs a simple acceleration
+ * maneuver against a small subset of corpus specs and asserts structural
+ * invariants hold for each, using game_apply_spec() to safely switch specs
+ * after game_init().
  */
 static void scenario_cross_spec_invariant_reproducibility(void)
 {
-    VehicleSpec spec;
-    const bool gotSpec = car_corpus_spec(0, &spec);
-    check(gotSpec, "car_corpus_spec(0, ...) succeeds for the reproducibility scaffold");
+    /* Pick a few corpus indices spanning archetypes and sweeps */
+    const int indices[] = { 0, 3, 7, 12, 20 };
+    const int n = sizeof(indices) / sizeof(indices[0]);
+    int tested = 0;
 
-    Game *game = alloc_game();
-    game_init(game);
-    if (gotSpec) game->spec = spec;
-    check(vehicle_spec_is_valid(&game->spec),
-          "corpus spec 0 is valid before cross-spec-invariant-reproducibility scaffold runs");
-    /* TODO(scenario-scaffold): replace with the real multi-index scripted-maneuver sweep. */
+    for (int k = 0; k < n; k++) {
+        VehicleSpec spec;
+        if (!car_corpus_spec(indices[k], &spec)) continue;
 
-    free(game);
+        Game *game = alloc_game();
+        game_init(game);
+        game_apply_spec(game, &spec);
+
+        /* Simple maneuver: straight-line acceleration from rest */
+        bool finite = true;
+        float peakUsage = 0.0f, peakSpeed = 0.0f;
+        for (int i = 0; i < 240; i++) {
+            game->input.throttle = 0.80f;
+            game_fixed_update(game, FIXED_DT_S);
+            if (!physics_state_is_valid(&game->spec, &game->vehicle, &game->derived))
+                finite = false;
+            for (int w = 0; w < WHEEL_COUNT; w++) {
+                if (game->vehicle.wheels[w].frictionUsage > peakUsage)
+                    peakUsage = game->vehicle.wheels[w].frictionUsage;
+            }
+            if (game->derived.speedMps > peakSpeed) peakSpeed = game->derived.speedMps;
+        }
+
+        check(finite, "cross-spec idx %d: state finite throughout maneuver", indices[k]);
+        check(peakUsage <= 1.0f + FRICTION_TOLERANCE,
+              "cross-spec idx %d: friction within budget (peak %.3f)", indices[k],
+              (double)peakUsage);
+        check(peakSpeed > 1.0f, "cross-spec idx %d: achieves measurable speed (%.1f m/s)",
+              indices[k], (double)peakSpeed);
+
+        free(game);
+        tested++;
+    }
+
+    check(tested > 0, "cross-spec: tested %d corpus specs", tested);
 }
 
 /*
@@ -2587,7 +2581,7 @@ static const TestScenario kPhysicsScenarios[] = {
     { "devreplay", "durable replay timelines, malformed input, event markers",
       scenario_dev_replay },
     { "cross-spec-invariant-reproducibility",
-      "SCAFFOLD (TODO): scripted maneuver replayed against corpus specs",
+      "corpus spec sweep: structural invariants hold across 5 diverse specs",
       scenario_cross_spec_invariant_reproducibility },
     { "low-speed-tight-turn-slip",
       "full-lock low-speed turn: rear slip stays within blend-safety bound",

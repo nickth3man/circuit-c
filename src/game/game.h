@@ -115,4 +115,10 @@ GAME_API uint32_t game_state_checksum(const Game *game);
 /* Reset the vehicle and resynchronise render history. Counters and tick are preserved. */
 GAME_API void game_reset_sim(Game *game);
 
+/* Overwrite the vehicle spec and reset the simulation to match. Safe to call after
+ * game_init() for headless scenarios that need to test multiple specs against the
+ * same maneuver. Does not re-initialise track, audio, or visual subsystems —
+ * callers that need those must handle them separately. */
+GAME_API void game_apply_spec(Game *game, const VehicleSpec *spec);
+
 #endif /* DRIFTY_GAME_H */
