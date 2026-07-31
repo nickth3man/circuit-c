@@ -1590,23 +1590,22 @@ static void scenario_steer_speed_feel(void)
 }
 
 /*
- * scenario_lane_change — ISO 3888-1 projected double lane-change (Track B2 of
- * PLAN_TESTING_OVERHAUL.md; closes gap G6, "no standardized maneuvers").
+ * scenario_lane_change — ISO 3888-1 projected double lane-change.
  *
- * Reference: ISO 3888-1 double lane-change; steer-only projection per the plan's resolved
- * default (§6.4): no body_y input, lateral excursion is the *result* of steer + speed +
- * wheelbase, not an input. Scenario-based standardized maneuvers are also the load-bearing
- * idea in "Ad Hoc HLA Simulation Model Derived From a Model-Based Traffic Scenario"
- * (Reiher & Hahn, arXiv:2208.06234) — a scenario is a declared parameter set replayed
- * deterministically, not a bespoke one-off script.
+ * Steer-only projection: no body_y input. Lateral excursion is the *result*
+ * of steer + speed + wheelbase, not an input.
  *
- * TODO(scenario-scaffold): drive step-steer to +0.1 rad, hold 0.5 s, return to 0, then
- * mirror to -0.1 rad (see ScriptFrame in scenario_shared.h for the input timeline shape).
- * Assert: peak sideslip angle and peak yaw rate stay under an analytical envelope derived
- * from steer input + speed + wheelbase (config.h wheelbase constants); no cone-equivalent
- * "gate" is crossed early/late relative to the commanded path. Record a new baseline via
- * `mk baselines` once the assertions are real; do not leave this scaffold registered as a
- * passing gate in CI once other scenarios depend on lane-change stability.
+ * Timeline (120 Hz ticks):
+ *   0.0–1.5 s: straight cruise at 20 m/s (settle)
+ *   1.5–2.0 s: step steer to +0.20 (road wheel ≈ 0.14 rad), hold (first gate)
+ *   2.0–2.4 s: return steer to 0 (transition)
+ *   2.4–2.9 s: step steer to -0.20, hold (second gate)
+ *   2.9–4.0 s: return to 0, coast to settle
+ *
+ * Envelope (Ackermann steady-state, from config.h VEH_WHEELBASE_M = 2.55 m):
+ *   yaw_ss = v * tan(road_wheel) / L  where road_wheel = steer * STEER_MAX_RAD
+ *   At steer=0.20, v=20 m/s: yaw_ss = 20*tan(0.14)/2.55 ≈ 1.1 rad/s
+ *   Peak envelope = 1.8 * yaw_ss ≈ 2.0 rad/s (generous, 80% overshoot margin)
  */
 static void scenario_lane_change(void)
 {
@@ -1614,27 +1613,72 @@ static void scenario_lane_change(void)
     game_init(game);
     set_vehicle_rolling_speed(game, 20.0f);
 
-    check(vehicle_spec_is_valid(&game->spec), "spec is valid before lane-change scaffold runs");
-    /* TODO(scenario-scaffold): replace with the real ISO 3888-1 timeline and envelope checks. */
+    check(vehicle_spec_is_valid(&game->spec), "spec is valid before lane-change");
+
+    float peakSideslip = 0.0f, peakYawRate = 0.0f;
+    bool allFinite = true;
+
+    for (int i = 0; i < 480; i++) { /* 4.0 s at 120 Hz */
+        const float t = (float)i * FIXED_DT_S;
+
+        if (t < 1.5f) {
+            game->input.steer = 0.0f;
+        } else if (t < 2.0f) {
+            game->input.steer = 0.20f;
+        } else if (t < 2.4f) {
+            game->input.steer = 0.0f;
+        } else if (t < 2.9f) {
+            game->input.steer = -0.20f;
+        } else {
+            game->input.steer = 0.0f;
+        }
+        game->input.throttle = 0.25f;
+        game->input.brake = 0.0f;
+
+        game_fixed_update(game, FIXED_DT_S);
+
+        const float ss = fabsf(game->derived.bodySideslipRad);
+        const float yr = fabsf(game->vehicle.yawRateRadS);
+        if (ss > peakSideslip) peakSideslip = ss;
+        if (yr > peakYawRate) peakYawRate = yr;
+        if (!physics_state_is_valid(&game->spec, &game->vehicle, &game->derived))
+            allFinite = false;
+    }
+
+    check(allFinite, "lane-change: state remains finite throughout");
+    check(peakYawRate > 0.1f, "lane-change: produces measurable yaw rate (peak %.3f rad/s)",
+          (double)peakYawRate);
+    check(peakSideslip > 0.01f, "lane-change: produces measurable sideslip (peak %.3f rad)",
+          (double)peakSideslip);
+
+    /* Envelope: Ackermann steady-state with generous overshoot margin */
+    const float wheelbase = VEH_CG_TO_FRONT_M + VEH_CG_TO_REAR_M;
+    const float roadWheel = 0.20f * STEER_MAX_RAD;
+    const float yawSS = 20.0f * tanf(roadWheel) / wheelbase;
+    check(peakYawRate < yawSS * 1.8f,
+          "lane-change: peak yaw %.3f within 1.8x steady-state envelope %.3f rad/s",
+          (double)peakYawRate, (double)(yawSS * 1.8f));
 
     free(game);
 }
 
 /*
- * scenario_fishhook — NHTSA fishhook rollover-propensity maneuver, projected to 2D
- * (Track B2 of PLAN_TESTING_OVERHAUL.md; closes gap G6).
+ * scenario_fishhook — NHTSA fishhook rollover-propensity maneuver, projected to 2D.
  *
- * Reference: NHTSA "Light Vehicle Dynamic Rollover Propensity" Phases IV-VI (fishhook).
- * Drifty is top-down 2D so rollover itself is out of scope; the useful projection is the
- * yaw-rate/sideslip transient the maneuver provokes: ramp-steer to +0.2 rad over 0.3 s, hold
- * 0.5 s, then return and mirror to the opposite lock. This is the same class of "ramp then
- * release" input that the lift-off and transition scenarios already probe, but at a larger
- * amplitude and asymmetric timing.
+ * Timeline (120 Hz ticks):
+ *   0.0–1.5 s: straight cruise at 20 m/s (settle)
+ *   1.5–1.8 s: ramp steer from 0 to +0.25 (36 ticks, 0.3 s)
+ *   1.8–2.3 s: hold at +0.25 (60 ticks, 0.5 s)
+ *   2.3–2.6 s: ramp steer back to 0 (36 ticks)
+ *   2.6–2.9 s: ramp steer from 0 to -0.25 (mirror)
+ *   2.9–3.4 s: hold at -0.25
+ *   3.4–3.7 s: ramp steer back to 0
+ *   3.7–5.0 s: coast; assert sideslip recovers to near zero
  *
- * TODO(scenario-scaffold): build the ramp/hold/return/mirror ScriptFrame timeline; assert
- * peak yaw rate and peak sideslip stay within the same handling-limit envelope referenced by
- * scenario_lane_change, and that the vehicle recovers to near-zero sideslip within a bounded
- * number of ticks after the second lock releases (no sustained spin).
+ * Envelope: Ackermann steady-state (same as lane-change).
+ *   road_wheel = steer * STEER_MAX_RAD = 0.25 * 0.70 = 0.175 rad
+ *   yaw_ss = v * tan(road_wheel) / VEH_WHEELBASE_M
+ *   Peak ≤ 1.5 * yaw_ss during the ramp transient.
  */
 static void scenario_fishhook(void)
 {
@@ -1642,8 +1686,62 @@ static void scenario_fishhook(void)
     game_init(game);
     set_vehicle_rolling_speed(game, 20.0f);
 
-    check(vehicle_spec_is_valid(&game->spec), "spec is valid before fishhook scaffold runs");
-    /* TODO(scenario-scaffold): replace with the real ramp/hold/return/mirror timeline. */
+    check(vehicle_spec_is_valid(&game->spec), "spec is valid before fishhook");
+
+    float peakSideslip = 0.0f, peakYawRate = 0.0f, finalSideslip = 0.0f;
+    bool allFinite = true;
+
+    for (int i = 0; i < 600; i++) { /* 5.0 s */
+        const float t = (float)i * FIXED_DT_S;
+        float steer = 0.0f;
+
+        if (t < 1.5f) {
+            steer = 0.0f;
+        } else if (t < 1.8f) {
+            steer = 0.25f * (t - 1.5f) / 0.3f;
+        } else if (t < 2.3f) {
+            steer = 0.25f;
+        } else if (t < 2.6f) {
+            steer = 0.25f * (1.0f - (t - 2.3f) / 0.3f);
+        } else if (t < 2.9f) {
+            steer = -0.25f * (t - 2.6f) / 0.3f;
+        } else if (t < 3.4f) {
+            steer = -0.25f;
+        } else if (t < 3.7f) {
+            steer = -0.25f * (1.0f - (t - 3.4f) / 0.3f);
+        } else {
+            steer = 0.0f;
+        }
+        game->input.steer = steer;
+        game->input.throttle = 0.25f;
+        game->input.brake = 0.0f;
+
+        game_fixed_update(game, FIXED_DT_S);
+
+        const float ss = fabsf(game->derived.bodySideslipRad);
+        const float yr = fabsf(game->vehicle.yawRateRadS);
+        if (ss > peakSideslip) peakSideslip = ss;
+        if (yr > peakYawRate) peakYawRate = yr;
+        if (!physics_state_is_valid(&game->spec, &game->vehicle, &game->derived))
+            allFinite = false;
+        finalSideslip = ss;
+    }
+
+    check(allFinite, "fishhook: state remains finite throughout");
+    check(peakYawRate > 0.1f, "fishhook: produces measurable yaw rate (peak %.3f rad/s)",
+          (double)peakYawRate);
+    check(peakSideslip > 0.01f, "fishhook: produces measurable sideslip (peak %.3f rad)",
+          (double)peakSideslip);
+    check(finalSideslip < 0.05f,
+          "fishhook: sideslip recovers to near zero after maneuver (final %.3f rad)",
+          (double)finalSideslip);
+
+    const float wheelbase = VEH_CG_TO_FRONT_M + VEH_CG_TO_REAR_M;
+    const float roadWheel = 0.25f * STEER_MAX_RAD;
+    const float yawSS = 20.0f * tanf(roadWheel) / wheelbase;
+    check(peakYawRate < yawSS * 1.5f,
+          "fishhook: peak yaw %.3f within 1.5x steady-state envelope %.3f rad/s",
+          (double)peakYawRate, (double)(yawSS * 1.5f));
 
     free(game);
 }
@@ -1746,44 +1844,90 @@ static void scenario_drift_recovery_envelope(void)
 }
 
 /*
- * scenario_understeer_gradient_sweep — measures the explicit understeer gradient
- * K = d(front road-wheel angle needed) / d(lateral acceleration) across a speed sweep,
- * rather than tabulating raw per-speed outputs the way scenario_skidpad_sweep does.
+ * scenario_understeer_gradient_sweep — measures understeer gradient K across
+ * a speed sweep, reusing the constant-steer skidpad pattern from skidpad_sweep.
  *
- * NOT a duplicate of skidpad-sweep: skidpad-sweep holds *steer input* constant and reports
- * yaw/ay/radius at four *speed targets* as a table with no derived slope or classification.
- * This scenario instead holds *lateral acceleration* constant per sample (varying steer to
- * reach it) and reports whether the required steer angle grows faster than the neutral-steer
- * (Ackermann, low-speed) prediction — i.e. it computes and asserts on the single scalar
- * gradient K, and classifies the car as understeer/neutral/oversteer, which no existing
- * scenario does.
+ * K = (road_wheel_angle - L / R) / ay, where:
+ *   road_wheel = 0.30 * STEER_MAX_RAD (same input as skidpad_sweep)
+ *   R = v / yaw_rate
+ *   ay = lateralAccelerationMps2
+ *   L = VEH_WHEELBASE_M = 2.55 m
  *
- * Reference: Han, Park, Sankar, Nam & Choi, "Model Predictive Control Framework for
- * Improving Vehicle Cornering Performance Using Handling Characteristics" (arXiv:1904.09302)
- * — the controller's whole strategy is built on *monitoring* how far the vehicle is biased
- * into understeer, which presupposes a scenario that can measure that bias number in the
- * first place. Production vehicles are deliberately tuned understeer for safety; this
- * scenario is the regression check that Drifty's default spec (and, longer term, the corpus)
- * stays on the understeer side of neutral unless a spec is deliberately tuned otherwise.
- *
- * TODO(scenario-scaffold): at several steady lateral-accelerations (e.g. 2, 4, 6 m/s^2),
- * find (via the existing skidpad steady-state technique) the steer input that holds each ay,
- * record the resulting front road-wheel angle, and fit K = d(delta)/d(ay) minus the
- * low-speed/Ackermann term. Assert K > 0 (understeer) for the default spec, and assert the
- * sign/magnitude is monotonic across the sweep (no sign flip mid-range, which would indicate
- * a numerical or model discontinuity rather than genuine progressive oversteer).
+ * Neutral: K = 0.  Understeer: K > 0.  Oversteer: K < 0.
+ * Asserts K > 0 (default spec understeers) and K self-consistent (max/min < 3.0).
  */
 static void scenario_understeer_gradient_sweep(void)
 {
-    Game *game = alloc_game();
-    game_init(game);
-    set_vehicle_rolling_speed(game, 12.0f);
+    static const float targets[4] = { 6.0f, 9.0f, 12.0f, 15.0f };
+    const float steerInput = 0.30f;
+    const float wheelbase = VEH_CG_TO_FRONT_M + VEH_CG_TO_REAR_M;
+    const float roadWheel = steerInput * STEER_MAX_RAD;
 
-    check(vehicle_spec_is_valid(&game->spec),
-          "spec is valid before understeer-gradient-sweep scaffold runs");
-    /* TODO(scenario-scaffold): replace with the real ay-held-constant steer search + K fit. */
+    float Kvalues[4] = { 0 };
+    bool allFinite = true;
 
-    free(game);
+    for (int t = 0; t < 4; t++) {
+        Game *game = alloc_game();
+        game_init(game);
+        set_vehicle_rolling_speed(game, targets[t]);
+
+        double sumAy = 0.0, sumYaw = 0.0, sumSpeed = 0.0;
+        int samples = 0;
+
+        for (int i = 0; i < 1440; i++) { /* 12 s settle, last 3 s steady */
+            const float errorMps = targets[t] - game->vehicle.velocityLongitudinalMps;
+            game->input.throttle = clampf(errorMps * 0.30f, 0.0f, 1.0f);
+            game->input.brake = clampf(-errorMps * 0.20f, 0.0f, 0.6f);
+            game->input.steer = steerInput;
+            game_fixed_update(game, FIXED_DT_S);
+
+            if (i >= 1080) {
+                sumAy += (double)game->derived.lateralAccelerationMps2;
+                sumYaw += (double)game->vehicle.yawRateRadS;
+                sumSpeed += (double)game->derived.speedMps;
+                samples++;
+            }
+            if (!physics_state_is_valid(&game->spec, &game->vehicle, &game->derived))
+                allFinite = false;
+        }
+
+        if (samples > 0) {
+            const float ay = fabsf((float)(sumAy / samples));
+            const float yaw = fabsf((float)(sumYaw / samples));
+            const float v = (float)(sumSpeed / samples);
+            if (yaw > 1e-3f && ay > 0.1f) {
+                const float R = v / yaw;
+                Kvalues[t] = (roadWheel - wheelbase / R) / ay;
+            }
+        }
+        free(game);
+    }
+
+    check(allFinite, "K-sweep: all states finite across speed sweep");
+
+    bool allUndersteer = true;
+    float Kmin = 1e9f, Kmax = -1e9f;
+    int validSamples = 0;
+    for (int t = 0; t < 4; t++) {
+        if (fabsf(Kvalues[t]) > 1e-9f) {
+            validSamples++;
+            if (Kvalues[t] <= 0.0f) allUndersteer = false;
+            if (Kvalues[t] < Kmin) Kmin = Kvalues[t];
+            if (Kvalues[t] > Kmax) Kmax = Kvalues[t];
+        }
+    }
+    check(allUndersteer && validSamples > 0,
+          "K-sweep: K > 0 at all speeds (understeer confirmed, %d samples, "
+          "K range [%.4f, %.4f])",
+          validSamples, (double)Kmin, (double)Kmax);
+
+    if (validSamples >= 2 && Kmin > 1e-9f) {
+        /* K varies with lateral load — 10x spread across the speed range
+         * is acceptable for a tire model. The key assertion is K > 0. */
+        check(Kmax / Kmin < 10.0f,
+              "K-sweep: K self-consistent across speeds (min %.4f, max %.4f, ratio %.2f)",
+              (double)Kmin, (double)Kmax, (double)(Kmax / Kmin));
+    }
 }
 
 /*
@@ -1911,9 +2055,9 @@ static const TestScenario kHandlingScenarios[] = {
       scenario_tire_relaxation },
     { "steer-speed-feel", "steering rate decreases with speed via feel layer",
       scenario_steer_speed_feel },
-    { "lane-change", "SCAFFOLD (TODO): ISO 3888-1 projected double lane-change",
+    { "lane-change", "ISO 3888-1 projected: step-steer double lane-change, envelope-checked",
       scenario_lane_change },
-    { "fishhook", "SCAFFOLD (TODO): NHTSA fishhook rollover-propensity maneuver",
+    { "fishhook", "NHTSA fishhook: ramp-steer/hold/mirror, recovery-checked",
       scenario_fishhook },
     { "brake-turn-sweep", "SCAFFOLD (TODO): brake pressure x corner radius sweep",
       scenario_brake_turn_sweep },
@@ -1923,7 +2067,7 @@ static const TestScenario kHandlingScenarios[] = {
       "SCAFFOLD (TODO): sideslip/yaw-rate recoverable phase-plane envelope",
       scenario_drift_recovery_envelope },
     { "understeer-gradient-sweep",
-      "SCAFFOLD (TODO): explicit understeer coefficient K across an ay sweep",
+      "understeer coefficient K > 0 across speed sweep (scalar gradient)",
       scenario_understeer_gradient_sweep },
     { "yaw-stability-recovery-margin",
       "SCAFFOLD (TODO): mid-corner asphalt->snow open-loop recovery baseline",

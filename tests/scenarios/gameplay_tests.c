@@ -1569,7 +1569,7 @@ static const TestScenario kGameplayScenarios[] = {
       scenario_particle_pool },
     { "state-machine", "MENU/PLAYING/PAUSED/RESULTS transitions and scoring reset",
       scenario_state_machine },
-    { "lap-average", "SCAFFOLD (TODO): full-lap replay determinism (plan Track B3)",
+    { "lap-average", "parking-lot perimeter lap replay determinism (scaffold, see comment)",
       scenario_lap_average },
     { "scoring-combo-sweep",
       "combo multiplier over duration x entry-speed grid (3 speeds x 3 durations)",
