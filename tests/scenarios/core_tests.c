@@ -114,6 +114,8 @@ uint32_t run_recording(Game *game, const ScriptFrame *frames, int count, float p
 {
     game_init(game);
     game->state = STATE_PLAYING; /* headless tests start simulating immediately */
+    /* The script drives the pedals and the shift keys directly, so the driver aid is off. */
+    game->autoTrans.enabled = false;
     game->renderPixelsPerMeter = pixelsPerMeter;
 
     for (int i = 0; i < count; i++) {
@@ -139,6 +141,8 @@ uint32_t run_playback(Game *game, const ReplayBuffer *timeline, const ScriptFram
 {
     game_init(game);
     game->state = STATE_PLAYING; /* headless tests start simulating immediately */
+    /* The script drives the pedals and the shift keys directly, so the driver aid is off. */
+    game->autoTrans.enabled = false;
     game->renderPixelsPerMeter = pixelsPerMeter;
 
     game->replay = *timeline;
@@ -509,6 +513,7 @@ static void scenario_oneshot(void)
 {
     Game *game = alloc_game();
     game_init(game);
+    game->autoTrans.enabled = false; /* the shift keys are only live in manual */
 
     /* One render frame that runs the maximum number of substeps, with one press of each
      * one-shot command and held controls applied throughout. */
@@ -813,7 +818,7 @@ static void scenario_metamorphic_steer_mirror_symmetry(void)
  * stateChecksum, closing the "is this bundle actually reproducible" question the current
  * failure_bundle machinery leaves open.
  *
- * Inherited from PLAN_TESTING_OVERHAUL.md Track F1/F2 (not a fresh arXiv finding this round):
+ * Inherited from the testing-overhaul plan, Track F1/F2 (not a fresh arXiv finding this round):
  * "F1: extend failure_bundle to record the seeded random state and entire input timeline...
  * F2: new `drifty_tests --replay-bundle <dir>` mode... A known-bad bundle on main fails with
  * the same offending check text; a known-good bundle passes." Placed in core_tests.c (not

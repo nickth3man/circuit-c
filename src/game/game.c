@@ -276,7 +276,7 @@ GAME_API void game_init(Game *game)
     memset(&game->sim, 0, sizeof(game->sim));
     vehicle_spec_set_default(&game->spec);
     game_reset_sim(game);
-    game->autoTrans.enabled = false;
+    game->autoTrans.enabled = true;
     game->autoTrans.driveState = AUTO_DRIVE;
     game->autoTrans.neutralTimer = 0.0f;
 #if defined(DRIFTY_HEADLESS)

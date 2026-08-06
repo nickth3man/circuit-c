@@ -1212,6 +1212,8 @@ static void scenario_launch_stop(void)
 {
     Game *game = alloc_game();
     game_init(game);
+    /* Brake means brake here: the driver aid would turn a held pedal at rest into reverse. */
+    game->autoTrans.enabled = false;
     TelemetryWriter writer;
     const bool telemetryOpened = telemetry_open(&writer, PHASE2_LAUNCH_TELEMETRY);
     game->input.throttle = 1.0f;
@@ -1670,6 +1672,7 @@ static void scenario_reverse(void)
 {
     Game *game = alloc_game();
     game_init(game);
+    game->autoTrans.enabled = false; /* the gear is selected explicitly here */
     game->vehicle.selectedGear = -1;
     game->input.throttle = 0.8f;
     game->input.steer = 0.25f;

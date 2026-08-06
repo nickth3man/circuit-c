@@ -1365,7 +1365,7 @@ static void scenario_state_machine(void)
  * `replay` scenario), completes several laps, and asserts per-lap time and total energy stay
  * within a tight tolerance across repeated runs of the identical script.
  *
- * Inherited from PLAN_TESTING_OVERHAUL.md Track B3 (not a fresh arXiv finding this round):
+ * Inherited from the testing-overhaul plan, Track B3 (not a fresh arXiv finding this round):
  * "the *one* end-to-end 'the simulation actually drives around a track' scenario."
  *
  * TRACK REALITY, MEASURED. track_init() builds a 200 m x 150 m parking-lot rectangle whose
@@ -1403,6 +1403,8 @@ static void lap_prepare_game(Game *game)
     game_init(game);
     track_init(&game->track);
     game->state = STATE_PLAYING;
+    /* The route is a fixed pedal script, so it drives the gearbox manually too. */
+    game->autoTrans.enabled = false;
     game->vehicle.positionM = (Vector2){ -102.0f, -77.0f };
     game->vehicle.headingRad = 0.0f; /* +X, along the bottom outer lane */
     set_vehicle_rolling_speed(game, 8.0f);

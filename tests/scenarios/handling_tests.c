@@ -161,6 +161,8 @@ static void run_scripted_scenario(const char *name)
     Game *game = alloc_game();
     g_scriptedGame = game;
     game_init(game);
+    /* The scripted pedal timeline assumes manual control; the driver aid would rewrite it. */
+    game->autoTrans.enabled = false;
     game->dev.scenario = index;
     game->dev.scenarioRunning = true;
     game->dev.scenarioStartTick = game->sim.tick;
@@ -216,6 +218,7 @@ static void run_scripted_scenario(const char *name)
      * regression workflow depends on. */
     Game *repeat = alloc_game();
     game_init(repeat);
+    repeat->autoTrans.enabled = false;
     repeat->dev.scenario = index;
     repeat->dev.scenarioRunning = true;
     repeat->dev.scenarioStartTick = repeat->sim.tick;
@@ -1258,6 +1261,8 @@ static void scenario_lsd_diff(void)
 {
     Game *game = alloc_game();
     game_init(game);
+    /* Hold first gear: an upshift mid-run would change the torque the diff is splitting. */
+    game->autoTrans.enabled = false;
     /* Unload the track so the per-wheel surface query in game_fixed_update
      * does not overwrite our explicit surfaceId assignment. */
     track_free(&game->track);
