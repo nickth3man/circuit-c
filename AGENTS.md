@@ -1,244 +1,155 @@
-# Drifty — AGENTS.md
+# AGENTS.md
 
-Top-down 2D drift driving simulator written in C with raylib 6.0.
+Behavioral guidelines for reducing common LLM coding mistakes. Merge these with project-specific instructions; project rules take precedence when they conflict.
 
-The interactive game and DLL hot reload are Windows-only and use MSYS2 UCRT64. The Makefile
-supports headless scenarios, corpus tools, telemetry, sanitizers, coverage, and fuzzing on Linux
-and macOS; hosted CI validates the Linux path, not macOS.
+**Tradeoff:** These guidelines favor correctness, clarity, and small diffs over speed. For trivial, low-risk, reversible tasks, use judgment and proceed with an explicit assumption instead of creating unnecessary delay.
 
-## Project Structure
+**Core rule:** Solve today's stated problem with the smallest verified change. Do not build for hypothetical future requirements.
 
-| Document | What it is |
-|---|---|
-| [docs/SOURCES.md](docs/SOURCES.md) | Technical reference index. |
-| [docs/DEVTOOLS.md](docs/DEVTOOLS.md) | Physics Lab, replay inspector, telemetry, corpus, gallery, and command reference. |
-| [docs/CI.md](docs/CI.md) | Hosted workflows, required checks, and gate rationale. |
-| [docs/CAR_VISUAL.md](docs/CAR_VISUAL.md) | Authoritative vehicle-appearance contract. |
-| [docs/generated/CORPUS.md](docs/generated/CORPUS.md) | Generated 100-vehicle corpus index. |
-| [docs/generated/PARAMETERS.md](docs/generated/PARAMETERS.md) | Generated tunable registry. |
+## 1. Think Before Coding
 
-Physics/gameplay and vehicle appearance number their phases independently. Always name the
-workstream when referring to a phase. Do not duplicate fast-changing phase status here; reconcile
-against the code before changing scope.
+**Do not assume. Do not hide confusion. Surface consequential tradeoffs.**
 
-## Platform and Toolchain
+Before implementing:
 
-| Capability | Windows MSYS2 UCRT64 | Linux CI | macOS Make |
-|---|---:|---:|---:|
-| Interactive game | Supported | No | No |
-| DLL hot reload | Supported | No | No |
-| Headless scenarios and corpus tools | Supported | Supported | Supported |
-| Sanitizers, coverage, and fuzzing | Tool-dependent | Supported | Tool-dependent |
+- Restate the requested outcome in observable terms.
+- Inspect the relevant code, tests, configuration, and local conventions before deciding on an approach.
+- Identify assumptions that materially affect the solution, especially:
+  - scope and affected users or data;
+  - interface and output format;
+  - fields, permissions, privacy, or security;
+  - expected volume and performance target;
+  - persistence, deployment, or compatibility constraints.
+- If multiple interpretations exist, name them and explain how each would change the implementation. Do not silently choose one.
+- If a simpler approach satisfies the request, say so and prefer it.
+- Push back when the requested approach adds risk or complexity without improving the stated outcome.
 
-- Install or refresh with `powershell -ExecutionPolicy Bypass -File scripts\setup_windows.ps1`.
-- From cmd.exe or PowerShell use `build.bat` / `.\build.bat`; from UCRT64 use `./build.sh`.
-- On Windows, `build.bat` and `mk.bat` enter UCRT64; bare `make` requires an existing UCRT64
-  shell. Linux and macOS use GNU Make for headless targets; hosted CI validates Linux.
-- Windows raylib 6.0 comes only from `mingw-w64-ucrt-x86_64-raylib`; never build it from source
-  for this project.
-- `Makefile` source groups are the single compilation manifest. Adding, moving, or deleting a
-  `.c` file requires updating the correct group. Do not duplicate source lists in `build.sh`,
-  wrappers, tools, or workflows.
+### Ask or proceed?
 
-Development links shared raylib (`libraylib.dll`). Release links `libraylib.a` statically and,
-with the current package, still needs `glfw3.dll`. Verify imports instead of assuming:
+Ask before coding when ambiguity could change public behavior, expose sensitive data, cause data loss, require a major architectural choice, or produce substantially different work.
 
-```bash
-objdump -p build/dev/game.dll | grep -i "DLL Name"
+Otherwise, state the safest reasonable assumption and proceed. Do not ask questions whose answers can be found by inspecting the repository.
+
+### Turn vague requests into concrete targets
+
+Examples:
+
+- "Export user data" -> define scope, delivery method, fields, privacy constraints, and expected volume.
+- "Make search faster" -> determine whether the target is latency, throughput, or perceived responsiveness; establish a baseline and a measurable goal.
+- "Fix authentication" -> identify the exact failing behavior before changing the system.
+
+## 2. Simplicity First
+
+**Write the minimum code that completely solves the current problem. Nothing speculative.**
+
+- Do not add features beyond what was requested.
+- Do not create an abstraction for a single use case.
+- Do not add configurability, extension points, or alternate backends without a current requirement.
+- Do not add caching, async processing, notifications, monitoring, validation layers, or retry systems "just in case."
+- Do not handle impossible scenarios or invent requirements absent from the codebase and request.
+- Prefer one clear function, endpoint, or code path over a framework built around it.
+- If 200 lines could be 50 without losing required behavior, rewrite it.
+
+Add complexity only when at least one of these is true:
+
+1. The user explicitly requested it.
+2. Existing project constraints require it.
+3. A second real use case makes the abstraction necessary.
+4. Measurement or a failing test demonstrates the need.
+
+Examples:
+
+- A percentage discount needs a function, not a strategy hierarchy.
+- Saving preferences needs a database write, not automatic caching, merging, validation, and notifications unless those behaviors are requested.
+- Start rate limiting with the smallest deployable slice; do not add Redis, per-endpoint configuration, and monitoring in one step unless the requirements demand them.
+
+Ask yourself: "Would a senior engineer consider this overbuilt for the stated requirement?" If yes, simplify.
+
+## 3. Surgical Changes
+
+**Touch only what the request requires. Clean up only what your change makes obsolete.**
+
+Before editing:
+
+- Locate the narrowest code path that controls the requested behavior.
+- Find the closest relevant tests.
+- Observe the file's existing style: naming, quote style, typing, docstrings, control flow, whitespace, imports, and error handling.
+
+While editing:
+
+- Do not refactor adjacent code that is not broken.
+- Do not reformat unrelated lines.
+- Do not strengthen validation beyond the reported issue.
+- Do not change comments, names, types, return logic, or public interfaces unless required.
+- Match existing style even when you would normally choose another style.
+- Preserve unrelated behavior.
+- Remove only imports, variables, functions, or files made unused by your own change.
+- Mention unrelated dead code or defects separately; do not fix them unless asked.
+
+Example: when fixing empty-email handling, change only the email path needed to reproduce and resolve the crash. Do not also rewrite username validation, add a docstring, change formatting, or redesign email validation.
+
+### Diff test
+
+Every changed line must trace directly to one of these:
+
+1. the requested behavior;
+2. a test that verifies that behavior;
+3. cleanup made necessary by the change.
+
+If a changed line does not pass that test, revert it.
+
+## 4. Goal-Driven Execution
+
+**Define success before implementation. Reproduce, change, and verify.**
+
+Translate requests into observable acceptance criteria:
+
+- **Bug fix:** Write or identify a test that reproduces the bug, confirm it fails for the expected reason, apply the smallest fix, then confirm the test and relevant regression tests pass.
+- **Feature:** Define the requested behavior and boundaries, write focused tests, implement the smallest complete version, and run existing related tests.
+- **Refactor:** Confirm tests pass before the change, preserve behavior, and confirm the same tests pass afterward.
+- **Performance work:** Record a baseline, define the target metric, change one relevant factor at a time, and measure again.
+
+For multi-step work, state a brief plan with a verification check for every step:
+
+```text
+1. [Action] -> verify: [observable check]
+2. [Action] -> verify: [observable check]
+3. [Action] -> verify: [observable check]
 ```
 
-`libraylib.dll` must appear for `build/dev/game.dll`. It must not appear for
-`build/tests/drifty_tests.exe` or `build/release/drifty_release.exe`.
+Prefer incremental steps that are independently testable and deployable. Do not combine infrastructure, abstraction, configuration, and product behavior into one large change when each can be verified separately.
 
-## Development Workflow — Hot Reload
+### Verification rules
 
-The platform layer is `build/dev/drifty.exe`; reloadable game code is `build/dev/game.dll`.
-`build.bat` always rebuilds the module and rebuilds the executable only when needed. A failed build
-leaves a running game on the previous module.
+- Reproduce before fixing whenever practical.
+- Confirm a new test fails for the intended reason before relying on it.
+- Run the narrowest relevant tests first, then broader regression checks when available.
+- Check edge cases tied to the reported behavior, not every imaginable case.
+- Do not claim success for checks you did not run.
+- If verification is blocked, state exactly what was not verified and why.
 
-Launch the interactive `build/dev/drifty.exe` from the repository root; Explorer double-click may
-prevent it from finding the repository-relative `build/dev/game.dll`. A normal executable session,
-`mk run`, and `mk inspect` remain active until a person closes or stops them.
+Strong success criteria allow independent iteration. Weak criteria such as "make it work" invite scope drift and repeated clarification.
 
-Bounded, self-exiting modes are `build.bat --smoke-test`,
-`build/dev/drifty.exe --smoke-test`, `build/dev/drifty.exe --capture-scene NAME`,
-`build/dev/drifty.exe --gallery-page N`, `mk screenshots`, `mk visual-test`, `mk gallery`,
-`mk cards`, and `mk visual-diagnose`. See `docs/DEVTOOLS.md` and `--help` for their arguments.
+## Quick Anti-Pattern Reference
 
-### Core commands
+| Situation | Avoid | Prefer |
+|---|---|---|
+| Ambiguous request | Silently choosing scope, format, or target | State material assumptions and clarify consequential choices |
+| Small feature | Designing a framework for future possibilities | Implement the current use case directly |
+| Bug fix | Refactoring nearby code and changing style | Make the smallest behavior-specific diff |
+| Vague goal | "Review, improve, and test" | Define a reproducer, expected result, and concrete checks |
+| Multi-step change | Building every layer at once | Deliver independently verifiable steps |
 
-```bash
-mk test                  # fast scenarios; mk.bat enters UCRT64 from Windows shells
-mk scenario NAME=skidpad
-mk report NAME=skidpad   # scenario plus artifacts/report_skidpad.html
-mk verify                # static analysis, scenarios, and regression comparison
-mk ci                    # core local checks; inspect SKIP lines; hosted CI is authoritative
-mk cards                 # headless per-car PNGs, label maps, and cards.json
-mk visual-diagnose       # bounded appearance measurements in artifacts/visual/
-```
+## Completion Checklist
 
-Missing local tools such as clang, cppcheck, gcovr, or clang-format print `SKIP` rather than
-failing. A successful `mk ci` is insufficient when a required tool was skipped: report every skip.
-Hosted CI additionally exercises its compiler matrix, workflow lint, Windows builds, hot-reload
-harness, linkage inspection, and CodeQL.
+Before finishing, confirm:
 
-`./build/tests/drifty_tests.exe --list` prints the current scenario table. Use
-`--scenario NAME` for focused feedback and `--no-bundle` to print all failures without writing a
-new bundle.
+- The implemented behavior matches the stated request and explicit assumptions.
+- No speculative feature or abstraction was added.
+- The diff contains no unrelated cleanup or style drift.
+- Relevant tests or checks were run, and their results are known.
+- Any unverified area, remaining risk, or unrelated finding is reported clearly.
 
-A failing scenario writes `artifacts/failure-<scenario>-<timestamp>/` with its input timeline,
-telemetry, tunables, first failing check, and build commit. Read it before rerunning. Because the
-bundle records only the first failed check, rerun a multi-failure scenario as:
+---
 
-```bash
-./build/tests/drifty_tests.exe --scenario corpus --no-bundle
-```
-
-When physics telemetry changes intentionally, `mk baselines` rerecords `tests/baselines/`. Never
-use it merely to make a regression green; review the numbers and explain the model change.
-
-### Restart requirements
-
-Restart `build/dev/drifty.exe` after:
-
-- changing the layout of `Game` or anything embedded in it, including `DevState`;
-- adding a field to `VehicleSpec`, which is embedded in `Game`;
-- changing `src/platform/main.c` or `src/platform/hotreload_windows.c`;
-- changing `GAME_ENTRY_POINTS`.
-
-One restart is sufficient. Ordinary module-only reloads then preserve body state, wheel speeds,
-engine RPM, and gear.
-
-### Reload-safety constraints
-
-- No pointer stored in `Game`, or reachable from it, may point into module code or static data.
-  Store identifiers such as `SurfaceId` and resolve them at point of use.
-- Never store function pointers in persistent state.
-- The platform owns the sole `Game` allocation; never declare `static Game game` in the module.
-- Release raylib-tracked textures, sounds, and callbacks in `game_pre_reload`; reacquire them in
-  `game_post_reload`.
-- Do not allocate heap memory inside `game_fixed_update()` or the physics step. Initialization,
-  profile loading, corpus generation, and texture rebakes may allocate at existing lifecycle
-  boundaries.
-
-## Generated Artifacts
-
-Generated files are part of the change, not optional bookkeeping.
-
-| Trigger | Required update |
-|---|---|
-| Parameter registry/default/range change | `mk params-doc` → `docs/generated/PARAMETERS.md` |
-| Corpus archetype, generation/sweep logic, or registry default/range consumed by the corpus | Regenerate `data/vehicles/corpus/**` and `docs/generated/CORPUS.md` |
-| Intentional physics-model output change | Review and, only when justified, update `tests/baselines/**` with `mk baselines` |
-| Appearance grammar or raster change | Run `car-visual`, `corpus`, and `mk visual-diagnose`; regenerate corpus outputs only when corpus specs changed |
-
-Corpus regeneration commands:
-
-```bash
-./build/tests/drifty_tests.exe --generate-corpus data/vehicles/corpus
-./build/tests/drifty_tests.exe --dump-corpus-index docs/generated/CORPUS.md
-```
-
-Corpus output depends on `src/dev/car_corpus.c`, `src/dev/car_corpus_archetypes.c`, and relevant
-registry defaults/ranges in `src/dev/dev_params.c`. The `corpus` scenario checks profile
-round-trips; Linux CI regenerates and diffs `docs/generated/CORPUS.md`.
-
-## Vehicle Appearance
-
-A car's appearance is a pure, total, deterministic function of its physics parameters. There is no
-hand-authored per-vehicle art. Read `docs/CAR_VISUAL.md` before modifying
-`src/render/car_visual.c`, `src/render/car_visual_raster.c`, `src/dev/car_corpus.c`,
-`src/dev/car_corpus_archetypes.c`, or `render_vehicle_draw()` in
-`src/render/render_vehicle.c`.
-
-Required invariants:
-
-- Geometry may not come from a hash of raw spec data. Colour is the documented exception and is
-  excluded from shape distinctness.
-- No `body.type` enum, per-archetype drawing branch, or per-car art asset. Vehicle classes are
-  regions of parameter space.
-- Styling decisions live only in `src/render/car_visual.c`. The grammar and rasterizer remain
-  raylib-call-free so headless tests can link them.
-- `CarVisual` remains stack-local and derived per bake; never store it in `Game` or `DevState`.
-- Cache keys use canonical field serialization, never raw struct bytes or `memcmp` across padded
-  structs. Hashes may invalidate caches and seed colour, never generate geometry.
-- Float determinism is within one binary only (`game.dll` is `-O0`, tests are `-O2`). Never compare
-  module-computed rasters with test-computed rasters, and never add `-ffast-math`.
-- `resources/sprite_examples/` is reference material, not shipped assets.
-
-Focused gates:
-
-```bash
-./build/tests/drifty_tests.exe --scenario car-visual
-./build/tests/drifty_tests.exe --scenario corpus
-mk visual-diagnose
-```
-
-Every corpus pair must clear all three floors from `tests/support/appearance_metrics.h`:
-
-| Floor | Constant |
-|---|---|
-| At least 3.0% of the union silhouette differs | `CV_MIN_PIXEL_DIFF` |
-| Signature L∞ at least 0.08 m | `CV_MIN_LINF` |
-| Signature L2 at least 0.25 | `CV_MIN_L2` |
-
-Never lower a corpus-wide threshold for one row. A key that cannot carry five distinct sweep steps
-belongs in `kVisualDrivers[]`; read the measured exclusions in `src/dev/car_corpus.c` first.
-
-Gates catch similarity, not visual plausibility. `mk cards` writes derived quantities and per-feature
-pixel histograms; use them to find overactive or zero-coverage features. `mk visual-diagnose` records
-the bounded diagnostic evidence. `mk gallery` renders the production texture path for human review;
-it is not a GPU regression baseline.
-
-## Physics Conventions
-
-Physics uses SI units: metres, seconds, kilograms, newtons, and radians. Body X is forward, body Y
-is left, heading and yaw rate are counterclockwise-positive, and steering is left-positive. Pixels
-exist only in the render layer through `PIXELS_PER_METER`. Physics translation units call no raylib
-function.
-
-## Tunables
-
-Every tunable is registered once in `src/dev/dev_params.c` with its default, unit, range, and
-description. The registry drives Physics Lab sliders, profiles, telemetry metadata, and generated
-parameter documentation. The `params` scenario checks registry defaults against
-`vehicle_spec_set_default()`.
-
-Adding a tunable has eleven touch points; use `body.cowl_x` as the template:
-
-1. Add the default constant in `src/core/config.h`.
-2. Add the `VehicleSpec` field in `src/physics/vehicle.h`; this requires a restart.
-3. Set and validate it in `src/physics/vehicle.c`.
-4. Add its `g_params[]` row in `src/dev/dev_params.c`; enums use float storage and step `1.0f`.
-5. Add a migration alias only when replacing a previously derived key.
-6. Add a `CarVisual` field in `src/render/car_visual.h` when it affects drawn geometry.
-7. Consume it in `car_visual_derive()` with the documented `[identity]` or `[rule]` taxonomy.
-8. Add it to `car_visual_bake_key()`.
-9. Add a `CAR_SIGNATURE_COMPONENTS` component when it contributes to distinctness.
-10. Draw it in `src/render/car_visual_raster.c`, adding a `CarRasterLabel` for a new feature.
-11. Add it to `kVisualDrivers[]` and the mapping table in `docs/CAR_VISUAL.md`; run
-    `mk params-doc`.
-
-Steps 8 and 11 protect each other: omitting both lets a slider change without rebaking and leaves no
-assertion to detect it.
-
-## Validation After Build-System Changes
-
-After changing build scripts, source manifests, wrappers, or linkage:
-
-1. `build.bat --clean`
-2. `build.bat --tests` and `build/tests/drifty_tests.exe`
-3. `build.bat`
-4. `build.bat --release`
-5. Inspect imports with `objdump -p` on `build/dev/drifty.exe`, `build/dev/game.dll`,
-   `build/tests/drifty_tests.exe`, and `build/release/drifty_release.exe`.
-6. `./scripts/validate_hotreload.sh`
-7. `build.bat --smoke-test`
-
-## Cloned Dependency Source
-
-`.slim/clonedeps/repos/` contains read-only dependency source. Never edit it:
-
-- `raysan5__raylib/` — raylib 6.0 headers, layouts, and examples.
-- `unconv__racer/` — rendering references only, not the physics model.
-- `alexliniger__MPCC/` — bicycle-model and Pacejka sanity references.
+**These guidelines are working if:** diffs are smaller, solutions are easier to understand and test, unnecessary rewrites decrease, ambiguity is surfaced before it causes mistakes, and verification is tied to concrete outcomes.

@@ -129,7 +129,7 @@ typedef struct {
 
 /* The normalised style axes. Derived first so that ~30 features move together instead of
  * independently: a heavy, tall, soft spec should read as van-like across silhouette, arches,
- * wing and exhaust at once. Exposed for test diagnostics and for docs/CAR_VISUAL.md. */
+ * wing and exhaust at once. Exposed for test diagnostics. */
 typedef struct {
     float mass01;    /* massKg */
     float size01;    /* wheelbase */

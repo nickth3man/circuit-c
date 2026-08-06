@@ -7,9 +7,7 @@ load-transfer behaviour, not because a state machine reaches in and changes forc
 
 **Windows only.** The supported development environment is **MSYS2 UCRT64**.
 
-- Reference index: [docs/SOURCES.md](docs/SOURCES.md)
 - Agent-facing workflow rules: [AGENTS.md](AGENTS.md)
-- Vehicle-appearance contract: [docs/CAR_VISUAL.md](docs/CAR_VISUAL.md)
 
 ## Current phase
 
@@ -21,9 +19,9 @@ Two workstreams number their phases independently, so "phase 4" needs qualifying
 **Vehicle-appearance phases 0–6 are complete.** A car's appearance is a pure, total function
 of its physics parameters — there is no hand-authored art for any vehicle. That workstream
 built the parameter registry expansion, the appearance grammar, a 100-vehicle demonstration
-corpus, the production texture path, and the in-game gallery. See
-[docs/CAR_VISUAL.md](docs/CAR_VISUAL.md) for the contract and
-[docs/generated/CORPUS.md](docs/generated/CORPUS.md) for the fleet.
+corpus, the production texture path, and the in-game gallery. The grammar lives in
+`src/render/car_visual.h/.c`; `build/tests/drifty_tests.exe --dump-corpus-index` prints the
+fleet.
 
 The running game uses a deterministic planar rigid-body vehicle in SI units:
 
@@ -232,14 +230,13 @@ Hot reload cannot handle these. Restart `build/dev/drifty.exe` after:
 
 The game itself stays plain C and raylib. Around it sits a development shell — an in-game
 Physics Lab, a replay inspector, telemetry reports, failure bundles, and one command per
-operation. [docs/DEVTOOLS.md](docs/DEVTOOLS.md) is the guide; [docs/CI.md](docs/CI.md) covers
-the workflows and required checks.
+operation. `make help` lists every target.
 
 ```bash
 mk test                 # fast scenarios          mk verify        analysis + tests + regression
 mk scenario NAME=skidpad
 mk report NAME=skidpad  # self-contained HTML report with plots and a baseline comparison
-mk ci                   # exactly what the required CI checks run
+mk ci                   # format, lint, analyze, every scenario, regression, sanitizers, coverage
 mk cards                # per-car sprites, feature-label maps and cards.json (headless)
 mk visual-diagnose      # appearance measurements and evidence into artifacts/visual/
 mk gallery              # the fleet through the production texture path, for human review
@@ -252,15 +249,14 @@ instead of the latter, since it starts and stops its own server.
 
 Press **F2** in the running game for the Physics Lab: scenario selector, pause and single
 step, live sliders for every tunable in the registry with its default and unit — currently
-123, listed in [docs/generated/PARAMETERS.md](docs/generated/PARAMETERS.md) — tuning profiles, overlay toggles,
+123, listed by `drifty_tests --dump-params` — tuning profiles, overlay toggles,
 an eight-channel scope with a baseline ghost, and an invariant panel. **F3** opens the replay
 inspector.
 
 ![The Physics Lab](tests/visual/baseline/physics_lab.png)
 
 Every tunable is defined once, in `src/dev/dev_params.c`, and that one definition generates the
-sliders, the profile format, the telemetry metadata, and
-[docs/generated/PARAMETERS.md](docs/generated/PARAMETERS.md).
+sliders, the profile format, the telemetry metadata, and the `--dump-params` table.
 
 ## Known limitations
 
@@ -274,8 +270,8 @@ sliders, the profile format, the telemetry metadata, and
 - **Every new tunable parameter costs one restart.** A parameter is a field on `VehicleSpec`,
   which lives inside `Game`, so adding one is a layout change like any other. Expect this
   while the parameter set is still growing.
-- **Linux gameplay remains unsupported.** Linux builds are headless CI support only and are
-  not a substitute for the MSYS2 UCRT64 gameplay build.
+- **Linux gameplay remains unsupported.** Linux builds cover the headless targets only and
+  are not a substitute for the MSYS2 UCRT64 gameplay build.
 - **Release still needs `glfw3.dll`.** The MSYS2 `libraylib.a` was built against shared
   GLFW (`__imp_glfw*`), so a fully static single-file release without any third-party DLL
   is blocked by that package layout. `libraylib.dll` and `game.dll` are not required.
@@ -287,13 +283,6 @@ Makefile, build.sh, build.bat   build entry points; all terminate immediately
 mk.bat                          run a Makefile target inside MSYS2 UCRT64 from cmd.exe
 scripts/setup_windows.ps1       idempotent MSYS2 UCRT64 bootstrap
 scripts/validate_hotreload.sh   harness + failed-compile preservation
-scripts/setup_ruleset.sh        branch ruleset via gh; prints unless given --apply
-docs/SOURCES.md                 technical reference index
-docs/DEVTOOLS.md                the development shell: lab, inspector, reports, targets
-docs/CI.md                      workflows, required checks, and why the gates are shaped so
-docs/generated/PARAMETERS.md              generated from the tunable registry
-docs/CAR_VISUAL.md              the vehicle-appearance contract and the fidelity budget
-docs/generated/CORPUS.md                  the 100 demonstration vehicles, generated from car_corpus.c
 src/platform/main.c                      platform layer: window, Game allocation, fixed-timestep loop
 src/platform/timestep.h/.c               the accumulator, isolated so the harness can assert it
 src/platform/hotreload.h                 GAME_ENTRY_POINTS, the one authoritative entry-point list

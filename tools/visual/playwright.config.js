@@ -1,8 +1,8 @@
 /*
  * Playwright config for the vehicle-appearance inspector.
  *
- * DELIBERATELY NOT A CI GATE. docs/CI.md keeps the required checks headless and
- * platform-independent; these tests need a browser and their value is the evidence they emit,
+ * DELIBERATELY NOT A GATE. The checks that gate work are headless and platform-independent;
+ * these tests need a browser and their value is the evidence they emit,
  * not a pass/fail bit. Some of them are EXPECTED to fail today — that is the point: they are
  * executable statements of what "car-looking" requires, and they turn green as the grammar is
  * fixed. Run them by hand, read artifacts/visual/.

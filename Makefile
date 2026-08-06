@@ -1,8 +1,7 @@
 # Drifty — one command per operation.
 #
-# Local targets provide the fast core checks used during development. Hosted CI remains
-# authoritative because it also runs its compiler/OS matrix, workflow lint, hot-reload
-# harness, linkage inspection, and security analysis.
+# These local targets are the project's checks. There is no hosted CI: the compiler/OS
+# matrix, hot-reload harness, linkage inspection, and security analysis are run by hand.
 #
 #   make dev              hot-reload development build: build/dev/game.dll + build/dev/drifty.exe
 #   make run              build, then LAUNCH the game (interactive; blocks until the window closes)
@@ -23,7 +22,6 @@
 #   make benchmark        fixed-update throughput
 #   make release          release build
 #   make ci               core local checks; inspect every SKIP line
-#   make params-doc       regenerate docs/generated/PARAMETERS.md from the registry
 #   make compile-commands write compile_commands.json for clangd
 #   make format           apply .clang-format        make format-check  check only
 #   make lint             cppcheck                   make analyze       clang --analyze
@@ -35,8 +33,8 @@
 # Every target terminates on its own except the interactive `run` and `inspect` targets.
 #
 # On Windows the canonical build lives in build.sh; the targets below call it rather than
-# duplicating the hot-reload-safe link sequence. Linux CI validates the headless targets
-# (tests, sanitizers, coverage, fuzzing); the interactive game remains Windows-only.
+# duplicating the hot-reload-safe link sequence. The headless targets (tests, sanitizers,
+# coverage, fuzzing) also build on Linux; the interactive game remains Windows-only.
 
 # ------------------------------------------------------------------------------- host --
 
@@ -94,7 +92,7 @@ PYTHON ?= $(shell command -v python3 2>/dev/null || command -v python 2>/dev/nul
 endif
 
 # Optional tools. Missing ones make their target explain how to install rather than fail
-# with a shell error; CI installs all of them, so nothing is skipped where it matters.
+# with a shell error, so a SKIP line is the only signal that a check did not actually run.
 CLANG        := $(shell command -v clang 2>/dev/null)
 CLANG_FORMAT := $(shell command -v clang-format 2>/dev/null)
 CPPCHECK     := $(shell command -v cppcheck 2>/dev/null)
@@ -118,8 +116,8 @@ BUILD_DEFINES = -DDRIFTY_BUILD_COMMIT=\"$(BUILD_COMMIT)\" \
 
 # ----------------------------------------------------------------------------- sources --
 #
-# THE source manifest. build.sh, tools/build/gen_compile_commands.py and the fuzz workflows
-# all read these groups out of this file through `print-source-groups` / `print-source-group`,
+# THE source manifest. build.sh and tools/build/gen_compile_commands.py both read these
+# groups out of this file through `print-source-groups` / `print-source-group`,
 # so link membership is declared exactly once. It used to be declared four times, and the
 # fourth copy had already drifted.
 #
@@ -212,7 +210,7 @@ REGRESSION_SCENARIOS := skidpad step-steer transition lift-off \
 
 .PHONY: all help info dev run release tests test test-physics scenario report regression \
         baselines verify-fast verify sanitize coverage screenshots visual-test gallery profile \
-        benchmark ci params-doc compile-commands format format-check lint analyze fuzz \
+        benchmark ci compile-commands format format-check lint analyze fuzz \
         clean clean-telemetry dirs windows-only cards inspect visual-diagnose \
         print-source-groups print-source-group
 
@@ -241,7 +239,7 @@ info:
 #     eval "$(make --no-print-directory -s print-source-groups)"
 #
 # `print-source-group GROUP=NAME` prints one group's unquoted, space-separated value, which
-# is what a workflow wants to interpolate straight into a compiler command line. An unknown
+# is what a script wants to interpolate straight into a compiler command line. An unknown
 # or empty group exits 2 rather than expanding to nothing and silently linking less.
 
 print-source-groups:
@@ -321,9 +319,6 @@ scenario: tests
 
 benchmark: tests
 	./$(EXE_TESTS) --benchmark 240000
-
-params-doc: tests
-	./$(EXE_TESTS) --dump-params docs/generated/PARAMETERS.md
 
 # ------------------------------------------------------------------- telemetry tooling --
 
@@ -409,7 +404,6 @@ ifeq ($(DRIFTY_HOST),ucrt64)
 else
 	@echo "SKIP sanitize: clang not installed. Install it with the platform package manager." >&2
 endif
-	@echo "The required Linux CI job runs every scenario under ASan and UBSan." >&2
 else
 	@mkdir -p $(BUILD_SANITIZE)
 ifeq ($(DRIFTY_HOST),ucrt64)
@@ -420,7 +414,6 @@ ifeq ($(DRIFTY_HOST),ucrt64)
 	    rm -f $(BUILD_SANITIZE)/runtime_probe.c $(BUILD_SANITIZE)/runtime_probe$(EXE_SUFFIX); \
 	    echo "SKIP sanitize: this clang installation has no linkable ASan/UBSan runtime." >&2; \
 	    echo "MSYS2 provides those runtimes in CLANG64, not the supported UCRT64 environment." >&2; \
-	    echo "The required Linux CI job runs every scenario under ASan and UBSan." >&2; \
 	else \
 	    rm -f $(BUILD_SANITIZE)/runtime_probe.c $(BUILD_SANITIZE)/runtime_probe$(EXE_SUFFIX); \
 	    $(CLANG) $(CSTD) $(INCLUDES) -O1 -g -fsanitize=address,undefined \
@@ -490,8 +483,8 @@ screenshots: windows-only dev
 #
 # The output is a HUMAN-REVIEW artifact and deliberately not a GPU regression baseline: a
 # hundred cars behind an RMSE gate, on hardware that rasterizes differently per vendor, is a
-# maintenance sinkhole with no CI value. The gates that matter are headless — the `corpus`
-# scenario and `drifty_tests --dump-corpus-sheet`.
+# maintenance sinkhole with no regression value. The checks that matter are headless — the
+# `corpus` scenario and `drifty_tests --dump-corpus-sheet`.
 GALLERY_PAGES ?= 7
 
 gallery: windows-only dev
@@ -519,7 +512,7 @@ inspect: cards
 
 # Bounded automation: runs the Playwright suite, starts and stops its own server, and writes
 # per-car cards, label maps, sweep strips, and diagnostics.txt under artifacts/visual/.
-# It remains diagnostic rather than a required CI gate; `|| true` preserves all evidence when
+# It remains diagnostic rather than a pass/fail gate; `|| true` preserves all evidence when
 # a measurement fails so the report can identify every defect in one run.
 visual-diagnose: cards
 	@cd tools/visual && npm install --silent && npx playwright test --reporter=list || true
@@ -551,7 +544,7 @@ endif
 
 fuzz:
 ifeq ($(CLANG),)
-	@echo "SKIP fuzz: clang with libFuzzer not installed. The scheduled CI job runs these." >&2
+	@echo "SKIP fuzz: clang with libFuzzer not installed." >&2
 else
 	@mkdir -p $(BUILD_FUZZ) $(ARTIFACTS)/fuzz/crashes
 	@for target in fuzz/fuzz_*.c; do \
@@ -580,17 +573,15 @@ profile: windows-only
 	    DRIFTY_EXTRA_DEFINES=-DDRIFTY_TRACY ./build.sh; \
 	else \
 	    echo "third_party/tracy not present — building with the built-in zone timers."; \
-	    echo "See docs/DEVTOOLS.md for how to add Tracy."; \
 	    DRIFTY_EXTRA_DEFINES=-DDRIFTY_PROFILE ./build.sh; \
 	fi
 
-# ---------------------------------------------------------------------------------- CI --
+# ------------------------------------------------------------------- aggregate check --
 
 ci: format-check lint analyze test-physics regression sanitize coverage
 	@echo ""
 	@echo "==============================================="
 	@echo "ci: core local checks passed; inspect any SKIP lines."
-	@echo "Hosted CI remains authoritative for matrix, workflow, Windows, linkage, and security checks."
 
 # ---------------------------------------------------------------------- editor support --
 

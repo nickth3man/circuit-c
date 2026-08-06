@@ -8,7 +8,7 @@
  *   - tuning-profile save and load (dev_params_save / dev_params_load),
  *   - reset-to-default behaviour,
  *   - the telemetry metadata block written beside a run,
- *   - the documentation table in docs/generated/PARAMETERS.md (drifty_tests --dump-params).
+ *   - the documentation table printed by `drifty_tests --dump-params`.
  *
  * That is the whole point: defaults, UI limits, saved profiles, and the specification cannot
  * drift apart because there is only one place to change.
@@ -125,7 +125,7 @@ int dev_params_apply_assignments(VehicleSpec *spec, const DevParamAssignment *it
 
 /* ------------------------------------------------------------------------------- reports -- */
 
-/* Markdown table of every parameter — the source of docs/generated/PARAMETERS.md. */
+/* Markdown table of every parameter — what `drifty_tests --dump-params` writes. */
 void dev_params_write_markdown(FILE *out);
 
 /* `# name,value,default,unit` comment lines for a telemetry sidecar file. */

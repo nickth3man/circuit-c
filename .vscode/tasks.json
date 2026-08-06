@@ -73,13 +73,6 @@
             "problemMatcher": []
         },
         {
-            "label": "Regenerate docs/generated/PARAMETERS.md",
-            "type": "shell",
-            "command": "${workspaceFolder}\\mk.bat",
-            "args": ["params-doc"],
-            "problemMatcher": []
-        },
-        {
             "label": "Regenerate compile_commands.json",
             "detail": "clangd needs this to use the real build flags",
             "type": "shell",

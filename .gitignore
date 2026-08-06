@@ -69,7 +69,7 @@ compile_commands.json
 /coverage/
 
 # Editor / OS. The four committed VS Code files are the shared task, launch, and extension
-# configuration described in docs/DEVTOOLS.md; everything else under .vscode/ is personal.
+# configuration; everything else under .vscode/ is personal.
 .vscode/*
 !.vscode/tasks.json
 !.vscode/launch.json

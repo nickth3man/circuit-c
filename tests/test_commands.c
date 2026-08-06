@@ -243,7 +243,7 @@ int test_generate_corpus(const char *dir)
     return 0;
 }
 
-/* The corpus table, in the same generated-Markdown style as docs/generated/PARAMETERS.md. */
+/* The corpus table, in the same generated-Markdown style as --dump-params. */
 int test_dump_corpus_index(const char *path)
 {
     FILE *out = stdout;

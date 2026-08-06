@@ -20,12 +20,8 @@ machine happened to be that day.
 
 The comparison is only meaningful on one pinned environment. raylib renders through OpenGL,
 and rasterisation differs between GPU vendors and drivers enough to move an RMSE well past
-any tolerance worth setting. GitHub's hosted Windows runners have no GPU at all. So this runs
-on the developer's machine, and CI checks the things that *are* portable — the headless
-physics, the telemetry comparison, the sanitizers.
-
-If a pinned self-hosted runner ever exists, `.github/workflows/` gains a job that calls the
-same two make targets; nothing else has to change.
+any tolerance worth setting. So this runs on the developer's machine, alongside the checks
+that *are* portable — the headless physics, the telemetry comparison, the sanitizers.
 
 ## Accepting a new baseline
 

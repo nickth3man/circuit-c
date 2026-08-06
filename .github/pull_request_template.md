@@ -23,7 +23,7 @@ What behaviour or infrastructure changed?
 - [ ] `mk verify-fast`
 - [ ] `mk verify`
 - [ ] Relevant scenario tests (`mk scenario NAME=...`)
-- [ ] Sanitizers (`mk sanitize`, or the CI job)
+- [ ] Sanitizers (`mk sanitize`)
 - [ ] Visual inspection in the running game
 
 ## Telemetry changes

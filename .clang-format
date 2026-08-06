@@ -7,8 +7,8 @@
 #
 # ADOPTION NOTE. Running `make format` over the existing tree will still produce a diff —
 # some tables and assignment groups are hand-aligned in ways no tool reproduces. Land that
-# normalisation as its own commit, review it, and only then make the CI format check
-# blocking (it starts advisory; see .github/workflows/ci.yml).
+# normalisation as its own commit and review it before treating `make format-check` as
+# blocking.
 ---
 Language: Cpp
 BasedOnStyle: LLVM
