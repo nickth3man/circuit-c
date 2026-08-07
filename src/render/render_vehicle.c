@@ -52,7 +52,11 @@
 
 /* One car's sprites. The running game keeps exactly one of these in a module static; the
  * gallery builds and discards one per cell, so reviewing a hundred vehicles never holds more
- * than a single car's textures on the GPU. */
+ * than a single car's textures on the GPU.
+ *
+ * Invariant: every instance is zero-initialised before first use. `s_car` and the gallery cells
+ * have static storage, and the gallery explicitly clears each cell before baking. That makes a
+ * zero Texture2D id the reliable empty-handle state used by partial-bake cleanup. */
 typedef struct {
     bool ready;
     float pxPerM; /* texels per metre these were baked at */
@@ -64,9 +68,14 @@ typedef struct {
 
 static void car_sprites_unload(CarSprites *s)
 {
-    if (s == NULL || !s->ready) return;
-    UnloadTexture(s->body);
-    for (int i = 0; i < WHEEL_COUNT; i++) UnloadTexture(s->wheel[i]);
+    if (s == NULL) return;
+
+    /* A bake may fail after uploading only some parts, before `ready` becomes true. Release
+     * each live handle independently so the failure path cannot leak the partial upload. */
+    if (s->body.id != 0) UnloadTexture(s->body);
+    for (int i = 0; i < WHEEL_COUNT; i++) {
+        if (s->wheel[i].id != 0) UnloadTexture(s->wheel[i]);
+    }
     memset(s, 0, sizeof(*s));
 }
 
