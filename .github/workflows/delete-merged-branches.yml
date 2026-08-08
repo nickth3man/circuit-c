@@ -1,0 +1,37 @@
+# GitHub deletes pull-request head branches when delete_branch_on_merge is enabled.
+# This covers direct pushes and command-line merges that bypass a pull request.
+name: Delete merged branches
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  delete-merged-branches:
+    name: Delete merged branches
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out complete history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Delete branches contained by main
+        shell: bash
+        run: |
+          set -u
+          git fetch --prune origin '+refs/heads/*:refs/remotes/origin/*'
+
+          while IFS= read -r branch; do
+            [ "$branch" = "main" ] && continue
+            [ "$branch" = "HEAD" ] && continue
+
+            if git merge-base --is-ancestor "origin/$branch" origin/main; then
+              echo "Deleting merged branch: $branch"
+              git push origin --delete "$branch" || echo "Could not delete $branch; it may be protected or already gone."
+            fi
+          done < <(git for-each-ref --format='%(refname:strip=3)' refs/remotes/origin)
