@@ -1,7 +1,10 @@
 # Drifty — one command per operation.
 #
-# These local targets are the project's checks. There is no hosted CI: the compiler/OS
-# matrix, hot-reload harness, linkage inspection, and security analysis are run by hand.
+# These local targets are the project's checks, and .github/workflows/ci.yml runs the same
+# ones on every push: a UCRT64 job for the canonical toolchain and a Linux job for the
+# headless targets, including the sanitizers UCRT64 cannot link. CI passes DRIFTY_STRICT=1,
+# which turns a missing tool from a SKIP into a failure. The hot-reload harness, linkage
+# inspection, and the interactive game remain hand-run.
 #
 #   make dev              hot-reload development build: build/dev/game.dll + build/dev/drifty.exe
 #   make run              build, then LAUNCH the game (interactive; blocks until the window closes)
@@ -22,8 +25,10 @@
 #   make benchmark        fixed-update throughput
 #   make release          release build
 #   make ci               core local checks; inspect every SKIP line
+#   make DRIFTY_STRICT=1 ci   same, but a missing tool fails instead of skipping (what CI runs)
 #   make compile-commands write compile_commands.json for clangd
 #   make format           apply .clang-format        make format-check  check only
+#   make format-py        apply ruff to the Python   make lint-py       check only
 #   make lint             cppcheck                   make analyze       clang --analyze
 #   make fuzz             build and briefly run the libFuzzer targets (clang)
 #   make clean            remove every generated artifact
@@ -98,6 +103,19 @@ CLANG_FORMAT := $(shell command -v clang-format 2>/dev/null)
 CPPCHECK     := $(shell command -v cppcheck 2>/dev/null)
 GCOVR        := $(shell command -v gcovr 2>/dev/null)
 MAGICK       := $(shell command -v magick 2>/dev/null)
+RUFF         := $(shell command -v ruff 2>/dev/null)
+
+# A missing tool is advisory on a developer machine and fatal in CI. Without this, `make ci`
+# exits 0 having run almost nothing whenever a tool is absent, which is exactly the state a
+# hosted CI job starts in — so every check has to opt out loudly rather than silently.
+#
+#   make ci                 SKIP lines, exit 0     (local: install what you need, or don't)
+#   make DRIFTY_STRICT=1 ci MISSING lines, exit 1  (CI: a check that did not run is a failure)
+ifdef DRIFTY_STRICT
+skip = @echo "MISSING $(1)" >&2; exit 1
+else
+skip = @echo "SKIP $(1)" >&2
+endif
 
 # ------------------------------------------------------------------------------- flags --
 
@@ -193,6 +211,8 @@ BUILD_COVERAGE := $(BUILD_DIR)/coverage
 BUILD_FUZZ     := $(BUILD_DIR)/fuzz
 BUILD_PACKAGES := $(BUILD_DIR)/packages
 
+ANALYZE_LOG := $(BUILD_DIR)/analyze.log
+
 EXE_TESTS   := $(BUILD_TESTS)/drifty_tests$(EXE_SUFFIX)
 EXE_DEBUG   := $(BUILD_DEV)/drifty$(EXE_SUFFIX)
 EXE_RELEASE := $(BUILD_RELEASE)/drifty_release$(EXE_SUFFIX)
@@ -210,7 +230,7 @@ REGRESSION_SCENARIOS := skidpad step-steer transition lift-off \
 
 .PHONY: all help info dev run release tests test test-physics scenario report regression \
         baselines verify-fast verify sanitize coverage screenshots visual-test gallery profile \
-        benchmark ci compile-commands format format-check lint analyze fuzz \
+        benchmark ci compile-commands format format-check format-py lint-py lint analyze fuzz \
         clean clean-telemetry dirs windows-only cards inspect visual-diagnose \
         print-source-groups print-source-group
 
@@ -229,6 +249,7 @@ info:
 	@echo "clang-format: $(if $(CLANG_FORMAT),$(CLANG_FORMAT),not installed)"
 	@echo "cppcheck    : $(if $(CPPCHECK),$(CPPCHECK),not installed)"
 	@echo "gcovr       : $(if $(GCOVR),$(GCOVR),not installed)"
+	@echo "ruff        : $(if $(RUFF),$(RUFF),not installed)"
 	@echo "magick      : $(if $(MAGICK),$(MAGICK),not installed)"
 
 # ------------------------------------------------------------- the source manifest, out --
@@ -355,15 +376,36 @@ endif
 
 format-check:
 ifeq ($(CLANG_FORMAT),)
-	@echo "SKIP format-check: clang-format not installed."
+	$(call skip,format-check: clang-format not installed.)
 else
 	$(CLANG_FORMAT) --dry-run --Werror $(ALL_C_SRCS) $(ALL_H_SRCS)
 	@echo "format ok"
 endif
 
+# The Python half of the same two targets. Configuration lives in pyproject.toml; ruff is the
+# only third-party package this repository needs (requirements-dev.txt).
+
+format-py:
+ifeq ($(RUFF),)
+	@echo "ruff not installed. pip install -r requirements-dev.txt" >&2
+	@exit 1
+else
+	$(RUFF) check --fix .
+	$(RUFF) format .
+endif
+
+lint-py:
+ifeq ($(RUFF),)
+	$(call skip,lint-py: ruff not installed (pip install -r requirements-dev.txt).)
+else
+	$(RUFF) check .
+	$(RUFF) format --check .
+	@echo "python lint and format ok"
+endif
+
 lint:
 ifeq ($(CPPCHECK),)
-	@echo "SKIP lint: cppcheck not installed (pacman -S mingw-w64-ucrt-x86_64-cppcheck)."
+	$(call skip,lint: cppcheck not installed (pacman -S mingw-w64-ucrt-x86_64-cppcheck).)
 else
 	# unusedFunction is left to the nightly `--enable=all` pass: a library of registry and
 	# inspector helpers legitimately has entry points that any single analysed set does not
@@ -379,20 +421,30 @@ endif
 
 analyze:
 ifeq ($(CLANG),)
-	@echo "SKIP analyze: clang not installed (pacman -S mingw-w64-ucrt-x86_64-clang)."
+	$(call skip,analyze: clang not installed (pacman -S mingw-w64-ucrt-x86_64-clang).)
 else
+	@mkdir -p $(BUILD_DIR)
+	@rm -f $(ANALYZE_LOG)
 	@for f in $(ANALYZE_SRCS); do \
 	    echo "  analyze $$f"; \
 	    $(CLANG) --analyze -Xanalyzer -analyzer-output=text $(CSTD) $(INCLUDES) \
-	        $(RAYLIB_CFLAGS) -DDRIFTY_HEADLESS $$f -o /dev/null || exit 1; \
+	        $(RAYLIB_CFLAGS) -DDRIFTY_HEADLESS $$f -o /dev/null 2>>$(ANALYZE_LOG) || exit 1; \
 	done
-	@echo "clang --analyze clean"
+	@cat $(ANALYZE_LOG)
+	@n=$$(grep -c 'warning:' $(ANALYZE_LOG) 2>/dev/null || true); n=$${n:-0}; \
+	if [ "$$n" -eq 0 ]; then \
+	    echo "clang --analyze clean"; \
+	else \
+	    echo "clang --analyze: $$n warning(s) — see $(ANALYZE_LOG)"; \
+	    echo "  clang exits 0 on analyzer findings, so these do NOT fail this target."; \
+	    echo "  Gating them lands with clang-tidy, on changed files only."; \
+	fi
 endif
 
-verify-fast: format-check test
+verify-fast: format-check lint-py test
 	@echo "verify-fast: ok"
 
-verify: format-check lint analyze test-physics regression
+verify: format-check lint-py lint analyze test-physics regression
 	@echo "verify: ok"
 
 # ------------------------------------------------------------------------- sanitizers --
@@ -400,9 +452,9 @@ verify: format-check lint analyze test-physics regression
 sanitize:
 ifeq ($(CLANG),)
 ifeq ($(DRIFTY_HOST),ucrt64)
-	@echo "SKIP sanitize: clang not installed (pacman -S mingw-w64-ucrt-x86_64-clang)." >&2
+	$(call skip,sanitize: clang not installed (pacman -S mingw-w64-ucrt-x86_64-clang).)
 else
-	@echo "SKIP sanitize: clang not installed. Install it with the platform package manager." >&2
+	$(call skip,sanitize: clang not installed. Install it with the platform package manager.)
 endif
 else
 	@mkdir -p $(BUILD_SANITIZE)
@@ -414,6 +466,8 @@ ifeq ($(DRIFTY_HOST),ucrt64)
 	    rm -f $(BUILD_SANITIZE)/runtime_probe.c $(BUILD_SANITIZE)/runtime_probe$(EXE_SUFFIX); \
 	    echo "SKIP sanitize: this clang installation has no linkable ASan/UBSan runtime." >&2; \
 	    echo "MSYS2 provides those runtimes in CLANG64, not the supported UCRT64 environment." >&2; \
+	    echo "This SKIP is unconditional, including under DRIFTY_STRICT: it is a documented" >&2; \
+	    echo "platform limitation, not a missing tool. CI runs the sanitizers on Linux." >&2; \
 	else \
 	    rm -f $(BUILD_SANITIZE)/runtime_probe.c $(BUILD_SANITIZE)/runtime_probe$(EXE_SUFFIX); \
 	    $(CLANG) $(CSTD) $(INCLUDES) -O1 -g -fsanitize=address,undefined \
@@ -458,7 +512,7 @@ coverage:
 	$(CC) --coverage $$objects -o $(BUILD_COVERAGE)/drifty_tests_cov$(EXE_SUFFIX) -lm
 	./$(BUILD_COVERAGE)/drifty_tests_cov$(EXE_SUFFIX)
 ifeq ($(GCOVR),)
-	@echo "SKIP gcovr report: gcovr not installed (pacman -S mingw-w64-ucrt-x86_64-gcovr). Raw .gcda files kept."
+	$(call skip,gcovr report: gcovr not installed (pacman -S mingw-w64-ucrt-x86_64-gcovr). Raw .gcda files kept.)
 else
 	$(GCOVR) --root . --filter 'src/.*' --exclude 'src/dev/dev_lab.c' \
 	    --txt --html-details $(BUILD_COVERAGE)/index.html \
@@ -520,7 +574,7 @@ visual-diagnose: cards
 
 visual-test: screenshots
 ifeq ($(MAGICK),)
-	@echo "SKIP visual-test: ImageMagick not installed (winget install ImageMagick.ImageMagick)."
+	$(call skip,visual-test: ImageMagick not installed (winget install ImageMagick.ImageMagick).)
 else
 	@mkdir -p $(ARTIFACTS)/visual-diff
 	@status=0; \
@@ -544,7 +598,7 @@ endif
 
 fuzz:
 ifeq ($(CLANG),)
-	@echo "SKIP fuzz: clang with libFuzzer not installed." >&2
+	$(call skip,fuzz: clang with libFuzzer not installed.)
 else
 	@mkdir -p $(BUILD_FUZZ) $(ARTIFACTS)/fuzz/crashes
 	@for target in fuzz/fuzz_*.c; do \
@@ -578,10 +632,17 @@ profile: windows-only
 
 # ------------------------------------------------------------------- aggregate check --
 
-ci: format-check lint analyze test-physics regression sanitize coverage
+ci: format-check lint-py lint analyze test-physics regression sanitize coverage
 	@echo ""
 	@echo "==============================================="
-	@echo "ci: core local checks passed; inspect any SKIP lines."
+ifdef DRIFTY_STRICT
+	@echo "ci: every check whose tool exists ran and passed (DRIFTY_STRICT)."
+	@echo "    A missing tool would have failed. Platform-limited checks can still skip:"
+	@echo "    on UCRT64 that is sanitize, which has no linkable ASan/UBSan runtime here."
+else
+	@echo "ci: core local checks passed; inspect any SKIP lines above."
+	@echo "    A SKIP is not a pass. Re-run with DRIFTY_STRICT=1 to make one fail."
+endif
 
 # ---------------------------------------------------------------------- editor support --
 

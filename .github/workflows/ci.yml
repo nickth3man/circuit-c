@@ -1,0 +1,134 @@
+# The same checks the Makefile offers locally, run on every push and pull request.
+#
+# Both jobs pass DRIFTY_STRICT=1, which turns a missing tool from a SKIP into a failure.
+# Without it a runner that happens to lack cppcheck would report a green tick for a job
+# that never linted anything.
+#
+# Two jobs because neither host covers everything:
+#   windows-ucrt64  the canonical toolchain developers actually build with, and the only
+#                   one the hot-reload link path is designed for
+#   linux-headless  the headless targets, and the only place ASan/UBSan can link at all —
+#                   MSYS2 ships those runtimes in CLANG64, not the supported UCRT64
+#
+# Actions are pinned by commit SHA, not tag, so a moved tag cannot change what runs here.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-ucrt64:
+    name: Windows UCRT64 (canonical)
+    runs-on: windows-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884 # v2.32.0
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            make
+            git
+          # `:p` resolves to the mingw-w64-ucrt-x86_64- prefix for this msystem.
+          # pkgconf is not optional: the Makefile errors out without pkg-config,
+          # and uses it to locate the raylib headers and cflags.
+          pacboy: >-
+            gcc:p
+            pkgconf:p
+            raylib:p
+            clang:p
+            clang-tools-extra:p
+            cppcheck:p
+            python:p
+
+      - name: Resolved toolchain
+        run: make info
+
+      # The C half of `verify`, named explicitly. lint-py is deliberately not run here: it is
+      # host-independent, and the only ruff available to MSYS2's Python is the pacman build,
+      # which tracks a different version from the pinned one in requirements-dev.txt.
+      # Two ruff versions would disagree about formatting and fail a job nobody can reproduce.
+      # The Linux job runs it instead, once, from the pin.
+      - name: Verify (format, lint, analyze, physics, regression)
+        run: make DRIFTY_STRICT=1 format-check lint analyze test-physics regression
+
+  linux-headless:
+    name: Linux headless (+ sanitizers)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang clang-format cppcheck
+          python -m pip install --disable-pip-version-check -r requirements-dev.txt
+
+      # The POSIX branch of the Makefile needs raylib for its HEADERS only: the headless
+      # build calls no raylib function and links no raylib library. So clone the source
+      # tree and stop — no build, no install. third_party/raylib-src is the fallback path
+      # the Makefile already looks for, and it is gitignored.
+      # Pinned by commit, for the same reason the actions above are: a tag can be moved or
+      # deleted, and this is the job's only external build input. dbc56a8 is tag 6.0, which
+      # is also the version the UCRT64 job's `raylib:p` package ships, so both jobs compile
+      # the headless set against the same headers.
+      - name: Fetch raylib headers
+        run: |
+          RAYLIB_SHA=dbc56a87da87d973a9c5baa4e7438a9d20121d28  # tag 6.0
+          git init -q third_party/raylib-src
+          git -C third_party/raylib-src fetch -q --depth 1 \
+            https://github.com/raysan5/raylib "$RAYLIB_SHA"
+          git -C third_party/raylib-src checkout -q FETCH_HEAD
+
+      - name: Resolved toolchain
+        run: make info
+
+      # Host-independent, so it runs here only rather than on both jobs. See the note in the
+      # UCRT64 job for why it is not part of that one.
+      - name: Python lint and format
+        run: make DRIFTY_STRICT=1 lint-py
+
+      # test-physics only. `regression` is deliberately NOT run here.
+      #
+      # tests/baselines/ is recorded on Windows/UCRT64, and the comparison tolerances are
+      # tight enough that a different libm does not reproduce them: the first CI run breached
+      # 13 of 46 comparisons, all of them longitudinal (brake-*, lift-off*, accel-load,
+      # launch_stop), with identical aggregate metrics but large single-row deltas — the
+      # signature of a discrete event landing one tick apart, not of drifting physics.
+      #
+      # The scenario assertions themselves pass identically on both hosts, so behaviour is
+      # not in question; byte-level reproduction across libms is, and the project has never
+      # claimed it. Windows CI gates the baselines.
+      - name: Physics scenarios
+        run: make DRIFTY_STRICT=1 test-physics
+
+      # This is the only place the sanitizers actually run; the UCRT64 job skips them by
+      # design. If this step ever starts skipping, the project has lost ASan/UBSan cover.
+      - name: ASan + UBSan
+        run: make DRIFTY_STRICT=1 sanitize
+
+      - name: Upload failure bundles
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: failure-bundles-linux
+          path: artifacts/
+          retention-days: 7
+          if-no-files-found: ignore

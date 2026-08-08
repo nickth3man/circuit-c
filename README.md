@@ -7,7 +7,9 @@ load-transfer behaviour, not because a state machine reaches in and changes forc
 
 **Windows only.** The supported development environment is **MSYS2 UCRT64**.
 
+- Setup, checks, and the hot-reload rules: [CONTRIBUTING.md](CONTRIBUTING.md)
 - Agent-facing workflow rules: [AGENTS.md](AGENTS.md)
+- Notable changes: [CHANGELOG.md](CHANGELOG.md)
 
 ## Current phase
 
@@ -55,7 +57,7 @@ previous step's solved body-longitudinal acceleration, transfers axle load from 
 CG geometry, propagates the dynamic loads into tire capacity, and applies separated
 quadratic aerodynamic drag and per-wheel rolling resistance.
 
-The headless runner covers 54 scenarios. (The check count is not quoted here — it moves with
+The headless runner covers 110 scenarios. (The check count is not quoted here — it moves with
 every parameter added, and `./build/tests/drifty_tests.exe` prints the current total.) Eight reviewed
 Phase 3 CSV baselines cover acceleration/braking load transfer, coast-down, skidpad, step
 steer, lift-off, transition, and a catchable drift. They live in `tests/baselines/`;
@@ -330,3 +332,12 @@ third_party/raygui/             vendored raygui, development builds only
 artifacts/                      telemetry CSV, reports, screenshots, replays,
                                 failure bundles, cards, gallery (all gitignored)
 ```
+
+## Licence
+
+Drifty is MIT licensed. See [LICENSE](LICENSE).
+
+Vendored third-party sources under `third_party/` keep their own licences — raygui is
+zlib/libpng and stb_image_write is dual public domain / MIT. Neither is linked into the
+release build. [third_party/README.md](third_party/README.md) records the provenance,
+the exact version, and the licence of each one.
