@@ -43,6 +43,7 @@
 #include "core/config.h"
 #include "dev/dev_scenario.h"
 #include "dev/dev_replay.h"
+#include "dev/failure_bundle.h"
 #include "game/ai_driver.h"
 #include "game/car_roster.h"
 #include "game/game.h"
@@ -600,6 +601,10 @@ static int run_validate_lap(Game *game, const Options *options)
     int outOfOrder = 0;
     bool allFinite = true;
     bool writeFailed = false;
+    /* Tick of the FIRST thing that went wrong, not the last. A run is not aborted by an
+     * out-of-order crossing, so without this the bundle would point at the tick budget for a
+     * fault that happened seconds in. 0 means nothing went wrong. */
+    uint64_t firstFaultTick = 0;
 
     replay_begin_recording(&game->replay, game->sim.tick);
 
@@ -609,9 +614,14 @@ static int run_validate_lap(Game *game, const Options *options)
         game_fixed_update(game, FIXED_DT_S);
         ticksRun++;
 
-        if (game->lastCheckpointEvent.outOfOrder) outOfOrder++;
-        if (!isfinite(game->vehicle.positionM.x) || !isfinite(game->vehicle.positionM.y))
+        if (game->lastCheckpointEvent.outOfOrder) {
+            outOfOrder++;
+            if (firstFaultTick == 0) firstFaultTick = game->sim.tick;
+        }
+        if (!isfinite(game->vehicle.positionM.x) || !isfinite(game->vehicle.positionM.y)) {
             allFinite = false;
+            if (firstFaultTick == 0) firstFaultTick = game->sim.tick;
+        }
 
         if (ticksRun % VIDEO_TICKS_PER_FRAME == 0) {
             TelemetryRow row = game_telemetry_row(game, 1);
@@ -637,8 +647,8 @@ static int run_validate_lap(Game *game, const Options *options)
                 vod.throttleInput = game->input.throttle;
                 vod.brakeInput = game->input.brake;
 
+                render_set_validation_overlay(&vod);
                 game_draw(game, 0.0f);
-                render_draw_validation_overlay(&vod);
 
                 Image shot = LoadImageFromScreen();
                 if (shot.data == NULL) {
@@ -675,8 +685,8 @@ static int run_validate_lap(Game *game, const Options *options)
             vod.throttleInput = game->input.throttle;
             vod.brakeInput = game->input.brake;
 
+            render_set_validation_overlay(&vod);
             game_draw(game, 0.0f);
-            render_draw_validation_overlay(&vod);
 
             Image shot = LoadImageFromScreen();
             if (shot.data != NULL) {
@@ -761,6 +771,39 @@ static int run_validate_lap(Game *game, const Options *options)
     rep.hasReplay = replaySaved;
 
     run_report_write(jsonPath, &rep);
+
+    /* A failed run keeps its evidence: the bundle lands beside the run's own artifacts, so the
+     * MP4, CSV, run.json, replay and bundle are one directory. The replay it carries is the
+     * AI's recorded input timeline, which reproduces the failure on its own. */
+    if (status != RUN_PASS) {
+        char failureText[256];
+        snprintf(failureText, sizeof(failureText),
+                 "validate-lap %s: %s (laps %d/2, %d checkpoint crossings over %d per lap, "
+                 "out-of-order %d, ticks %d/%d)",
+                 runId, run_failure_reason(status), game->track.lap, metrics.checkpointsPassed,
+                 game->track.checkpointCount, outOfOrder, ticksRun, budgetTicks);
+
+        FailureBundle bundle;
+        memset(&bundle, 0, sizeof(bundle));
+        bundle.scenario = runId;
+        bundle.failureText = failureText;
+        bundle.telemetryPath = csvOpened ? csvPath : NULL;
+        bundle.replay = &game->replay;
+        bundle.spec = &game->spec;
+        bundle.failingTick = (firstFaultTick != 0) ? firstFaultTick : game->sim.tick;
+        bundle.checksum = game->stateChecksum;
+        /* One check was run -- the run's own verdict -- and it failed. Leaving checksRun at 0
+         * made summary.json report the impossible pair checks_run 0 / checks_failed 1. */
+        bundle.checksRun = 1;
+        bundle.checksFailed = 1;
+
+        char bundleDir[512];
+        if (failure_bundle_write(carDir, &bundle, bundleDir, sizeof(bundleDir))) {
+            printf("VALIDATE: failure bundle -> %s\n", bundleDir);
+        } else {
+            fprintf(stderr, "warning: could not write a failure bundle for '%s'\n", carId);
+        }
+    }
 
     printf("VALIDATE: car=%s status=%s timed_lap=%.3fs out_lap=%.3fs -> %s\n", carId,
            run_status_label(status), metrics.timedLapTimeS, metrics.outLapTimeS, jsonPath);
