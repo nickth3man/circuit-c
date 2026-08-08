@@ -1,18 +1,22 @@
-# Third-party packages the dev scripts need. Install with:
+# Third-party packages the dev scripts need. Install with [uv](https://docs.astral.sh/uv/):
 #
-#   pip install -r requirements-dev.txt
+#   uv pip install -r requirements-dev.txt
+#
+# On MSYS2 UCRT64 the mingw python cannot take PyPI's MSVC-only ruff wheel, so install the
+# tools as isolated uv tools there instead:
+#
+#   uv tool install ruff==0.15.20 pre-commit
 #
 # Keep this list short. Most tooling here is pure-stdlib on purpose: compare_car_rgba.py
 # implements PNG decoding itself rather than depend on Pillow, which means the appearance
 # regression checks run on a bare Python with nothing installed. Prefer that where it is
 # reasonable, and add a dependency here rather than importing something undeclared.
 
-# Linter and formatter for everything under tools/ and scripts/. Configured in pyproject.toml.
+# Linter and formatter for everything under tools/. Configured in pyproject.toml.
 ruff==0.15.20
 
 # Runs the hooks in .pre-commit-config.yaml. `pre-commit install` needs this present first.
 pre-commit>=4.0
 
 # Nothing else. Every remaining script is pure-stdlib, which is why the appearance and
-# telemetry checks run on a bare Python with nothing installed. Pillow was the one exception
-# and left with scripts/run_gameplay_recording.py.
+# telemetry checks run on a bare Python with nothing installed.

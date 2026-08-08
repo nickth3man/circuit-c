@@ -29,9 +29,15 @@
 #   make compile-commands write compile_commands.json for clangd
 #   make format           apply .clang-format        make format-check  check only
 #   make format-py        apply ruff to the Python   make lint-py       check only
+#   make validate-hotreload  bounded hot-reload + failed-compile preservation checks
+#   make compare-rgba A=.. B=..     compare two car PNGs
+#   make measure-rotation PNG=..    sprite rotation stability
+#   make record           drive the running game and record run evidence
 #   make lint             cppcheck                   make analyze       clang --analyze
+#   make tidy             clang-tidy, whole tree     make tidy-changed  only changed files
 #   make fuzz             build and briefly run the libFuzzer targets (clang)
 #   make clean            remove every generated artifact
+#   make clean-artifacts  reap run evidence, keeping the KEEP newest failure bundles (10)
 #   make info             print the resolved toolchain and linkage
 #   make help             this list
 #
@@ -70,10 +76,10 @@ endif
 
 PKGCONFIG := $(shell command -v pkg-config 2>/dev/null)
 ifeq ($(PKGCONFIG),)
-$(error pkg-config not found. Run scripts/setup_windows.ps1.)
+$(error pkg-config not found. Run tools/setup/setup_windows.ps1.)
 endif
 ifeq ($(shell pkg-config --exists raylib 2>/dev/null && echo yes),)
-$(error pkg-config cannot find raylib. Run scripts/setup_windows.ps1.)
+$(error pkg-config cannot find raylib. Run tools/setup/setup_windows.ps1.)
 endif
 
 RAYLIB_CFLAGS := $(shell pkg-config --cflags raylib)
@@ -104,6 +110,7 @@ CPPCHECK     := $(shell command -v cppcheck 2>/dev/null)
 GCOVR        := $(shell command -v gcovr 2>/dev/null)
 MAGICK       := $(shell command -v magick 2>/dev/null)
 RUFF         := $(shell command -v ruff 2>/dev/null)
+CLANG_TIDY   := $(shell command -v clang-tidy 2>/dev/null)
 
 # A missing tool is advisory on a developer machine and fatal in CI. Without this, `make ci`
 # exits 0 having run almost nothing whenever a tool is absent, which is exactly the state a
@@ -212,6 +219,7 @@ BUILD_FUZZ     := $(BUILD_DIR)/fuzz
 BUILD_PACKAGES := $(BUILD_DIR)/packages
 
 ANALYZE_LOG := $(BUILD_DIR)/analyze.log
+TIDY_LOG    := $(BUILD_DIR)/tidy.log
 
 EXE_TESTS   := $(BUILD_TESTS)/drifty_tests$(EXE_SUFFIX)
 EXE_DEBUG   := $(BUILD_DEV)/drifty$(EXE_SUFFIX)
@@ -231,7 +239,8 @@ REGRESSION_SCENARIOS := skidpad step-steer transition lift-off \
 .PHONY: all help info dev run release tests test test-physics scenario report regression \
         baselines verify-fast verify sanitize coverage screenshots visual-test gallery profile \
         benchmark ci compile-commands format format-check format-py lint-py lint analyze fuzz \
-        clean clean-telemetry dirs windows-only cards inspect visual-diagnose \
+        validate-hotreload compare-rgba measure-rotation record tidy tidy-changed tidy-run \
+        clean clean-telemetry clean-artifacts dirs windows-only cards inspect visual-diagnose \
         print-source-groups print-source-group
 
 all: dev
@@ -250,6 +259,7 @@ info:
 	@echo "cppcheck    : $(if $(CPPCHECK),$(CPPCHECK),not installed)"
 	@echo "gcovr       : $(if $(GCOVR),$(GCOVR),not installed)"
 	@echo "ruff        : $(if $(RUFF),$(RUFF),not installed)"
+	@echo "clang-tidy  : $(if $(CLANG_TIDY),$(CLANG_TIDY),not installed)"
 	@echo "magick      : $(if $(MAGICK),$(MAGICK),not installed)"
 
 # ------------------------------------------------------------- the source manifest, out --
@@ -385,9 +395,35 @@ endif
 # The Python half of the same two targets. Configuration lives in pyproject.toml; ruff is the
 # only third-party package this repository needs (requirements-dev.txt).
 
+# ---------------------------------------------------------------------------- dev tools --
+#
+# Every tool under tools/ is reachable from here. A tool with no entry point is a tool nobody
+# runs and nobody notices rotting — which is how four scripts ended up referenced by nothing.
+
+# Bounded hot-reload validation: harness plus deliberate-compile-failure preservation.
+validate-hotreload:
+	@tools/setup/validate_hotreload.sh
+
+# Compare two car PNGs by colour, alpha occupancy, and silhouette. Pure stdlib.
+#   make compare-rgba A=before.png B=after.png
+compare-rgba:
+	@test -n "$(A)" -a -n "$(B)" || { echo "usage: make compare-rgba A=<before.png> B=<after.png>" >&2; exit 2; }
+	@$(PYTHON) tools/appearance/compare_car_rgba.py "$(A)" "$(B)"
+
+# Rotate a sprite through a full turn and report area, edge, and pivot stability.
+#   make measure-rotation PNG=artifacts/corpus-cards/car_00.png
+measure-rotation:
+	@test -n "$(PNG)" || { echo "usage: make measure-rotation PNG=<sprite.png>" >&2; exit 2; }
+	@$(PYTHON) tools/appearance/measure_sprite_rotation.py "$(PNG)"
+
+# Drive the running game and record telemetry, frames, and a review manifest into
+# artifacts/recordings/. Interactive: it operates a real window.
+record: windows-only
+	@$(PYTHON) tools/recording/record_gameplay.py $(RECORD_ARGS)
+
 format-py:
 ifeq ($(RUFF),)
-	@echo "ruff not installed. pip install -r requirements-dev.txt" >&2
+	@echo "ruff not installed. uv tool install ruff==0.15.20" >&2
 	@exit 1
 else
 	$(RUFF) check --fix .
@@ -396,7 +432,7 @@ endif
 
 lint-py:
 ifeq ($(RUFF),)
-	$(call skip,lint-py: ruff not installed (pip install -r requirements-dev.txt).)
+	$(call skip,lint-py: ruff not installed (uv tool install ruff==0.15.20).)
 else
 	$(RUFF) check .
 	$(RUFF) format --check .
@@ -431,7 +467,7 @@ else
 	        $(RAYLIB_CFLAGS) -DDRIFTY_HEADLESS $$f -o /dev/null 2>>$(ANALYZE_LOG) || exit 1; \
 	done
 	@cat $(ANALYZE_LOG)
-	@n=$$(grep -c 'warning:' $(ANALYZE_LOG) 2>/dev/null || true); n=$${n:-0}; \
+	@n=$$(grep -cE '^.+:[0-9]+:[0-9]+: warning:' $(ANALYZE_LOG) 2>/dev/null || true); n=$${n:-0}; \
 	if [ "$$n" -eq 0 ]; then \
 	    echo "clang --analyze clean"; \
 	else \
@@ -440,6 +476,48 @@ else
 	    echo "  Gating them lands with clang-tidy, on changed files only."; \
 	fi
 endif
+
+# clang-tidy over the headless-safe set, reusing the ANALYZE_SRCS exclusions rather than
+# inventing a second list. Reports; never fixes. Not part of `verify` or `ci`: the tree still
+# carries pre-existing findings, so a whole-tree gate would block every pull request on work
+# nobody in that PR caused. CI runs `tidy-changed` instead, and nightly reports the full count.
+#
+#   make tidy                 whole tree
+#   make tidy-changed         only files differing from origin/main
+tidy:
+ifeq ($(CLANG_TIDY),)
+	$(call skip,tidy: clang-tidy not installed (pacman -S mingw-w64-ucrt-x86_64-clang-tools-extra).)
+else
+	@$(MAKE) --no-print-directory tidy-run TIDY_FILES="$(ANALYZE_SRCS)"
+endif
+
+tidy-changed:
+ifeq ($(CLANG_TIDY),)
+	$(call skip,tidy-changed: clang-tidy not installed.)
+else
+	@base=$${TIDY_BASE:-origin/main}; \
+	changed=$$(git diff --name-only --diff-filter=d "$$base"...HEAD -- 'src/*.c' 'tests/*.c' 'tests/*/*.c' 2>/dev/null || true); \
+	files=$$(for f in $$changed; do case " $(ANALYZE_SRCS) " in *" $$f "*) printf '%s ' "$$f";; esac; done); \
+	if [ -z "$$files" ]; then \
+	    echo "tidy-changed: no analysable .c files changed against $$base"; \
+	else \
+	    $(MAKE) --no-print-directory tidy-run TIDY_FILES="$$files"; \
+	fi
+endif
+
+# Shared runner. compile_commands.json is regenerated first so a source-manifest change cannot
+# leave clang-tidy analysing a file with stale flags.
+tidy-run:
+	@$(MAKE) --no-print-directory compile-commands >/dev/null
+	@mkdir -p $(BUILD_DIR)
+	@rm -f $(TIDY_LOG)
+	@for f in $(TIDY_FILES); do \
+	    echo "  tidy $$f"; \
+	    $(CLANG_TIDY) -p . --quiet "$$f" >>$(TIDY_LOG) 2>&1 || true; \
+	done
+	@cat $(TIDY_LOG)
+	@n=$$(grep -cE '^.+:[0-9]+:[0-9]+: (warning|error):' $(TIDY_LOG) 2>/dev/null || true); n=$${n:-0}; \
+	echo "clang-tidy: $$n finding(s) across $(words $(TIDY_FILES)) file(s) — see $(TIDY_LOG)"
 
 verify-fast: format-check lint-py test
 	@echo "verify-fast: ok"
@@ -673,3 +751,33 @@ clean:
 
 clean-telemetry:
 	rm -f $(TELEMETRY)/*.csv $(TELEMETRY)/*.png
+
+# Reap run evidence. artifacts/ is ignored, so nothing here ever reaps itself — it had grown
+# to 959 MB across 142 entries, 116 of them failure bundles, before this target existed.
+#
+#   make clean-artifacts          keep the 10 newest failure bundles
+#   make clean-artifacts KEEP=3   keep 3
+#   make clean-artifacts KEEP=0   keep none
+#
+# Failure bundles are the reproducible evidence for a specific defect, so the newest are kept
+# by default: the one you want is almost always from the run you just did. Everything else
+# under artifacts/ is regenerable by re-running the target that wrote it.
+KEEP ?= 10
+clean-artifacts:
+	@set -e; \
+	if [ ! -d $(ARTIFACTS) ]; then echo "clean-artifacts: nothing to do"; exit 0; fi; \
+	before=$$(du -sm $(ARTIFACTS) 2>/dev/null | cut -f1); \
+	bundles=$$(ls -1d $(ARTIFACTS)/failure-* 2>/dev/null | sort -r || true); \
+	total=$$(printf '%s\n' "$$bundles" | grep -c . || true); \
+	if [ "$$total" -gt "$(KEEP)" ]; then \
+	    printf '%s\n' "$$bundles" | tail -n +$$(($(KEEP) + 1)) | while read -r d; do \
+	        [ -n "$$d" ] && rm -rf "$$d"; \
+	    done; \
+	fi; \
+	rm -rf $(TELEMETRY) $(ARTIFACTS)/replays $(ARTIFACTS)/plots $(ARTIFACTS)/screenshots \
+	       $(ARTIFACTS)/visual $(ARTIFACTS)/visual-diff $(ARTIFACTS)/corpus-cards \
+	       $(ARTIFACTS)/gallery-ingame $(ARTIFACTS)/recordings $(ARTIFACTS)/video \
+	       $(ARTIFACTS)/car_visual_failures $(ARTIFACTS)/racing_line $(ARTIFACTS)/validation; \
+	rm -f $(ARTIFACTS)/*.html $(ARTIFACTS)/*.md $(ARTIFACTS)/*.xml; \
+	after=$$(du -sm $(ARTIFACTS) 2>/dev/null | cut -f1 || echo 0); \
+	echo "clean-artifacts: kept $$(ls -1d $(ARTIFACTS)/failure-* 2>/dev/null | grep -c . || echo 0) of $$total failure bundle(s); $${before} MB -> $${after} MB"

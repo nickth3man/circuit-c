@@ -9,7 +9,7 @@ mechanics: what to install, what to run, and what has to be green before you pus
 in the [README](README.md#prerequisites-windows--msys2-ucrt64) and run:
 
 ```bash
-scripts/setup_windows.ps1
+tools/setup/setup_windows.ps1
 ```
 
 Expected by `make verify`: `clang`, `clang-tools-extra` (clang-format), and `cppcheck`.
@@ -21,14 +21,23 @@ through `tools/telemetry/compare_telemetry.py`, and `make compile-commands` is a
 script too, so `verify` cannot complete without it. `setup_windows.ps1` does not install it:
 
 ```bash
-pacman -S mingw-w64-ucrt-x86_64-python mingw-w64-ucrt-x86_64-python-pip
+pacman -S mingw-w64-ucrt-x86_64-python
 ```
 
-Then the Python tooling — ruff and pre-commit:
+The Python *tooling* — ruff and pre-commit — is managed by [uv](https://docs.astral.sh/uv/).
+PyPI's ruff ships MSVC wheels only, so it cannot install into MSYS2's mingw python; `uv tool
+install` runs the pinned ruff in uv's own managed python instead:
 
 ```bash
-pip install -r requirements-dev.txt
+uv tool install ruff==0.15.20 pre-commit
 ```
+
+`ruff==0.15.20` must match [requirements-dev.txt](requirements-dev.txt) and
+[.pre-commit-config.yaml](.pre-commit-config.yaml) — keep the three in step.
+
+Node and npm are needed only by the vehicle appearance inspector (`make inspect`,
+`make visual-diagnose`); nothing else in the toolchain uses them, and the bootstrap script
+does not install them. See [tools/visual/README.md](tools/visual/README.md).
 
 Everything else under `tools/` is deliberately pure-stdlib, so the telemetry and appearance
 checks run on a bare Python. Prefer keeping it that way over adding a dependency.
@@ -72,12 +81,13 @@ request:
 
 | Job | What it covers |
 | --- | --- |
-| `windows-ucrt64` | The canonical toolchain: format-check, cppcheck, clang analyzer, physics scenarios, baseline regression |
-| `linux-headless` | Python lint, the headless scenarios and regression, and ASan/UBSan |
+| `windows-ucrt64` | The canonical toolchain: format-check, ruff, cppcheck, clang analyzer, physics scenarios, baseline regression |
+| `linux-headless` | ruff, the headless scenarios and regression, and ASan/UBSan |
 
-Python linting runs on Linux only. It is host-independent, and MSYS2's ruff tracks a
-different version from the pinned one, so running it on both would mean two versions
-disagreeing about formatting.
+Both jobs lint Python with the same pinned ruff. It runs through [uv](https://docs.astral.sh/uv/):
+MSYS2's mingw python cannot take PyPI's MSVC-only ruff wheels, so the Windows job runs the
+pinned ruff in uv's own managed python. `requirements-dev.txt` is the source of truth for the
+version.
 
 ## Formatting
 
@@ -129,7 +139,7 @@ the link output only moves into place on success.
 Validate it without a window:
 
 ```bash
-scripts/validate_hotreload.sh
+tools/setup/validate_hotreload.sh
 ```
 
 ## Commits and pull requests

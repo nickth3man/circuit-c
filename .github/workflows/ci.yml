@@ -16,7 +16,6 @@ name: CI
 
 on:
   push:
-    branches: [main]
   pull_request:
 
 permissions:
@@ -54,18 +53,24 @@ jobs:
             clang:p
             clang-tools-extra:p
             cppcheck:p
+            gcovr:p
             python:p
+            uv:p
+
+      # uv (installed above as `uv:p`, native to this MSYS2 shell) owns the Python tooling.
+      # PyPI's ruff ships MSVC wheels only, so it cannot install into MSYS2's mingw python;
+      # --python 3.13 makes uv fetch a managed MSVC CPython for the ruff wheel, and
+      # UV_TOOL_BIN_DIR drops ruff into the UCRT64 bin dir so `command -v ruff` finds it.
+      - name: Install pinned Python tooling
+        # ruff==0.15.20 must match requirements-dev.txt and .pre-commit-config.yaml.
+        run: UV_TOOL_BIN_DIR="$MINGW_PREFIX/bin" uv tool install --python 3.13 ruff==0.15.20
 
       - name: Resolved toolchain
         run: make info
 
-      # The C half of `verify`, named explicitly. lint-py is deliberately not run here: it is
-      # host-independent, and the only ruff available to MSYS2's Python is the pacman build,
-      # which tracks a different version from the pinned one in requirements-dev.txt.
-      # Two ruff versions would disagree about formatting and fail a job nobody can reproduce.
-      # The Linux job runs it instead, once, from the pin.
-      - name: Verify (format, lint, analyze, physics, regression)
-        run: make DRIFTY_STRICT=1 format-check lint analyze test-physics regression
+      # `verify` includes the pinned ruff check, so both CI jobs exercise the same project gate.
+      - name: Verify (format, Python, lint, analyze, physics, regression)
+        run: make DRIFTY_STRICT=1 verify
 
   linux-headless:
     name: Linux headless (+ sanitizers)
@@ -74,12 +79,20 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: Set up uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+
       - name: Install toolchain
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            clang clang-format cppcheck
-          python -m pip install --disable-pip-version-check -r requirements-dev.txt
+            clang clang-format cppcheck gcovr
+          # A uv venv is user-owned, so it sidesteps both the externally-managed marker on
+          # the /usr python and the root-only /usr/local site-packages. Its bin goes on PATH
+          # so the Makefile's `command -v ruff` resolves.
+          uv venv /tmp/drifty-tools
+          uv pip install --python /tmp/drifty-tools/bin/python -r requirements-dev.txt
+          echo "/tmp/drifty-tools/bin" >> "$GITHUB_PATH"
 
       # The POSIX branch of the Makefile needs raylib for its HEADERS only: the headless
       # build calls no raylib function and links no raylib library. So clone the source
@@ -100,8 +113,7 @@ jobs:
       - name: Resolved toolchain
         run: make info
 
-      # Host-independent, so it runs here only rather than on both jobs. See the note in the
-      # UCRT64 job for why it is not part of that one.
+      # Host-independent; both CI jobs exercise the same pinned Python gate.
       - name: Python lint and format
         run: make DRIFTY_STRICT=1 lint-py
 

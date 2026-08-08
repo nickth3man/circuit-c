@@ -8,6 +8,7 @@ load-transfer behaviour, not because a state machine reaches in and changes forc
 **Windows only.** The supported development environment is **MSYS2 UCRT64**.
 
 - Setup, checks, and the hot-reload rules: [CONTRIBUTING.md](CONTRIBUTING.md)
+- Design contracts and historical notes: [docs/](docs/README.md)
 - Agent-facing workflow rules: [AGENTS.md](AGENTS.md)
 - Notable changes: [CHANGELOG.md](CHANGELOG.md)
 
@@ -75,7 +76,7 @@ winget install -e --id MSYS2.MSYS2 --accept-package-agreements --accept-source-a
 2. Install the project toolchain and raylib 6.0 from the MSYS2 package manager:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\setup_windows.ps1
+powershell -ExecutionPolicy Bypass -File tools\setup\setup_windows.ps1
 ```
 
 That script is idempotent. It installs (when missing):
@@ -204,7 +205,7 @@ Or the fuller script (harness + failed-compile preservation):
 
 ```bash
 # inside MSYS2 UCRT64, from the repo root
-./scripts/validate_hotreload.sh
+./tools/setup/validate_hotreload.sh
 ```
 
 ### When a restart is required
@@ -283,8 +284,8 @@ sliders, the profile format, the telemetry metadata, and the `--dump-params` tab
 ```
 Makefile, build.sh, build.bat   build entry points; all terminate immediately
 mk.bat                          run a Makefile target inside MSYS2 UCRT64 from cmd.exe
-scripts/setup_windows.ps1       idempotent MSYS2 UCRT64 bootstrap
-scripts/validate_hotreload.sh   harness + failed-compile preservation
+tools/setup/setup_windows.ps1       idempotent MSYS2 UCRT64 bootstrap
+tools/setup/validate_hotreload.sh   harness + failed-compile preservation
 src/platform/main.c                      platform layer: window, Game allocation, fixed-timestep loop
 src/platform/timestep.h/.c               the accumulator, isolated so the harness can assert it
 src/platform/hotreload.h                 GAME_ENTRY_POINTS, the one authoritative entry-point list
