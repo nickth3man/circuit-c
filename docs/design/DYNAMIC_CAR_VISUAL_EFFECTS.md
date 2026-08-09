@@ -110,7 +110,7 @@ The implementation is complete when these checks pass:
 5. Surface selection changes material, not intensity.
 6. Deriving effects does not change the game checksum.
 7. The base sprite bake key is unchanged by every dynamic input.
-8. A headless scripted drift produces nonzero rear tire effects and a scripted straight stop produces brake lamps without tire smoke.
+8. A headless scripted sideslip maneuver produces nonzero rear tire effects and a scripted straight stop produces brake lamps without tire smoke.
 9. Rendering at two scales changes only pixel dimensions, not derived effect intensities.
 
 ## Performance boundary

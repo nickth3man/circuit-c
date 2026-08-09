@@ -3,8 +3,8 @@
  *
  * This module uses SI forces and dimensionless slips. It calls no raylib function.
  */
-#ifndef DRIFTY_TIRE_H
-#define DRIFTY_TIRE_H
+#ifndef CIRCUIT_TIRE_H
+#define CIRCUIT_TIRE_H
 
 float tire_normalized_curve(float stiffnessB, float shapeC, float slip);
 
@@ -23,4 +23,4 @@ void tire_apply_combined_limit(float requestedLongitudinalForceN, float requeste
                                float *limitedLongitudinalForceN, float *limitedLateralForceN,
                                float *frictionUsage);
 
-#endif /* DRIFTY_TIRE_H */
+#endif /* CIRCUIT_TIRE_H */

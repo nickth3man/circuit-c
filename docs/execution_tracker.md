@@ -38,13 +38,13 @@ Start the Identity and Architecture lanes in parallel.
 
 ## Identity lane
 
-- [ ] [#43 — Choose the replacement product identity and migration map](https://github.com/nickth3man/drift-c/issues/43)
+- [x] [#43 — Choose the replacement product identity and migration map](https://github.com/nickth3man/drift-c/issues/43)
   - Depends on: none
 
-- [ ] [#44 — Remove drift-game language, scoring remnants, and misleading scenario names](https://github.com/nickth3man/drift-c/issues/44)
+- [x] [#44 — Remove drift-game language, scoring remnants, and misleading scenario names](https://github.com/nickth3man/drift-c/issues/44)
   - Depends on: #43
 
-- [ ] [#45 — Rename technical symbols, binaries, paths, artifacts, and repository metadata](https://github.com/nickth3man/drift-c/issues/45)
+- [x] [#45 — Rename technical symbols, binaries, paths, artifacts, and repository metadata](https://github.com/nickth3man/drift-c/issues/45)
   - Depends on: #43, #44
 
 ## Architecture lane
@@ -71,9 +71,9 @@ After #46, #47 and #48 may run in parallel.
 
 ## Phase 0 gate
 
-- [ ] Replacement identity is fully decided.
-- [ ] Player-facing drift scoring/game framing has been removed.
-- [ ] Technical identity rename builds and tests successfully.
+- [x] Replacement identity is fully decided.
+- [x] Player-facing drift scoring/game framing has been removed.
+- [x] Technical identity rename builds and tests successfully.
 - [ ] Track content and racer progress have separate ownership.
 - [ ] Vehicle definitions, setups, and runtime instances have separate ownership.
 - [ ] All simulated entrants use the same controller contract.
@@ -381,7 +381,7 @@ Start #94 after both the grid/start and basic live-AI requirements are complete.
 - [ ] All cars and tracks load from versioned external content.
 - [ ] Content validators pass for every shipped car and track.
 - [ ] Physics documentation identifies modeled, approximated, inactive, and out-of-scope behavior.
-- [ ] No obsolete Drifty or drift-scoring identity remains.
+- [ ] No obsolete Circuit or drift-scoring identity remains.
 - [ ] Windows and Linux release packages pass clean-install smoke tests.
 - [ ] Performance meets the documented 120 Hz entrant budget.
 - [ ] Issue #100 is closed.

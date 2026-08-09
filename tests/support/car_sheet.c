@@ -2,7 +2,7 @@
  * car_sheet.c — headless paginated vehicle contact sheet. See the header for the contract.
  *
  * This is the only translation unit that defines STB_IMAGE_WRITE_IMPLEMENTATION, and it is
- * compiled into drifty_tests.exe alone: neither the game module, drifty.exe, nor the release
+ * compiled into circuit_tests.exe alone: neither the game module, circuit.exe, nor the release
  * build links stb_image_write (see third_party/README.md).
  */
 #include "car_sheet.h"
@@ -240,7 +240,7 @@ static void write_index(FILE *out, int pageCount, int zoom, float pxPerM, int pa
     fprintf(
         out,
         "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n"
-        "<title>Drifty — vehicle corpus</title>\n<style>\n"
+        "<title>Circuit — vehicle corpus</title>\n<style>\n"
         "  body { background:#15181d; color:#e8eaee; font:14px/1.5 system-ui,sans-serif;"
         " margin:24px; }\n"
         "  h1 { font-size:20px; font-weight:600; margin:0 0 4px; }\n"
@@ -249,7 +249,7 @@ static void write_index(FILE *out, int pageCount, int zoom, float pxPerM, int pa
         "  img.page { image-rendering:pixelated; background:#15181d;"
         " border:1px solid #2a303a; display:block; max-width:100%%; height:auto; }\n"
         "</style>\n</head>\n<body>\n"
-        "<h1>Drifty — vehicle corpus</h1>\n"
+        "<h1>Circuit — vehicle corpus</h1>\n"
         "<p class=\"sub\">%d vehicles as paginated contact sheets."
         " Rasterized at %.2f px/m — the scale the game actually draws at — with one shared"
         " cell size (no per-car auto-fit). Pages shown at %d&times; nearest-neighbour.</p>\n",

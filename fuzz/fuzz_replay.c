@@ -62,7 +62,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
     return 0;
 }
 
-#if !defined(DRIFTY_LIBFUZZER)
+#if !defined(CIRCUIT_LIBFUZZER)
 int main(int argc, char **argv)
 {
     static unsigned char bytes[1 << 20];

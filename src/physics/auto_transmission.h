@@ -1,8 +1,8 @@
 /*
  * auto_transmission.h — automatic gear selection and arcade direction-swap state machine.
  */
-#ifndef DRIFTY_AUTO_TRANSMISSION_H
-#define DRIFTY_AUTO_TRANSMISSION_H
+#ifndef CIRCUIT_AUTO_TRANSMISSION_H
+#define CIRCUIT_AUTO_TRANSMISSION_H
 
 #include <stdbool.h>
 

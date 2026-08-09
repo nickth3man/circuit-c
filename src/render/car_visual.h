@@ -7,14 +7,14 @@
  * may invent geometry of its own.
  *
  * WHY IT LIVES HERE AND NOT IN render.c. render.c stubs its whole draw path out under
- * DRIFTY_HEADLESS (src/render/render.c), so anything decided there is unreachable from
- * drifty_tests.exe and therefore unverifiable. car_visual.c is raylib-free and sits in
+ * CIRCUIT_HEADLESS (src/render/render.c), so anything decided there is unreachable from
+ * circuit_tests.exe and therefore unverifiable. car_visual.c is raylib-free and sits in
  * SHARED_SRCS, so the grammar is linked into the headless test binary and is covered by the
  * `car-visual` and `corpus` scenarios.
  *
  * RAYLIB-FREE. This header includes raylib.h for the Vector2 and Color *types* only. Neither
  * it nor car_visual.c calls a raylib function, exactly like src/core/units.h. That is what keeps
- * drifty_tests linkable without a window.
+ * circuit_tests linkable without a window.
  *
  * TAXONOMY OF A FEATURE. Every field below is produced by exactly one of these kinds of rule,
  * and car_visual.c labels each one:
@@ -50,8 +50,8 @@
  *
  * These are applied ONLY in car_visual.c. No simulation quantity reads them.
  */
-#ifndef DRIFTY_CAR_VISUAL_H
-#define DRIFTY_CAR_VISUAL_H
+#ifndef CIRCUIT_CAR_VISUAL_H
+#define CIRCUIT_CAR_VISUAL_H
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -307,4 +307,4 @@ uint32_t car_visual_colour_seed(const VehicleSpec *spec);
  * no-hashing rule at the top of this header. */
 uint32_t car_visual_bake_key(const CarVisual *visual);
 
-#endif /* DRIFTY_CAR_VISUAL_H */
+#endif /* CIRCUIT_CAR_VISUAL_H */

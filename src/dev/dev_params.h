@@ -8,7 +8,7 @@
  *   - tuning-profile save and load (dev_params_save / dev_params_load),
  *   - reset-to-default behaviour,
  *   - the telemetry metadata block written beside a run,
- *   - the documentation table printed by `drifty_tests --dump-params`.
+ *   - the documentation table printed by `circuit_tests --dump-params`.
  *
  * That is the whole point: defaults, UI limits, saved profiles, and the specification cannot
  * drift apart because there is only one place to change.
@@ -20,8 +20,8 @@
  * This translation unit is raylib-free — it is linked into the headless test executable as
  * well as the game module.
  */
-#ifndef DRIFTY_DEV_PARAMS_H
-#define DRIFTY_DEV_PARAMS_H
+#ifndef CIRCUIT_DEV_PARAMS_H
+#define CIRCUIT_DEV_PARAMS_H
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -92,7 +92,7 @@ void dev_params_refresh_derived(VehicleSpec *spec);
  * still loads. Parsing is deliberately defensive: it is a fuzz target (fuzz/fuzz_profile.c).
  */
 
-#define DEV_PROFILE_MAGIC "# drifty tuning profile v1"
+#define DEV_PROFILE_MAGIC "# circuit tuning profile v1"
 
 /* Write every parameter (name, value, unit, default) to path. Returns false on any I/O
  * failure. Creates nothing but the file itself. */
@@ -125,7 +125,7 @@ int dev_params_apply_assignments(VehicleSpec *spec, const DevParamAssignment *it
 
 /* ------------------------------------------------------------------------------- reports -- */
 
-/* Markdown table of every parameter — what `drifty_tests --dump-params` writes. */
+/* Markdown table of every parameter — what `circuit_tests --dump-params` writes. */
 void dev_params_write_markdown(FILE *out);
 
 /* `# name,value,default,unit` comment lines for a telemetry sidecar file. */
@@ -135,4 +135,4 @@ void dev_params_write_metadata(FILE *out, const VehicleSpec *spec);
  * Returns the number written. Used in failure bundles and run summaries. */
 int dev_params_write_overrides(FILE *out, const VehicleSpec *spec);
 
-#endif /* DRIFTY_DEV_PARAMS_H */
+#endif /* CIRCUIT_DEV_PARAMS_H */

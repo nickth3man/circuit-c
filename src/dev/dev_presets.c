@@ -4,9 +4,9 @@
  * Each preset is a named bundle of parameter overrides sourced from a research lane:
  *
  *   0  Stock Baseline  — the config.h defaults (no overrides)
- *   1  Touge Hero      — 950 kg AE86 grip-drift (JDM touge)
- *   2  Pro D1GP        — 1320 kg Formula Drift V8 competition car (pro drift + sim drift)
- *   3  Arcade God      — exaggerated NFS / Forza / Burnout arcade drift (arcade drift)
+ *   1  Touge Hero       — 950 kg lightweight rear-drive touge car
+ *   2  High-Angle RWD   — 1320 kg V8 competition car with a wide steering range
+ *   3  Arcade Oversteer — exaggerated low-grip rear balance
  *   4  Track Predator  — 1220 kg GT3 maximum-grip circuit car (grip racing)
  *   5  Rally Devil     — 1000 kg Group B gravel monster (rally / loose surface)
  *   6  Pony Car        — 1740 kg American muscle (car archetypes)
@@ -127,10 +127,9 @@ static const PresetOverride kProD1GP[] = {
     O("collision.half_width", 0.90f),
 };
 
-/* --------------------------------------------------------------------- 3: Arcade God --
- * Exaggerated arcade drift: locked diff, rear mu 0.70 vs front 1.10, 3500 N*m
- * handbrake, 55 deg steer, very low wheel inertia. Every input breaks traction.
- * Source: lib-4 (arcade drift), Forza Horizon drift guides, NFS ProStreet, Burnout. */
+/* -------------------------------------------------------------- 3: Arcade Oversteer --
+ * Exaggerated low-grip rear balance: locked diff, rear mu 0.70 vs front 1.10, 3500 N*m
+ * handbrake, 55 deg steer, very low wheel inertia. Every input breaks traction. */
 static const PresetOverride kArcadeGod[] = {
     O("body.mass", 1150.0f),
     O("body.yaw_inertia", 1400.0f),
@@ -445,10 +444,10 @@ static const PresetOverride kTimeMachine[] = {
 /* --------------------------------------------------------------------------- table -- */
 
 static const DevPreset kPresets[] = {
-    { "Stock Baseline", "the Drifty defaults" },
-    { "Touge Hero", "950 kg AE86 grip-drift" },
-    { "Pro D1GP", "1320 kg Formula Drift V8" },
-    { "Arcade God", "exaggerated arcade drift" },
+    { "Stock Baseline", "the Circuit defaults" },
+    { "Touge Hero", "950 kg lightweight RWD touge" },
+    { "High-Angle RWD", "1320 kg V8 competition setup" },
+    { "Arcade Oversteer", "exaggerated low-grip rear balance" },
     { "Track Predator", "1220 kg GT3 maximum grip" },
     { "Rally Devil", "1000 kg Group B gravel" },
     { "Pony Car", "1740 kg American muscle" },

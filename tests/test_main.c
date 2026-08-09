@@ -5,10 +5,10 @@
  * It opens no window, initialises no audio, requires no display, and calls no raylib function.
  *
  * Usage:
- *     drifty_tests                       run every scenario
- *     drifty_tests --scenario replay     run one scenario
- *     drifty_tests --list                list scenario names
- *     drifty_tests -v                    print passing checks too
+ *     circuit_tests                       run every scenario
+ *     circuit_tests --scenario replay     run one scenario
+ *     circuit_tests --list                list scenario names
+ *     circuit_tests -v                    print passing checks too
  *
  * Exit status is the number of failed checks, clamped to 125, so a failure is nonzero.
  */
@@ -225,7 +225,7 @@ int main(int argc, char **argv)
         return 2;
     }
 
-    printf("drifty_tests - Phase 0-3 planar vehicle physics and development tooling\n");
+    printf("circuit_tests - Phase 0-3 planar vehicle physics and development tooling\n");
     printf("headless: no window, audio, display, or raylib function call\n\n");
 
     int ran = 0;
@@ -304,7 +304,7 @@ int main(int argc, char **argv)
             }
             fprintf(jf, "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
             fprintf(jf,
-                    "<testsuite name=\"drifty_tests\" tests=\"%d\" failures=\"%d\" "
+                    "<testsuite name=\"circuit_tests\" tests=\"%d\" failures=\"%d\" "
                     "errors=\"0\" time=\"%.3f\">\n",
                     junitCount, totalFailures, totalTime);
             for (int i = 0; i < junitCount; i++) {

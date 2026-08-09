@@ -5,7 +5,7 @@
  * restart-free for audio work. Every function is safe to call when the audio device is
  * unavailable or assets are missing — degradation is silent, never a crash.
  *
- * Headless builds (DRIFTY_HEADLESS) compile the entire implementation into no-op stubs so
+ * Headless builds (CIRCUIT_HEADLESS) compile the entire implementation into no-op stubs so
  * the test binary never touches the audio device.
  *
  * Asset convention (the developer drops these in to activate audio):
@@ -15,8 +15,8 @@
  *
  * Without these files the game runs silently; no errors are printed.
  */
-#ifndef DRIFTY_AUDIO_H
-#define DRIFTY_AUDIO_H
+#ifndef CIRCUIT_AUDIO_H
+#define CIRCUIT_AUDIO_H
 
 #include <stdbool.h>
 
@@ -28,4 +28,4 @@ void audio_update(float engineRpm, float idleRpm, float redlineRpm, bool physica
                   float speedMps, float dt);
 void audio_play_collision_thud(void);
 
-#endif /* DRIFTY_AUDIO_H */
+#endif /* CIRCUIT_AUDIO_H */

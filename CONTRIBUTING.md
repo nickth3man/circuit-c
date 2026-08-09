@@ -1,4 +1,4 @@
-# Contributing to Drifty
+# Contributing to Circuit
 
 Behavioural rules for AI agents are in [AGENTS.md](AGENTS.md). This file is about the
 mechanics: what to install, what to run, and what has to be green before you push.
@@ -64,10 +64,10 @@ Targets whose tool is not installed print `SKIP` and exit 0, so a local run can 
 having checked very little. To find out what actually ran:
 
 ```bash
-make DRIFTY_STRICT=1 verify
+make CIRCUIT_STRICT=1 verify
 ```
 
-Under `DRIFTY_STRICT`, a missing tool is a hard failure. This is what CI passes, so if it
+Under `CIRCUIT_STRICT`, a missing tool is a hard failure. This is what CI passes, so if it
 fails for you it will fail there too.
 
 The one exception is the sanitizer runtime check. MSYS2 ships ASan/UBSan in CLANG64, not in
@@ -112,13 +112,13 @@ message, with what changed and why the new numbers are right**. A baseline updat
 **The baselines are platform-specific.** They are recorded on Windows/UCRT64, and the
 tolerances are tight enough that a different libm does not reproduce them — the first CI run
 breached 13 of 46 comparisons on Linux, all longitudinal, with identical aggregate metrics
-but large single-row deltas. That is a discrete event landing one tick apart, not drifting
-physics: the scenario assertions pass identically on both hosts. So `make regression` is
+but large single-row deltas. That is a discrete event landing one tick apart, not changed
+vehicle dynamics: the scenario assertions pass identically on both hosts. So `make regression` is
 gated on the Windows job only, and re-record baselines on Windows.
 
 ## Hot reload
 
-The game is a thin platform layer (`build/dev/drifty.exe`) plus a reloadable module
+The game is a thin platform layer (`build/dev/circuit.exe`) plus a reloadable module
 (`build/dev/game.dll`). Run the executable once, leave it open, and rebuild with `build.bat`
 or `./build.sh`; the running game swaps the new module in. A compile error cannot close it —
 the link output only moves into place on success.

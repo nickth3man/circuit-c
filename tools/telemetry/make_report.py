@@ -250,7 +250,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--dir", help="include every CSV in this directory")
     parser.add_argument("--baseline", help="baseline CSV to compare against")
     parser.add_argument("--failures", help="failure.txt from a failure bundle")
-    parser.add_argument("--title", default="Drifty telemetry report")
+    parser.add_argument("--title", default="Circuit telemetry report")
     parser.add_argument("--out", default="artifacts/report.html")
     args = parser.parse_args(argv)
 

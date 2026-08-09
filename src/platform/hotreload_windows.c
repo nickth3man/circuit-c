@@ -22,7 +22,7 @@
  * linker, and the modification time is deliberately NOT recorded in that case so the next
  * frame retries.
  */
-#if defined(_WIN32) && defined(DRIFTY_HOT_RELOAD)
+#if defined(_WIN32) && defined(CIRCUIT_HOT_RELOAD)
 
 #include "raylib.h"
 
@@ -213,6 +213,6 @@ void Game_UnloadModule(void)
 #else
 
 /* Not the active platform for this build configuration. */
-typedef int drifty_hotreload_windows_unused;
+typedef int circuit_hotreload_windows_unused;
 
-#endif /* _WIN32 && DRIFTY_HOT_RELOAD */
+#endif /* _WIN32 && CIRCUIT_HOT_RELOAD */

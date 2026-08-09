@@ -7,10 +7,10 @@
  *
  * Three build configurations select different expansions:
  *
- *   DRIFTY_HOT_RELOAD + !DRIFTY_GAME_MODULE   platform layer: function pointers, resolved
+ *   CIRCUIT_HOT_RELOAD + !CIRCUIT_GAME_MODULE   platform layer: function pointers, resolved
  *                                             from the module at load time.
- *   DRIFTY_HOT_RELOAD +  DRIFTY_GAME_MODULE   game module: exported definitions.
- *   !DRIFTY_HOT_RELOAD                        release: plain prototypes, called directly,
+ *   CIRCUIT_HOT_RELOAD +  CIRCUIT_GAME_MODULE   game module: exported definitions.
+ *   !CIRCUIT_HOT_RELOAD                        release: plain prototypes, called directly,
  *                                             no module and no indirection.
  *
  * RELOAD-SAFETY INVARIANT. The platform layer owns the Game allocation and hands the same
@@ -38,21 +38,21 @@
  * holds a lock on the current PDB and the next build fails. Numbering them
  * (`game_1.pdb`, `game_2.pdb`, …) avoids this; clean them up on a fresh start.
  */
-#ifndef DRIFTY_HOTRELOAD_H
-#define DRIFTY_HOTRELOAD_H
+#ifndef CIRCUIT_HOTRELOAD_H
+#define CIRCUIT_HOTRELOAD_H
 
 /*
  * The GAME itself is Windows-only and main.c says so with its own #error. The guard here is
  * narrower on purpose: it fires only for a build that actually asks for hot reload, so that
- * the headless test executable — which defines neither DRIFTY_HOT_RELOAD nor DRIFTY_GAME_MODULE
+ * the headless test executable — which defines neither CIRCUIT_HOT_RELOAD nor CIRCUIT_GAME_MODULE
  * and links no raylib library — still compiles on Linux. That is what lets CI run the
  * sanitizer, coverage, and fuzzing jobs, none of which have a Windows equivalent.
  */
-#if defined(DRIFTY_HOT_RELOAD) && !defined(_WIN32)
+#if defined(CIRCUIT_HOT_RELOAD) && !defined(_WIN32)
 #error Hot reload is implemented for Windows only.
 #endif
 /* Exported from the reloadable module; a no-op everywhere else. */
-#if defined(_WIN32) && defined(DRIFTY_HOT_RELOAD) && defined(DRIFTY_GAME_MODULE)
+#if defined(_WIN32) && defined(CIRCUIT_HOT_RELOAD) && defined(CIRCUIT_GAME_MODULE)
 #define GAME_API __declspec(dllexport)
 #else
 #define GAME_API
@@ -106,7 +106,7 @@ typedef struct ValidationOverlayData ValidationOverlayData;
 GAME_ENTRY_POINTS
 #undef ENTRY
 
-#if defined(DRIFTY_HOT_RELOAD) && !defined(DRIFTY_GAME_MODULE)
+#if defined(CIRCUIT_HOT_RELOAD) && !defined(CIRCUIT_GAME_MODULE)
 
 /* Platform layer: calls go through a table resolved from the loaded module. */
 #define ENTRY(name, ...) extern name##_t *name;
@@ -145,4 +145,4 @@ static inline void Game_UnloadModule(void) {}
 
 #endif
 
-#endif /* DRIFTY_HOTRELOAD_H */
+#endif /* CIRCUIT_HOTRELOAD_H */

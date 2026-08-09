@@ -1,4 +1,4 @@
-Audio Assets for Drifty
+Audio Assets for Circuit
 =======================
 
 Drop the following three WAV files into this directory to activate the
@@ -19,4 +19,4 @@ Format: 16-bit PCM WAV at 44100 Hz is the safest choice for raylib's audio
 backend. Other sample rates and formats may work but are not tested.
 
 The game references these by relative path: resources/audio/<name>.wav
-Run drifty.exe from the repository root.
+Run circuit.exe from the repository root.

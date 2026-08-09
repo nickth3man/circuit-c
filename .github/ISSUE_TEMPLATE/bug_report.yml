@@ -5,7 +5,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        The fields below exist to turn "drifting feels wrong" into something reproducible.
+        The fields below exist to turn "handling feels wrong" into something reproducible.
         If you have a failure bundle (`artifacts/failure-<scenario>-<timestamp>/`), attach it
         and most of this is answered already.
 
@@ -43,7 +43,7 @@ body:
       label: Exact reproduction steps
       description: Commands, key presses, scenario name, and tick if you know it.
       placeholder: |
-        1. ./build.sh --tests && ./build/tests/drifty_tests.exe --scenario handbrake
+        1. ./build.sh --tests && ./build/tests/circuit_tests.exe --scenario handbrake
         2. ...
     validations:
       required: true
@@ -66,9 +66,9 @@ body:
     id: headless
     attributes:
       label: Does it reproduce headlessly?
-      description: A bug that reproduces in drifty_tests is worth ten that only appear on screen.
+      description: A bug that reproduces in circuit_tests is worth ten that only appear on screen.
       options:
-        - "Yes — it reproduces in drifty_tests"
+        - "Yes — it reproduces in circuit_tests"
         - "No — only in the running game"
         - "Not tried"
     validations:

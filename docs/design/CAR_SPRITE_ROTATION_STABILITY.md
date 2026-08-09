@@ -14,7 +14,7 @@ The production renderer rotates low-resolution, point-filtered body and wheel te
 Generate one corpus card and run:
 
 ```text
-build/tests/drifty_tests.exe --dump-corpus-cards artifacts/cars
+build/tests/circuit_tests.exe --dump-corpus-cards artifacts/cars
 python tools/appearance/measure_sprite_rotation.py \
   artifacts/cars/archetype_00_stock_baseline.png \
   --steps 128 \

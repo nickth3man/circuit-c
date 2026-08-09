@@ -1,10 +1,10 @@
 #!/bin/sh
 #
-# build.sh — canonical Drifty build, executed inside MSYS2 UCRT64.
+# build.sh — canonical Circuit build, executed inside MSYS2 UCRT64.
 #
-# Rebuilds the game module every time, and rebuilds build/dev/drifty.exe only when it is not
+# Rebuilds the game module every time, and rebuilds build/dev/circuit.exe only when it is not
 # already running. It always terminates in well under a second and returns the compiler's exit
-# status. It never launches or supervises drifty.exe: the developer starts that once and
+# status. It never launches or supervises circuit.exe: the developer starts that once and
 # leaves it open. Use --smoke-test for a bounded visual run that exits on its own.
 #
 # A failed compile leaves the previous, working module untouched — the link output goes to a
@@ -12,15 +12,15 @@
 # close the running game.
 #
 # Every artifact goes under build/, one directory per configuration:
-#   build/dev/      drifty.exe, game.dll, the hot-reload harness, and their runtime DLLs
-#   build/tests/    drifty_tests.exe (headless)
-#   build/release/  drifty_release.exe and glfw3.dll
+#   build/dev/      circuit.exe, game.dll, the hot-reload harness, and their runtime DLLs
+#   build/tests/    circuit_tests.exe (headless)
+#   build/release/  circuit_release.exe and glfw3.dll
 #
 #   ./build.sh              build the module (and the exe if it is not running)
 #   ./build.sh --release    single executable; raylib linked statically (no libraylib.dll)
 #   ./build.sh --tests      headless test executable
 #   ./build.sh --hotreload-harness  windowless hot-reload validation executable
-#   ./build.sh --smoke-test build (if needed) and run build/dev/drifty.exe --smoke-test
+#   ./build.sh --smoke-test build (if needed) and run build/dev/circuit.exe --smoke-test
 #   ./build.sh --clean      remove generated artifacts
 #
 # From cmd.exe / PowerShell prefer build.bat, which enters the UCRT64 environment for you.
@@ -76,7 +76,7 @@ fi
 
 # ------------------------------------------------------------------------------- raylib --
 #
-# Development / hot reload: shared libraylib.dll (MSYS2 name). Both drifty.exe and
+# Development / hot reload: shared libraylib.dll (MSYS2 name). Both circuit.exe and
 # build/game.dll must import the same DLL so raylib global state is not duplicated.
 #
 # Release: static libraylib.a. The MSYS2 static archive still references shared GLFW
@@ -99,24 +99,24 @@ GLFW_SHARED_DLL="${MINGW_PREFIX}/bin/glfw3.dll"
 # fall back to "unknown". Values must not contain spaces: they are expanded unquoted into the
 # compiler command line below.
 
-if [ -z "${DRIFTY_GIT_COMMIT:-}" ] && command -v git >/dev/null 2>&1; then
-    DRIFTY_GIT_COMMIT="$(git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)"
-    DRIFTY_GIT_BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
+if [ -z "${CIRCUIT_GIT_COMMIT:-}" ] && command -v git >/dev/null 2>&1; then
+    CIRCUIT_GIT_COMMIT="$(git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)"
+    CIRCUIT_GIT_BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
     if git diff --quiet HEAD 2>/dev/null; then
-        DRIFTY_GIT_DIRTY="clean"
+        CIRCUIT_GIT_DIRTY="clean"
     else
-        DRIFTY_GIT_DIRTY="dirty"
+        CIRCUIT_GIT_DIRTY="dirty"
     fi
 fi
-BUILD_COMMIT="${DRIFTY_GIT_COMMIT:-unknown}"
-BUILD_BRANCH="${DRIFTY_GIT_BRANCH:-unknown}"
-BUILD_DIRTY="${DRIFTY_GIT_DIRTY:-unknown}"
+BUILD_COMMIT="${CIRCUIT_GIT_COMMIT:-unknown}"
+BUILD_BRANCH="${CIRCUIT_GIT_BRANCH:-unknown}"
+BUILD_DIRTY="${CIRCUIT_GIT_DIRTY:-unknown}"
 
 build_info_defines() {
     # $1 = build mode, $2 = comma-separated optimisation flags (no spaces, see above)
-    echo "-DDRIFTY_BUILD_COMMIT=\"$BUILD_COMMIT\" -DDRIFTY_BUILD_BRANCH=\"$BUILD_BRANCH\"" \
-         "-DDRIFTY_BUILD_DIRTY=\"$BUILD_DIRTY\" -DDRIFTY_BUILD_MODE=\"$1\"" \
-         "-DDRIFTY_BUILD_FLAGS=\"$2\""
+    echo "-DCIRCUIT_BUILD_COMMIT=\"$BUILD_COMMIT\" -DCIRCUIT_BUILD_BRANCH=\"$BUILD_BRANCH\"" \
+         "-DCIRCUIT_BUILD_DIRTY=\"$BUILD_DIRTY\" -DCIRCUIT_BUILD_MODE=\"$1\"" \
+         "-DCIRCUIT_BUILD_FLAGS=\"$2\""
 }
 
 # -------------------------------------------------------------------------------- flags --
@@ -130,11 +130,11 @@ RELEASE_FLAGS="-O2 -DNDEBUG"
 # Development tooling (Physics Lab, replay inspector, failure bundles). The registry, the
 # scenario table, the scope history, and the bundle writer are raylib-free and are compiled
 # into every configuration; only the raygui interface is conditional.
-DEV_TOOL_DEFINES="-DDRIFTY_DEV_TOOLS"
+DEV_TOOL_DEFINES="-DCIRCUIT_DEV_TOOLS"
 
-# Extra defines for opt-in builds: `DRIFTY_EXTRA_DEFINES=-DDRIFTY_PROFILE ./build.sh`.
+# Extra defines for opt-in builds: `CIRCUIT_EXTRA_DEFINES=-DCIRCUIT_PROFILE ./build.sh`.
 # `make profile` uses it. Values must not contain spaces (see the note above).
-EXTRA_DEFINES="${DRIFTY_EXTRA_DEFINES:-}"
+EXTRA_DEFINES="${CIRCUIT_EXTRA_DEFINES:-}"
 
 # ------------------------------------------------------------------------------ sources --
 #
@@ -181,7 +181,7 @@ unset group value
 # (build.bat, build.sh, mk.bat, Makefile) stay at the root, where a developer expects them.
 #
 # Each configuration's runtime DLLs sit BESIDE its executable: Windows resolves an import from
-# the directory of the loading module first, so this is what makes build/dev/drifty.exe find
+# the directory of the loading module first, so this is what makes build/dev/circuit.exe find
 # libraylib.dll without a PATH entry.
 
 BUILD_DEV="build/dev"
@@ -190,10 +190,10 @@ BUILD_RELEASE="build/release"
 
 MODULE="$BUILD_DEV/game.dll"
 MODULE_TMP="$BUILD_DEV/game_tmp.tmp"
-EXE="$BUILD_DEV/drifty.exe"
-EXE_RELEASE="$BUILD_RELEASE/drifty_release.exe"
-EXE_TESTS="$BUILD_TESTS/drifty_tests.exe"
-EXE_HOTRELOAD="$BUILD_DEV/drifty_hotreload_harness.exe"
+EXE="$BUILD_DEV/circuit.exe"
+EXE_RELEASE="$BUILD_RELEASE/circuit_release.exe"
+EXE_TESTS="$BUILD_TESTS/circuit_tests.exe"
+EXE_HOTRELOAD="$BUILD_DEV/circuit_hotreload_harness.exe"
 
 # Only the build output roots. Run-evidence directories under artifacts/ are created by the
 # writer that needs them (telemetry_ensure_dir / ensure_parent_directory), so a clean checkout
@@ -256,8 +256,8 @@ if [ "$MODE" = "clean" ]; then
     # built by an older checkout does not keep a stale runnable or generated copy beside the
     # new one.
     rm -rf telemetry replays
-    rm -f drifty.exe drifty_release.exe drifty_tests.exe drifty_hotreload_harness.exe
-    rm -f drifty_tests_asan.exe drifty_tests_cov.exe
+    rm -f circuit.exe circuit_release.exe circuit_tests.exe circuit_hotreload_harness.exe
+    rm -f circuit_tests_asan.exe circuit_tests_cov.exe
     rm -f libraylib.dll raylib.dll glfw3.dll
     rm -f ./*.o src/*.o tests/*.o ./*.d ./*.pdb ./*.ilk ./*.exp ./*.map
     rm -f ./*.gcda ./*.gcno ./*.gcov
@@ -268,8 +268,8 @@ fi
 
 if [ "$MODE" = "tests" ]; then
     # shellcheck disable=SC2086,SC2046
-    $CC $CSTD $INCLUDES $WARNINGS $RELEASE_FLAGS -DDRIFTY_HEADLESS \
-        $(build_info_defines tests "-O2,-DNDEBUG,-DDRIFTY_HEADLESS") \
+    $CC $CSTD $INCLUDES $WARNINGS $RELEASE_FLAGS -DCIRCUIT_HEADLESS \
+        $(build_info_defines tests "-O2,-DNDEBUG,-DCIRCUIT_HEADLESS") \
         $TEST_SRCS -o "$EXE_TESTS" $RAYLIB_CFLAGS -lm
     status=$?
     [ $status -eq 0 ] && echo "Built $EXE_TESTS."
@@ -282,7 +282,7 @@ if [ "$MODE" = "hotreload-harness" ]; then
     # The harness loads $MODULE; build it the same safe way as the dev path.
     # shellcheck disable=SC2086,SC2046
     $CC $CSTD $INCLUDES $WARNINGS $DEBUG_FLAGS -shared \
-        -DDRIFTY_HOT_RELOAD -DDRIFTY_GAME_MODULE $DEV_TOOL_DEFINES \
+        -DCIRCUIT_HOT_RELOAD -DCIRCUIT_GAME_MODULE $DEV_TOOL_DEFINES \
         $(build_info_defines module "-O0,-g") $EXTRA_DEFINES \
         $GAME_SRCS $DEV_UI_SRCS $SHARED_SRCS -o "$MODULE_TMP" \
         $RAYLIB_CFLAGS $RAYLIB_SHARED_LIBS
@@ -295,7 +295,7 @@ if [ "$MODE" = "hotreload-harness" ]; then
     mv -f "$MODULE_TMP" "$MODULE" || exit 1
 
     # shellcheck disable=SC2086
-    $CC $CSTD $INCLUDES $WARNINGS $DEBUG_FLAGS -DDRIFTY_HOT_RELOAD \
+    $CC $CSTD $INCLUDES $WARNINGS $DEBUG_FLAGS -DCIRCUIT_HOT_RELOAD \
         $HOTRELOAD_HARNESS_SRCS -o "$EXE_HOTRELOAD" $RAYLIB_CFLAGS $RAYLIB_SHARED_LIBS
     status=$?
     [ $status -eq 0 ] && echo "Built $MODULE and $EXE_HOTRELOAD."
@@ -324,7 +324,7 @@ build_dev() {
     # survives.
     # shellcheck disable=SC2086,SC2046
     $CC $CSTD $INCLUDES $WARNINGS $DEBUG_FLAGS -shared \
-        -DDRIFTY_HOT_RELOAD -DDRIFTY_GAME_MODULE $DEV_TOOL_DEFINES \
+        -DCIRCUIT_HOT_RELOAD -DCIRCUIT_GAME_MODULE $DEV_TOOL_DEFINES \
         $(build_info_defines module "-O0,-g") $EXTRA_DEFINES \
         $GAME_SRCS $DEV_UI_SRCS $SHARED_SRCS -o "$MODULE_TMP" \
         $RAYLIB_CFLAGS $RAYLIB_SHARED_LIBS
@@ -338,14 +338,14 @@ build_dev() {
 
     # If the game is already running, that is all there is to do: it will pick the module up.
     if command -v tasklist >/dev/null 2>&1; then
-        if tasklist 2>/dev/null | grep -qi "drifty\.exe"; then
+        if tasklist 2>/dev/null | grep -qi "circuit\.exe"; then
             echo "Hot reloading $MODULE..."
             return 0
         fi
     fi
 
     # shellcheck disable=SC2086,SC2046
-    $CC $CSTD $INCLUDES $WARNINGS $DEBUG_FLAGS -DDRIFTY_HOT_RELOAD \
+    $CC $CSTD $INCLUDES $WARNINGS $DEBUG_FLAGS -DCIRCUIT_HOT_RELOAD \
         $(build_info_defines platform "-O0,-g") $EXTRA_DEFINES \
         $PLATFORM_SRCS $SHARED_SRCS $HOTRELOAD_SRC -o "$EXE" \
         $RAYLIB_CFLAGS $RAYLIB_SHARED_LIBS

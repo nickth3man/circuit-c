@@ -25,18 +25,18 @@ if not exist "%MSYS2_ROOT%\ucrt64\bin\gcc.exe" (
 )
 
 rem Build provenance, resolved here where git is on PATH (see build.bat).
-set "DRIFTY_GIT_COMMIT="
-set "DRIFTY_GIT_BRANCH="
-set "DRIFTY_GIT_DIRTY="
+set "CIRCUIT_GIT_COMMIT="
+set "CIRCUIT_GIT_BRANCH="
+set "CIRCUIT_GIT_DIRTY="
 where git >nul 2>&1
 if not errorlevel 1 (
-    for /f "delims=" %%i in ('git rev-parse --short^=12 HEAD 2^>nul') do set "DRIFTY_GIT_COMMIT=%%i"
-    for /f "delims=" %%i in ('git rev-parse --abbrev-ref HEAD 2^>nul') do set "DRIFTY_GIT_BRANCH=%%i"
+    for /f "delims=" %%i in ('git rev-parse --short^=12 HEAD 2^>nul') do set "CIRCUIT_GIT_COMMIT=%%i"
+    for /f "delims=" %%i in ('git rev-parse --abbrev-ref HEAD 2^>nul') do set "CIRCUIT_GIT_BRANCH=%%i"
     git diff --quiet HEAD >nul 2>&1
-    if errorlevel 1 (set "DRIFTY_GIT_DIRTY=dirty") else (set "DRIFTY_GIT_DIRTY=clean")
+    if errorlevel 1 (set "CIRCUIT_GIT_DIRTY=dirty") else (set "CIRCUIT_GIT_DIRTY=clean")
 )
 
-set "MSYS_REPO_FILE=%TEMP%\drifty_msys_repo_%RANDOM%.txt"
+set "MSYS_REPO_FILE=%TEMP%\circuit_msys_repo_%RANDOM%.txt"
 "%MSYS2_ROOT%\usr\bin\cygpath.exe" -u "%CD%" > "%MSYS_REPO_FILE%"
 if errorlevel 1 (
     echo mk.bat: cygpath failed for "%CD%". 1>&2

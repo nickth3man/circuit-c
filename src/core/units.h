@@ -42,8 +42,8 @@
  * This header includes raylib.h for the Vector2 type only. It calls no raylib function, so
  * translation units that include it still link without a window.
  */
-#ifndef DRIFTY_UNITS_H
-#define DRIFTY_UNITS_H
+#ifndef CIRCUIT_UNITS_H
+#define CIRCUIT_UNITS_H
 
 #include <math.h>
 
@@ -93,13 +93,13 @@ static inline Vector2 units_render_px_to_world(Vector2 px, float pixelsPerMeter)
  * (degrees, clockwise positive in render space). */
 static inline float units_heading_to_rotation_deg(float headingRad)
 {
-    return -headingRad * DRIFTY_RAD2DEG;
+    return -headingRad * CIRCUIT_RAD2DEG;
 }
 
 /* Inverse of units_heading_to_rotation_deg(). */
 static inline float units_rotation_deg_to_heading(float rotationDeg)
 {
-    return -rotationDeg * DRIFTY_DEG2RAD;
+    return -rotationDeg * CIRCUIT_DEG2RAD;
 }
 
 /* ---------------------------------------------------------------- pixel-grid snapping --
@@ -129,4 +129,4 @@ static inline float units_camera_translation_axis(float offset, float target, fl
     return offset - target * zoom;
 }
 
-#endif /* DRIFTY_UNITS_H */
+#endif /* CIRCUIT_UNITS_H */

@@ -10,8 +10,8 @@
  * This translation unit must not call any raylib function. It uses <math.h> and the
  * Vector2 type from raylib.h.
  */
-#ifndef DRIFTY_COLLISION_H
-#define DRIFTY_COLLISION_H
+#ifndef CIRCUIT_COLLISION_H
+#define CIRCUIT_COLLISION_H
 
 #include "world/track.h"
 #include "physics/vehicle.h"
@@ -37,4 +37,4 @@ int collision_resolve_track(const VehicleSpec *spec, VehicleState *state,
                             VehicleRenderState *renderState, const Track *track,
                             float *crashLockoutTimerS);
 
-#endif /* DRIFTY_COLLISION_H */
+#endif /* CIRCUIT_COLLISION_H */

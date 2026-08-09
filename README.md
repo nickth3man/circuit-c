@@ -1,14 +1,15 @@
-# Drifty
+# Circuit
 
-A top-down 2D drift driving simulator in C11 with raylib 6.0. The design goal is a
-physically coherent vehicle simulation underneath an arcade presentation layer: the car
-initiates, holds, transitions, and recovers a drift because of tire, drivetrain, and
-load-transfer behaviour, not because a state machine reaches in and changes forces.
+A deterministic top-down 2D racing simulator in C11 with raylib 6.0. The design goal is a
+physically coherent vehicle simulation underneath an arcade presentation layer: handling at
+and beyond the tire limit emerges from tire, drivetrain, and load-transfer behaviour rather
+than from state-machine force overrides.
 
 **Windows only.** The supported development environment is **MSYS2 UCRT64**.
 
 - Setup, checks, and the hot-reload rules: [CONTRIBUTING.md](CONTRIBUTING.md)
 - Design contracts and the current milestone plan: [docs/](docs/README.md)
+- Product identity and repository migration: [docs/IDENTITY.md](docs/IDENTITY.md)
 - Agent-facing workflow rules: [AGENTS.md](AGENTS.md)
 - Notable changes: [CHANGELOG.md](CHANGELOG.md)
 
@@ -23,7 +24,7 @@ Two workstreams number their phases independently, so "phase 4" needs qualifying
 of its physics parameters — there is no hand-authored art for any vehicle. That workstream
 built the parameter registry expansion, the appearance grammar, a 100-vehicle demonstration
 corpus, the production texture path, and the in-game gallery. The grammar lives in
-`src/render/car_visual.h/.c`; `build/tests/drifty_tests.exe --dump-corpus-index` prints the
+`src/render/car_visual.h/.c`; `build/tests/circuit_tests.exe --dump-corpus-index` prints the
 fleet.
 
 The running game uses a deterministic planar rigid-body vehicle in SI units:
@@ -39,7 +40,7 @@ The running game uses a deterministic planar rigid-body vehicle in SI units:
 | Platform-owned `Game` block, hot-reloadable game module | `src/platform/main.c`, `src/platform/hotreload_windows.c`, `src/game/game.h/.c` |
 | Headless test executable | `tests/test_main.c` + `tests/scenarios/`, `tests/support/` |
 | Windowless hot-reload harness | `tests/hotreload/hotreload_harness.c` |
-| Bounded visual smoke test | `build/dev/drifty.exe --smoke-test` |
+| Bounded visual smoke test | `build/dev/circuit.exe --smoke-test` |
 | Canonical vehicle specification/state/diagnostics | `src/physics/vehicle.h/.c` |
 | Steering, contact kinematics, tire forces, body integration | `src/physics/physics.h/.c` |
 | Normalized nonlinear lateral/longitudinal tire curves and friction ellipse | `src/physics/tire.h/.c` |
@@ -60,10 +61,10 @@ quadratic aerodynamic drag and per-wheel rolling resistance.
 
 Neither the scenario count nor the check count is quoted here — both move with every scenario
 and parameter added, and a number written down once is wrong shortly afterwards.
-`./build/tests/drifty_tests.exe --list` names every scenario; running it without arguments
+`./build/tests/circuit_tests.exe --list` names every scenario; running it without arguments
 prints the current totals. Eight reviewed
 Phase 3 CSV baselines cover acceleration/braking load transfer, coast-down, skidpad, step
-steer, lift-off, transition, and a catchable drift. They live in `tests/baselines/`;
+steer, lift-off, transition, and sideslip recovery. They live in `tests/baselines/`;
 `mk regression` compares a fresh run against them, and `mk baselines` re-records them only
 when the model changed on purpose and the accepted deltas have been written down.
 
@@ -136,21 +137,21 @@ frame budget, writes a screenshot, and exits.
 ### Running
 
 ```bat
-build/dev/drifty.exe                 rem development build; start once and leave it running
-build/dev/drifty.exe --smoke-test    rem bounded visual verification; exits on its own
-build/release/drifty_release.exe         rem release build
-build/tests/drifty_tests.exe           rem headless tests; run from the repository root
-build/dev/drifty_hotreload_harness.exe
+build/dev/circuit.exe                 rem development build; start once and leave it running
+build/dev/circuit.exe --smoke-test    rem bounded visual verification; exits on its own
+build/release/circuit_release.exe         rem release build
+build/tests/circuit_tests.exe           rem headless tests; run from the repository root
+build/dev/circuit_hotreload_harness.exe
 ```
 
-`build/tests/drifty_tests.exe` writes CSV telemetry to `artifacts/telemetry/` relative to the working directory,
+`build/tests/circuit_tests.exe` writes CSV telemetry to `artifacts/telemetry/` relative to the working directory,
 so run it from the repository root. It accepts `--list`, `--scenario NAME`, and `-v`.
 
 ## Linkage
 
 ### Development (hot reload)
 
-`build/dev/drifty.exe` and `build/dev/game.dll` both link the MSYS2 **shared** raylib import library and
+`build/dev/circuit.exe` and `build/dev/game.dll` both link the MSYS2 **shared** raylib import library and
 therefore both import `libraylib.dll` (MSYS2's DLL name). The build copies:
 
 - `libraylib.dll`
@@ -163,7 +164,7 @@ Never compile raylib sources into `game.dll`.
 
 ### Release
 
-`build/release/drifty_release.exe` compiles platform + game into one executable with `DRIFTY_HOT_RELOAD`
+`build/release/circuit_release.exe` compiles platform + game into one executable with `CIRCUIT_HOT_RELOAD`
 undefined. It links `libraylib.a` statically and does **not** import `libraylib.dll` or
 `game.dll`. With the current MSYS2 raylib package, the static archive still references
 shared GLFW, so `glfw3.dll` is copied next to the release executable. That is a package
@@ -172,21 +173,21 @@ limitation, not a project DLL.
 ### Verify imports
 
 ```bash
-objdump -p build/dev/drifty.exe | grep -i "DLL Name"
+objdump -p build/dev/circuit.exe | grep -i "DLL Name"
 objdump -p build/dev/game.dll | grep -i "DLL Name"
-objdump -p build/tests/drifty_tests.exe | grep -i "DLL Name"
-objdump -p build/release/drifty_release.exe | grep -i "DLL Name"
+objdump -p build/tests/circuit_tests.exe | grep -i "DLL Name"
+objdump -p build/release/circuit_release.exe | grep -i "DLL Name"
 ```
 
 Expected: development artifacts import `libraylib.dll`; tests and release do not.
 
 ## Hot-reload workflow
 
-The game is a thin platform layer (`build/dev/drifty.exe`) plus a hot-reloadable game module
+The game is a thin platform layer (`build/dev/circuit.exe`) plus a hot-reloadable game module
 (`build/dev/game.dll`). The platform layer owns the window, the raylib context, the `Game`
 allocation, and the fixed-timestep loop. Everything else lives in the module.
 
-1. Run `build/dev/drifty.exe` once and leave it open.
+1. Run `build/dev/circuit.exe` once and leave it open.
 2. Edit game code.
 3. Run `build.bat` (or `./build.sh` in UCRT64). It rebuilds the module always, rebuilds the
    executable only when it is not already running, and returns in well under a second.
@@ -196,11 +197,11 @@ allocation, and the fixed-timestep loop. Everything else lives in the module.
 The loader never unloads a working module until a replacement has been proven good. A
 compile error cannot close the running game.
 
-Automated validation without leaving `build/dev/drifty.exe` running:
+Automated validation without leaving `build/dev/circuit.exe` running:
 
 ```bat
 build.bat --hotreload-harness
-build/dev/drifty_hotreload_harness.exe
+build/dev/circuit_hotreload_harness.exe
 ```
 
 Or the fuller script (harness + failed-compile preservation):
@@ -212,7 +213,7 @@ Or the fuller script (harness + failed-compile preservation):
 
 ### When a restart is required
 
-Hot reload cannot handle these. Restart `build/dev/drifty.exe` after:
+Hot reload cannot handle these. Restart `build/dev/circuit.exe` after:
 
 - A change to the layout of `Game` or anything it contains.
 - **Adding a field to `VehicleSpec`** (`src/physics/vehicle.h`) — it lives inside `Game`, so this is
@@ -254,7 +255,7 @@ instead of the latter, since it starts and stops its own server.
 
 Press **F2** in the running game for the Physics Lab: scenario selector, pause and single
 step, live sliders for every tunable in the registry with its default and unit — currently
-123, listed by `drifty_tests --dump-params` — tuning profiles, overlay toggles,
+123, listed by `circuit_tests --dump-params` — tuning profiles, overlay toggles,
 an eight-channel scope with a baseline ghost, and an invariant panel. **F3** opens the replay
 inspector.
 
@@ -266,10 +267,10 @@ sliders, the profile format, the telemetry metadata, and the `--dump-params` tab
 ## Known limitations
 
 - **Changing the `Game` struct layout requires a restart.** Inherent to the technique.
-- **Restart `build/dev/drifty.exe` once for the development-tool layout.** `Game` now carries the
+- **Restart `build/dev/circuit.exe` once for the development-tool layout.** `Game` now carries the
   Physics Lab's state (`DevState`); restart the executable once after updating, and ordinary
   module-only hot reload preserves state as usual after that.
-- **Restart `build/dev/drifty.exe` once for the Phase 2 layout.** Canonical vehicle diagnostics and
+- **Restart `build/dev/circuit.exe` once for the Phase 2 layout.** Canonical vehicle diagnostics and
   reverse gearing changed persistent structure layout; normal code-only hot reload works
   after that restart.
 - **Every new tunable parameter costs one restart.** A parameter is a field on `VehicleSpec`,
@@ -379,7 +380,7 @@ artifacts/                                telemetry CSV, reports, screenshots, r
 
 ## Licence
 
-Drifty is MIT licensed. See [LICENSE](LICENSE).
+Circuit is MIT licensed. See [LICENSE](LICENSE).
 
 Vendored third-party sources under `third_party/` keep their own licences — raygui is
 zlib/libpng and stb_image_write is dual public domain / MIT. Neither is linked into the

@@ -583,7 +583,7 @@ static void scenario_vehicle_units(void)
     check(unrotated.x == 12.0f && unrotated.y == -34.0f,
           "zero steering leaves the wheel-frame force unchanged");
     const Vector2 rotated =
-        physics_rotate_wheel_force_to_body((Vector2){ 0.0f, 100.0f }, DRIFTY_PI * 0.5f);
+        physics_rotate_wheel_force_to_body((Vector2){ 0.0f, 100.0f }, CIRCUIT_PI * 0.5f);
     check_near(rotated.x, -100.0, 1e-4,
                "positive steering rotates lateral force toward -body X");
     check_near(rotated.y, 0.0, 1e-4, "a ninety-degree force rotation has zero body Y");
@@ -609,14 +609,14 @@ static void scenario_vehicle_units(void)
 
     VehicleRenderState wrapState;
     memset(&wrapState, 0, sizeof(wrapState));
-    wrapState.prevHeadingRad = DRIFTY_PI - 0.1f;
-    wrapState.currHeadingRad = -DRIFTY_PI + 0.1f;
-    wrapState.prevWheelAngleRad[0] = DRIFTY_PI - 0.2f;
-    wrapState.currWheelAngleRad[0] = -DRIFTY_PI + 0.2f;
+    wrapState.prevHeadingRad = CIRCUIT_PI - 0.1f;
+    wrapState.currHeadingRad = -CIRCUIT_PI + 0.1f;
+    wrapState.prevWheelAngleRad[0] = CIRCUIT_PI - 0.2f;
+    wrapState.currWheelAngleRad[0] = -CIRCUIT_PI + 0.2f;
     const VehicleDrawState draw = render_interpolate_vehicle(&wrapState, 0.5f);
-    check(fabsf(fabsf(draw.headingRad) - DRIFTY_PI) < 1e-4f,
+    check(fabsf(fabsf(draw.headingRad) - CIRCUIT_PI) < 1e-4f,
           "render heading interpolation takes the shortest path across angle wrap");
-    check(fabsf(fabsf(draw.wheelAngleRad[0]) - DRIFTY_PI) < 1e-4f,
+    check(fabsf(fabsf(draw.wheelAngleRad[0]) - CIRCUIT_PI) < 1e-4f,
           "wheel interpolation also takes the shortest wrapped path");
 }
 
@@ -770,7 +770,7 @@ static void scenario_drivetrain(void)
                "reverse gear ratio is negative");
     check_near(drivetrain_total_gear_ratio(&spec, 0), 0.0, 0.0, "neutral total ratio is zero");
     check_near(drivetrain_engine_rpm(&spec, 1, 20.0f),
-               clampf(20.0f * firstRatio * 60.0f / DRIFTY_TWO_PI, spec.engineIdleRpm,
+               clampf(20.0f * firstRatio * 60.0f / CIRCUIT_TWO_PI, spec.engineIdleRpm,
                       spec.engineRedlineRpm),
                1e-4, "engine RPM derives from driven wheel speed and gearing");
 
@@ -2066,12 +2066,12 @@ static void scenario_integration(void)
     check_near(state.positionM.x, state.velocityLongitudinalMps * FIXED_DT_S, 1e-6,
                "position uses the updated semi-implicit velocity");
 
-    state.headingRad = DRIFTY_PI - 0.001f;
+    state.headingRad = CIRCUIT_PI - 0.001f;
     state.yawRateRadS = 1.0f;
     state.velocityLongitudinalMps = 0.0f;
     input.throttle = 0.0f;
     physics_fixed_update(&spec, &state, &derived, &renderState, &input, FIXED_DT_S);
-    check(state.headingRad >= -DRIFTY_PI && state.headingRad < DRIFTY_PI,
+    check(state.headingRad >= -CIRCUIT_PI && state.headingRad < CIRCUIT_PI,
           "integrated heading remains wrapped");
 }
 
@@ -2631,7 +2631,7 @@ static void scenario_cross_spec_invariant_reproducibility(void)
  * Reference: Diener, Kalkkuhl & Enzweiler, "Lateral Velocity Model for Vehicle Parking
  * Applications" (arXiv:2511.01369) — identifies a "systematic deviation from the zero-slip
  * assumption" during low-speed parking-style maneuvers that the common zero-rear-slip model
- * misses. Drifty's arcade model is not held to that paper's accuracy bar, but the finding
+ * misses. Circuit's arcade model is not held to that paper's accuracy bar, but the finding
  * motivates a scenario that actually measures the deviation instead of assuming it away.
  *
  * WHAT IT DOES. Starts just above LOW_SPEED_BEGIN_MPS so the kinematic/dynamic blend is

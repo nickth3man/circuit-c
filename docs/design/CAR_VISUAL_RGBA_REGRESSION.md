@@ -14,13 +14,13 @@ The existing appearance scenarios correctly test semantic label differences and 
 From the baseline revision:
 
 ```text
-build/tests/drifty_tests.exe --dump-corpus-cards artifacts/baseline-cars
+build/tests/circuit_tests.exe --dump-corpus-cards artifacts/baseline-cars
 ```
 
 From the candidate revision:
 
 ```text
-build/tests/drifty_tests.exe --dump-corpus-cards artifacts/candidate-cars
+build/tests/circuit_tests.exe --dump-corpus-cards artifacts/candidate-cars
 ```
 
 Each directory contains one rendered PNG and one label-map PNG per corpus vehicle. Compare a focused vehicle exactly:

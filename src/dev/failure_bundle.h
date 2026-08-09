@@ -14,8 +14,8 @@
  * The point is that a human or an agent can act on the bundle alone, without reconstructing
  * the environment that produced it. Nothing here is raylib-dependent.
  */
-#ifndef DRIFTY_FAILURE_BUNDLE_H
-#define DRIFTY_FAILURE_BUNDLE_H
+#ifndef CIRCUIT_FAILURE_BUNDLE_H
+#define CIRCUIT_FAILURE_BUNDLE_H
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -52,4 +52,4 @@ typedef struct {
 bool failure_bundle_write(const char *rootDir, const FailureBundle *bundle, char *dirOut,
                           size_t dirCapacity);
 
-#endif /* DRIFTY_FAILURE_BUNDLE_H */
+#endif /* CIRCUIT_FAILURE_BUNDLE_H */

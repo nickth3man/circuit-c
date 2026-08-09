@@ -8,9 +8,9 @@
 
 #if defined(_WIN32)
 #include <direct.h>
-#define drifty_mkdir(path) _mkdir(path)
+#define circuit_mkdir(path) _mkdir(path)
 #else
-#define drifty_mkdir(path) mkdir((path), 0775)
+#define circuit_mkdir(path) mkdir((path), 0775)
 #endif
 
 #define TELEMETRY_HEADER                                                                      \
@@ -65,7 +65,7 @@ bool telemetry_ensure_dir(const char *dirPath)
         *c = '\0';
         /* A bare drive prefix such as "C:" is not a directory anyone can create. */
         const bool isDrivePrefix = (c - buffer == 2 && buffer[1] == ':');
-        if (!isDrivePrefix && drifty_mkdir(buffer) != 0 && errno != EEXIST) {
+        if (!isDrivePrefix && circuit_mkdir(buffer) != 0 && errno != EEXIST) {
             fprintf(stderr, "TELEMETRY: could not create directory '%s': %s\n", buffer,
                     strerror(errno));
             *c = separator;
@@ -74,7 +74,7 @@ bool telemetry_ensure_dir(const char *dirPath)
         *c = separator;
     }
 
-    if (drifty_mkdir(buffer) == 0) return true;
+    if (circuit_mkdir(buffer) == 0) return true;
     if (errno == EEXIST) return true;
 
     fprintf(stderr, "TELEMETRY: could not create directory '%s': %s\n", dirPath,

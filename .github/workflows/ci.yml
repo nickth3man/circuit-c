@@ -1,6 +1,6 @@
 # The same checks the Makefile offers locally, run on every push and pull request.
 #
-# Both jobs pass DRIFTY_STRICT=1, which turns a missing tool from a SKIP into a failure.
+# Both jobs pass CIRCUIT_STRICT=1, which turns a missing tool from a SKIP into a failure.
 # Without it a runner that happens to lack cppcheck would report a green tick for a job
 # that never linted anything.
 #
@@ -70,7 +70,7 @@ jobs:
 
       # `verify` includes the pinned ruff check, so both CI jobs exercise the same project gate.
       - name: Verify (format, Python, lint, analyze, physics, regression)
-        run: make DRIFTY_STRICT=1 verify
+        run: make CIRCUIT_STRICT=1 verify
 
   linux-headless:
     name: Linux headless (+ sanitizers) (optional)
@@ -93,9 +93,9 @@ jobs:
           # A uv venv is user-owned, so it sidesteps both the externally-managed marker on
           # the /usr python and the root-only /usr/local site-packages. Its bin goes on PATH
           # so the Makefile's `command -v ruff` resolves.
-          uv venv /tmp/drifty-tools
-          uv pip install --python /tmp/drifty-tools/bin/python -r requirements-dev.txt
-          echo "/tmp/drifty-tools/bin" >> "$GITHUB_PATH"
+          uv venv /tmp/circuit-tools
+          uv pip install --python /tmp/circuit-tools/bin/python -r requirements-dev.txt
+          echo "/tmp/circuit-tools/bin" >> "$GITHUB_PATH"
 
       # The POSIX branch of the Makefile needs raylib for its HEADERS only: the headless
       # build calls no raylib function and links no raylib library. So clone the source
@@ -118,7 +118,7 @@ jobs:
 
       # Host-independent; both CI jobs exercise the same pinned Python gate.
       - name: Python lint and format
-        run: make DRIFTY_STRICT=1 lint-py
+        run: make CIRCUIT_STRICT=1 lint-py
 
       # clang-tidy on the files this branch actually touched. The whole tree carries ~112
       # pre-existing findings, so a full-tree gate would fail every pull request over work
@@ -128,7 +128,7 @@ jobs:
         if: github.event_name == 'pull_request'
         run: |
           git fetch -q --no-tags origin "${{ github.base_ref }}"
-          make DRIFTY_STRICT=1 tidy-changed TIDY_BASE="origin/${{ github.base_ref }}"
+          make CIRCUIT_STRICT=1 tidy-changed TIDY_BASE="origin/${{ github.base_ref }}"
 
       # test-physics only. `regression` is deliberately NOT run here.
       #
@@ -136,18 +136,18 @@ jobs:
       # tight enough that a different libm does not reproduce them: the first CI run breached
       # 13 of 46 comparisons, all of them longitudinal (brake-*, lift-off*, accel-load,
       # launch_stop), with identical aggregate metrics but large single-row deltas — the
-      # signature of a discrete event landing one tick apart, not of drifting physics.
+      # signature of a discrete event landing one tick apart, not of changed vehicle dynamics.
       #
       # The scenario assertions themselves pass identically on both hosts, so behaviour is
       # not in question; byte-level reproduction across libms is, and the project has never
       # claimed it. Windows CI gates the baselines.
       - name: Physics scenarios
-        run: make DRIFTY_STRICT=1 test-physics
+        run: make CIRCUIT_STRICT=1 test-physics
 
       # This is the only place the sanitizers actually run; the UCRT64 job skips them by
       # design. If this step ever starts skipping, the project has lost ASan/UBSan cover.
       - name: ASan + UBSan
-        run: make DRIFTY_STRICT=1 sanitize
+        run: make CIRCUIT_STRICT=1 sanitize
 
       - name: Upload failure bundles
         if: failure()

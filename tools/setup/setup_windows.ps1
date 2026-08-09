@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-  Idempotent Drifty bootstrap for Windows + MSYS2 UCRT64.
+  Idempotent Circuit bootstrap for Windows + MSYS2 UCRT64.
 
 .DESCRIPTION
   Locates MSYS2 at C:\msys64 (or $env:MSYS2_ROOT), installs the required UCRT64
@@ -62,7 +62,7 @@ $requiredPackages = @(
     'mingw-w64-ucrt-x86_64-python',
     'make',
     # Windows git is not visible from inside MSYS2. Without git here the Makefile stamps
-    # every build DRIFTY_BUILD_COMMIT="unknown" / DIRTY="dirty", so failure bundles record
+    # every build CIRCUIT_BUILD_COMMIT="unknown" / DIRTY="dirty", so failure bundles record
     # no usable provenance, and `make tidy-changed` cannot tell which files changed.
     'git'
 )
@@ -136,7 +136,7 @@ $gcovr = Join-Path $ucrtBin 'gcovr.exe'
 $ok = (Assert-Tool 'gcovr' $gcovr { & $gcovr --version | Select-Object -First 1 | ForEach-Object { Write-Host "         $_" } }) -and $ok
 
 # raylib via pkg-config inside a real UCRT64 environment
-$raylibScriptPath = Join-Path $env:TEMP ("drifty_raylib_check_{0}.sh" -f [guid]::NewGuid().ToString('N'))
+$raylibScriptPath = Join-Path $env:TEMP ("circuit_raylib_check_{0}.sh" -f [guid]::NewGuid().ToString('N'))
 $raylibScript = @"
 pkg-config --exists raylib || { echo "pkg-config cannot find raylib" >&2; exit 2; }
 echo "raylib modversion : `$(pkg-config --modversion raylib)"

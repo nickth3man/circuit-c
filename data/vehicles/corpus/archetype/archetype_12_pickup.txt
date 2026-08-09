@@ -1,4 +1,4 @@
-# drifty tuning profile v1
+# circuit tuning profile v1
 # name = value    [unit]  (default)
 
 # --- Body ---

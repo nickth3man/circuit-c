@@ -13,7 +13,7 @@ body:
     id: scenario
     attributes:
       label: Scenario
-      description: "`drifty_tests --list`, e.g. skidpad, handbrake, power-oversteer"
+      description: "`circuit_tests --list`, e.g. skidpad, handbrake, power-oversteer"
     validations:
       required: true
 

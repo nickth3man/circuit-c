@@ -9,7 +9,7 @@
  *
  * WHY C AND NOT FILES, the same reason as car_corpus.h: the roster is the source of truth for
  * the suite, so it has to be reachable with no file I/O, no working-directory assumption, and
- * no directory enumeration from inside the hot-reloadable module. `drifty_tests
+ * no directory enumeration from inside the hot-reloadable module. `circuit_tests
  * --generate-roster` exports each spec to data/vehicles/roster/ as .txt files in the existing
  * format for humans to read and diff, and the `roster` scenario asserts the export round-trips
  * so the files cannot rot away from the code.
@@ -25,8 +25,8 @@
  *
  * Raylib-free and I/O-free, like car_corpus.h.
  */
-#ifndef DRIFTY_CAR_ROSTER_H
-#define DRIFTY_CAR_ROSTER_H
+#ifndef CIRCUIT_CAR_ROSTER_H
+#define CIRCUIT_CAR_ROSTER_H
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -69,4 +69,4 @@ uint32_t car_roster_spec_hash(int index);
  * knowing the table order. */
 int car_roster_find(const char *id);
 
-#endif /* DRIFTY_CAR_ROSTER_H */
+#endif /* CIRCUIT_CAR_ROSTER_H */

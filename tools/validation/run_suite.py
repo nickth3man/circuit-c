@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""run_suite.py — Validation suite orchestrator for Drifty Milestone 1.
+"""run_suite.py — Validation suite orchestrator for Circuit Milestone 1.
 
-Runs `drifty.exe --validate-lap --car ID --track NAME --start-checkpoint N` for every roster car
+Runs `circuit.exe --validate-lap --car ID --track NAME --start-checkpoint N` for every roster car
 and each validation scenario, aggregates individual `run.json` files into a top-level `suite.json`,
 copies results to `artifacts/validation/latest/`, and exits nonzero if any case failed.
 
@@ -9,7 +9,7 @@ Usage:
     python tools/validation/run_suite.py
     python tools/validation/run_suite.py --no-video
     python tools/validation/run_suite.py --cars rwd_grip,fwd_light
-    python tools/validation/run_suite.py --exe build/dev/drifty.exe --out artifacts/validation
+    python tools/validation/run_suite.py --exe build/dev/circuit.exe --out artifacts/validation
 """
 
 from __future__ import annotations
@@ -130,7 +130,7 @@ def run_car_validation(
 
 def main(argv: List[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--exe", default="build/dev/drifty.exe", help="path to drifty executable")
+    parser.add_argument("--exe", default="build/dev/circuit.exe", help="path to circuit executable")
     parser.add_argument("--out", default="artifacts/validation", help="root output directory")
     parser.add_argument("--cars", help="comma-separated car IDs filter")
     parser.add_argument("--no-video", action="store_true", help="disable MP4 video encoding")

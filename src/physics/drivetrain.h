@@ -1,8 +1,8 @@
 /*
  * drivetrain.h — pure Phase 2 engine, gearing, torque split, and wheel integration.
  */
-#ifndef DRIFTY_DRIVETRAIN_H
-#define DRIFTY_DRIVETRAIN_H
+#ifndef CIRCUIT_DRIVETRAIN_H
+#define CIRCUIT_DRIVETRAIN_H
 
 #include "physics/vehicle.h"
 
@@ -96,4 +96,4 @@ bool drivetrain_wheel_equilibrium_omega(float driveTorqueNm, float wheelLongitud
                                         float tireBLong, float tireCLong,
                                         float slipSpeedEpsilonMps, float *equilibriumOmegaRadS);
 
-#endif /* DRIFTY_DRIVETRAIN_H */
+#endif /* CIRCUIT_DRIVETRAIN_H */

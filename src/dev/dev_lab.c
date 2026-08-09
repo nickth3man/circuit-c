@@ -1,6 +1,6 @@
 #include "dev/dev_lab.h"
 
-#if defined(DRIFTY_DEV_TOOLS) && !defined(DRIFTY_HEADLESS)
+#if defined(CIRCUIT_DEV_TOOLS) && !defined(CIRCUIT_HEADLESS)
 
 #include <math.h>
 #include <stdio.h>
@@ -888,4 +888,4 @@ void dev_lab_draw_ui(struct Game *game)
     if (game->dev.uiDeterministic) GuiUnlock();
 }
 
-#endif /* DRIFTY_DEV_TOOLS && !DRIFTY_HEADLESS */
+#endif /* CIRCUIT_DEV_TOOLS && !CIRCUIT_HEADLESS */

@@ -4,20 +4,20 @@
  * These are pure functions of their arguments. They never read window, render, or global
  * state, so the headless test executable links them without raylib.
  */
-#ifndef DRIFTY_MATH_UTILS_H
-#define DRIFTY_MATH_UTILS_H
+#ifndef CIRCUIT_MATH_UTILS_H
+#define CIRCUIT_MATH_UTILS_H
 
-#ifndef DRIFTY_PI
-#define DRIFTY_PI 3.14159265358979323846f
+#ifndef CIRCUIT_PI
+#define CIRCUIT_PI 3.14159265358979323846f
 #endif
-#ifndef DRIFTY_TWO_PI
-#define DRIFTY_TWO_PI (2.0f * DRIFTY_PI)
+#ifndef CIRCUIT_TWO_PI
+#define CIRCUIT_TWO_PI (2.0f * CIRCUIT_PI)
 #endif
-#ifndef DRIFTY_RAD2DEG
-#define DRIFTY_RAD2DEG (180.0f / DRIFTY_PI)
+#ifndef CIRCUIT_RAD2DEG
+#define CIRCUIT_RAD2DEG (180.0f / CIRCUIT_PI)
 #endif
-#ifndef DRIFTY_DEG2RAD
-#define DRIFTY_DEG2RAD (DRIFTY_PI / 180.0f)
+#ifndef CIRCUIT_DEG2RAD
+#define CIRCUIT_DEG2RAD (CIRCUIT_PI / 180.0f)
 #endif
 
 /* Clamp v into [lo, hi]. If hi < lo the bounds are swapped, so the result is always
@@ -49,4 +49,4 @@ float smoothstep(float edge0, float edge1, float x);
  * +-PI does not spin through a full rotation. The result is wrapped into [-PI, +PI). */
 float lerp_angle(float aRad, float bRad, float t);
 
-#endif /* DRIFTY_MATH_UTILS_H */
+#endif /* CIRCUIT_MATH_UTILS_H */

@@ -5,8 +5,8 @@
  * nothing registers itself at load time, and the order the runner reports is the order written
  * in the source rather than whatever the linker chose.
  */
-#ifndef DRIFTY_TEST_SCENARIOS_H
-#define DRIFTY_TEST_SCENARIOS_H
+#ifndef CIRCUIT_TEST_SCENARIOS_H
+#define CIRCUIT_TEST_SCENARIOS_H
 
 #include <stddef.h>
 
@@ -35,4 +35,4 @@ TestScenarioGroup test_gameplay_scenarios(void);
 /* Releases the Game the last scripted handling run kept alive for failure bundles. */
 void test_handling_cleanup(void);
 
-#endif /* DRIFTY_TEST_SCENARIOS_H */
+#endif /* CIRCUIT_TEST_SCENARIOS_H */

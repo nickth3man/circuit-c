@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Drifty — vehicle appearance inspector</title>
+<title>Circuit — vehicle appearance inspector</title>
 <style>
   :root { color-scheme: dark; }
   body { background:#12151a; color:#e8eaee; font:13px/1.5 ui-monospace,Consolas,monospace; margin:0; padding:16px; }
@@ -43,10 +43,10 @@
 </head>
 <body>
 
-<h1>Drifty — vehicle appearance inspector</h1>
+<h1>Circuit — vehicle appearance inspector</h1>
 <p class="sub">
   Every car is drawn from <code>cards.json</code>, produced by
-  <code>drifty_tests --dump-corpus-cards</code>. The sprite is the exact PNG the CPU rasterizer
+  <code>circuit_tests --dump-corpus-cards</code>. The sprite is the exact PNG the CPU rasterizer
   emits at the scale the game draws at; overlays are computed from the same derived
   <code>CarVisual</code> the rasterizer read, so an overlay that disagrees with the pixels is a
   rasterizer bug, not a drawing error here.
@@ -362,8 +362,8 @@ async function main() {
   $("group").innerHTML = `<option value="">all</option>` +
     groups.map(g => `<option value="${g}">${g}</option>`).join("");
   renderDiagnostics(DATA);
-  window.DRIFTY_DIAGNOSTICS = diagnostics(DATA);
-  window.DRIFTY_DATA = DATA;
+  window.CIRCUIT_DIAGNOSTICS = diagnostics(DATA);
+  window.CIRCUIT_DATA = DATA;
   ["zoom","search","group","showLabels","showOverlay","showHull","showWheels","showCabin","showAxes"]
     .forEach(id => $(id).addEventListener("input", render));
   await render();

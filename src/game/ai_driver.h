@@ -24,8 +24,8 @@
  * Raylib-free apart from Vector2, and free of I/O and global state, so the headless harness
  * links it unchanged.
  */
-#ifndef DRIFTY_AI_DRIVER_H
-#define DRIFTY_AI_DRIVER_H
+#ifndef CIRCUIT_AI_DRIVER_H
+#define CIRCUIT_AI_DRIVER_H
 
 #include <stdbool.h>
 
@@ -193,4 +193,4 @@ void ai_driver_update(const AiDriverConfig *cfg, AiDriverState *state, const Tra
  */
 Vector2 ai_driver_plan_point(const AiDriverState *state, const Track *track, int nodeIndex);
 
-#endif /* DRIFTY_AI_DRIVER_H */
+#endif /* CIRCUIT_AI_DRIVER_H */

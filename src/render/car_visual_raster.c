@@ -9,7 +9,7 @@
  * reference sprites in resources/sprite_examples/ do, and it keeps the output exactly
  * reproducible.
  *
- * Raylib-free: linked into drifty_tests.exe.
+ * Raylib-free: linked into circuit_tests.exe.
  *
  * =============================================================== LAYER STACK, fixed order ===
  *

@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 TELEMETRY_DIR = Path("artifacts/telemetry")
-TEST_EXE = Path("build/tests/drifty_tests.exe")
+TEST_EXE = Path("build/tests/circuit_tests.exe")
 WHEEL_RADIUS_M = 0.31
 
 # These names match the telemetry files emitted by the C test runner.  They are

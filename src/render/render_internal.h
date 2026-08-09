@@ -3,8 +3,8 @@
  * units. Nothing here is public: render/render.h is the only header callers outside
  * src/render/ may use, and these functions exist only in non-headless builds.
  */
-#ifndef DRIFTY_RENDER_INTERNAL_H
-#define DRIFTY_RENDER_INTERNAL_H
+#ifndef CIRCUIT_RENDER_INTERNAL_H
+#define CIRCUIT_RENDER_INTERNAL_H
 
 #include "render/render.h"
 
@@ -40,4 +40,4 @@ void render_hud_draw_state_overlay(const Game *game);
  * game_draw()'s frame so the offline capture readback sees it. */
 void render_draw_staged_validation_overlay(void);
 
-#endif /* DRIFTY_RENDER_INTERNAL_H */
+#endif /* CIRCUIT_RENDER_INTERNAL_H */

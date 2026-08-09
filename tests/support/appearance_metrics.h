@@ -5,8 +5,8 @@
  * the canvas, the metrics and the floors, or a key could pass one and fail the other for
  * reasons that have nothing to do with the vehicle.
  */
-#ifndef DRIFTY_APPEARANCE_METRICS_H
-#define DRIFTY_APPEARANCE_METRICS_H
+#ifndef CIRCUIT_APPEARANCE_METRICS_H
+#define CIRCUIT_APPEARANCE_METRICS_H
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -64,4 +64,4 @@ float test_car_signature_l2(const CarVisual *a, const CarVisual *b);
 int test_car_primary_diff_count(const VehicleSpec *a, const VehicleSpec *b,
                                 const char **firstName);
 
-#endif /* DRIFTY_APPEARANCE_METRICS_H */
+#endif /* CIRCUIT_APPEARANCE_METRICS_H */

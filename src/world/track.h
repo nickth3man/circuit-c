@@ -22,8 +22,8 @@
  * This translation unit calls no raylib function; Vector2 from the header is fine.
  * SurfaceId is defined in vehicle.h.
  */
-#ifndef DRIFTY_TRACK_H
-#define DRIFTY_TRACK_H
+#ifndef CIRCUIT_TRACK_H
+#define CIRCUIT_TRACK_H
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -156,4 +156,4 @@ float track_distance_to_centerline_m(const Track *track, Vector2 pointM, float *
  */
 TrackCheckpointEvent track_update_checkpoints(Track *track, Vector2 prevPosM, Vector2 currPosM);
 
-#endif /* DRIFTY_TRACK_H */
+#endif /* CIRCUIT_TRACK_H */

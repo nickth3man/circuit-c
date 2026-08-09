@@ -27,8 +27,8 @@
  * This header and its implementation are raylib-free and are linked by the headless
  * test executable.
  */
-#ifndef DRIFTY_REPLAY_H
-#define DRIFTY_REPLAY_H
+#ifndef CIRCUIT_REPLAY_H
+#define CIRCUIT_REPLAY_H
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -92,4 +92,4 @@ double replay_frame_time_s(const ReplayBuffer *rb, int index);
 ReplayFrame replay_pack(const Input *in);
 void replay_unpack(const ReplayFrame *frame, Input *out);
 
-#endif /* DRIFTY_REPLAY_H */
+#endif /* CIRCUIT_REPLAY_H */

@@ -4,7 +4,7 @@
  * WHY C AND NOT FILES. The corpus is the source of truth for the distinctness test and the
  * contact sheet, so it must be reachable without file I/O, without a working directory
  * assumption, and without enumerating a directory from inside the hot-reloadable game module.
- * `drifty_tests --generate-corpus` exports these specs into data/vehicles/corpus as .txt files in the
+ * `circuit_tests --generate-corpus` exports these specs into data/vehicles/corpus as .txt files in the
  * existing profile format for humans to read and diff; a test asserts the export round-trips,
  * so the files cannot silently rot away from the code.
  *
@@ -22,8 +22,8 @@
  *
  * Raylib-free and I/O-free.
  */
-#ifndef DRIFTY_CAR_CORPUS_H
-#define DRIFTY_CAR_CORPUS_H
+#ifndef CIRCUIT_CAR_CORPUS_H
+#define CIRCUIT_CAR_CORPUS_H
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -65,7 +65,7 @@ const char *car_corpus_sweep_key(int index);
  *
  * A sweep axis has to move roughly a fifth of its range past all three distinctness floors,
  * four times over, and most registry keys cannot. Deciding that by argument wastes a build:
- * `drifty_tests --measure-sweep KEY` measures it directly, and these two entry points are
+ * `circuit_tests --measure-sweep KEY` measures it directly, and these two entry points are
  * what let it build exactly the cars the sweep generator would build for a key that is not
  * (yet) on the axis table.
  *
@@ -76,4 +76,4 @@ const char *car_corpus_sweep_key(int index);
 int car_corpus_sweep_steps(void);
 bool car_corpus_sweep_probe(const char *key, int step, VehicleSpec *out);
 
-#endif /* DRIFTY_CAR_CORPUS_H */
+#endif /* CIRCUIT_CAR_CORPUS_H */

@@ -1,12 +1,12 @@
-# Drifty — one command per operation.
+# Circuit — one command per operation.
 #
 # These local targets are the project's checks, and .github/workflows/ci.yml runs the same
 # ones on every push: a UCRT64 job for the canonical toolchain and a Linux job for the
-# headless targets, including the sanitizers UCRT64 cannot link. CI passes DRIFTY_STRICT=1,
+# headless targets, including the sanitizers UCRT64 cannot link. CI passes CIRCUIT_STRICT=1,
 # which turns a missing tool from a SKIP into a failure. The hot-reload harness, linkage
 # inspection, and the interactive game remain hand-run.
 #
-#   make dev              hot-reload development build: build/dev/game.dll + build/dev/drifty.exe
+#   make dev              hot-reload development build: build/dev/game.dll + build/dev/circuit.exe
 #   make run              build, then LAUNCH the game (interactive; blocks until the window closes)
 #   make test             fast unit and infrastructure scenarios
 #   make test-physics     every physics and maneuver scenario, with telemetry
@@ -21,11 +21,11 @@
 #   make screenshots      capture the deterministic visual scenes
 #   make visual-test      compare captured scenes against tests/visual/baseline
 #   make gallery          capture every page of the in-game vehicle corpus gallery
-#   make profile          build with the Tracy hooks enabled (DRIFTY_TRACY)
+#   make profile          build with the Tracy hooks enabled (CIRCUIT_TRACY)
 #   make benchmark        fixed-update throughput
 #   make release          release build
 #   make ci               core local checks; inspect every SKIP line
-#   make DRIFTY_STRICT=1 ci   same, but a missing tool fails instead of skipping (what CI runs)
+#   make CIRCUIT_STRICT=1 ci   same, but a missing tool fails instead of skipping (what CI runs)
 #   make compile-commands write compile_commands.json for clangd
 #   make format           apply .clang-format        make format-check  check only
 #   make format-py        apply ruff to the Python   make lint-py       check only
@@ -50,23 +50,23 @@
 # ------------------------------------------------------------------------------- host --
 
 ifeq ($(MSYSTEM),UCRT64)
-    DRIFTY_HOST := ucrt64
+    CIRCUIT_HOST := ucrt64
 else
     UNAME_S := $(shell uname -s 2>/dev/null)
 ifneq (,$(filter Linux Darwin,$(UNAME_S)))
-        DRIFTY_HOST := posix
+        CIRCUIT_HOST := posix
 else
-        DRIFTY_HOST := unsupported
+        CIRCUIT_HOST := unsupported
 endif
 endif
 
-ifeq ($(DRIFTY_HOST),unsupported)
+ifeq ($(CIRCUIT_HOST),unsupported)
 $(error Run make from an MSYS2 UCRT64 shell (or use build.bat / mk.bat), or from Linux for the headless targets.)
 endif
 
 # --------------------------------------------------------------------------- toolchain --
 
-ifeq ($(DRIFTY_HOST),ucrt64)
+ifeq ($(CIRCUIT_HOST),ucrt64)
 
 CC := gcc
 CC_PATH := $(shell command -v $(CC) 2>/dev/null)
@@ -117,8 +117,8 @@ CLANG_TIDY   := $(shell command -v clang-tidy 2>/dev/null)
 # hosted CI job starts in — so every check has to opt out loudly rather than silently.
 #
 #   make ci                 SKIP lines, exit 0     (local: install what you need, or don't)
-#   make DRIFTY_STRICT=1 ci MISSING lines, exit 1  (CI: a check that did not run is a failure)
-ifdef DRIFTY_STRICT
+#   make CIRCUIT_STRICT=1 ci MISSING lines, exit 1  (CI: a check that did not run is a failure)
+ifdef CIRCUIT_STRICT
 skip = @echo "MISSING $(1)" >&2; exit 1
 else
 skip = @echo "SKIP $(1)" >&2
@@ -135,9 +135,9 @@ RELEASE_FLAGS := -O2 -DNDEBUG
 BUILD_COMMIT := $(shell git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
 BUILD_BRANCH := $(shell git rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)
 BUILD_DIRTY  := $(shell git diff --quiet HEAD 2>/dev/null && echo clean || echo dirty)
-BUILD_DEFINES = -DDRIFTY_BUILD_COMMIT=\"$(BUILD_COMMIT)\" \
-                -DDRIFTY_BUILD_BRANCH=\"$(BUILD_BRANCH)\" \
-                -DDRIFTY_BUILD_DIRTY=\"$(BUILD_DIRTY)\"
+BUILD_DEFINES = -DCIRCUIT_BUILD_COMMIT=\"$(BUILD_COMMIT)\" \
+                -DCIRCUIT_BUILD_BRANCH=\"$(BUILD_BRANCH)\" \
+                -DCIRCUIT_BUILD_DIRTY=\"$(BUILD_DIRTY)\"
 
 # ----------------------------------------------------------------------------- sources --
 #
@@ -227,20 +227,20 @@ BUILD_PACKAGES := $(BUILD_DIR)/packages
 ANALYZE_LOG := $(BUILD_DIR)/analyze.log
 TIDY_LOG    := $(BUILD_DIR)/tidy.log
 
-EXE_TESTS   := $(BUILD_TESTS)/drifty_tests$(EXE_SUFFIX)
-EXE_DEBUG   := $(BUILD_DEV)/drifty$(EXE_SUFFIX)
-EXE_RELEASE := $(BUILD_RELEASE)/drifty_release$(EXE_SUFFIX)
+EXE_TESTS   := $(BUILD_TESTS)/circuit_tests$(EXE_SUFFIX)
+EXE_DEBUG   := $(BUILD_DEV)/circuit$(EXE_SUFFIX)
+EXE_RELEASE := $(BUILD_RELEASE)/circuit_release$(EXE_SUFFIX)
 
 ARTIFACTS := artifacts
 # Ephemeral run evidence, all of it under the already-ignored artifacts/ root.
 TELEMETRY := $(ARTIFACTS)/telemetry
 BASELINES := tests/baselines
-SCENES    := debug_overlay tire_curves drift_hud physics_lab \
-             accel_load brake_load skidpad_p3 lift_off transition_p3 catchable
+SCENES    := debug_overlay tire_curves limit_handling_hud physics_lab \
+             accel_load brake_load skidpad_p3 lift_off transition_p3 sideslip_recovery
 
 # The scenarios that write telemetry and are compared against a baseline.
 REGRESSION_SCENARIOS := skidpad step-steer transition lift-off \
-                        accel-load brake-load coast-down catchable-drift
+                        accel-load brake-load coast-down sideslip-recovery
 
 .PHONY: all help info dev run release tests test test-physics scenario report regression \
         baselines verify-fast verify sanitize coverage screenshots visual-test gallery profile \
@@ -255,7 +255,7 @@ help:
 	@sed -n '6,39p' Makefile
 
 info:
-	@echo "host        : $(DRIFTY_HOST)"
+	@echo "host        : $(CIRCUIT_HOST)"
 	@echo "compiler    : $(CC)"
 	@echo "raylib cflags: $(RAYLIB_CFLAGS)"
 	@echo "python      : $(PYTHON)"
@@ -302,7 +302,7 @@ dirs:
 	@mkdir -p $(BUILD_DEV) $(BUILD_TESTS) $(BUILD_RELEASE) $(TELEMETRY) $(ARTIFACTS)
 
 windows-only:
-ifneq ($(DRIFTY_HOST),ucrt64)
+ifneq ($(CIRCUIT_HOST),ucrt64)
 	@echo "This target builds the game itself and needs MSYS2 UCRT64 on Windows." >&2
 	@exit 1
 endif
@@ -322,13 +322,13 @@ run: dev
 release: windows-only
 	./build.sh --release
 
-ifeq ($(DRIFTY_HOST),ucrt64)
+ifeq ($(CIRCUIT_HOST),ucrt64)
 tests:
 	./build.sh --tests
 else
 tests: dirs
-	$(CC) $(CSTD) $(INCLUDES) $(WARNINGS) $(RELEASE_FLAGS) -DDRIFTY_HEADLESS \
-	    $(BUILD_DEFINES) -DDRIFTY_BUILD_MODE=\"tests\" -DDRIFTY_BUILD_FLAGS=\"-O2,-DNDEBUG\" \
+	$(CC) $(CSTD) $(INCLUDES) $(WARNINGS) $(RELEASE_FLAGS) -DCIRCUIT_HEADLESS \
+	    $(BUILD_DEFINES) -DCIRCUIT_BUILD_MODE=\"tests\" -DCIRCUIT_BUILD_FLAGS=\"-O2,-DNDEBUG\" \
 	    $(TEST_SRCS) -o $(EXE_TESTS) $(RAYLIB_CFLAGS) -lm
 	@echo "Built $(EXE_TESTS)."
 endif
@@ -364,7 +364,7 @@ report: tests
 	./$(EXE_TESTS) --scenario $(NAME)
 	$(PYTHON) tools/telemetry/make_report.py $(TELEMETRY)/scenario_$(NAME).csv \
 	    $(if $(wildcard $(BASELINES)/scenario_$(NAME).csv),--baseline $(BASELINES)/scenario_$(NAME).csv,) \
-	    --title "Drifty — $(NAME)" --out $(ARTIFACTS)/report_$(NAME).html
+	    --title "Circuit — $(NAME)" --out $(ARTIFACTS)/report_$(NAME).html
 	@echo "open $(ARTIFACTS)/report_$(NAME).html"
 
 regression: test-physics
@@ -384,10 +384,10 @@ baselines: test-physics
 CAR ?= rwd_grip
 
 validate-car: dev
-	./build/dev/drifty.exe --validate-lap --car $(CAR)
+	./build/dev/circuit.exe --validate-lap --car $(CAR)
 
 validate: dev
-	$(PYTHON) tools/validation/run_suite.py --exe build/dev/drifty.exe --out artifacts/validation
+	$(PYTHON) tools/validation/run_suite.py --exe build/dev/circuit.exe --out artifacts/validation
 
 validate-compare:
 	$(PYTHON) tools/validation/compare_runs.py $(A) $(B)
@@ -482,7 +482,7 @@ else
 	@for f in $(ANALYZE_SRCS); do \
 	    echo "  analyze $$f"; \
 	    $(CLANG) --analyze -Xanalyzer -analyzer-output=text $(CSTD) $(INCLUDES) \
-	        $(RAYLIB_CFLAGS) -DDRIFTY_HEADLESS $$f -o /dev/null 2>>$(ANALYZE_LOG) || exit 1; \
+	        $(RAYLIB_CFLAGS) -DCIRCUIT_HEADLESS $$f -o /dev/null 2>>$(ANALYZE_LOG) || exit 1; \
 	done
 	@cat $(ANALYZE_LOG)
 	@n=$$(grep -cE '^.+:[0-9]+:[0-9]+: warning:' $(ANALYZE_LOG) 2>/dev/null || true); n=$${n:-0}; \
@@ -557,14 +557,14 @@ verify: format-check lint-py lint analyze test-physics regression
 
 sanitize:
 ifeq ($(CLANG),)
-ifeq ($(DRIFTY_HOST),ucrt64)
+ifeq ($(CIRCUIT_HOST),ucrt64)
 	$(call skip,sanitize: clang not installed (pacman -S mingw-w64-ucrt-x86_64-clang).)
 else
 	$(call skip,sanitize: clang not installed. Install it with the platform package manager.)
 endif
 else
 	@mkdir -p $(BUILD_SANITIZE)
-ifeq ($(DRIFTY_HOST),ucrt64)
+ifeq ($(CIRCUIT_HOST),ucrt64)
 	@printf 'int main(void) { return 0; }\n' > $(BUILD_SANITIZE)/runtime_probe.c
 	@if ! $(CLANG) -fsanitize=address,undefined \
 	        $(BUILD_SANITIZE)/runtime_probe.c \
@@ -572,24 +572,24 @@ ifeq ($(DRIFTY_HOST),ucrt64)
 	    rm -f $(BUILD_SANITIZE)/runtime_probe.c $(BUILD_SANITIZE)/runtime_probe$(EXE_SUFFIX); \
 	    echo "SKIP sanitize: this clang installation has no linkable ASan/UBSan runtime." >&2; \
 	    echo "MSYS2 provides those runtimes in CLANG64, not the supported UCRT64 environment." >&2; \
-	    echo "This SKIP is unconditional, including under DRIFTY_STRICT: it is a documented" >&2; \
+	    echo "This SKIP is unconditional, including under CIRCUIT_STRICT: it is a documented" >&2; \
 	    echo "platform limitation, not a missing tool. CI runs the sanitizers on Linux." >&2; \
 	else \
 	    rm -f $(BUILD_SANITIZE)/runtime_probe.c $(BUILD_SANITIZE)/runtime_probe$(EXE_SUFFIX); \
 	    $(CLANG) $(CSTD) $(INCLUDES) -O1 -g -fsanitize=address,undefined \
-	        -fno-omit-frame-pointer -fno-sanitize-recover=all -DDRIFTY_HEADLESS \
-	        $(BUILD_DEFINES) -DDRIFTY_BUILD_MODE=\"sanitize\" \
-	        -DDRIFTY_BUILD_FLAGS=\"-O1,-g,-fsanitize=address+undefined\" \
-	        $(TEST_SRCS) -o $(BUILD_SANITIZE)/drifty_tests_asan$(EXE_SUFFIX) $(RAYLIB_CFLAGS) -lm && \
-	    ./$(BUILD_SANITIZE)/drifty_tests_asan$(EXE_SUFFIX); \
+	        -fno-omit-frame-pointer -fno-sanitize-recover=all -DCIRCUIT_HEADLESS \
+	        $(BUILD_DEFINES) -DCIRCUIT_BUILD_MODE=\"sanitize\" \
+	        -DCIRCUIT_BUILD_FLAGS=\"-O1,-g,-fsanitize=address+undefined\" \
+	        $(TEST_SRCS) -o $(BUILD_SANITIZE)/circuit_tests_asan$(EXE_SUFFIX) $(RAYLIB_CFLAGS) -lm && \
+	    ./$(BUILD_SANITIZE)/circuit_tests_asan$(EXE_SUFFIX); \
 	fi
 else
 	$(CLANG) $(CSTD) $(INCLUDES) -O1 -g -fsanitize=address,undefined \
-	    -fno-omit-frame-pointer -fno-sanitize-recover=all -DDRIFTY_HEADLESS \
-	    $(BUILD_DEFINES) -DDRIFTY_BUILD_MODE=\"sanitize\" \
-	    -DDRIFTY_BUILD_FLAGS=\"-O1,-g,-fsanitize=address+undefined\" \
-	    $(TEST_SRCS) -o $(BUILD_SANITIZE)/drifty_tests_asan$(EXE_SUFFIX) $(RAYLIB_CFLAGS) -lm
-	./$(BUILD_SANITIZE)/drifty_tests_asan$(EXE_SUFFIX)
+	    -fno-omit-frame-pointer -fno-sanitize-recover=all -DCIRCUIT_HEADLESS \
+	    $(BUILD_DEFINES) -DCIRCUIT_BUILD_MODE=\"sanitize\" \
+	    -DCIRCUIT_BUILD_FLAGS=\"-O1,-g,-fsanitize=address+undefined\" \
+	    $(TEST_SRCS) -o $(BUILD_SANITIZE)/circuit_tests_asan$(EXE_SUFFIX) $(RAYLIB_CFLAGS) -lm
+	./$(BUILD_SANITIZE)/circuit_tests_asan$(EXE_SUFFIX)
 endif
 endif
 
@@ -609,14 +609,14 @@ coverage:
 	objects=""; \
 	for src in $(TEST_SRCS); do \
 	    object="$(BUILD_COVERAGE)/$$(echo $$src | tr '/' '_' | sed 's/\.c$$/.o/')"; \
-	    $(CC) $(CSTD) $(INCLUDES) -O0 -g --coverage -DDRIFTY_HEADLESS \
-	        $(BUILD_DEFINES) -DDRIFTY_BUILD_MODE=\"coverage\" \
-	        -DDRIFTY_BUILD_FLAGS=\"-O0,--coverage\" \
+	    $(CC) $(CSTD) $(INCLUDES) -O0 -g --coverage -DCIRCUIT_HEADLESS \
+	        $(BUILD_DEFINES) -DCIRCUIT_BUILD_MODE=\"coverage\" \
+	        -DCIRCUIT_BUILD_FLAGS=\"-O0,--coverage\" \
 	        $(RAYLIB_CFLAGS) -c $$src -o $$object; \
 	    objects="$$objects $$object"; \
 	done; \
-	$(CC) --coverage $$objects -o $(BUILD_COVERAGE)/drifty_tests_cov$(EXE_SUFFIX) -lm
-	./$(BUILD_COVERAGE)/drifty_tests_cov$(EXE_SUFFIX)
+	$(CC) --coverage $$objects -o $(BUILD_COVERAGE)/circuit_tests_cov$(EXE_SUFFIX) -lm
+	./$(BUILD_COVERAGE)/circuit_tests_cov$(EXE_SUFFIX)
 ifeq ($(GCOVR),)
 	$(call skip,gcovr report: gcovr not installed (pacman -S mingw-w64-ucrt-x86_64-gcovr). Raw .gcda files kept.)
 else
@@ -638,13 +638,13 @@ screenshots: windows-only dev
 
 # The in-game vehicle gallery: every corpus page through the production texture path.
 #
-# Bounded and self-exiting like every other capture here — `drifty.exe --gallery-page N`
+# Bounded and self-exiting like every other capture here — `circuit.exe --gallery-page N`
 # draws one page and quits, so this target never launches an interactive session.
 #
 # The output is a HUMAN-REVIEW artifact and deliberately not a GPU regression baseline: a
 # hundred cars behind an RMSE gate, on hardware that rasterizes differently per vendor, is a
 # maintenance sinkhole with no regression value. The checks that matter are headless — the
-# `corpus` scenario and `drifty_tests --dump-corpus-sheet`.
+# `corpus` scenario and `circuit_tests --dump-corpus-sheet`.
 GALLERY_PAGES ?= 7
 
 gallery: windows-only dev
@@ -711,7 +711,7 @@ else
 	    name=$$(basename $$target .c); \
 	    echo "  building $$name"; \
 	    mkdir -p $(ARTIFACTS)/fuzz/corpus/$$name; \
-	    $(CLANG) $(CSTD) $(INCLUDES) -O1 -g -DDRIFTY_HEADLESS \
+	    $(CLANG) $(CSTD) $(INCLUDES) -O1 -g -DCIRCUIT_HEADLESS \
 	        -fsanitize=fuzzer,address,undefined -fno-sanitize-recover=all \
 	        $$target $(FUZZ_SUPPORT_SRCS) \
 	        -o $(BUILD_FUZZ)/$$name $(RAYLIB_CFLAGS) -lm || exit 1; \
@@ -730,10 +730,10 @@ FUZZ_SECONDS ?= 20
 profile: windows-only
 	@if [ -f third_party/tracy/public/TracyClient.cpp ]; then \
 	    echo "Building with Tracy (third_party/tracy found)."; \
-	    DRIFTY_EXTRA_DEFINES=-DDRIFTY_TRACY ./build.sh; \
+	    CIRCUIT_EXTRA_DEFINES=-DCIRCUIT_TRACY ./build.sh; \
 	else \
 	    echo "third_party/tracy not present — building with the built-in zone timers."; \
-	    DRIFTY_EXTRA_DEFINES=-DDRIFTY_PROFILE ./build.sh; \
+	    CIRCUIT_EXTRA_DEFINES=-DCIRCUIT_PROFILE ./build.sh; \
 	fi
 
 # ------------------------------------------------------------------- aggregate check --
@@ -741,13 +741,13 @@ profile: windows-only
 ci: format-check lint-py lint analyze test-physics regression sanitize coverage
 	@echo ""
 	@echo "==============================================="
-ifdef DRIFTY_STRICT
-	@echo "ci: every check whose tool exists ran and passed (DRIFTY_STRICT)."
+ifdef CIRCUIT_STRICT
+	@echo "ci: every check whose tool exists ran and passed (CIRCUIT_STRICT)."
 	@echo "    A missing tool would have failed. Platform-limited checks can still skip:"
 	@echo "    on UCRT64 that is sanitize, which has no linkable ASan/UBSan runtime here."
 else
 	@echo "ci: core local checks passed; inspect any SKIP lines above."
-	@echo "    A SKIP is not a pass. Re-run with DRIFTY_STRICT=1 to make one fail."
+	@echo "    A SKIP is not a pass. Re-run with CIRCUIT_STRICT=1 to make one fail."
 endif
 
 # ---------------------------------------------------------------------- editor support --
@@ -767,9 +767,9 @@ compile-commands:
 clean:
 	rm -rf $(BUILD_DIR) coverage dist replays corpus
 	rm -rf $(ARTIFACTS)/fuzz $(ARTIFACTS)/plots $(ARTIFACTS)/screenshots
-	rm -f drifty$(EXE_SUFFIX) drifty_release$(EXE_SUFFIX) drifty_tests$(EXE_SUFFIX)
-	rm -f drifty_hotreload_harness$(EXE_SUFFIX)
-	rm -f drifty_tests_asan$(EXE_SUFFIX) drifty_tests_cov$(EXE_SUFFIX)
+	rm -f circuit$(EXE_SUFFIX) circuit_release$(EXE_SUFFIX) circuit_tests$(EXE_SUFFIX)
+	rm -f circuit_hotreload_harness$(EXE_SUFFIX)
+	rm -f circuit_tests_asan$(EXE_SUFFIX) circuit_tests_cov$(EXE_SUFFIX)
 	rm -f libraylib.dll raylib.dll glfw3.dll
 	rm -f *.gcda *.gcno *.gcov
 	rm -f mk_verify*.log

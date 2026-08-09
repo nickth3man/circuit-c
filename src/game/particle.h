@@ -7,8 +7,8 @@
  *
  * Phase 6 chunk [6c-1]: particle pool + spawn logic for the presentation backbone.
  */
-#ifndef DRIFTY_PARTICLE_H
-#define DRIFTY_PARTICLE_H
+#ifndef CIRCUIT_PARTICLE_H
+#define CIRCUIT_PARTICLE_H
 
 #include <stdbool.h>
 
@@ -42,4 +42,4 @@ void particle_pool_update(ParticlePool *pool, float dt);
 void particle_spawn(ParticlePool *pool, Vector2 worldPosM, Vector2 worldVelMps, float sizeM,
                     Color color);
 
-#endif /* DRIFTY_PARTICLE_H */
+#endif /* CIRCUIT_PARTICLE_H */

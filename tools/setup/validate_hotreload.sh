@@ -9,7 +9,7 @@ echo "== building module + harness =="
 ./build.sh --hotreload-harness
 
 echo "== running windowless harness =="
-./build/dev/drifty_hotreload_harness.exe
+./build/dev/circuit_hotreload_harness.exe
 
 echo "== failed compile must preserve build/dev/game.dll =="
 SUM_BEFORE="$(sha256sum build/dev/game.dll | awk '{print $1}')"

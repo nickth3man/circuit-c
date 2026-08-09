@@ -32,7 +32,7 @@ VehicleDrawState render_interpolate_vehicle(const VehicleRenderState *state, flo
     return out;
 }
 
-#if defined(DRIFTY_HEADLESS)
+#if defined(CIRCUIT_HEADLESS)
 void render_draw_game(struct Game *game, float interpolationAlpha)
 {
     (void)game;
@@ -153,7 +153,7 @@ void render_draw_game(struct Game *game, float interpolationAlpha)
      * nothing when the dev tools are not built in. */
     dev_lab_update(game);
 
-    DRIFTY_ZONE_BEGIN(render, "Render");
+    CIRCUIT_ZONE_BEGIN(render, "Render");
     const float renderDt = GetFrameTime();
     if (game->reloadFlashTimerS > 0.0f) {
         game->reloadFlashTimerS = fmaxf(0.0f, game->reloadFlashTimerS - renderDt);
@@ -220,16 +220,16 @@ void render_draw_game(struct Game *game, float interpolationAlpha)
     render_hud_draw_state_overlay(game);
 
     /* The lab paints over the HUD deliberately: when it is open it is what you are reading. */
-    DRIFTY_ZONE_BEGIN(lab, "PhysicsLab");
+    CIRCUIT_ZONE_BEGIN(lab, "PhysicsLab");
     dev_lab_draw_ui(game);
-    DRIFTY_ZONE_END(lab);
+    CIRCUIT_ZONE_END(lab);
 
     /* Inside the frame, because EndDrawing() below both flushes the batch and swaps: an
      * overlay drawn after game_draw() returns never reaches the buffer the capture reads. */
     render_draw_staged_validation_overlay();
 
     EndDrawing();
-    DRIFTY_ZONE_END(render);
-    DRIFTY_FRAME_MARK();
+    CIRCUIT_ZONE_END(render);
+    CIRCUIT_FRAME_MARK();
 }
 #endif

@@ -948,7 +948,7 @@ void physics_fixed_update(const VehicleSpec *spec, VehicleState *state, VehicleD
     }
 
     /* Constant across the four wheels: the slip at which the longitudinal curve peaks. */
-    const float peakSlip = tanf(DRIFTY_PI / (2.0f * spec->tireCLong)) / spec->tireBLong;
+    const float peakSlip = tanf(CIRCUIT_PI / (2.0f * spec->tireCLong)) / spec->tireBLong;
     for (int i = 0; i < WHEEL_COUNT; i++) {
         /* Body integration precedes wheel integration, so the brake/free-roll crossing
          * guard uses the updated contact speed rather than lagging one fixed tick behind. */
@@ -1010,7 +1010,7 @@ void physics_fixed_update(const VehicleSpec *spec, VehicleState *state, VehicleD
         locked_axle_equalize(state, WHEEL_REAR_LEFT, WHEEL_REAR_RIGHT);
     if (diffMode == DIFF_LOCKED && torques.totalGearRatio != 0.0f) {
         const float redlineWheelOmegaRadS =
-            spec->engineRedlineRpm * DRIFTY_TWO_PI / (60.0f * fabsf(torques.totalGearRatio));
+            spec->engineRedlineRpm * CIRCUIT_TWO_PI / (60.0f * fabsf(torques.totalGearRatio));
         if (frontShare > 0.0f)
             locked_axle_clamp_redline(state, WHEEL_FRONT_LEFT, WHEEL_FRONT_RIGHT,
                                       redlineWheelOmegaRadS);
