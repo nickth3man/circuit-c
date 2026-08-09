@@ -1183,7 +1183,7 @@ static void scenario_per_surface_asymmetry(void)
     check(opened, "surface asymmetry telemetry writer opened");
     /* Unload the track so the per-wheel surface query in game_fixed_update
      * does not overwrite our explicit surfaceId assignment. */
-    track_free(&game->track);
+    track_free(&game->trackDef);
 
     /* Cruise straight with no steer — confirm initial symmetry. */
     set_vehicle_rolling_speed(game, 12.0f);
@@ -1243,7 +1243,7 @@ static void scenario_open_diff(void)
     game_init(game);
     /* Unload the track so the per-wheel surface query in game_fixed_update
      * does not overwrite our explicit surfaceId assignment. */
-    track_free(&game->track);
+    track_free(&game->trackDef);
     game->spec.differentialMode = (float)DIFF_OPEN;
 
     /* Place the rear-left wheel on grass. */
@@ -1292,7 +1292,7 @@ static void scenario_lsd_diff(void)
     game->autoTrans.enabled = false;
     /* Unload the track so the per-wheel surface query in game_fixed_update
      * does not overwrite our explicit surfaceId assignment. */
-    track_free(&game->track);
+    track_free(&game->trackDef);
 
     /* Same setup as open-diff: rear-left on grass, full throttle from low speed. */
     game->vehicle.wheels[WHEEL_REAR_LEFT].surfaceId = SURFACE_GRASS;
@@ -1345,7 +1345,7 @@ static void scenario_locked_diff(void)
     game_init(game);
     /* Unload the track so the per-wheel surface query in game_fixed_update
      * does not overwrite our explicit surfaceId assignment. */
-    track_free(&game->track);
+    track_free(&game->trackDef);
     game->spec.differentialMode = (float)DIFF_LOCKED;
 
     /* Place the rear-left wheel on grass. */

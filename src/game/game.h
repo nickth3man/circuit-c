@@ -13,6 +13,9 @@
  *
  * Phase 2 extends the embedded canonical vehicle structures. This layout change requires
  * one platform restart; subsequent game-module-only edits preserve the block normally.
+ *
+ * Splitting Track into TrackDefinition/TrackRuntime/RacerProgress is likewise a layout
+ * change, so it too costs one platform restart.
  */
 #ifndef CIRCUIT_GAME_H
 #define CIRCUIT_GAME_H
@@ -82,7 +85,14 @@ struct Game {
     VehicleState vehicle;
     VehicleDerived derived;
     VehicleRenderState renderState;
-    Track track;
+    /* Track ownership is split three ways: `trackDef` is immutable authored content shared by
+     * every entrant, `trackRuntime` is session-wide mutable track state, and `progress` is
+     * THIS entrant's lap cursor. Today there is exactly one entrant, so exactly one
+     * RacerProgress lives here; it moves into RaceEntrant when multi-car storage lands.
+     * See docs/SIMULATION_OWNERSHIP.md. */
+    TrackDefinition trackDef;
+    TrackRuntime trackRuntime;
+    RacerProgress progress;
     /* What the checkpoint test saw on the most recent fixed tick. Plain value data, rewritten
      * every tick, and excluded from the state checksum because it is a report about the
      * simulation rather than part of it. */

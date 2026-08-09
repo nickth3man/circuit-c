@@ -109,8 +109,8 @@ static void draw_overlay_results(const Game *game)
     draw_text_centered_shadow("RUN COMPLETE", 196, 40, COL_TEXT);
 
     /* Lap time is the primary result now. */
-    const int mins = (int)(game->track.lastLapTimeS / 60.0f);
-    const float secs = game->track.lastLapTimeS - (float)mins * 60.0f;
+    const int mins = (int)(game->progress.lastLapTimeS / 60.0f);
+    const float secs = game->progress.lastLapTimeS - (float)mins * 60.0f;
     draw_text_centered_shadow(TextFormat("%d:%05.2f", mins, (double)secs), 286, 56, COL_ACCENT);
     draw_text_centered("LAP TIME", 352, 16, COL_TEXT_DIM);
 
@@ -159,20 +159,20 @@ void render_hud_draw_arcade(const Game *game)
         const Rectangle panel = { (SCREEN_W - 360.0f) * 0.5f, 16.0f, 360.0f, 56.0f };
         draw_hud_panel(panel);
 
-        int shownLap = game->track.lap + 1;
+        int shownLap = game->progress.lap + 1;
         if (shownLap > RESULTS_TARGET_LAPS) shownLap = RESULTS_TARGET_LAPS;
         DrawText(TextFormat("LAP %d/%d", shownLap, RESULTS_TARGET_LAPS), (int)panel.x + 16,
                  (int)panel.y + 18, 18, COL_TEXT);
 
-        const int minutes = (int)(game->track.lapTimerS / 60.0f);
-        const float seconds = game->track.lapTimerS - (float)minutes * 60.0f;
+        const int minutes = (int)(game->progress.lapTimerS / 60.0f);
+        const float seconds = game->progress.lapTimerS - (float)minutes * 60.0f;
         const char *timerText = TextFormat("%d:%05.2f", minutes, (double)seconds);
         DrawText(timerText,
                  (int)(panel.x + (panel.width - (float)MeasureText(timerText, 22)) * 0.5f),
                  (int)panel.y + 16, 22, COL_TEXT);
 
-        const char *cpText =
-            TextFormat("CP %d/%d", game->track.nextCheckpoint, game->track.checkpointCount);
+        const char *cpText = TextFormat("CP %d/%d", game->progress.nextCheckpoint,
+                                        game->trackDef.checkpointCount);
         DrawText(cpText, (int)(panel.x + panel.width) - 16 - MeasureText(cpText, 18),
                  (int)panel.y + 18, 18, COL_TEXT_DIM);
     }
@@ -379,11 +379,11 @@ void render_hud_draw_diagnostics(const Game *game, float alpha)
                             (double)game->renderPixelsPerMeter),
                  dim);
         hud_line(14, &y,
-                 TextFormat("Lap: %d  Timer: %d:%05.2f  Checkpoint: %d / %d", game->track.lap,
-                            (int)(game->track.lapTimerS / 60.0f),
-                            (double)(game->track.lapTimerS -
-                                     (float)(int)(game->track.lapTimerS / 60.0f) * 60.0f),
-                            game->track.nextCheckpoint, game->track.checkpointCount),
+                 TextFormat("Lap: %d  Timer: %d:%05.2f  Checkpoint: %d / %d",
+                            game->progress.lap, (int)(game->progress.lapTimerS / 60.0f),
+                            (double)(game->progress.lapTimerS -
+                                     (float)(int)(game->progress.lapTimerS / 60.0f) * 60.0f),
+                            game->progress.nextCheckpoint, game->trackDef.checkpointCount),
                  label);
         {
             hud_line(

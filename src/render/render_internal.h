@@ -22,7 +22,9 @@ extern const Color COL_PANEL_EDGE;
 extern const Color COL_DIM_SCREEN;
 
 /* The world pass, drawn into the low-resolution target inside BeginMode2D. */
-void render_world_draw_track(const Track *track, float ppm);
+/* `progress` supplies the next-gate highlight; NULL draws every gate dim. */
+void render_world_draw_track(const TrackDefinition *track, const RacerProgress *progress,
+                             float ppm);
 void render_world_draw_particles(const Game *game);
 void render_world_draw_debug(const Game *game, const VehicleDrawState *draw);
 

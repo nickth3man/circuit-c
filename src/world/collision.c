@@ -201,9 +201,11 @@ static bool resolve_circle_barrier(const VehicleSpec *spec, VehicleState *state,
 /* ====================================================================================== */
 
 int collision_resolve_track(const VehicleSpec *spec, VehicleState *state,
-                            VehicleRenderState *renderState, const Track *track,
-                            float *crashLockoutTimerS)
+                            VehicleRenderState *renderState, const TrackDefinition *track,
+                            const TrackRuntime *runtime, float *crashLockoutTimerS)
 {
+    (void)runtime; /* barriers are pure definition geometry today; see the header */
+
     if (spec == NULL || state == NULL || renderState == NULL || track == NULL ||
         track->nodes == NULL || track->count < 2) {
         return 0;

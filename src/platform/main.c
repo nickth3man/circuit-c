@@ -610,10 +610,10 @@ static int run_validate_lap(Game *game, const Options *options)
 
     replay_begin_recording(&game->replay, game->sim.tick);
 
-    for (int t = 0; t < budgetTicks && game->track.lap < VALIDATION_RUN_LAPS && !writeFailed;
+    for (int t = 0; t < budgetTicks && game->progress.lap < VALIDATION_RUN_LAPS && !writeFailed;
          t++) {
-        ai_driver_update(&aiCfg, &aiState, &game->track, &game->vehicle, &game->derived,
-                         &game->spec, &game->input, FIXED_DT_S);
+        ai_driver_update(&aiCfg, &aiState, &game->trackDef, &game->trackRuntime, &game->vehicle,
+                         &game->derived, &game->spec, &game->input, FIXED_DT_S);
         game_fixed_update(game, FIXED_DT_S);
         ticksRun++;
 
@@ -641,10 +641,10 @@ static int run_validate_lap(Game *game, const Options *options)
                 vod.carId = carId;
                 vod.carDisplayName = car_roster_display_name(carIndex);
                 vod.elapsedS = (float)game->sim.tick * FIXED_DT_S;
-                vod.checkpointIndex = game->track.nextCheckpoint;
-                vod.checkpointTotal = game->track.checkpointCount;
+                vod.checkpointIndex = game->progress.nextCheckpoint;
+                vod.checkpointTotal = game->trackDef.checkpointCount;
                 vod.speedMps = game->derived.speedMps;
-                vod.lapState = (game->track.lap < 1) ? 0 : 1;
+                vod.lapState = (game->progress.lap < 1) ? 0 : 1;
                 vod.isPassing = (outOfOrder == 0 && allFinite);
                 vod.steerInput = game->input.steer;
                 vod.throttleInput = game->input.throttle;
@@ -679,10 +679,10 @@ static int run_validate_lap(Game *game, const Options *options)
             vod.carId = carId;
             vod.carDisplayName = car_roster_display_name(carIndex);
             vod.elapsedS = (float)game->sim.tick * FIXED_DT_S;
-            vod.checkpointIndex = game->track.nextCheckpoint;
-            vod.checkpointTotal = game->track.checkpointCount;
+            vod.checkpointIndex = game->progress.nextCheckpoint;
+            vod.checkpointTotal = game->trackDef.checkpointCount;
             vod.speedMps = game->derived.speedMps;
-            vod.lapState = (game->track.lap < 1) ? 0 : 1;
+            vod.lapState = (game->progress.lap < 1) ? 0 : 1;
             vod.isPassing = (outOfOrder == 0 && allFinite);
             vod.steerInput = game->input.steer;
             vod.throttleInput = game->input.throttle;
@@ -721,7 +721,7 @@ static int run_validate_lap(Game *game, const Options *options)
         status = RUN_FAIL_VIDEO_ENCODE_FAILED;
     } else if (outOfOrder > 0) {
         status = RUN_FAIL_CHECKPOINT_OUT_OF_ORDER;
-    } else if (game->track.lap < VALIDATION_RUN_LAPS) {
+    } else if (game->progress.lap < VALIDATION_RUN_LAPS) {
         status = RUN_FAIL_CHECKPOINT_MISSED;
     } else if (ticksRun >= budgetTicks) {
         status = RUN_FAIL_TICK_BUDGET_EXCEEDED;
@@ -732,13 +732,13 @@ static int run_validate_lap(Game *game, const Options *options)
 
     char geometryHashHex[16];
     snprintf(geometryHashHex, sizeof(geometryHashHex), "%08x",
-             track_geometry_hash(&game->track));
+             track_geometry_hash(&game->trackDef));
 
     bool replaySaved =
         dev_replay_save(&game->replay, replayPath, "validate-lap", 0u, game->stateChecksum);
 
     char runId[128];
-    snprintf(runId, sizeof(runId), "%s-%s-start%d", game->track.id, carId,
+    snprintf(runId, sizeof(runId), "%s-%s-start%d", game->trackDef.id, carId,
              options->startCheckpoint);
 
     RunReportInput rep;
@@ -749,11 +749,11 @@ static int run_validate_lap(Game *game, const Options *options)
     rep.carDrivetrain = car_roster_layout_name(carIndex);
     rep.carMassKg = (double)game->spec.massKg;
     rep.carSpecHash = specHashHex;
-    rep.trackId = game->track.id;
-    rep.trackVersion = game->track.version;
+    rep.trackId = game->trackDef.id;
+    rep.trackVersion = game->trackDef.version;
     rep.trackGeometryHash = geometryHashHex;
-    rep.trackCheckpointCount = game->track.checkpointCount;
-    rep.trackLengthM = (double)track_length_m(&game->track);
+    rep.trackCheckpointCount = game->trackDef.checkpointCount;
+    rep.trackLengthM = (double)track_length_m(&game->trackDef);
     rep.startCheckpointIndex = options->startCheckpoint;
     rep.fixedHz = FIXED_HZ;
     rep.telemetryHz = VIDEO_FPS;
@@ -767,7 +767,7 @@ static int run_validate_lap(Game *game, const Options *options)
     rep.status = status;
     rep.checkpointsPassed = metrics.checkpointsPassed;
     rep.checkpointsMissed =
-        (status == RUN_PASS) ? 0 : (game->track.checkpointCount - metrics.checkpointsPassed);
+        (status == RUN_PASS) ? 0 : (game->trackDef.checkpointCount - metrics.checkpointsPassed);
     rep.outOfOrderEvents = outOfOrder;
     rep.metrics = &metrics;
     rep.hasVideo = (!options->noVideo && pipe != NULL && !writeFailed);
@@ -783,8 +783,9 @@ static int run_validate_lap(Game *game, const Options *options)
         snprintf(failureText, sizeof(failureText),
                  "validate-lap %s: %s (laps %d/2, %d checkpoint crossings over %d per lap, "
                  "out-of-order %d, ticks %d/%d)",
-                 runId, run_failure_reason(status), game->track.lap, metrics.checkpointsPassed,
-                 game->track.checkpointCount, outOfOrder, ticksRun, budgetTicks);
+                 runId, run_failure_reason(status), game->progress.lap,
+                 metrics.checkpointsPassed, game->trackDef.checkpointCount, outOfOrder,
+                 ticksRun, budgetTicks);
 
         FailureBundle bundle;
         memset(&bundle, 0, sizeof(bundle));

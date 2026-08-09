@@ -63,7 +63,7 @@ static float nearest_centerline_distance_sq(const TrackNode *nodes, int count, V
 
 /* --------------- public API -------------------------------------------------------------- */
 
-void track_init(Track *track)
+void track_init(TrackDefinition *track)
 {
     if (track == NULL) return;
     /* Defensive: free any previously-allocated state first. */
@@ -102,20 +102,14 @@ void track_init(Track *track)
     track->runoffSurfaceId = SURFACE_GRASS;
 
     /* The lot is an open area, not a circuit, but the perimeter still carries gates so that
-     * lap bookkeeping behaves identically to before gates became explicit data. Progress
-     * starts at gate 0 rather than at track_reset_progress()'s post-start gate: nothing here
-     * is a standing start on a finish line. */
+     * lap bookkeeping behaves identically to before gates became explicit data. A racer's
+     * starting gate is now that racer's business: see track_reset_progress_at(). */
     track_build_checkpoints_from_nodes(track);
-    track->nextCheckpoint = 0;
-    track->lap = 0;
-    track->lapStartCheckpoint = 0;
-    track->lapTimerS = 0.0f;
-    track->lastLapTimeS = 0.0f;
     snprintf(track->id, sizeof(track->id), "%s", "parking_lot");
     snprintf(track->version, sizeof(track->version), "%s", "v1");
 }
 
-void track_free(Track *track)
+void track_free(TrackDefinition *track)
 {
     if (track == NULL) return;
     free(track->nodes);
@@ -126,17 +120,30 @@ void track_free(Track *track)
     track->checkpointCount = 0;
     track->offTrackSurfaceId = SURFACE_ASPHALT;
     track->runoffSurfaceId = SURFACE_ASPHALT;
-    track->nextCheckpoint = 0;
-    track->lap = 0;
-    track->lapStartCheckpoint = 0;
-    track->lapTimerS = 0.0f;
-    track->lastLapTimeS = 0.0f;
     track->id[0] = '\0';
     track->version[0] = '\0';
 }
 
-SurfaceId Track_SurfaceAt(const Track *track, Vector2 pointM)
+void track_runtime_bind(TrackRuntime *runtime, const TrackDefinition *track)
 {
+    if (runtime == NULL) return;
+    runtime->definitionHash = track_geometry_hash(track);
+}
+
+bool track_runtime_definition_unchanged(const TrackRuntime *runtime,
+                                        const TrackDefinition *track)
+{
+    if (runtime == NULL) return false;
+    return runtime->definitionHash == track_geometry_hash(track);
+}
+
+SurfaceId Track_SurfaceAt(const TrackDefinition *track, const TrackRuntime *runtime,
+                          Vector2 pointM)
+{
+    /* Accepted now so #39/#41 can add cached queries and wetness without moving every call
+     * site again; the surface a point sits on is pure definition geometry today. */
+    (void)runtime;
+
     /* Headless tests and scenarios that don't initialise a track hit this safe default, so
      * existing scenarios remain on asphalt and their CSVs are unchanged. */
     if (track == NULL || track->nodes == NULL || track->count <= 0) {
@@ -169,7 +176,8 @@ SurfaceId Track_SurfaceAt(const Track *track, Vector2 pointM)
     return track->offTrackSurfaceId;
 }
 
-float track_distance_to_centerline_m(const Track *track, Vector2 pointM, float *halfWidthM)
+float track_distance_to_centerline_m(const TrackDefinition *track, Vector2 pointM,
+                                     float *halfWidthM)
 {
     if (track == NULL || track->nodes == NULL || track->count <= 0) {
         if (halfWidthM != NULL) *halfWidthM = 0.0f;
@@ -300,7 +308,7 @@ static float chicane_offset_at(float u)
     return CHICANE_OFFSET_M * s * s;
 }
 
-void track_load_chicane(Track *track)
+void track_load_chicane(TrackDefinition *track)
 {
     if (track == NULL) return;
     track_free(track);
@@ -399,10 +407,8 @@ void track_load_chicane(Track *track)
         { { -halfX - radius, radius }, { 0.0f, -1.0f }, GATE_HALF_WIDTH_M, true },
     };
     memcpy(track->checkpoints, gates, sizeof(gates));
-
-    track_reset_progress(track);
 }
-void track_load_sprint(Track *track)
+void track_load_sprint(TrackDefinition *track)
 {
     if (track == NULL) return;
 
@@ -429,9 +435,8 @@ void track_load_sprint(Track *track)
     }
     snprintf(track->id, sizeof(track->id), "%s", "sprint");
     snprintf(track->version, sizeof(track->version), "%s", "sprint_v1");
-    track_reset_progress(track);
 }
-void track_load_technical(Track *track)
+void track_load_technical(TrackDefinition *track)
 {
     if (track == NULL) return;
 
@@ -471,10 +476,9 @@ void track_load_technical(Track *track)
     }
     snprintf(track->id, sizeof(track->id), "%s", "technical");
     snprintf(track->version, sizeof(track->version), "%s", "technical_v1");
-    track_reset_progress(track);
 }
 
-bool track_build_checkpoints_from_nodes(Track *track)
+bool track_build_checkpoints_from_nodes(TrackDefinition *track)
 {
     if (track == NULL || track->nodes == NULL || track->count <= 0) return false;
 
@@ -504,29 +508,25 @@ bool track_build_checkpoints_from_nodes(Track *track)
     return true;
 }
 
-void track_reset_progress_at(Track *track, int startCheckpointIndex)
+void track_reset_progress_at(RacerProgress *progress, const TrackDefinition *track,
+                             int startCheckpointIndex)
 {
-    if (track == NULL) return;
-    track->lap = 0;
-    track->lapTimerS = 0.0f;
-    track->lastLapTimeS = 0.0f;
-    if (track->checkpointCount <= 0) {
-        track->nextCheckpoint = 0;
-        track->lapStartCheckpoint = 0;
+    if (progress == NULL) return;
+    progress->lap = 0;
+    progress->lapTimerS = 0.0f;
+    progress->lastLapTimeS = 0.0f;
+    if (track == NULL || track->checkpointCount <= 0) {
+        progress->nextCheckpoint = 0;
+        progress->lapStartCheckpoint = 0;
         return;
     }
     if (startCheckpointIndex < 0 || startCheckpointIndex >= track->checkpointCount)
         startCheckpointIndex = 0;
-    track->lapStartCheckpoint = startCheckpointIndex;
-    track->nextCheckpoint = (startCheckpointIndex + 1) % track->checkpointCount;
+    progress->lapStartCheckpoint = startCheckpointIndex;
+    progress->nextCheckpoint = (startCheckpointIndex + 1) % track->checkpointCount;
 }
 
-void track_reset_progress(Track *track)
-{
-    track_reset_progress_at(track, 0);
-}
-
-bool track_start_pose_at(const Track *track, int checkpointIndex, Vector2 *positionM,
+bool track_start_pose_at(const TrackDefinition *track, int checkpointIndex, Vector2 *positionM,
                          float *headingRad)
 {
     if (track == NULL || track->checkpoints == NULL || track->checkpointCount <= 0)
@@ -538,7 +538,7 @@ bool track_start_pose_at(const Track *track, int checkpointIndex, Vector2 *posit
     return true;
 }
 
-bool track_start_pose(const Track *track, Vector2 *positionM, float *headingRad)
+bool track_start_pose(const TrackDefinition *track, Vector2 *positionM, float *headingRad)
 {
     return track_start_pose_at(track, 0, positionM, headingRad);
 }
@@ -555,7 +555,7 @@ static uint32_t hash_f32(uint32_t h, float value)
     return h;
 }
 
-uint32_t track_geometry_hash(const Track *track)
+uint32_t track_geometry_hash(const TrackDefinition *track)
 {
     if (track == NULL) return 0u;
     uint32_t h = FNV1A_OFFSET_BASIS;
@@ -579,7 +579,7 @@ uint32_t track_geometry_hash(const Track *track)
     return h;
 }
 
-float track_length_m(const Track *track)
+float track_length_m(const TrackDefinition *track)
 {
     if (track == NULL || track->nodes == NULL || track->count <= 1) return 0.0f;
     float total = 0.0f;
@@ -609,16 +609,19 @@ static bool gate_crossed(const Checkpoint *gate, Vector2 prevPosM, Vector2 currP
     return segments_intersect(prevPosM, currPosM, gateA, gateB);
 }
 
-TrackCheckpointEvent track_update_checkpoints(Track *track, Vector2 prevPosM, Vector2 currPosM)
+TrackCheckpointEvent track_update_checkpoints(const TrackDefinition *track,
+                                              RacerProgress *progress, Vector2 prevPosM,
+                                              Vector2 currPosM)
 {
     TrackCheckpointEvent event;
     memset(&event, 0, sizeof(event));
     event.index = -1;
 
-    if (track == NULL || track->checkpoints == NULL || track->checkpointCount <= 0)
+    if (track == NULL || progress == NULL || track->checkpoints == NULL ||
+        track->checkpointCount <= 0)
         return event;
 
-    const int expected = track->nextCheckpoint;
+    const int expected = progress->nextCheckpoint;
 
     /*
      * Test the expected gate first, then every other one. Order matters: a car doing the
@@ -647,19 +650,19 @@ TrackCheckpointEvent track_update_checkpoints(Track *track, Vector2 prevPosM, Ve
     if (!event.crossed || event.outOfOrder) return event;
 
     /* Only the expected gate advances progress. */
-    track->nextCheckpoint++;
-    if (track->nextCheckpoint >= track->checkpointCount) {
-        track->nextCheckpoint = 0;
+    progress->nextCheckpoint++;
+    if (progress->nextCheckpoint >= track->checkpointCount) {
+        progress->nextCheckpoint = 0;
     }
 
     /* A lap closes when the ordered route returns to the gate where this run started. */
-    const int lapCloseNext = (track->lapStartCheckpoint + 1) % track->checkpointCount;
-    if (track->nextCheckpoint == lapCloseNext || track->checkpointCount == 1) {
-        track->lap++;
+    const int lapCloseNext = (progress->lapStartCheckpoint + 1) % track->checkpointCount;
+    if (progress->nextCheckpoint == lapCloseNext || track->checkpointCount == 1) {
+        progress->lap++;
         event.lapCompleted = true;
-        event.lapTimeS = track->lapTimerS;
-        track->lastLapTimeS = track->lapTimerS;
-        track->lapTimerS = 0.0f;
+        event.lapTimeS = progress->lapTimerS;
+        progress->lastLapTimeS = progress->lapTimerS;
+        progress->lapTimerS = 0.0f;
     }
 
     return event;

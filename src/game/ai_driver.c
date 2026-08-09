@@ -194,7 +194,7 @@ static float menger_curvature(Vector2 a, Vector2 b, Vector2 c)
 
 /* Unit normal to the centreline at node i, pointing left of travel. Taken from the chord
  * between the node's neighbours so it is the tangent of the curve rather than of one segment. */
-static Vector2 node_normal(const Track *track, int i)
+static Vector2 node_normal(const TrackDefinition *track, int i)
 {
     const int count = track->count;
     const Vector2 prev = track->nodes[(i - 1 + count) % count].centerM;
@@ -206,14 +206,15 @@ static Vector2 node_normal(const Track *track, int i)
 }
 
 /* How far either side of the centreline a planned point may sit at node i. */
-static float usable_half_width(const Track *track, int i, float marginM)
+static float usable_half_width(const TrackDefinition *track, int i, float marginM)
 {
     const float usable = track->nodes[i].halfWidthM - marginM;
     return (usable > 0.0f) ? usable : 0.0f;
 }
 
 /* The planned lateral offset at a centreline node, or 0 (the centreline) outside the window. */
-static float plan_offset_at(const AiDriverState *state, const Track *track, int nodeIndex)
+static float plan_offset_at(const AiDriverState *state, const TrackDefinition *track,
+                            int nodeIndex)
 {
     if (state->planLayerCount <= 0) return 0.0f;
     const int count = track->count;
@@ -221,7 +222,8 @@ static float plan_offset_at(const AiDriverState *state, const Track *track, int 
     return (rel < state->planLayerCount) ? state->planOffsetM[rel] : 0.0f;
 }
 
-Vector2 ai_driver_plan_point(const AiDriverState *state, const Track *track, int nodeIndex)
+Vector2 ai_driver_plan_point(const AiDriverState *state, const TrackDefinition *track,
+                             int nodeIndex)
 {
     if (state == NULL || track == NULL || track->nodes == NULL || track->count < 3)
         return (Vector2){ 0.0f, 0.0f };
@@ -241,8 +243,8 @@ Vector2 ai_driver_plan_point(const AiDriverState *state, const Track *track, int
  *
  * The walk is capped at one lap so a lookahead longer than the circuit cannot spin forever.
  */
-static Vector2 plan_point_ahead(const AiDriverState *state, const Track *track, int segment,
-                                float t, float distanceM)
+static Vector2 plan_point_ahead(const AiDriverState *state, const TrackDefinition *track,
+                                int segment, float t, float distanceM)
 {
     const int count = track->count;
     const Vector2 a = ai_driver_plan_point(state, track, segment);
@@ -293,8 +295,8 @@ static Vector2 plan_point_ahead(const AiDriverState *state, const Track *track, 
  * table AI_PLAN_OFFSETS^2 wide and the transition cost O(AI_PLAN_OFFSETS) — the reason the
  * offset count is the parameter worth keeping small.
  */
-static void plan_path(const AiDriverConfig *cfg, AiDriverState *state, const Track *track,
-                      int baseSegment, float carOffsetM)
+static void plan_path(const AiDriverConfig *cfg, AiDriverState *state,
+                      const TrackDefinition *track, int baseSegment, float carOffsetM)
 {
     const int count = track->count;
     const int layers = (count < AI_PLAN_LAYERS) ? count : AI_PLAN_LAYERS;
@@ -420,11 +422,12 @@ static void plan_path(const AiDriverConfig *cfg, AiDriverState *state, const Tra
  * the tyres fitted and the surface under the car. Composed exactly the way physics.c composes
  * them, so the driver's expectation and the car's behaviour cannot silently diverge.
  */
-static void available_grip(const VehicleSpec *spec, const Track *track, Vector2 positionM,
-                           float *muLatOut, float *muLongOut)
+static void available_grip(const VehicleSpec *spec, const TrackDefinition *track,
+                           const TrackRuntime *runtime, Vector2 positionM, float *muLatOut,
+                           float *muLongOut)
 {
-    const SurfaceId id =
-        (track != NULL) ? Track_SurfaceAt(track, positionM) : (SurfaceId)SURFACE_ASPHALT;
+    const SurfaceId id = (track != NULL) ? Track_SurfaceAt(track, runtime, positionM)
+                                         : (SurfaceId)SURFACE_ASPHALT;
     const SurfaceSpec *surface = Surface_Get(id);
 
     const float tyreMu = minf(spec->tireMuLatFront, spec->tireMuLatRear);
@@ -435,7 +438,8 @@ static void available_grip(const VehicleSpec *spec, const Track *track, Vector2 
 
 /* ------------------------------------------------------------------------------------- */
 
-void ai_driver_update(const AiDriverConfig *cfg, AiDriverState *state, const Track *track,
+void ai_driver_update(const AiDriverConfig *cfg, AiDriverState *state,
+                      const TrackDefinition *track, const TrackRuntime *runtime,
                       const VehicleState *vehicle, const VehicleDerived *derived,
                       const VehicleSpec *spec, Input *out, float dt)
 {
@@ -548,7 +552,7 @@ void ai_driver_update(const AiDriverConfig *cfg, AiDriverState *state, const Tra
 
     /* --- Speed target --- */
     float muLat = 1.0f, muLong = 1.0f;
-    available_grip(spec, track, posM, &muLat, &muLong);
+    available_grip(spec, track, runtime, posM, &muLat, &muLong);
     const float latAccelLimit = maxf(cfg->corneringGripFraction * muLat * GRAVITY_MPS2, 0.1f);
     const float brakeAccelLimit = maxf(cfg->brakeGripFraction * muLong * GRAVITY_MPS2, 0.1f);
 

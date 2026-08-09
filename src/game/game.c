@@ -103,6 +103,17 @@ GAME_API uint32_t game_state_checksum(const Game *game)
         h = hash_u32(h, wheel->locked ? 1u : 0u);
         h = hash_u32(h, (uint32_t)wheel->surfaceId);
     }
+
+    /* Route progress is authoritative simulation state: it decides when a lap closes and when
+     * the run ends, so a replay that diverged on it was previously undetectable. The bound
+     * definition hash is deliberately NOT hashed here — an immutable input belongs to the
+     * session compatibility digest, not to the rolling checksum. */
+    const RacerProgress *p = &game->progress;
+    h = hash_u32(h, (uint32_t)p->nextCheckpoint);
+    h = hash_u32(h, (uint32_t)p->lap);
+    h = hash_u32(h, (uint32_t)p->lapStartCheckpoint);
+    h = hash_f32(h, p->lapTimerS);
+    h = hash_f32(h, p->lastLapTimeS);
     return h;
 }
 
@@ -126,13 +137,15 @@ GAME_API bool game_configure_run(Game *game, const GameRunConfig *config)
     if (game == NULL || config == NULL) return false;
 
     switch (config->track) {
-        case GAME_TRACK_PARKING_LOT: track_init(&game->track); break;
-        case GAME_TRACK_CHICANE: track_load_chicane(&game->track); break;
-        case GAME_TRACK_SPRINT: track_load_sprint(&game->track); break;
-        case GAME_TRACK_TECHNICAL: track_load_technical(&game->track); break;
+        case GAME_TRACK_PARKING_LOT: track_init(&game->trackDef); break;
+        case GAME_TRACK_CHICANE: track_load_chicane(&game->trackDef); break;
+        case GAME_TRACK_SPRINT: track_load_sprint(&game->trackDef); break;
+        case GAME_TRACK_TECHNICAL: track_load_technical(&game->trackDef); break;
         case GAME_TRACK_KEEP: break;
         default: return false;
     }
+    if (config->track != GAME_TRACK_KEEP)
+        track_runtime_bind(&game->trackRuntime, &game->trackDef);
 
     game->dev.cameraZoomOverride = config->cameraZoomOverride;
     game->targetLaps = (config->targetLaps > 0) ? config->targetLaps : RESULTS_TARGET_LAPS;
@@ -152,7 +165,8 @@ GAME_API bool game_spawn_on_track_at(Game *game, int checkpointIndex)
 
     Vector2 startM = { 0.0f, 0.0f };
     float headingRad = 0.0f;
-    if (!track_start_pose_at(&game->track, checkpointIndex, &startM, &headingRad)) return false;
+    if (!track_start_pose_at(&game->trackDef, checkpointIndex, &startM, &headingRad))
+        return false;
 
     /* Reset first, then place: vehicle_state_reset() puts the car at the world origin, so
      * doing it the other way round would throw the pose away. */
@@ -167,7 +181,7 @@ GAME_API bool game_spawn_on_track_at(Game *game, int checkpointIndex)
     game->renderState.prevHeadingRad = headingRad;
     game->renderState.currHeadingRad = headingRad;
 
-    track_reset_progress_at(&game->track, checkpointIndex);
+    track_reset_progress_at(&game->progress, &game->trackDef, checkpointIndex);
     memset(&game->lastCheckpointEvent, 0, sizeof(game->lastCheckpointEvent));
     game->lastCheckpointEvent.index = -1;
 
@@ -273,7 +287,8 @@ GAME_API void game_init(Game *game)
         SetGamepadMappings(gamepadMappings);
         UnloadFileText(gamepadMappings);
     }
-    track_init(&game->track);
+    track_init(&game->trackDef);
+    track_runtime_bind(&game->trackRuntime, &game->trackDef);
     audio_init();
 #endif
     game->stateChecksum = game_state_checksum(game);
@@ -371,11 +386,12 @@ GAME_API void game_fixed_update(Game *game, float dt)
          *
          * Guarded: skip when no track is loaded so tests and scenarios that explicitly set
          * per-wheel surfaceId are not overwritten. */
-        if (game->track.nodes != NULL && game->track.count > 0) {
+        if (game->trackDef.nodes != NULL && game->trackDef.count > 0) {
             for (int i = 0; i < WHEEL_COUNT; i++) {
                 const Vector2 worldContact =
                     physics_wheel_world_position(&game->vehicle, (WheelId)i);
-                game->vehicle.wheels[i].surfaceId = Track_SurfaceAt(&game->track, worldContact);
+                game->vehicle.wheels[i].surfaceId =
+                    Track_SurfaceAt(&game->trackDef, &game->trackRuntime, worldContact);
             }
         }
         physics_fixed_update(&game->spec, &game->vehicle, &game->derived, &game->renderState,
@@ -385,14 +401,14 @@ GAME_API void game_fixed_update(Game *game, float dt)
         /* Checkpoint crossing: check whether the car passed a gate this tick. The event is
          * kept for the tick so telemetry and the validation runner can record which gate was
          * taken, and whether it was taken out of order. */
-        if (game->track.nodes != NULL && game->track.count > 0) {
-            TrackCheckpointEvent ev = track_update_checkpoints(&game->track, startPosM,
-                                                               game->renderState.currPositionM);
+        if (game->trackDef.nodes != NULL && game->trackDef.count > 0) {
+            TrackCheckpointEvent ev = track_update_checkpoints(
+                &game->trackDef, &game->progress, startPosM, game->renderState.currPositionM);
             game->lastCheckpointEvent = ev;
             if (ev.crossed) {
                 game->pendingTelemetryCheckpointEvent = ev;
             }
-            game->track.lapTimerS += dt;
+            game->progress.lapTimerS += dt;
         } else {
             memset(&game->lastCheckpointEvent, 0, sizeof(game->lastCheckpointEvent));
             game->lastCheckpointEvent.index = -1;
@@ -408,10 +424,11 @@ GAME_API void game_fixed_update(Game *game, float dt)
         }
 
         /* Collision with track barriers. */
-        if (game->track.nodes != NULL && game->track.count > 0) {
+        if (game->trackDef.nodes != NULL && game->trackDef.count > 0) {
             float oldLockout = game->crashLockoutTimerS;
             collision_resolve_track(&game->spec, &game->vehicle, &game->renderState,
-                                    &game->track, &game->crashLockoutTimerS);
+                                    &game->trackDef, &game->trackRuntime,
+                                    &game->crashLockoutTimerS);
             if (game->crashLockoutTimerS > oldLockout) {
                 audio_play_collision_thud();
             }
@@ -424,7 +441,7 @@ GAME_API void game_fixed_update(Game *game, float dt)
 
         /* Results trigger: when the run's target lap count is reached, transition to
          * STATE_RESULTS. The car is no longer simulated after this tick. */
-        if (game->track.lap >= game->targetLaps) {
+        if (game->progress.lap >= game->targetLaps) {
             game->state = STATE_RESULTS;
         }
 
@@ -480,7 +497,7 @@ GAME_API void game_draw(Game *game, float interpolationAlpha)
 GAME_API void game_shutdown(Game *game)
 {
     if (game != NULL) {
-        track_free(&game->track);
+        track_free(&game->trackDef);
     }
     (void)game;
 }
@@ -493,7 +510,7 @@ GAME_API void game_draw(Game *game, float interpolationAlpha)
 GAME_API void game_shutdown(Game *game)
 {
     if (game == NULL) return;
-    track_free(&game->track);
+    track_free(&game->trackDef);
     audio_shutdown();
     render_shutdown();
     TRACELOG(LOG_INFO, "GAME: shutdown after %llu fixed ticks (checksum %08x)",
@@ -612,15 +629,15 @@ GAME_API TelemetryRow game_telemetry_row(const Game *game, int substepCount)
     row.surfaceRearRight = game->vehicle.wheels[WHEEL_REAR_RIGHT].surfaceId;
 
     /* Phase 5 lap-validation columns. */
-    row.checkpointIndex = game->track.nextCheckpoint;
-    row.lapIndex = game->track.lap;
-    row.lapState = (game->track.lap < 1) ? 0 : 1;
+    row.checkpointIndex = game->progress.nextCheckpoint;
+    row.lapIndex = game->progress.lap;
+    row.lapState = (game->progress.lap < 1) ? 0 : 1;
     row.checkpointEvent = encode_checkpoint_event(&game->pendingTelemetryCheckpointEvent);
     /* Consume the 60 Hz telemetry event latch so it is sampled exactly once into CSV/metrics. */
     ((Game *)game)->pendingTelemetryCheckpointEvent.crossed = false;
     row.crashLockoutS = game->crashLockoutTimerS;
     row.distanceToCenterlineM =
-        track_distance_to_centerline_m(&game->track, game->vehicle.positionM, NULL);
+        track_distance_to_centerline_m(&game->trackDef, game->vehicle.positionM, NULL);
     row.onTrack = (game->vehicle.wheels[WHEEL_FRONT_LEFT].surfaceId == SURFACE_ASPHALT &&
                    game->vehicle.wheels[WHEEL_FRONT_RIGHT].surfaceId == SURFACE_ASPHALT &&
                    game->vehicle.wheels[WHEEL_REAR_LEFT].surfaceId == SURFACE_ASPHALT &&

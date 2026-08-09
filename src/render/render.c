@@ -191,7 +191,7 @@ void render_draw_game(struct Game *game, float interpolationAlpha)
     }
 
     BeginMode2D(worldCam);
-    render_world_draw_track(&game->track, game->renderPixelsPerMeter);
+    render_world_draw_track(&game->trackDef, &game->progress, game->renderPixelsPerMeter);
 
     /* ---- particles (between track and car, per the spec draw order) ---- */
     render_world_draw_particles(game);

@@ -13,6 +13,13 @@
 # worktree copy LF too means the file on disk is byte-identical to what the run produced.
 *.csv text eol=lf
 
+# Baselines are machine-generated and wide: a re-record is thousands of near-identical lines
+# that nobody reads and that buries the real change in a review. Suppress the textual diff and
+# mark them generated so forges collapse them by default. They stay TRACKED on purpose —
+# `make regression` and `make verify` compare against them, so a clone without them has no
+# regression gate. To inspect one deliberately: git diff --text -- tests/baselines/<file>.csv
+tests/baselines/*.csv -diff linguist-generated
+
 # Binary: never touch, never diff as text.
 *.png binary
 *.dll binary
