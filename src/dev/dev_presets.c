@@ -87,11 +87,11 @@ static const PresetOverride kTougeHero[] = {
     O("collision.half_width", 0.81f), /* AE86 is 1625 mm wide */
 };
 
-/* ----------------------------------------------------------------------- 2: Pro D1GP --
+/* ---------------------------------------------------------------- 2: High-Angle RWD --
  * Formula Drift competition car: 1320 kg, locked diff, 65 deg steering lock, flat
  * 550 N*m V8 torque from 2500-7500 rpm, rear tire mu ~30% below front.
  * Source: lib-1 (pro drift), Wisefab, Suspension Secrets, DrivingLine. */
-static const PresetOverride kProD1GP[] = {
+static const PresetOverride kHighAngleRWD[] = {
     O("body.mass", 1320.0f),
     O("body.yaw_inertia", 2200.0f), /* longer wheelbase, resists snap-spins */
     O("body.cg_to_front", 1.17f),
@@ -458,14 +458,14 @@ static const DevPreset kPresets[] = {
 
 static const PresetOverride *const kOverrideTables[] = {
     NULL, /* Stock Baseline — no overrides, reset only */
-    kTougeHero, kProD1GP,     kArcadeGod, kTrackPredator, kRallyDevil,
-    kPonyCar,   k911Pendulum, kShoebox,   kTimeMachine,
+    kTougeHero, kHighAngleRWD, kArcadeGod, kTrackPredator, kRallyDevil,
+    kPonyCar,   k911Pendulum,  kShoebox,   kTimeMachine,
 };
 
 static const int kOverrideCounts[] = {
     0,
     (int)(sizeof(kTougeHero) / sizeof(kTougeHero[0])),
-    (int)(sizeof(kProD1GP) / sizeof(kProD1GP[0])),
+    (int)(sizeof(kHighAngleRWD) / sizeof(kHighAngleRWD[0])),
     (int)(sizeof(kArcadeGod) / sizeof(kArcadeGod[0])),
     (int)(sizeof(kTrackPredator) / sizeof(kTrackPredator[0])),
     (int)(sizeof(kRallyDevil) / sizeof(kRallyDevil[0])),

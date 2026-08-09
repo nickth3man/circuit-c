@@ -711,7 +711,7 @@ else
 	    name=$$(basename $$target .c); \
 	    echo "  building $$name"; \
 	    mkdir -p $(ARTIFACTS)/fuzz/corpus/$$name; \
-	    $(CLANG) $(CSTD) $(INCLUDES) -O1 -g -DCIRCUIT_HEADLESS \
+	    $(CLANG) $(CSTD) $(INCLUDES) -O1 -g -DCIRCUIT_HEADLESS -DCIRCUIT_LIBFUZZER \
 	        -fsanitize=fuzzer,address,undefined -fno-sanitize-recover=all \
 	        $$target $(FUZZ_SUPPORT_SRCS) \
 	        -o $(BUILD_FUZZ)/$$name $(RAYLIB_CFLAGS) -lm || exit 1; \
