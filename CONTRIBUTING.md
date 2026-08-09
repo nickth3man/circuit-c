@@ -70,21 +70,30 @@ make CIRCUIT_STRICT=1 verify
 Under `CIRCUIT_STRICT`, a missing tool is a hard failure. This is what CI passes, so if it
 fails for you it will fail there too.
 
-The one exception is the sanitizer runtime check. MSYS2 ships ASan/UBSan in CLANG64, not in
-the supported UCRT64 environment, so `make sanitize` skips unconditionally on Windows. The
-Linux CI job is where the sanitizers actually run.
+The one exception is the sanitizer runtime check. UCRT64 cannot link ASan/UBSan, so
+`make sanitize` still skips in that environment. Install the parallel native CLANG64 lane and
+run it from cmd.exe or PowerShell instead:
+
+```powershell
+.\tools\setup\setup_windows.ps1 -IncludeSanitizers
+.\sanitize.bat
+```
+
+CLANG64 is headless-test-only; normal development, release, and gameplay builds remain on
+UCRT64. Linux CI also retains independent ASan/UBSan coverage.
 
 ## CI
 
-[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs two jobs on every push and pull
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs three jobs on every push and pull
 request:
 
 | Job | What it covers |
 | --- | --- |
 | `windows-ucrt64` | The canonical toolchain: format-check, ruff, cppcheck, clang analyzer, physics scenarios, baseline regression |
-| `linux-headless` | ruff, the headless scenarios and regression, and ASan/UBSan |
+| `windows-clang64-sanitizers` | Native Windows headless suite under ASan/UBSan |
+| `linux-headless` | ruff, headless physics scenarios, and independent ASan/UBSan coverage |
 
-Both jobs lint Python with the same pinned ruff. It runs through [uv](https://docs.astral.sh/uv/):
+The UCRT64 and Linux jobs lint Python with the same pinned ruff. It runs through [uv](https://docs.astral.sh/uv/):
 MSYS2's mingw python cannot take PyPI's MSVC-only ruff wheels, so the Windows job runs the
 pinned ruff in uv's own managed python. `requirements-dev.txt` is the source of truth for the
 version.

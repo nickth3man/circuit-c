@@ -4,8 +4,10 @@
 # Without it a runner that happens to lack cppcheck would report a green tick for a job
 # that never linted anything.
 #
-# The canonical Windows toolchain is the required CI environment and matches the platform
-# developers actually build and run.
+# Two Windows jobs cover the canonical build and native sanitizer runtime:
+#   windows-ucrt64  the canonical toolchain developers actually build with, and the only
+#                   one the hot-reload link path is designed for
+#   windows-clang64 native Windows ASan/UBSan for the full headless suite
 #
 # Actions are pinned by commit SHA, not tag, so a moved tag cannot change what runs here.
 
@@ -70,3 +72,32 @@ jobs:
       - name: Verify (format, Python, lint, analyze, physics, regression)
         # These prerequisites use separate outputs, so Make can safely overlap them.
         run: make -j4 CIRCUIT_STRICT=1 verify
+
+  windows-clang64-sanitizers:
+    name: Windows CLANG64 sanitizers (optional)
+    runs-on: windows-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884 # v2.32.0
+        with:
+          msystem: CLANG64
+          update: true
+          install: >-
+            make
+            git
+          pacboy: >-
+            clang:p
+            compiler-rt:p
+            pkgconf:p
+            raylib:p
+
+      - name: Resolved toolchain
+        run: make info
+
+      - name: Native Windows ASan + UBSan
+        run: make CIRCUIT_STRICT=1 sanitize
