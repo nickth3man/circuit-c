@@ -1,8 +1,9 @@
 # Circuit — one command per operation.
 #
 # These local targets are the project's checks, and .github/workflows/ci.yml runs the same
-# ones on every push: a UCRT64 job for the canonical toolchain and a Linux job for the
-# headless targets, including the sanitizers UCRT64 cannot link. CI passes CIRCUIT_STRICT=1,
+# ones on every push: UCRT64 for the canonical toolchain, CLANG64 for native sanitizers, and
+# Linux for independent headless coverage. UCRT64 remains canonical while native Windows
+# sanitizer builds use the parallel MSYS2 CLANG64 environment. CI passes CIRCUIT_STRICT=1,
 # which turns a missing tool from a SKIP into a failure. The hot-reload harness, linkage
 # inspection, and the interactive game remain hand-run.
 #
@@ -44,13 +45,16 @@
 # Every target terminates on its own except the interactive `run` and `inspect` targets.
 #
 # On Windows the canonical build lives in build.sh; the targets below call it rather than
-# duplicating the hot-reload-safe link sequence. The headless targets (tests, sanitizers,
-# coverage, fuzzing) also build on Linux; the interactive game remains Windows-only.
+# duplicating the hot-reload-safe link sequence. Headless targets also build on Linux, and the
+# sanitizer target additionally builds in native Windows CLANG64. The interactive game remains
+# UCRT64-only.
 
 # ------------------------------------------------------------------------------- host --
 
 ifeq ($(MSYSTEM),UCRT64)
     CIRCUIT_HOST := ucrt64
+else ifeq ($(MSYSTEM),CLANG64)
+    CIRCUIT_HOST := clang64
 else
     UNAME_S := $(shell uname -s 2>/dev/null)
 ifneq (,$(filter Linux Darwin,$(UNAME_S)))
@@ -61,7 +65,7 @@ endif
 endif
 
 ifeq ($(CIRCUIT_HOST),unsupported)
-$(error Run make from an MSYS2 UCRT64 shell (or use build.bat / mk.bat), or from Linux for the headless targets.)
+$(error Run make from MSYS2 UCRT64, MSYS2 CLANG64, or Linux. Use build.bat / mk.bat for UCRT64 and sanitize.bat for CLANG64.)
 endif
 
 # --------------------------------------------------------------------------- toolchain --
@@ -85,6 +89,26 @@ endif
 RAYLIB_CFLAGS := $(shell pkg-config --cflags raylib)
 EXE_SUFFIX    := .exe
 # On Windows `python3` is usually the Microsoft Store stub, which does nothing useful.
+PYTHON ?= $(shell command -v python 2>/dev/null || command -v python3 2>/dev/null)
+
+else ifeq ($(CIRCUIT_HOST),clang64)
+
+CC := clang
+CC_PATH := $(shell command -v $(CC) 2>/dev/null)
+ifeq ($(findstring /clang64/bin/,$(CC_PATH)),)
+$(error refusing non-CLANG64 compiler '$(CC_PATH)'. Use sanitize.bat or the CLANG64 shell.)
+endif
+
+PKGCONFIG := $(shell command -v pkg-config 2>/dev/null)
+ifeq ($(PKGCONFIG),)
+$(error CLANG64 pkg-config not found. Run tools/setup/setup_windows.ps1 -IncludeSanitizers.)
+endif
+ifeq ($(shell pkg-config --exists raylib 2>/dev/null && echo yes),)
+$(error CLANG64 pkg-config cannot find raylib. Run tools/setup/setup_windows.ps1 -IncludeSanitizers.)
+endif
+
+RAYLIB_CFLAGS := $(shell pkg-config --cflags raylib)
+EXE_SUFFIX    := .exe
 PYTHON ?= $(shell command -v python 2>/dev/null || command -v python3 2>/dev/null)
 
 else   # posix: headless only
@@ -559,6 +583,8 @@ sanitize:
 ifeq ($(CLANG),)
 ifeq ($(CIRCUIT_HOST),ucrt64)
 	$(call skip,sanitize: clang not installed (pacman -S mingw-w64-ucrt-x86_64-clang).)
+else ifeq ($(CIRCUIT_HOST),clang64)
+	$(call skip,sanitize: CLANG64 clang not installed. Run tools/setup/setup_windows.ps1 -IncludeSanitizers.)
 else
 	$(call skip,sanitize: clang not installed. Install it with the platform package manager.)
 endif
@@ -744,7 +770,7 @@ ci: format-check lint-py lint analyze test-physics regression sanitize coverage
 ifdef CIRCUIT_STRICT
 	@echo "ci: every check whose tool exists ran and passed (CIRCUIT_STRICT)."
 	@echo "    A missing tool would have failed. Platform-limited checks can still skip:"
-	@echo "    on UCRT64 that is sanitize, which has no linkable ASan/UBSan runtime here."
+	@echo "    on UCRT64 that is sanitize; run sanitize.bat to execute it in native CLANG64."
 else
 	@echo "ci: core local checks passed; inspect any SKIP lines above."
 	@echo "    A SKIP is not a pass. Re-run with CIRCUIT_STRICT=1 to make one fail."

@@ -4,11 +4,11 @@
 # Without it a runner that happens to lack cppcheck would report a green tick for a job
 # that never linted anything.
 #
-# Two jobs because neither host covers everything:
+# Three jobs because no single toolchain covers everything:
 #   windows-ucrt64  the canonical toolchain developers actually build with, and the only
 #                   one the hot-reload link path is designed for
-#   linux-headless  the headless targets, and the only place ASan/UBSan can link at all —
-#                   MSYS2 ships those runtimes in CLANG64, not the supported UCRT64
+#   windows-clang64 native Windows ASan/UBSan for the full headless suite
+#   linux-headless  independent cross-platform headless and sanitizer coverage
 #
 # Actions are pinned by commit SHA, not tag, so a moved tag cannot change what runs here.
 
@@ -71,6 +71,35 @@ jobs:
       # `verify` includes the pinned ruff check, so both CI jobs exercise the same project gate.
       - name: Verify (format, Python, lint, analyze, physics, regression)
         run: make CIRCUIT_STRICT=1 verify
+
+  windows-clang64-sanitizers:
+    name: Windows CLANG64 sanitizers (optional)
+    runs-on: windows-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884 # v2.32.0
+        with:
+          msystem: CLANG64
+          update: true
+          install: >-
+            make
+            git
+          pacboy: >-
+            clang:p
+            compiler-rt:p
+            pkgconf:p
+            raylib:p
+
+      - name: Resolved toolchain
+        run: make info
+
+      - name: Native Windows ASan + UBSan
+        run: make CIRCUIT_STRICT=1 sanitize
 
   linux-headless:
     name: Linux headless (+ sanitizers) (optional)
@@ -144,8 +173,8 @@ jobs:
       - name: Physics scenarios
         run: make CIRCUIT_STRICT=1 test-physics
 
-      # This is the only place the sanitizers actually run; the UCRT64 job skips them by
-      # design. If this step ever starts skipping, the project has lost ASan/UBSan cover.
+      # Independent sanitizer coverage on a second OS/runtime. UCRT64 still skips sanitizers
+      # by design, while the CLANG64 job above provides the native Windows lane.
       - name: ASan + UBSan
         run: make CIRCUIT_STRICT=1 sanitize
 

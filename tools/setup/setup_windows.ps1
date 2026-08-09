@@ -1,11 +1,12 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-  Idempotent Circuit bootstrap for Windows + MSYS2 UCRT64.
+  Idempotent Circuit bootstrap for Windows + MSYS2 UCRT64, with optional CLANG64 sanitizers.
 
 .DESCRIPTION
   Locates MSYS2 at C:\msys64 (or $env:MSYS2_ROOT), installs the required UCRT64
-  packages via pacman when missing, and prints verified tool paths/versions.
+  packages via pacman when missing, and prints verified tool paths/versions. Pass
+  -IncludeSanitizers to install and verify the parallel native-Windows CLANG64 ASan/UBSan lane.
 
   Does not rewrite the user PATH permanently. Does not use Chocolatey. Does not
   download or compile raylib from source — raylib comes from the MSYS2 package.
@@ -16,7 +17,8 @@
 #>
 [CmdletBinding()]
 param(
-    [string]$Msys2Root = $(if ($env:MSYS2_ROOT) { $env:MSYS2_ROOT } else { 'C:\msys64' })
+    [string]$Msys2Root = $(if ($env:MSYS2_ROOT) { $env:MSYS2_ROOT } else { 'C:\msys64' }),
+    [switch]$IncludeSanitizers
 )
 
 Set-StrictMode -Version Latest
@@ -66,6 +68,15 @@ $requiredPackages = @(
     # no usable provenance, and `make tidy-changed` cannot tell which files changed.
     'git'
 )
+
+if ($IncludeSanitizers) {
+    $requiredPackages += @(
+        'mingw-w64-clang-x86_64-clang',
+        'mingw-w64-clang-x86_64-compiler-rt',
+        'mingw-w64-clang-x86_64-raylib',
+        'mingw-w64-clang-x86_64-pkgconf'
+    )
+}
 
 Write-Info "Using MSYS2 at $Msys2Root"
 Write-Info 'Checking / installing required packages (idempotent)...'
@@ -163,10 +174,77 @@ if ($raylibStatus -ne 0) {
     $raylibCheck | ForEach-Object { Write-Host "[setup] $_" }
 }
 
+if ($IncludeSanitizers) {
+    Write-Info 'Verifying native CLANG64 ASan/UBSan toolchain...'
+    $clang64Bin = Join-Path $Msys2Root 'clang64\bin'
+    $clang64 = Join-Path $clang64Bin 'clang.exe'
+    $clang64PkgConfig = Join-Path $clang64Bin 'pkg-config.exe'
+    if (-not (Test-Path -LiteralPath $clang64PkgConfig)) {
+        $clang64PkgConfig = Join-Path $clang64Bin 'pkgconf.exe'
+    }
+
+    if (-not (Test-Path -LiteralPath $clang64)) {
+        Write-Err "CLANG64 clang not found at $clang64"
+        $ok = $false
+    } else {
+        Write-Info "clang64 : $clang64"
+        & $clang64 --version | Select-Object -First 1 | ForEach-Object { Write-Host "         $_" }
+    }
+    if (-not (Test-Path -LiteralPath $clang64PkgConfig)) {
+        Write-Err "CLANG64 pkg-config not found at $clang64PkgConfig"
+        $ok = $false
+    } else {
+        & $clang64PkgConfig --exists raylib
+        if ($LASTEXITCODE -ne 0) {
+            Write-Err 'CLANG64 pkg-config cannot find raylib.'
+            $ok = $false
+        } else {
+            $clang64RaylibVersion = & $clang64PkgConfig --modversion raylib
+            Write-Info "clang64 raylib : $clang64RaylibVersion"
+        }
+    }
+
+    if (Test-Path -LiteralPath $clang64) {
+        $probeDir = Join-Path $env:TEMP ("circuit_sanitizer_probe_{0}" -f [guid]::NewGuid().ToString('N'))
+        $probeSource = Join-Path $probeDir 'probe.c'
+        $probeExe = Join-Path $probeDir 'probe.exe'
+        New-Item -ItemType Directory -Path $probeDir | Out-Null
+        try {
+            [System.IO.File]::WriteAllText($probeSource, "int main(void) { return 0; }`n")
+            & $clang64 '-fsanitize=address,undefined' $probeSource -o $probeExe
+            if ($LASTEXITCODE -ne 0) {
+                Write-Err 'CLANG64 could not link the ASan/UBSan runtime probe.'
+                $ok = $false
+            } else {
+                $previousPath = $env:PATH
+                try {
+                    $env:PATH = "$clang64Bin;$previousPath"
+                    & $probeExe
+                    if ($LASTEXITCODE -ne 0) {
+                        Write-Err 'The CLANG64 ASan/UBSan runtime probe did not execute successfully.'
+                        $ok = $false
+                    } else {
+                        Write-Info 'clang64 sanitizers : ASan + UBSan link and execute'
+                    }
+                } finally {
+                    $env:PATH = $previousPath
+                }
+            }
+        } finally {
+            Remove-Item -LiteralPath $probeDir -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
 if (-not $ok) {
     Write-Err 'Setup incomplete.'
     exit 1
 }
 
-Write-Info 'Setup complete. Build with build.bat from cmd.exe, or ./build.sh from an MSYS2 UCRT64 shell.'
+if ($IncludeSanitizers) {
+    Write-Info 'Setup complete. Build normally with build.bat / mk.bat; run ASan + UBSan with sanitize.bat.'
+} else {
+    Write-Info 'Setup complete. Build with build.bat from cmd.exe, or ./build.sh from an MSYS2 UCRT64 shell.'
+    Write-Info 'Optional native sanitizers: re-run with -IncludeSanitizers, then use sanitize.bat.'
+}
 exit 0

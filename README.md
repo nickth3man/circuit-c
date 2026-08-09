@@ -93,6 +93,16 @@ That script is idempotent. It installs (when missing):
 There is **no** Chocolatey GCC path, **no** vendored `vendor/raylib` build, and **no**
 manual raylib source compile. raylib comes only from the MSYS2 package.
 
+To add native Windows AddressSanitizer and UndefinedBehaviorSanitizer support, install the
+parallel MSYS2 CLANG64 test toolchain once:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools\setup\setup_windows.ps1 -IncludeSanitizers
+```
+
+This does not replace UCRT64 or change normal builds. It adds CLANG64 solely for the headless
+sanitizer executable, which runs with `sanitize.bat`.
+
 ## Building
 
 `build.bat` is the Windows entry point: it enters MSYS2 UCRT64 and runs `build.sh`.
@@ -243,12 +253,14 @@ mk test                 # fast scenarios          mk verify        analysis + te
 mk scenario NAME=skidpad
 mk report NAME=skidpad  # self-contained HTML report with plots and a baseline comparison
 mk ci                   # format, lint, analyze, every scenario, regression, sanitizers, coverage
+sanitize.bat            # full headless suite under native Windows ASan + UBSan (CLANG64)
 mk cards                # per-car sprites, feature-label maps and cards.json (headless)
 mk visual-diagnose      # appearance measurements and evidence into artifacts/visual/
 mk gallery              # the fleet through the production texture path, for human review
 ```
 
-`mk.bat` enters MSYS2 UCRT64 for you and works from cmd.exe or PowerShell; from a UCRT64
+`mk.bat` enters MSYS2 UCRT64 for you and works from cmd.exe or PowerShell. `sanitize.bat`
+enters the parallel CLANG64 environment and runs only the sanitizer target. From a UCRT64
 shell use `make <target>`. Every target terminates on its own except **`mk run`** (launches
 the game) and **`mk inspect`** (serves the browser inspector) — use `mk visual-diagnose`
 instead of the latter, since it starts and stops its own server.
@@ -287,8 +299,9 @@ sliders, the profile format, the telemetry metadata, and the `--dump-params` tab
 Grouped by directory, so this block can be checked against `ls` rather than read as prose.
 
 ```
-Makefile, build.sh, build.bat             build entry points; all terminate immediately
+Makefile, build.sh, build.bat             canonical UCRT64 build entry points
 mk.bat                                    run a Makefile target inside MSYS2 UCRT64 from cmd.exe
+sanitize.bat                              run native Windows ASan + UBSan inside MSYS2 CLANG64
 
 src/core/config.h                         default constants, every physical value unit-bearing
 src/core/units.h                          world<->render conversion and the coordinate convention
