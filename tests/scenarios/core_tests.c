@@ -925,6 +925,18 @@ static void scenario_race_entrant(void)
         check(!race_roster_spawn(roster, &duplicate, NULL) && roster->count == 4,
               "a duplicate EntrantId is refused and adds nothing (count %d)", roster->count);
 
+        const RaceEntrantSpawn secondLocal = { .localPlayer = true };
+        check(!race_roster_spawn(roster, &secondLocal, NULL) && roster->count == 4 &&
+                  roster->localEntrantId == 1u,
+              "a second local designation is refused rather than moving presentation onto the "
+              "car that spawned last (local %u)",
+              roster->localEntrantId);
+
+        const RaceEntrantSpawn beyondRange = { .id = RACE_ENTRANT_ID_MAX + 1u };
+        check(!race_roster_spawn(roster, &beyondRange, NULL) && roster->count == 4,
+              "an id past RACE_ENTRANT_ID_MAX is refused, so the id cursor cannot wrap onto "
+              "the reserved zero");
+
         int accepted = 0;
         for (int i = 0; i < RACE_MAX_ENTRANTS + 2; i++) {
             const RaceEntrantSpawn extra = { .gridSlot = -1 };
@@ -1014,10 +1026,22 @@ static void scenario_race_entrant(void)
               "the next spawn takes a fresh id rather than the departed entrant's (got %u)",
               reborn);
 
+        /* The identity is retired, not merely vacated: asking for it by name must fail too, or
+         * results and events recorded against the departed entrant would alias its successor. */
+        const RaceEntrantSpawn impostor = { .id = 2u, .gridSlot = -1 };
+        check(!race_roster_spawn(roster, &impostor, NULL) && roster->count == 4,
+              "a despawned id cannot be claimed back by an explicit spawn (count %d)",
+              roster->count);
+
         check(
             race_roster_despawn(roster, 1u) && roster->localEntrantId == RACE_ENTRANT_ID_NONE &&
                 race_roster_local(roster) == NULL,
             "losing the local entrant clears the designation instead of promoting a stranger");
+
+        const RaceEntrantSpawn replacement = { .localPlayer = true, .gridSlot = 0 };
+        check(race_roster_spawn(roster, &replacement, NULL) &&
+                  race_roster_local(roster) != NULL,
+              "and a new local entrant may then be designated, the seat now being vacant");
     }
 
     /* ---- 7. Pair ordering is deterministic and history-independent ---- */

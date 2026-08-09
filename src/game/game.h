@@ -105,6 +105,15 @@ struct Game {
      * so reordering RaceEntrant is a compile error rather than a silent misread. New code
      * should go through race_roster_local() / race_roster_find(); the view is deleted once
      * nothing reads it. See docs/SIMULATION_OWNERSHIP.md.
+     *
+     * PRECONDITION UNTIL ISSUE 11. game_fixed_update() still drives exactly one car — the one
+     * this view names, `entrants[0]` — because the ordered per-entrant session stages are
+     * issue 11's subject, not this one. A Game whose roster holds more than one entrant would
+     * therefore leave every other slot unsimulated, and a local entrant that sorts after some
+     * other id would be presented but never driven. game_init() spawns exactly one entrant, so
+     * no supported path can reach that state; build a multi-entrant roster through Game only
+     * once the session stages iterate it. Rosters used directly, as the "race-entrant"
+     * scenario does, are storage and are not subject to this.
      */
     union {
         RaceRoster roster;

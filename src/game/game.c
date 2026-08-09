@@ -70,6 +70,14 @@ static uint32_t hash_u64(uint32_t h, uint64_t value)
  *
  * Identity is hashed first because ordering and membership are part of the result: two rosters
  * holding the same cars under different ids, or one that lost an entrant, must not agree.
+ *
+ * The private controller memory is the one piece of persistent entrant state deliberately left
+ * out, and it is not an oversight. Playback calls controller_update() with
+ * CONTROLLER_KIND_REPLAY, so a recorded run's AI memory is never rebuilt during replay while a
+ * live run updates it every tick. Hashing it would make a live AI lap and its own replay
+ * disagree on every tick — the "ai-no-privilege" scenario measures exactly that parity — which
+ * would report a divergence where there is none. It is added when replay drives controllers
+ * through their own memory rather than around it; see docs/SIMULATION_OWNERSHIP.md.
  */
 static uint32_t hash_entrant(uint32_t h, const RaceEntrant *entrant)
 {
@@ -180,10 +188,19 @@ GAME_API uint32_t game_state_checksum(const Game *game)
     h = hash_u32(h, game->sim.shiftUpCount);
     h = hash_u32(h, game->sim.shiftDownCount);
 
-    /* Ascending EntrantId, which is the roster's storage order. Which entrant the local
-     * presentation follows is deliberately absent: that is a camera/audio decision, and a
-     * checksum that moved when the view changed would stop meaning "the simulation diverged". */
+    /* Ascending EntrantId, which is the roster's storage order.
+     *
+     * The two id cursors are hashed with the count because they decide what a LATER spawn is
+     * called: a session that spawned and despawned an entrant and one that never spawned it
+     * can hold identical entrants today and still name their next car differently, and a
+     * divergence the checksum cannot see is the kind this project exists to catch.
+     *
+     * Which entrant the local presentation follows is deliberately absent: that is a
+     * camera/audio decision, and a checksum that moved when the view changed would stop
+     * meaning "the simulation diverged". */
     h = hash_u32(h, (uint32_t)game->roster.count);
+    h = hash_u32(h, game->roster.nextId);
+    h = hash_u32(h, game->roster.reuseFloorId);
     for (int i = 0; i < game->roster.count; i++) {
         h = hash_entrant(h, &game->roster.entrants[i]);
     }

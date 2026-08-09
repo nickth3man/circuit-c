@@ -46,9 +46,14 @@
  * Session-local competitor identity. Nonzero for an occupied slot; `RACE_ENTRANT_ID_NONE`
  * means "no entrant". Assigned in ascending order when a slot is filled and never reused, so
  * an id identifies one competitor for the whole session even after other entrants leave.
+ *
+ * `RACE_ENTRANT_ID_MAX` is one below the width's maximum so that "the id after the last one
+ * issued" is always representable. Without that reservation an exhausted cursor would wrap
+ * onto `RACE_ENTRANT_ID_NONE` and quietly refuse every later automatic spawn.
  */
 typedef uint32_t EntrantId;
 #define RACE_ENTRANT_ID_NONE 0u
+#define RACE_ENTRANT_ID_MAX (UINT32_MAX - 1u)
 
 /*
  * Where this entrant finished. Storage only: the rules that decide a finishing order belong to
@@ -89,8 +94,14 @@ typedef struct {
  */
 typedef struct {
     RaceEntrant entrants[RACE_MAX_ENTRANTS];
-    int count;                /* occupied slots, always the prefix [0, count) */
-    EntrantId nextId;         /* next auto-assigned id; monotonic, never reused */
+    int count;        /* occupied slots, always the prefix [0, count) */
+    EntrantId nextId; /* next auto-assigned id; monotonic, never reused */
+    /* No id below this may be issued again. Despawn raises it past the id that left, which is
+     * what stops a session identity from being handed to a second competitor — checking the
+     * occupied slots alone would happily re-issue the id of an entrant that has gone. It stays
+     * at 1 until the first despawn, so assembling a grid by explicit id in any order is
+     * unaffected. */
+    EntrantId reuseFloorId;
     EntrantId localEntrantId; /* the human-designated entrant, or RACE_ENTRANT_ID_NONE */
 } RaceRoster;
 
@@ -115,16 +126,22 @@ void race_roster_init(RaceRoster *roster);
  *
  * The new entrant is inserted at its sorted position by id, so `entrants[0 .. count)` stays
  * ascending whatever order the caller spawns in. `spawn->id` of 0 takes the next id; a nonzero
- * id is used verbatim and pushes `nextId` past it. Returns false and changes nothing when the
- * roster is full, the definition/setup pair is invalid, or the id is already taken. Writes the
- * assigned id to `outId` when that is non-NULL.
+ * id is used verbatim and pushes `nextId` past it. Writes the assigned id to `outId` when that
+ * is non-NULL.
+ *
+ * Returns false and changes nothing when the roster is full, the definition/setup pair is
+ * invalid, the id is already taken, the id belongs to an entrant that has been despawned, the
+ * id is out of range, or `localPlayer` is requested while the session already has a local
+ * entrant — one designation, and a caller that asks for a second is told so rather than
+ * silently moving the camera onto whichever car spawned last.
  */
 bool race_roster_spawn(RaceRoster *roster, const RaceEntrantSpawn *spawn, EntrantId *outId);
 
 /*
  * Remove one entrant and close the gap, preserving ascending order for everyone else. The id is
- * not reused. Clears the local designation when the local entrant is the one that left.
- * Returns false when no entrant has that id.
+ * retired: no later spawn, automatic or explicit, may take it again. Clears the local
+ * designation when the local entrant is the one that left. Returns false when no entrant has
+ * that id.
  */
 bool race_roster_despawn(RaceRoster *roster, EntrantId id);
 

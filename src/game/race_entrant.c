@@ -14,7 +14,8 @@ void race_roster_init(RaceRoster *roster)
 {
     if (roster == NULL) return;
     memset(roster, 0, sizeof(*roster));
-    roster->nextId = 1u; /* 0 is reserved for "no entrant" */
+    roster->nextId = 1u;       /* 0 is reserved for "no entrant" */
+    roster->reuseFloorId = 1u; /* nothing has been retired yet */
     roster->localEntrantId = RACE_ENTRANT_ID_NONE;
 }
 
@@ -54,8 +55,15 @@ bool race_roster_spawn(RaceRoster *roster, const RaceEntrantSpawn *spawn, Entran
     if (roster->count >= RACE_MAX_ENTRANTS) return false;
 
     const EntrantId id = (spawn->id != RACE_ENTRANT_ID_NONE) ? spawn->id : roster->nextId;
-    if (id == RACE_ENTRANT_ID_NONE) return false;
+    if (id == RACE_ENTRANT_ID_NONE || id > RACE_ENTRANT_ID_MAX) return false;
+    /* Occupied is a duplicate; below the floor is an identity that has already been used and
+     * retired. Both hand one session id to two competitors, which is the one thing the id is
+     * supposed to rule out. */
+    if (id < roster->reuseFloorId) return false;
     if (race_roster_find_const(roster, id) != NULL) return false;
+    /* One local designation per session. See the header: the alternative is last-write-wins,
+     * which moves presentation onto another car with nothing said. */
+    if (spawn->localPlayer && roster->localEntrantId != RACE_ENTRANT_ID_NONE) return false;
 
     /* Build the entrant completely before it is visible in the roster, so a rejected
      * definition/setup pair leaves the collection exactly as it was. */
@@ -95,6 +103,9 @@ bool race_roster_spawn(RaceRoster *roster, const RaceEntrantSpawn *spawn, Entran
     roster->entrants[slot] = entrant;
     roster->count++;
 
+    /* Same reservation as above keeps this from wrapping onto RACE_ENTRANT_ID_NONE: once the
+     * cursor reaches RACE_ENTRANT_ID_MAX + 1, automatic spawns fail the range check instead of
+     * silently asking for the reserved zero. */
     if (id >= roster->nextId) roster->nextId = id + 1u;
     if (spawn->localPlayer) roster->localEntrantId = id;
     if (outId != NULL) *outId = id;
@@ -110,6 +121,9 @@ bool race_roster_despawn(RaceRoster *roster, EntrantId id)
             roster->entrants[j] = roster->entrants[j + 1];
         roster->count--;
         memset(&roster->entrants[roster->count], 0, sizeof(roster->entrants[0]));
+        /* Retire the identity. `id + 1u` cannot wrap: RACE_ENTRANT_ID_MAX reserves the top
+         * value precisely so "one past the last id" is always representable. */
+        if (id >= roster->reuseFloorId) roster->reuseFloorId = id + 1u;
         if (roster->localEntrantId == id) roster->localEntrantId = RACE_ENTRANT_ID_NONE;
         return true;
     }
