@@ -3,7 +3,14 @@
 # Must run under MSYS2 UCRT64 (via build.bat --hotreload-harness path or directly).
 set -eu
 
-cd "$(dirname "$0")/.."
+# Repo root, two levels up from tools/setup/. The guard is deliberate: this script moved from
+# scripts/ to tools/setup/ without the `..` gaining a level, and the only symptom was
+# `./build.sh: No such file or directory` reported from whichever directory it landed in.
+cd "$(dirname "$0")/../.."
+if [ ! -f build.sh ] || [ ! -f src/game/game.c ]; then
+    echo "validate_hotreload: not at the repository root (in $(pwd))" >&2
+    exit 2
+fi
 
 echo "== building module + harness =="
 ./build.sh --hotreload-harness
