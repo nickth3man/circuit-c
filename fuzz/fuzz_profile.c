@@ -48,7 +48,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
     return 0;
 }
 
-#if !defined(DRIFTY_LIBFUZZER)
+#if !defined(CIRCUIT_LIBFUZZER)
 /* Standalone driver: `fuzz_profile corpus/file ...` replays inputs without libFuzzer. */
 int main(int argc, char **argv)
 {

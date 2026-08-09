@@ -2,9 +2,9 @@
 rem ---------------------------------------------------------------------------------------
 rem build.bat - Windows wrapper that runs build.sh inside MSYS2 UCRT64.
 rem
-rem Same contract as build.sh: rebuilds the game module every time, rebuilds drifty.exe only
+rem Same contract as build.sh: rebuilds the game module every time, rebuilds circuit.exe only
 rem when it is not already running, always terminates immediately, and returns the
-rem compiler's exit status. It never launches drifty.exe except for the explicit
+rem compiler's exit status. It never launches circuit.exe except for the explicit
 rem --smoke-test mode, which is bounded and exits on its own.
 rem
 rem   build.bat                 build the module (and the exe if it is not already running)
@@ -35,19 +35,19 @@ if not exist "%MSYS2_ROOT%\usr\bin\bash.exe" (
 rem Build provenance. git is on PATH here but usually not inside the MSYS2 minimal PATH, so
 rem the values are resolved in cmd.exe and inherited by the child shell. build.sh falls back
 rem to "unknown" when they are absent, so a git-less checkout still builds.
-set "DRIFTY_GIT_COMMIT="
-set "DRIFTY_GIT_BRANCH="
-set "DRIFTY_GIT_DIRTY="
+set "CIRCUIT_GIT_COMMIT="
+set "CIRCUIT_GIT_BRANCH="
+set "CIRCUIT_GIT_DIRTY="
 where git >nul 2>&1
 if not errorlevel 1 (
-    for /f "delims=" %%i in ('git rev-parse --short^=12 HEAD 2^>nul') do set "DRIFTY_GIT_COMMIT=%%i"
-    for /f "delims=" %%i in ('git rev-parse --abbrev-ref HEAD 2^>nul') do set "DRIFTY_GIT_BRANCH=%%i"
+    for /f "delims=" %%i in ('git rev-parse --short^=12 HEAD 2^>nul') do set "CIRCUIT_GIT_COMMIT=%%i"
+    for /f "delims=" %%i in ('git rev-parse --abbrev-ref HEAD 2^>nul') do set "CIRCUIT_GIT_BRANCH=%%i"
     git diff --quiet HEAD >nul 2>&1
-    if errorlevel 1 (set "DRIFTY_GIT_DIRTY=dirty") else (set "DRIFTY_GIT_DIRTY=clean")
+    if errorlevel 1 (set "CIRCUIT_GIT_DIRTY=dirty") else (set "CIRCUIT_GIT_DIRTY=clean")
 )
 
 rem Convert the repository path to an MSYS path via a temp file (avoids brittle for /f quoting).
-set "MSYS_REPO_FILE=%TEMP%\drifty_msys_repo_%RANDOM%.txt"
+set "MSYS_REPO_FILE=%TEMP%\circuit_msys_repo_%RANDOM%.txt"
 "%MSYS2_ROOT%\usr\bin\cygpath.exe" -u "%CD%" > "%MSYS_REPO_FILE%"
 if errorlevel 1 (
     echo build.bat: cygpath failed for "%CD%". 1>&2

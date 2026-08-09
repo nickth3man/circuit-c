@@ -1,8 +1,8 @@
 /*
  * render.h — Phase 1 interpolation and simple vehicle/debug presentation.
  */
-#ifndef DRIFTY_RENDER_H
-#define DRIFTY_RENDER_H
+#ifndef CIRCUIT_RENDER_H
+#define CIRCUIT_RENDER_H
 
 #include "physics/vehicle.h"
 #include "platform/hotreload.h"
@@ -37,7 +37,7 @@ typedef struct ValidationOverlayData {
  *
  * The struct is copied, and the two strings are copied into module-owned buffers, so the
  * caller's storage need not outlive the call. */
-#if !defined(DRIFTY_HOT_RELOAD) || defined(DRIFTY_GAME_MODULE)
+#if !defined(CIRCUIT_HOT_RELOAD) || defined(CIRCUIT_GAME_MODULE)
 GAME_API void render_set_validation_overlay(const ValidationOverlayData *data);
 #endif
 struct Game;
@@ -56,7 +56,7 @@ void render_draw_game(struct Game *game, float interpolationAlpha);
  * No Game layout changes: the cache is module-static, not persistent state. Losing it across
  * a reload costs one rebake on the next frame and nothing else.
  *
- * All three are no-ops under DRIFTY_HEADLESS. */
+ * All three are no-ops under CIRCUIT_HEADLESS. */
 void render_pre_reload(void);
 void render_post_reload(void);
 void render_shutdown(void);
@@ -82,4 +82,4 @@ void render_shutdown(void);
 int render_gallery_page_count(void);
 void render_draw_gallery(struct Game *game, int page);
 
-#endif /* DRIFTY_RENDER_H */
+#endif /* CIRCUIT_RENDER_H */

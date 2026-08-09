@@ -49,7 +49,7 @@ const server = http.createServer((req, res) => {
   res.writeHead(404, { "content-type": "text/plain" });
   res.end(
     `404 ${rel}\n\nLooked in:\n${ROOTS.join("\n")}\n\n` +
-      `If cards.json is missing, run:\n  drifty_tests.exe --dump-corpus-cards artifacts/corpus-cards\n`
+      `If cards.json is missing, run:\n  circuit_tests.exe --dump-corpus-cards artifacts/corpus-cards\n`
   );
 });
 

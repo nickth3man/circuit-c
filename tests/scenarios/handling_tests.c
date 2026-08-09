@@ -975,9 +975,9 @@ static void scenario_transition(void)
         (double)worstYawTorqueJumpNm);
 }
 
-static void scenario_catchable_drift(void)
+static void scenario_sideslip_recovery(void)
 {
-    run_scripted_scenario("catchable-drift");
+    run_scripted_scenario("sideslip-recovery");
     if (g_sampleCount < 100) return;
 
     /* The five scripted stages, by the times the script uses. */
@@ -1025,7 +1025,7 @@ static void scenario_catchable_drift(void)
             allFinite = false;
     }
 
-    check(allFinite, "every catchable-drift sample stays finite");
+    check(allFinite, "every sideslip-recovery sample stays finite");
     check(peakSideslipRad > sideslipAtEntryRad + 0.20f,
           "initiation builds body sideslip (%.4f -> %.4f rad at %.2f s)",
           (double)sideslipAtEntryRad, (double)peakSideslipRad, (double)peakSideslipTimeS);
@@ -1058,7 +1058,7 @@ static void scenario_catchable_drift(void)
     {
         Game *a = alloc_game();
         Game *b = alloc_game();
-        const int index = dev_scenario_find("catchable-drift");
+        const int index = dev_scenario_find("sideslip-recovery");
         game_init(a);
         game_init(b);
         a->dev.scenario = b->dev.scenario = index;
@@ -1078,7 +1078,7 @@ static void scenario_catchable_drift(void)
         free(a);
     }
 
-    printf("    catchable-drift: peak beta %.4f rad at %.2f s, peak yaw %.4f rad/s, "
+    printf("    sideslip-recovery: peak beta %.4f rad at %.2f s, peak yaw %.4f rad/s, "
            "peak rear usage %.4f\n"
            "                     beta entry %.4f -> counter %.4f -> min %.4f -> "
            "recovered %.4f rad\n"
@@ -1840,7 +1840,7 @@ static void scenario_brake_turn_sweep(void)
     }
 }
 
-/* Steady-state summary of one drift-hold run, shared by the drift scenarios below. */
+/* Steady-state summary of one limit-handling hold, shared by the scenarios below. */
 typedef struct {
     float meanSideslip, meanYaw, meanSpeed, meanRadius;
     float sideslipEarly, sideslipLate, maxSideslipRate;
@@ -1848,20 +1848,19 @@ typedef struct {
     float entryPeakUsage, entryPeakYaw;
     uint32_t checksum;
     bool allFinite, withinBudget;
-} DriftHoldResult;
+} LimitHoldResult;
 
 /*
- * scenario_constant_radius_drift — steady-state circular drift with a fixed center, held
+ * scenario_constant_radius_limit_equilibrium — steady-state circular drift with a fixed center, held
  * indefinitely at constant sideslip and yaw rate.
  *
  * Reference: Yang, Lu, Yang & Mo, "A Hierarchical Control Framework for Drift Maneuvering of
  * Autonomous Vehicles" (arXiv:2109.06730) — constant-radius drift with a fixed center is
  * used there as the canonical drift-control benchmark ("common training task for drift
- * enthusiasts"). Drifty is a *drift* simulator and currently has no scenario that grades
- * "can the model sustain a steady drift", only entry (catchable-drift) and cornering
- * (skidpad) at non-saturated slip.
+ * enthusiasts"). Circuit is a general racing simulator; this test retains that scientifically
+ * useful limit-handling coverage without presenting drifting as the product objective.
  *
- * HOW THE CIRCLE IS HELD. Handbrake entry (the catchable-drift recipe) breaks the rear loose,
+ * HOW THE CIRCLE IS HELD. Handbrake entry (the sideslip-recovery recipe) breaks the rear loose,
  * then the hold is fixed steering plus a proportional speed controller on throttle and brake.
  * The speed loop is what makes "constant radius" testable at all: a yaw rate alone does not
  * fix a radius, R = v / r does, so a decaying speed would shrink the circle even under a
@@ -1877,7 +1876,7 @@ typedef struct {
  * value. The handbrake entry is a pure transient — by 5 s the state is indistinguishable from
  * a run that never touched the handbrake (steady sideslip agrees to better than 1e-3 rad).
  *
- * So Drifty does NOT sustain a held opposite-lock drift, and this scenario does not pretend
+ * So Circuit does NOT sustain a held opposite-lock drift, and this scenario does not pretend
  * otherwise. It grades the two properties the reference's benchmark actually rests on and that
  * this model does exhibit — a fixed trajectory centre and a steady (zero-derivative) sideslip
  * and yaw rate — plus the entry-path independence above, which is the sharper invariant: it
@@ -1885,7 +1884,7 @@ typedef struct {
  * (drift) equilibrium, or makes the transient fail to decay, breaks this scenario loudly.
  * Should a real drift equilibrium ever be added to the model, this is the scenario to revisit.
  */
-static void scenario_constant_radius_drift(void)
+static void scenario_constant_radius_limit_equilibrium(void)
 {
     const float steerHold = 0.40f;
     const float targetSpeedMps = 10.0f;
@@ -1894,13 +1893,13 @@ static void scenario_constant_radius_drift(void)
     const int settleTicks = 7 * FIXED_HZ;          /* measurement window opens */
     const int totalTicks = 10 * FIXED_HZ;
 
-    DriftHoldResult drift, grip, repeat;
+    LimitHoldResult limitEntry, grip, repeat;
 
-    memset(&drift, 0, sizeof(drift));
+    memset(&limitEntry, 0, sizeof(limitEntry));
     memset(&grip, 0, sizeof(grip));
     memset(&repeat, 0, sizeof(repeat));
 
-    /* pass 0 = the drift, pass 1 = a grip reference entered without the handbrake,
+    /* pass 0 = a handbrake entry, pass 1 = a grip reference entered without the handbrake,
      * pass 2 = a repeat of pass 0 for the determinism check. */
     for (int pass = 0; pass < 3; pass++) {
         const bool handbrakeEntry = (pass != 1);
@@ -1995,7 +1994,7 @@ static void scenario_constant_radius_drift(void)
         }
 
         const float spread = haveCenter ? fmaxf(maxCx - minCx, maxCy - minCy) : 1e9f;
-        DriftHoldResult *out = (pass == 0) ? &drift : ((pass == 1) ? &grip : &repeat);
+        LimitHoldResult *out = (pass == 0) ? &limitEntry : ((pass == 1) ? &grip : &repeat);
 
         out->meanSideslip = (samples > 0) ? (float)(sumSideslip / samples) : 0.0f;
         out->meanYaw = (samples > 0) ? (float)(sumYaw / samples) : 0.0f;
@@ -2015,77 +2014,86 @@ static void scenario_constant_radius_drift(void)
         free(game);
     }
 
-    check(drift.allFinite, "constant-radius-drift: every state stays finite");
-    check(drift.withinBudget,
-          "constant-radius-drift: friction stays within budget (peak usage %.3f)",
-          (double)drift.peakUsage);
+    check(limitEntry.allFinite, "constant-radius-limit-equilibrium: every state stays finite");
+    check(limitEntry.withinBudget,
+          "constant-radius-limit-equilibrium: friction stays within budget (peak usage %.3f)",
+          (double)limitEntry.peakUsage);
 
     /* The handbrake entry really does break the rear loose — otherwise "the transient decays"
      * would be a claim about a transient that never happened. */
-    check(drift.entryPeakUsage > 0.95f,
-          "constant-radius-drift: the handbrake entry saturates a tire (peak usage %.3f)",
-          (double)drift.entryPeakUsage);
-    check(drift.entryPeakYaw > 0.30f,
-          "constant-radius-drift: the entry throws real yaw rate (peak %.4f rad/s)",
-          (double)drift.entryPeakYaw);
+    check(limitEntry.entryPeakUsage > 0.95f,
+          "constant-radius-limit-equilibrium: the handbrake entry saturates a tire (peak usage "
+          "%.3f)",
+          (double)limitEntry.entryPeakUsage);
+    check(limitEntry.entryPeakYaw > 0.30f,
+          "constant-radius-limit-equilibrium: the entry throws real yaw rate (peak %.4f rad/s)",
+          (double)limitEntry.entryPeakYaw);
     /* The two entries must be genuinely different transients, or "the steady state does not
      * depend on the entry" below would be comparing a run against a copy of itself. The
      * handbrake entry peaks *lower* in yaw than the grip entry, because locking the rear
      * scrubs the speed that yaw rate is built from. */
-    check(fabsf(drift.entryPeakYaw - grip.entryPeakYaw) > 0.20f,
-          "constant-radius-drift: handbrake and grip entries are distinct transients "
-          "(peak yaw %.4f vs %.4f rad/s)",
-          (double)drift.entryPeakYaw, (double)grip.entryPeakYaw);
+    check(
+        fabsf(limitEntry.entryPeakYaw - grip.entryPeakYaw) > 0.20f,
+        "constant-radius-limit-equilibrium: handbrake and grip entries are distinct transients "
+        "(peak yaw %.4f vs %.4f rad/s)",
+        (double)limitEntry.entryPeakYaw, (double)grip.entryPeakYaw);
 
     /* The held circle is a real, loaded corner, not a coast. */
-    check(fabsf(drift.meanSideslip) > 0.05f,
-          "constant-radius-drift: holds a measurable sideslip (mean %.4f rad)",
-          (double)drift.meanSideslip);
-    check(drift.peakUsage > 0.60f,
-          "constant-radius-drift: the tires work near their limit (peak usage %.3f)",
-          (double)drift.peakUsage);
+    check(fabsf(limitEntry.meanSideslip) > 0.05f,
+          "constant-radius-limit-equilibrium: holds a measurable sideslip (mean %.4f rad)",
+          (double)limitEntry.meanSideslip);
+    check(
+        limitEntry.peakUsage > 0.60f,
+        "constant-radius-limit-equilibrium: the tires work near their limit (peak usage %.3f)",
+        (double)limitEntry.peakUsage);
 
     /* Entry-path independence: one attracting equilibrium, reached with or without the
      * handbrake. This is what fails first if the model ever grows a second equilibrium. */
-    check(fabsf(drift.meanSideslip - grip.meanSideslip) < 0.005f,
-          "constant-radius-drift: the steady state does not depend on the entry "
+    check(fabsf(limitEntry.meanSideslip - grip.meanSideslip) < 0.005f,
+          "constant-radius-limit-equilibrium: the steady state does not depend on the entry "
           "(handbrake %.4f vs grip %.4f rad)",
-          (double)drift.meanSideslip, (double)grip.meanSideslip);
+          (double)limitEntry.meanSideslip, (double)grip.meanSideslip);
+    check(fabsf(limitEntry.meanYaw - grip.meanYaw) < 0.02f,
+          "constant-radius-limit-equilibrium: steady yaw rate is entry-independent too (%.4f "
+          "vs %.4f rad/s)",
+          (double)limitEntry.meanYaw, (double)grip.meanYaw);
     check(
-        fabsf(drift.meanYaw - grip.meanYaw) < 0.02f,
-        "constant-radius-drift: steady yaw rate is entry-independent too (%.4f vs %.4f rad/s)",
-        (double)drift.meanYaw, (double)grip.meanYaw);
-    check(drift.meanSideslip * drift.meanYaw > 0.0f,
-          "constant-radius-drift: steady sideslip carries the steer's sign — a grip "
-          "equilibrium, not opposite lock (beta %.4f rad, yaw %.4f rad/s)",
-          (double)drift.meanSideslip, (double)drift.meanYaw);
+        limitEntry.meanSideslip * limitEntry.meanYaw > 0.0f,
+        "constant-radius-limit-equilibrium: steady sideslip carries the steer's sign — a grip "
+        "equilibrium, not opposite lock (beta %.4f rad, yaw %.4f rad/s)",
+        (double)limitEntry.meanSideslip, (double)limitEntry.meanYaw);
 
     /* Steady, neither diverging nor decaying: the "constant" in constant-radius. */
-    check(fabsf(drift.sideslipLate - drift.sideslipEarly) < 0.03f,
-          "constant-radius-drift: sideslip is steady from 5 s to 10 s (%.4f -> %.4f rad)",
-          (double)drift.sideslipEarly, (double)drift.sideslipLate);
-    check(drift.maxSideslipRate < 1.0f,
-          "constant-radius-drift: sideslip derivative stays near zero (peak %.4f rad/s)",
-          (double)drift.maxSideslipRate);
-    check(fabsf(drift.meanYaw) > 0.30f,
-          "constant-radius-drift: the car keeps rotating (mean yaw %.4f rad/s)",
-          (double)drift.meanYaw);
+    check(fabsf(limitEntry.sideslipLate - limitEntry.sideslipEarly) < 0.03f,
+          "constant-radius-limit-equilibrium: sideslip is steady from 5 s to 10 s (%.4f -> "
+          "%.4f rad)",
+          (double)limitEntry.sideslipEarly, (double)limitEntry.sideslipLate);
+    check(limitEntry.maxSideslipRate < 1.0f,
+          "constant-radius-limit-equilibrium: sideslip derivative stays near zero (peak %.4f "
+          "rad/s)",
+          (double)limitEntry.maxSideslipRate);
+    check(fabsf(limitEntry.meanYaw) > 0.30f,
+          "constant-radius-limit-equilibrium: the car keeps rotating (mean yaw %.4f rad/s)",
+          (double)limitEntry.meanYaw);
 
     /* Fixed centre: the reference's defining property. */
-    check(drift.centerSpread < 3.0f,
-          "constant-radius-drift: the turn centre stays put (spread %.3f m at R %.2f m)",
-          (double)drift.centerSpread, (double)fabsf(drift.meanRadius));
-    check(fabsf(drift.meanRadius) > 4.0f && fabsf(drift.meanRadius) < 40.0f,
-          "constant-radius-drift: radius is a plausible circle (%.2f m at %.2f m/s)",
-          (double)fabsf(drift.meanRadius), (double)drift.meanSpeed);
+    check(limitEntry.centerSpread < 3.0f,
+          "constant-radius-limit-equilibrium: the turn centre stays put (spread %.3f m at R "
+          "%.2f m)",
+          (double)limitEntry.centerSpread, (double)fabsf(limitEntry.meanRadius));
+    check(
+        fabsf(limitEntry.meanRadius) > 4.0f && fabsf(limitEntry.meanRadius) < 40.0f,
+        "constant-radius-limit-equilibrium: radius is a plausible circle (%.2f m at %.2f m/s)",
+        (double)fabsf(limitEntry.meanRadius), (double)limitEntry.meanSpeed);
 
-    check(drift.checksum == repeat.checksum,
-          "constant-radius-drift: the whole maneuver is deterministic (%08x vs %08x)",
-          drift.checksum, repeat.checksum);
+    check(
+        limitEntry.checksum == repeat.checksum,
+        "constant-radius-limit-equilibrium: the whole maneuver is deterministic (%08x vs %08x)",
+        limitEntry.checksum, repeat.checksum);
 }
 
 /*
- * scenario_drift_recovery_envelope — asserts the vehicle state stays inside (or, when pushed
+ * scenario_sideslip_yaw_recovery_envelope — asserts the vehicle state stays inside (or, when pushed
  * past it, exits and is later brought back inside) the phase-plane recoverable region.
  *
  * Reference: Dallas, Talbot, Suminaka, Thompson, Lew, Orosz & Subosits, "Control Barrier
@@ -2094,11 +2102,11 @@ static void scenario_constant_radius_drift(void)
  * states from which the vehicle can still be brought back to controlled driving. Gan, Song,
  * Yang et al., "Dual-Envelope Constrained Nonlinear MPC for ... Drifting" (arXiv:2604.07342)
  * extends this to a *dual* envelope: an outer recoverable set and an inner non-drifting
- * stability region, both reshaped by steering and yaw-moment coupling. No existing Drifty
+ * stability region, both reshaped by steering and yaw-moment coupling. No existing Circuit
  * scenario has a phase-plane oracle; check_run_invariants checks scalar bounds (friction
  * budget, max speed) but never the joint (sideslip, yaw rate) state.
  *
- * HOW THE ENVELOPE IS MAPPED. Rather than fitting an ellipse to catchable-drift samples, this
+ * HOW THE ENVELOPE IS MAPPED. Rather than fitting an ellipse to sideslip-recovery samples, this
  * scenario probes the phase plane directly: it seeds (sideslip, yaw rate) pairs across a 6x6
  * grid at a fixed 15 m/s — reaching states no scripted input sequence can reach, which is the
  * point of a phase-plane oracle — and then runs one of three recovery policies for 8 s,
@@ -2109,7 +2117,7 @@ static void scenario_constant_radius_drift(void)
  * tested, out to 1.5 rad of sideslip and 12 rad/s of yaw rate. Both a hands-off policy (steer
  * centred) and a countersteer policy return every one of the 36 seeded states to near-zero
  * sideslip and yaw. The inner "non-drifting stability region" and the outer recoverable set of
- * Gan et al.'s dual envelope therefore coincide here: Drifty self-stabilises, and countersteer
+ * Gan et al.'s dual envelope therefore coincide here: Circuit self-stabilises, and countersteer
  * buys no additional territory because there is none left to buy.
  *
  * WHY THAT IS NOT A VACUOUS TEST. A third policy steers *into* the spin, and most of the same
@@ -2122,10 +2130,10 @@ static void scenario_constant_radius_drift(void)
  * If the model ever gains a genuine unrecoverable region, the hands-off and countersteer
  * assertions below fail together and this comment is the thing to revisit.
  */
-static void scenario_drift_recovery_envelope(void)
+static void scenario_sideslip_yaw_recovery_envelope(void)
 {
     /* Grid corners were chosen to bracket, and then far exceed, anything the scripted drift
-     * scenarios reach: catchable-drift peaks near 0.2 rad of sideslip and 0.9 rad/s of yaw. */
+     * scenarios reach: sideslip-recovery peaks near 0.2 rad of sideslip and 0.9 rad/s of yaw. */
     static const float betas[6] = { 0.10f, 0.30f, 0.60f, 0.90f, 1.20f, 1.50f };
     static const float yaws[6] = { 0.5f, 1.5f, 3.0f, 5.0f, 8.0f, 12.0f };
     static const char *const policyName[3] = { "hands-off", "countersteer", "steer-into-spin" };
@@ -2337,7 +2345,7 @@ static void scenario_understeer_gradient_sweep(void)
  * Integrated Active Front Wheel Steering and Individual Braking" (arXiv:2210.10225) —
  * defines lateral stability as keeping yaw rate near a friction-aware reference and sideslip
  * near zero; the controller in that paper needs exactly the "how far off, how fast does it
- * grow, how long to recover" numbers this scenario is meant to produce. Drifty has no such
+ * grow, how long to recover" numbers this scenario is meant to produce. Circuit has no such
  * controller (by design, arcade physics), so this scenario's role is to record the *current*
  * open-loop margin as a committed baseline other scenarios and any future assist feature can
  * be compared against, not to assert the vehicle self-corrects.
@@ -2395,14 +2403,14 @@ static void scenario_yaw_stability_recovery_margin(void)
 }
 
 /*
- * scenario_figure_eight_drift_transition — drifts a steady circular arc in one direction,
+ * scenario_figure_eight_limit_transition — drifts a steady circular arc in one direction,
  * then transitions through a straight counter-steer reversal into a steady drift in the
  * *opposite* direction, tracing a figure-eight, and asserts the transition itself (not just
  * the two steady states) stays within the friction budget and settles within a bounded tick
  * count.
  *
- * NOT a duplicate of constant-radius-drift (round 1, single steady drift, one direction, one
- * fixed center) or catchable-drift (single entry -> hold -> recover, never a second opposite
+ * NOT a duplicate of constant-radius-limit-equilibrium (round 1, single steady drift, one direction, one
+ * fixed center) or sideslip-recovery (single entry -> hold -> recover, never a second opposite
  * drift). This scenario is the first to chain two opposite-handedness drifts through one
  * continuous script, which exercises the countersteer reversal path (sideslip and yaw rate
  * both crossing zero and changing sign under active driver input, not decaying passively)
@@ -2411,19 +2419,19 @@ static void scenario_yaw_stability_recovery_margin(void)
  * Reference: Zhao, Wu, Zhou, Zhao & Wu, "Steeringless Drifting: Differential-Torque Control
  * of a Four-Wheel Independently Driven Vehicle" (arXiv:2607.24863) — the paper's validation
  * explicitly includes "figure-eight drift tracking" as the maneuver that proves a drift
- * controller generalises past a single steady-state circle. Drifty's steering-based model
+ * controller generalises past a single steady-state circle. Circuit's steering-based model
  * differs from the paper's differential-torque actuation, but the maneuver shape (and the
  * reason it matters: a controller/model that only holds one steady drift may not handle the
  * reversal) transfers directly.
  *
- * HOW IT IS SCRIPTED. The steady lobes reuse constant-radius-drift's hold exactly — handbrake
+ * HOW IT IS SCRIPTED. The steady lobes reuse constant-radius-limit-equilibrium's hold exactly — handbrake
  * entry, then fixed steer with a proportional speed controller — so the two scenarios agree on
  * what "settled" means and this one adds only the reversal. The reversal itself is a linear
  * steer ramp from +0.40 through neutral to -0.40 over half a second: a driver's countersteer
  * input, not a step, because a step would measure the input's discontinuity rather than the
  * model's response to crossing zero.
  *
- * As constant-radius-drift documents, the settled lobes are grip equilibria rather than
+ * As constant-radius-limit-equilibrium documents, the settled lobes are grip equilibria rather than
  * held opposite-lock drifts — this model has no drift equilibrium to chain. What the reversal
  * still exercises, and nothing else in the suite does, is sideslip and yaw rate both changing
  * sign under active steering input rather than decaying passively to zero, which is the
@@ -2433,7 +2441,7 @@ static void scenario_yaw_stability_recovery_margin(void)
  * to be sign-symmetric, so a settled right-hand lobe that does not mirror the left one within
  * tolerance means the reversal degraded the state rather than merely reflecting it.
  */
-static void scenario_figure_eight_drift_transition(void)
+static void scenario_figure_eight_limit_transition(void)
 {
     const float steerHold = 0.40f;
     const float targetSpeedMps = 10.0f;
@@ -2755,8 +2763,8 @@ static const TestScenario kHandlingScenarios[] = {
       scenario_transition },
     { "lift-off", "scripted throttle lift mid-corner: the load shift that causes it",
       scenario_lift_off },
-    { "catchable-drift", "initiate, hold, countersteer, reduce slip, and recover",
-      scenario_catchable_drift },
+    { "sideslip-recovery", "initiate, hold, countersteer, reduce slip, and recover",
+      scenario_sideslip_recovery },
     { "lat-load-transfer", "lateral load transfer: inside/outside wheel unloading",
       scenario_lateral_load_transfer },
     { "surface-asymmetry", "per-surface asymmetry: grass wheel produces yaw moment",
@@ -2781,22 +2789,22 @@ static const TestScenario kHandlingScenarios[] = {
     { "brake-turn-sweep",
       "3 steer x 3 brake pressure grid: friction budget and ay monotonicity",
       scenario_brake_turn_sweep },
-    { "constant-radius-drift",
+    { "constant-radius-limit-equilibrium",
       "fixed-centre constant-radius hold; the entry transient decays to one equilibrium",
-      scenario_constant_radius_drift },
-    { "drift-recovery-envelope",
+      scenario_constant_radius_limit_equilibrium },
+    { "sideslip-yaw-recovery-envelope",
       "seeded sideslip/yaw-rate grid: recoverable under hands-off and countersteer, not "
       "under steer-into-spin",
-      scenario_drift_recovery_envelope },
+      scenario_sideslip_yaw_recovery_envelope },
     { "understeer-gradient-sweep",
       "understeer coefficient K > 0 across speed sweep (scalar gradient)",
       scenario_understeer_gradient_sweep },
     { "yaw-stability-recovery-margin",
       "asphalt->snow mid-corner: open-loop yaw deviation and sideslip bound",
       scenario_yaw_stability_recovery_margin },
-    { "figure-eight-drift-transition",
+    { "figure-eight-limit-transition",
       "steady lobe, countersteer reversal through neutral, mirrored opposite lobe",
-      scenario_figure_eight_drift_transition },
+      scenario_figure_eight_limit_transition },
     { "sine-steer", "research: sinusoidal steering sweep", scenario_sine_steer },
     { "sine-dwell", "research: sine-with-dwell reversal", scenario_sine_dwell },
     { "j-turn", "research: throttle-lift J-turn", scenario_j_turn },

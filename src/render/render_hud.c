@@ -1,9 +1,9 @@
 /*
  * render_hud.c — screen-space presentation: the diagnostics readout, the arcade HUD, and
  * the full-screen state overlays, plus the palette and text helpers they share. Compiled
- * to an empty translation unit under DRIFTY_HEADLESS.
+ * to an empty translation unit under CIRCUIT_HEADLESS.
  */
-#if !defined(DRIFTY_HEADLESS)
+#if !defined(CIRCUIT_HEADLESS)
 
 #include "render/render_internal.h"
 
@@ -16,10 +16,10 @@
 
 /* ---- presentation palette, type scale, and screen-space helpers -----------------------
  *
- * Arcade-drift palette (documented for the design review):
- *   COL_ACCENT       hot gold    - score, combo, DRIFT! callouts, the car nose marker
+ * Racing HUD palette (documented for the design review):
+ *   COL_ACCENT       hot gold    - primary timing, the rpm warning, the car nose marker
  *   COL_ACCENT_WARM  warm orange - NEW BEST flash and other "payoff" moments
- *   COL_COOL         steel cyan  - secondary info (best score, rpm bar fill)
+ *   COL_COOL         steel cyan  - secondary info and rpm bar fill
  *   COL_TEXT         near-white  - primary HUD text
  *   COL_TEXT_DIM     slate       - secondary and hint text
  *   COL_PANEL        translucent charcoal - backing panels behind HUD clusters
@@ -43,7 +43,7 @@ const Color COL_DIM_SCREEN = { 8, 10, 14, 185 };
  * COL_TIRE / COL_RIM, next to a hardcoded 4.2 x 1.82 m box. Both are gone: the vehicle's
  * colours and its geometry are now derived in src/render/car_visual.c and rasterized by
  * src/render/car_visual_raster.c, and this file only uploads and draws what they produce. Adding a
- * styling decision back here would put it where drifty_tests cannot reach it. */
+ * styling decision back here would put it where circuit_tests cannot reach it. */
 
 static void draw_text_centered(const char *text, int y, int fontSize, Color color)
 {
@@ -82,8 +82,8 @@ static void draw_overlay_menu(const Game *game)
     (void)game;
     DrawRectangle(0, 0, SCREEN_W, SCREEN_H, COL_DIM_SCREEN);
 
-    draw_text_centered_shadow("DRIFTY", 226, 64, COL_ACCENT);
-    draw_text_centered("a tiny top-down drift sandbox", 306, 20, COL_TEXT_DIM);
+    draw_text_centered_shadow("CIRCUIT", 226, 64, COL_ACCENT);
+    draw_text_centered("a deterministic top-down racing simulator", 306, 20, COL_TEXT_DIM);
 
     draw_text_centered(
         "PRESS P TO START", 414, 24,
@@ -311,7 +311,7 @@ void render_hud_draw_diagnostics(const Game *game, float alpha)
         const Color label = (Color){ 235, 235, 235, 255 };
         const Color dim = (Color){ 155, 160, 170, 255 };
         int y = 12;
-        hud_line(14, &y, "DRIFTY diagnostics", label);
+        hud_line(14, &y, "CIRCUIT diagnostics", label);
         hud_line(14, &y,
                  TextFormat("pos (%+.2f,%+.2f) m  heading %+.3f rad",
                             (double)game->vehicle.positionM.x,
@@ -452,4 +452,4 @@ void render_hud_draw_state_overlay(const Game *game)
     }
 }
 
-#endif /* !DRIFTY_HEADLESS */
+#endif /* !CIRCUIT_HEADLESS */

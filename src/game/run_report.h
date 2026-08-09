@@ -9,8 +9,8 @@
  * Failure reasons are a closed set so the suite orchestrator can group and count them without
  * parsing free text.
  */
-#ifndef DRIFTY_RUN_REPORT_H
-#define DRIFTY_RUN_REPORT_H
+#ifndef CIRCUIT_RUN_REPORT_H
+#define CIRCUIT_RUN_REPORT_H
 
 #include <stdbool.h>
 
@@ -82,4 +82,4 @@ const char *run_failure_reason(RunStatus s);
  * struct borrows every string; they only need to outlive this call.
  */
 bool run_report_write(const char *path, const RunReportInput *in);
-#endif /* DRIFTY_RUN_REPORT_H */
+#endif /* CIRCUIT_RUN_REPORT_H */

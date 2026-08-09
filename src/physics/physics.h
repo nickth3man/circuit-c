@@ -6,8 +6,8 @@
  * resistance forces. The individual stages are exposed so the headless suite can assert each
  * equation on its own rather than only through a whole-vehicle run.
  */
-#ifndef DRIFTY_PHYSICS_H
-#define DRIFTY_PHYSICS_H
+#ifndef CIRCUIT_PHYSICS_H
+#define CIRCUIT_PHYSICS_H
 
 #include <stdbool.h>
 
@@ -64,4 +64,4 @@ bool physics_state_is_valid(const VehicleSpec *spec, const VehicleState *state,
 void physics_fixed_update(const VehicleSpec *spec, VehicleState *state, VehicleDerived *derived,
                           VehicleRenderState *renderState, const Input *input, float dt);
 
-#endif /* DRIFTY_PHYSICS_H */
+#endif /* CIRCUIT_PHYSICS_H */

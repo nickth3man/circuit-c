@@ -4,8 +4,8 @@
  * Physical values use SI units. This header uses raylib's Vector2 type but neither this
  * translation unit nor physics.c calls a raylib function.
  */
-#ifndef DRIFTY_VEHICLE_H
-#define DRIFTY_VEHICLE_H
+#ifndef CIRCUIT_VEHICLE_H
+#define CIRCUIT_VEHICLE_H
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -311,4 +311,4 @@ float vehicle_effective_drag_coefficient(const VehicleSpec *spec);
 void vehicle_state_reset(const VehicleSpec *spec, VehicleState *state, VehicleDerived *derived,
                          VehicleRenderState *renderState);
 
-#endif /* DRIFTY_VEHICLE_H */
+#endif /* CIRCUIT_VEHICLE_H */

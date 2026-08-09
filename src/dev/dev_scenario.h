@@ -5,7 +5,7 @@
  * all it is: no state, no randomness, no wall-clock. The same table therefore drives
  *
  *   - the Physics Lab's scenario selector (src/dev/dev_lab.c),
- *   - the headless maneuver runs (`drifty_tests --scenario skidpad`),
+ *   - the headless maneuver runs (`circuit_tests --scenario skidpad`),
  *   - the physics-regression workflow, which replays them and diffs telemetry.
  *
  * Because the input timeline is a deterministic function of the tick index, two runs of the
@@ -15,8 +15,8 @@
  * These scripts describe *what the driver does*, never what the car should do. They contain
  * no tuning targets, so adding one cannot smuggle in a handling change.
  */
-#ifndef DRIFTY_DEV_SCENARIO_H
-#define DRIFTY_DEV_SCENARIO_H
+#ifndef CIRCUIT_DEV_SCENARIO_H
+#define CIRCUIT_DEV_SCENARIO_H
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -40,4 +40,4 @@ int dev_scenario_find(const char *name);
  * Out-of-range indices produce a zeroed Input, which is a safe free-drive default. */
 void dev_scenario_input(int index, uint64_t tick, Input *out);
 
-#endif /* DRIFTY_DEV_SCENARIO_H */
+#endif /* CIRCUIT_DEV_SCENARIO_H */

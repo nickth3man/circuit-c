@@ -14,8 +14,8 @@
  * Phase 2 extends the embedded canonical vehicle structures. This layout change requires
  * one platform restart; subsequent game-module-only edits preserve the block normally.
  */
-#ifndef DRIFTY_GAME_H
-#define DRIFTY_GAME_H
+#ifndef CIRCUIT_GAME_H
+#define CIRCUIT_GAME_H
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -126,7 +126,7 @@ struct Game {
 
     /* Development tooling: Physics Lab, scope history, trajectory, invariant monitor, and
      * the time controls the platform loop reads. Plain value data like everything else here,
-     * and present in every build configuration so that drifty.exe and build/game.dll cannot
+     * and present in every build configuration so that circuit.exe and build/game.dll cannot
      * disagree about the layout of this struct. See src/dev/dev_state.h. */
     DevState dev;
 };
@@ -145,4 +145,4 @@ GAME_API uint32_t game_state_checksum(const Game *game);
 /* Reset the vehicle and resynchronise render history. Counters and tick are preserved. */
 GAME_API void game_reset_sim(Game *game);
 
-#endif /* DRIFTY_GAME_H */
+#endif /* CIRCUIT_GAME_H */

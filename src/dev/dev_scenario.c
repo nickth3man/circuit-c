@@ -23,7 +23,7 @@ typedef enum {
     SCENARIO_COAST_DOWN,
     SCENARIO_ACCEL_LOAD,
     SCENARIO_BRAKE_LOAD,
-    SCENARIO_CATCHABLE_DRIFT,
+    SCENARIO_SIDESLIP_RECOVERY,
     SCENARIO_SINE_STEER,
     SCENARIO_SINE_DWELL,
     SCENARIO_J_TURN,
@@ -72,7 +72,7 @@ static const DevScenario g_scenarios[] = {
     { "coast-down", "accelerate, then coast with every control released", 2400, 1009u },
     { "accel-load", "straight full-throttle launch: load transfers rearward", 720, 1010u },
     { "brake-load", "accelerate, then brake to a stop: load transfers forward", 1080, 1011u },
-    { "catchable-drift", "initiate, hold, countersteer, and recover a slide", 1200, 1012u },
+    { "sideslip-recovery", "initiate, hold, countersteer, and recover a slide", 1200, 1012u },
     { "sine-steer", "sinusoidal steering sweep for nonlinear lateral response", 1200, 2001u },
     { "sine-dwell", "sine-with-dwell steering reversal and recovery", 1440, 2002u },
     { "j-turn", "throttle lift followed by a single aggressive steering turn", 900, 2003u },
@@ -245,7 +245,7 @@ void dev_scenario_input(int index, uint64_t tick, Input *out)
             out->brake = (tick >= AT(4.0)) ? 1.0f : 0.0f;
             break;
 
-        case SCENARIO_CATCHABLE_DRIFT:
+        case SCENARIO_SIDESLIP_RECOVERY:
             /* Five stages, all through ordinary controls: build speed, break the rear loose
              * with the handbrake, hold the slide on throttle, catch it on countersteer, then
              * unwind to straight travel. Nothing here reaches into the physics. */

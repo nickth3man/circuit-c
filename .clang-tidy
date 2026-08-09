@@ -1,4 +1,4 @@
-# Drifty clang-tidy.
+# Circuit clang-tidy.
 #
 # This is plain C11, so the C++-oriented check groups (modernize-*, cppcoreguidelines-*,
 # hicpp-*) are off entirely rather than disabled one at a time: none of them can fire on code

@@ -5,7 +5,7 @@
  * scope history, and the replay timeline. It is the fast subjective loop: change a value,
  * watch the car, compare against a baseline, save the profile — without rebuilding.
  *
- * BUILD CONFIGURATION. The lab exists only when DRIFTY_DEV_TOOLS is defined and the build is
+ * BUILD CONFIGURATION. The lab exists only when CIRCUIT_DEV_TOOLS is defined and the build is
  * not headless. Everywhere else the entry points below are no-op inline stubs, so callers
  * never need an #ifdef. The *state* the lab edits (DevState) is always present — see the
  * layout note in dev_state.h.
@@ -16,14 +16,14 @@
  *   F3  show/hide the replay inspector   F7  cycle time scale
  *   F5  pause / resume               F8  capture the current run as the baseline ghost
  */
-#ifndef DRIFTY_DEV_LAB_H
-#define DRIFTY_DEV_LAB_H
+#ifndef CIRCUIT_DEV_LAB_H
+#define CIRCUIT_DEV_LAB_H
 
 #include "render/render.h"
 
 struct Game;
 
-#if defined(DRIFTY_DEV_TOOLS) && !defined(DRIFTY_HEADLESS)
+#if defined(CIRCUIT_DEV_TOOLS) && !defined(CIRCUIT_HEADLESS)
 
 /* Keyboard shortcuts and time control. Call once per render frame, before drawing. */
 void dev_lab_update(struct Game *game);
@@ -59,4 +59,4 @@ static inline void dev_lab_reload_style(void) {}
 
 #endif
 
-#endif /* DRIFTY_DEV_LAB_H */
+#endif /* CIRCUIT_DEV_LAB_H */

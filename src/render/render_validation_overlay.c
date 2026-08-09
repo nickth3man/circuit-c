@@ -5,9 +5,9 @@
  * carries the car identity, elapsed time, checkpoint progress, speed, running pass/fail status,
  * and input bar indicators.
  *
- * Compiled to a clean no-op under DRIFTY_HEADLESS.
+ * Compiled to a clean no-op under CIRCUIT_HEADLESS.
  */
-#if !defined(DRIFTY_HEADLESS)
+#if !defined(CIRCUIT_HEADLESS)
 
 #include "render/render_internal.h"
 
@@ -154,4 +154,4 @@ void render_set_validation_overlay(const ValidationOverlayData *data)
     (void)data;
 }
 
-#endif /* !DRIFTY_HEADLESS */
+#endif /* !CIRCUIT_HEADLESS */

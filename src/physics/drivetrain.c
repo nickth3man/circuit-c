@@ -54,7 +54,7 @@ float drivetrain_engine_rpm(const VehicleSpec *spec, int selectedGear,
     const float totalGear = drivetrain_total_gear_ratio(spec, selectedGear);
     if (totalGear == 0.0f) return spec->engineIdleRpm;
     const float rpm =
-        fabsf(drivenAngularVelocityRadS) * fabsf(totalGear) * 60.0f / DRIFTY_TWO_PI;
+        fabsf(drivenAngularVelocityRadS) * fabsf(totalGear) * 60.0f / CIRCUIT_TWO_PI;
     return clampf(rpm, spec->engineIdleRpm, spec->engineRedlineRpm);
 }
 
@@ -156,7 +156,7 @@ DrivetrainTorques drivetrain_calculate_torques(const VehicleSpec *spec, int sele
      * subtracted separately below. */
     if (out.totalGearRatio != 0.0f) {
         const float rawRpm = fabsf(drivenAngularVelocityRadS) * fabsf(out.totalGearRatio) *
-                             60.0f / DRIFTY_TWO_PI;
+                             60.0f / CIRCUIT_TWO_PI;
         const float limiterStartRpm = spec->engineRedlineRpm - 500.0f;
         if (rawRpm > limiterStartRpm) {
             const float fade = clampf((spec->engineRedlineRpm - rawRpm) / 500.0f, 0.0f, 1.0f);
@@ -179,7 +179,7 @@ DrivetrainTorques drivetrain_calculate_torques(const VehicleSpec *spec, int sele
     float engineBrakingScale = 0.0f;
     if (fabsf(drivenAngularVelocityRadS) > 1e-4f && out.totalGearRatio != 0.0f) {
         const float rawRpm = fabsf(drivenAngularVelocityRadS) * fabsf(out.totalGearRatio) *
-                             60.0f / DRIFTY_TWO_PI;
+                             60.0f / CIRCUIT_TWO_PI;
         engineBrakingScale =
             clampf((rawRpm - spec->engineIdleRpm) / ENGINE_BRAKING_FADE_RPM_SPAN, 0.0f, 1.0f);
     }

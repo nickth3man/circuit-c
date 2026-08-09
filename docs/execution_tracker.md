@@ -1,6 +1,6 @@
 # Deterministic 2D Racing Simulator — Execution Tracker
 
-Master roadmap: https://github.com/nickth3man/drift-c/issues/42
+Master roadmap: https://github.com/nickth3man/circuit-c/issues/2
 
 ## Target
 
@@ -27,8 +27,8 @@ If work is in progress, append `— IN PROGRESS` to its line.
 3. Complete the phase gate before advancing to the next phase unless the later issue's dependencies are independently satisfied.
 4. Physics behavior changes require focused validation and deterministic regression tests.
 5. Content migrations must preserve existing behavior before compiled definitions are removed.
-6. Issue #99 is post-core and does not block the AI-racing target.
-7. Issue #100 is the final core release gate.
+6. Issue #59 is post-core and does not block the AI-racing target.
+7. Issue #60 is the final core release gate.
 
 ---
 
@@ -38,42 +38,42 @@ Start the Identity and Architecture lanes in parallel.
 
 ## Identity lane
 
-- [ ] [#43 — Choose the replacement product identity and migration map](https://github.com/nickth3man/drift-c/issues/43)
+- [x] [#3 — Choose the replacement product identity and migration map](https://github.com/nickth3man/circuit-c/issues/3)
   - Depends on: none
 
-- [ ] [#44 — Remove drift-game language, scoring remnants, and misleading scenario names](https://github.com/nickth3man/drift-c/issues/44)
-  - Depends on: #43
+- [x] [#4 — Remove drift-game language, scoring remnants, and misleading scenario names](https://github.com/nickth3man/circuit-c/issues/4)
+  - Depends on: #3
 
-- [ ] [#45 — Rename technical symbols, binaries, paths, artifacts, and repository metadata](https://github.com/nickth3man/drift-c/issues/45)
-  - Depends on: #43, #44
+- [x] [#5 — Rename technical symbols, binaries, paths, artifacts, and repository metadata](https://github.com/nickth3man/circuit-c/issues/5)
+  - Depends on: #3, #4
 
 ## Architecture lane
 
-- [ ] [#46 — Define simulation, content, entrant, and session ownership contracts](https://github.com/nickth3man/drift-c/issues/46)
+- [ ] [#6 — Define simulation, content, entrant, and session ownership contracts](https://github.com/nickth3man/circuit-c/issues/6)
   - Depends on: none
 
-After #46, #47 and #48 may run in parallel.
+After #6, #7 and #8 may run in parallel.
 
-- [ ] [#47 — Split immutable TrackDefinition from per-entrant RacerProgress](https://github.com/nickth3man/drift-c/issues/47)
-  - Depends on: #46
+- [ ] [#7 — Split immutable TrackDefinition from per-entrant RacerProgress](https://github.com/nickth3man/circuit-c/issues/7)
+  - Depends on: #6
 
-- [ ] [#48 — Split VehicleDefinition, VehicleSetup, and VehicleInstance state](https://github.com/nickth3man/drift-c/issues/48)
-  - Depends on: #46
+- [ ] [#8 — Split VehicleDefinition, VehicleSetup, and VehicleInstance state](https://github.com/nickth3man/circuit-c/issues/8)
+  - Depends on: #6
 
-- [ ] [#49 — Unify human, AI, replay, ghost, and scripted control behind Controller output](https://github.com/nickth3man/drift-c/issues/49)
-  - Depends on: #48
+- [ ] [#9 — Unify human, AI, replay, ghost, and scripted control behind Controller output](https://github.com/nickth3man/circuit-c/issues/9)
+  - Depends on: #8
 
-- [ ] [#50 — Introduce RaceEntrant and deterministic multi-vehicle storage](https://github.com/nickth3man/drift-c/issues/50)
-  - Depends on: #47, #48, #49
+- [ ] [#10 — Introduce RaceEntrant and deterministic multi-vehicle storage](https://github.com/nickth3man/circuit-c/issues/10)
+  - Depends on: #7, #8, #9
 
-- [ ] [#51 — Introduce RaceSession lifecycle, rules, and ordered fixed-update stages](https://github.com/nickth3man/drift-c/issues/51)
-  - Depends on: #50
+- [ ] [#11 — Introduce RaceSession lifecycle, rules, and ordered fixed-update stages](https://github.com/nickth3man/circuit-c/issues/11)
+  - Depends on: #10
 
 ## Phase 0 gate
 
-- [ ] Replacement identity is fully decided.
-- [ ] Player-facing drift scoring/game framing has been removed.
-- [ ] Technical identity rename builds and tests successfully.
+- [x] Replacement identity is fully decided.
+- [x] Player-facing drift scoring/game framing has been removed.
+- [x] Technical identity rename builds and tests successfully.
 - [ ] Track content and racer progress have separate ownership.
 - [ ] Vehicle definitions, setups, and runtime instances have separate ownership.
 - [ ] All simulated entrants use the same controller contract.
@@ -86,11 +86,11 @@ After #46, #47 and #48 may run in parallel.
 
 These issues establish truthful parameters and safe solver seams before adding physical effects.
 
-- [ ] [#52 — Audit VehicleSpec parameter truthfulness and units](https://github.com/nickth3man/drift-c/issues/52)
-  - Depends on: #48
+- [ ] [#12 — Audit VehicleSpec parameter truthfulness and units](https://github.com/nickth3man/circuit-c/issues/12)
+  - Depends on: #8
 
-- [ ] [#53 — Decompose the planar solver into deterministic, testable stages](https://github.com/nickth3man/drift-c/issues/53)
-  - Depends on: #51, #52
+- [ ] [#13 — Decompose the planar solver into deterministic, testable stages](https://github.com/nickth3man/circuit-c/issues/13)
+  - Depends on: #11, #12
 
 ## Phase 1 gate
 
@@ -108,41 +108,41 @@ The Cars and Tracks lanes can run primarily in parallel.
 
 ## Cars lane
 
-- [ ] [#69 — Define a versioned vehicle manifest and loader](https://github.com/nickth3man/drift-c/issues/69)
-  - Depends on: #48, #52
+- [ ] [#29 — Define a versioned vehicle manifest and loader](https://github.com/nickth3man/circuit-c/issues/29)
+  - Depends on: #8, #12
 
-- [ ] [#70 — Migrate the six-car validated roster out of hard-coded C](https://github.com/nickth3man/drift-c/issues/70)
-  - Depends on: #69
+- [ ] [#30 — Migrate the six-car validated roster out of hard-coded C](https://github.com/nickth3man/circuit-c/issues/30)
+  - Depends on: #29
 
-After #70, #71 and #72 may run in parallel.
+After #30, #31 and #32 may run in parallel.
 
-- [ ] [#71 — Separate the appearance corpus from gameplay roster promotion](https://github.com/nickth3man/drift-c/issues/71)
-  - Depends on: #69, #70
+- [ ] [#31 — Separate the appearance corpus from gameplay roster promotion](https://github.com/nickth3man/circuit-c/issues/31)
+  - Depends on: #29, #30
 
-- [ ] [#72 — Add player-facing car selection, inspection, and compatibility status](https://github.com/nickth3man/drift-c/issues/72)
-  - Depends on: #70, #51
+- [ ] [#32 — Add player-facing car selection, inspection, and compatibility status](https://github.com/nickth3man/circuit-c/issues/32)
+  - Depends on: #30, #11
 
-- [ ] [#73 — Implement validated setups, classes, and class-aware performance checks](https://github.com/nickth3man/drift-c/issues/73)
-  - Depends on: #48, #52, #69
+- [ ] [#33 — Implement validated setups, classes, and class-aware performance checks](https://github.com/nickth3man/circuit-c/issues/33)
+  - Depends on: #8, #12, #29
 
 ## Tracks lane
 
-- [ ] [#74 — Define a versioned external track format](https://github.com/nickth3man/drift-c/issues/74)
-  - Depends on: #47
+- [ ] [#34 — Define a versioned external track format](https://github.com/nickth3man/circuit-c/issues/34)
+  - Depends on: #7
 
-- [ ] [#75 — Implement headless track loading, validation, version migration, and hashes](https://github.com/nickth3man/drift-c/issues/75)
-  - Depends on: #74
+- [ ] [#35 — Implement headless track loading, validation, version migration, and hashes](https://github.com/nickth3man/circuit-c/issues/35)
+  - Depends on: #34
 
-After #75, track migration can proceed while race semantics are developed.
+After #35, track migration can proceed while race semantics are developed.
 
-- [ ] [#76 — Migrate built-in tracks from C into external content](https://github.com/nickth3man/drift-c/issues/76)
-  - Depends on: #75
+- [ ] [#36 — Migrate built-in tracks from C into external content](https://github.com/nickth3man/circuit-c/issues/36)
+  - Depends on: #35
 
-- [ ] [#77 — Separate route checkpoints, timing sectors, start/finish, grid, and pit semantics](https://github.com/nickth3man/drift-c/issues/77)
-  - Depends on: #51, #74
+- [ ] [#37 — Separate route checkpoints, timing sectors, start/finish, grid, and pit semantics](https://github.com/nickth3man/circuit-c/issues/37)
+  - Depends on: #11, #34
 
-- [ ] [#78 — Implement per-entrant route localization, progress, ordering, and wrong-way detection](https://github.com/nickth3man/drift-c/issues/78)
-  - Depends on: #50, #77
+- [ ] [#38 — Implement per-entrant route localization, progress, ordering, and wrong-way detection](https://github.com/nickth3man/circuit-c/issues/38)
+  - Depends on: #10, #37
 
 ## Phase 2 gate
 
@@ -160,66 +160,66 @@ After #75, track migration can proceed while race semantics are developed.
 
 # Phase 3 — Physics Implementation
 
-Multiple lanes may operate in parallel after #53, but dependencies within each lane must be respected.
+Multiple lanes may operate in parallel after #13, but dependencies within each lane must be respected.
 
 ## Alignment lane
 
-- [ ] [#54 — Apply per-wheel toe/alignment to contact-patch kinematics](https://github.com/nickth3man/drift-c/issues/54)
-  - Depends on: #53
+- [ ] [#14 — Apply per-wheel toe/alignment to contact-patch kinematics](https://github.com/nickth3man/circuit-c/issues/14)
+  - Depends on: #13
 
-- [ ] [#55 — Model bounded camber and caster effects in the planar tire model](https://github.com/nickth3man/drift-c/issues/55)
-  - Depends on: #54
+- [ ] [#15 — Model bounded camber and caster effects in the planar tire model](https://github.com/nickth3man/circuit-c/issues/15)
+  - Depends on: #14
 
 ## Tire dimensions and transient-force lane
 
-- [ ] [#56 — Make tire width, radius, and pressure affect force generation consistently](https://github.com/nickth3man/drift-c/issues/56)
-  - Depends on: #52, #53
+- [ ] [#16 — Make tire width, radius, and pressure affect force generation consistently](https://github.com/nickth3man/circuit-c/issues/16)
+  - Depends on: #12, #13
 
-- [ ] [#60 — Add longitudinal relaxation and aligning-moment diagnostics](https://github.com/nickth3man/drift-c/issues/60)
-  - Depends on: #53, #55, #56
+- [ ] [#20 — Add longitudinal relaxation and aligning-moment diagnostics](https://github.com/nickth3man/circuit-c/issues/20)
+  - Depends on: #13, #15, #16
 
-- [ ] [#61 — Add deterministic tire temperature and pressure state](https://github.com/nickth3man/drift-c/issues/61)
-  - Depends on: #48, #56, #60
+- [ ] [#21 — Add deterministic tire temperature and pressure state](https://github.com/nickth3man/circuit-c/issues/21)
+  - Depends on: #8, #16, #20
 
-- [ ] [#62 — Add tire wear, grip degradation, and deterministic service hooks](https://github.com/nickth3man/drift-c/issues/62)
-  - Depends on: #51, #61
+- [ ] [#22 — Add tire wear, grip degradation, and deterministic service hooks](https://github.com/nickth3man/circuit-c/issues/22)
+  - Depends on: #11, #21
 
 ## Aerodynamics lane
 
-- [ ] [#57 — Implement speed-squared aerodynamic loads and balance](https://github.com/nickth3man/drift-c/issues/57)
-  - Depends on: #52, #53
+- [ ] [#17 — Implement speed-squared aerodynamic loads and balance](https://github.com/nickth3man/circuit-c/issues/17)
+  - Depends on: #12, #13
 
 ## Suspension lane
 
-- [ ] [#58 — Derive quasi-static load transfer from suspension and chassis parameters](https://github.com/nickth3man/drift-c/issues/58)
-  - Depends on: #52, #53
+- [ ] [#18 — Derive quasi-static load transfer from suspension and chassis parameters](https://github.com/nickth3man/circuit-c/issues/18)
+  - Depends on: #12, #13
 
-- [ ] [#59 — Add suspension travel, bump-stop, and wheel-unloading limits](https://github.com/nickth3man/drift-c/issues/59)
-  - Depends on: #58
+- [ ] [#19 — Add suspension travel, bump-stop, and wheel-unloading limits](https://github.com/nickth3man/circuit-c/issues/19)
+  - Depends on: #18
 
 ## Powertrain lane
 
-- [ ] [#63 — Model engine inertia, clutch coupling, and shift engagement](https://github.com/nickth3man/drift-c/issues/63)
-  - Depends on: #48, #49, #53
+- [ ] [#23 — Model engine inertia, clutch coupling, and shift engagement](https://github.com/nickth3man/circuit-c/issues/23)
+  - Depends on: #8, #9, #13
 
-- [ ] [#64 — Add fuel consumption and dynamic mass/CG effects](https://github.com/nickth3man/drift-c/issues/64)
-  - Depends on: #48, #63
+- [ ] [#24 — Add fuel consumption and dynamic mass/CG effects](https://github.com/nickth3man/circuit-c/issues/24)
+  - Depends on: #8, #23
 
 ## Driver-assist lane
 
-- [ ] [#65 — Add deterministic ABS and traction-control controllers](https://github.com/nickth3man/drift-c/issues/65)
-  - Depends on: #49, #60, #63
+- [ ] [#25 — Add deterministic ABS and traction-control controllers](https://github.com/nickth3man/circuit-c/issues/25)
+  - Depends on: #9, #20, #23
 
 ## Collision lane
 
-- [ ] [#66 — Introduce a deterministic collision world and measured broadphase](https://github.com/nickth3man/drift-c/issues/66)
-  - Depends on: #50, #51
+- [ ] [#26 — Introduce a deterministic collision world and measured broadphase](https://github.com/nickth3man/circuit-c/issues/26)
+  - Depends on: #10, #11
 
-- [ ] [#67 — Implement deterministic vehicle-to-vehicle contact response](https://github.com/nickth3man/drift-c/issues/67)
-  - Depends on: #66
+- [ ] [#27 — Implement deterministic vehicle-to-vehicle contact response](https://github.com/nickth3man/circuit-c/issues/27)
+  - Depends on: #26
 
-- [ ] [#68 — Add configurable collision damage and deterministic stuck recovery](https://github.com/nickth3man/drift-c/issues/68)
-  - Depends on: #51, #67
+- [ ] [#28 — Add configurable collision damage and deterministic stuck recovery](https://github.com/nickth3man/circuit-c/issues/28)
+  - Depends on: #11, #27
 
 ## Phase 3 gate
 
@@ -238,20 +238,20 @@ Multiple lanes may operate in parallel after #53, but dependencies within each l
 
 # Phase 4 — Complete the Track System
 
-- [ ] [#79 — Cache local track queries and add measured spatial acceleration](https://github.com/nickth3man/drift-c/issues/79)
-  - Depends on: #66, #78
+- [ ] [#39 — Cache local track queries and add measured spatial acceleration](https://github.com/nickth3man/circuit-c/issues/39)
+  - Depends on: #26, #38
 
-- [ ] [#80 — Add elevation, grade, banking, kerb, and road-profile effects for the 2.5D solver](https://github.com/nickth3man/drift-c/issues/80)
-  - Depends on: #59, #75, #78
+- [ ] [#40 — Add elevation, grade, banking, kerb, and road-profile effects for the 2.5D solver](https://github.com/nickth3man/circuit-c/issues/40)
+  - Depends on: #19, #35, #38
 
-- [ ] [#81 — Add deterministic weather, wetness, time, and environmental presentation state](https://github.com/nickth3man/drift-c/issues/81)
-  - Depends on: #61, #80
+- [ ] [#41 — Add deterministic weather, wetness, time, and environmental presentation state](https://github.com/nickth3man/circuit-c/issues/41)
+  - Depends on: #21, #40
 
-- [ ] [#82 — Build the track authoring, validation, conversion, and preview workflow](https://github.com/nickth3man/drift-c/issues/82)
-  - Depends on: #75, #77, #81
+- [ ] [#42 — Build the track authoring, validation, conversion, and preview workflow](https://github.com/nickth3man/circuit-c/issues/42)
+  - Depends on: #35, #37, #41
 
-- [ ] [#83 — Ship independent circuits, discovery metadata, previews, and track coverage](https://github.com/nickth3man/drift-c/issues/83)
-  - Depends on: #76, #82
+- [ ] [#43 — Ship independent circuits, discovery metadata, previews, and track coverage](https://github.com/nickth3man/circuit-c/issues/43)
+  - Depends on: #36, #42
 
 ## Phase 4 gate
 
@@ -271,17 +271,17 @@ Multiple lanes may operate in parallel after #53, but dependencies within each l
 
 These tasks may run in parallel once their dependencies are complete.
 
-- [ ] [#84 — Build a multi-car determinism, replay, checksum, and regression matrix](https://github.com/nickth3man/drift-c/issues/84)
-  - Depends on: #49, #50, #51, #67, #78
+- [ ] [#44 — Build a multi-car determinism, replay, checksum, and regression matrix](https://github.com/nickth3man/circuit-c/issues/44)
+  - Depends on: #9, #10, #11, #27, #38
 
-- [ ] [#85 — Establish fixed-step performance budgets and multi-car scale benchmarks](https://github.com/nickth3man/drift-c/issues/85)
-  - Depends on: #50, #66, #79
+- [ ] [#45 — Establish fixed-step performance budgets and multi-car scale benchmarks](https://github.com/nickth3man/circuit-c/issues/45)
+  - Depends on: #10, #26, #39
 
-- [ ] [#86 — Deliver interactive cross-platform builds and reproducible release packaging](https://github.com/nickth3man/drift-c/issues/86)
-  - Depends on: #45, #69, #75
+- [ ] [#46 — Deliver interactive cross-platform builds and reproducible release packaging](https://github.com/nickth3man/circuit-c/issues/46)
+  - Depends on: #5, #29, #35
 
-- [ ] [#87 — Add versioned player profile, settings, controls, and accessibility](https://github.com/nickth3man/drift-c/issues/87)
-  - Depends on: #45, #69, #75
+- [ ] [#47 — Add versioned player profile, settings, controls, and accessibility](https://github.com/nickth3man/circuit-c/issues/47)
+  - Depends on: #5, #29, #35
 
 ## Phase 5 gate
 
@@ -302,48 +302,48 @@ Several lanes can begin in parallel after the phase foundations are complete.
 
 ## Session configuration and start lane
 
-- [ ] [#88 — Build the player-facing car, track, and session configuration flow](https://github.com/nickth3man/drift-c/issues/88)
-  - Depends on: #51, #72, #83, #87
+- [ ] [#48 — Build the player-facing car, track, and session configuration flow](https://github.com/nickth3man/circuit-c/issues/48)
+  - Depends on: #11, #32, #43, #47
 
-- [ ] [#89 — Implement grid placement, countdown, start lights, and false starts](https://github.com/nickth3man/drift-c/issues/89)
-  - Depends on: #51, #77, #88
+- [ ] [#49 — Implement grid placement, countdown, start lights, and false starts](https://github.com/nickth3man/circuit-c/issues/49)
+  - Depends on: #11, #37, #48
 
 ## Timing and ghost lane
 
-- [ ] [#90 — Implement authoritative timing, sectors, lap validity, and time-trial records](https://github.com/nickth3man/drift-c/issues/90)
-  - Depends on: #51, #77, #78, #87
+- [ ] [#50 — Implement authoritative timing, sectors, lap validity, and time-trial records](https://github.com/nickth3man/circuit-c/issues/50)
+  - Depends on: #11, #37, #38, #47
 
-- [ ] [#91 — Promote replay data into persistent, non-interacting player ghosts](https://github.com/nickth3man/drift-c/issues/91)
-  - Depends on: #49, #84, #90
+- [ ] [#51 — Promote replay data into persistent, non-interacting player ghosts](https://github.com/nickth3man/circuit-c/issues/51)
+  - Depends on: #9, #44, #50
 
 ## AI lane
 
-- [ ] [#92 — Integrate the validation AI as a live session Controller](https://github.com/nickth3man/drift-c/issues/92)
-  - Depends on: #49, #50, #70, #78
+- [ ] [#52 — Integrate the validation AI as a live session Controller](https://github.com/nickth3man/circuit-c/issues/52)
+  - Depends on: #9, #10, #30, #38
 
-- [ ] [#93 — Add AI racecraft, traffic awareness, and data-driven difficulty](https://github.com/nickth3man/drift-c/issues/93)
-  - Depends on: #67, #78, #85, #92
+- [ ] [#53 — Add AI racecraft, traffic awareness, and data-driven difficulty](https://github.com/nickth3man/circuit-c/issues/53)
+  - Depends on: #27, #38, #45, #52
 
 ## Classification, rules, and results lane
 
-Start #94 after both the grid/start and basic live-AI requirements are complete.
+Start #54 after both the grid/start and basic live-AI requirements are complete.
 
-- [ ] [#94 — Implement multi-entrant race order, finish, and classification](https://github.com/nickth3man/drift-c/issues/94)
-  - Depends on: #51, #78, #89, #92
+- [ ] [#54 — Implement multi-entrant race order, finish, and classification](https://github.com/nickth3man/circuit-c/issues/54)
+  - Depends on: #11, #38, #49, #52
 
-- [ ] [#95 — Implement track limits, cuts, wrong-way, contact, and penalty rules](https://github.com/nickth3man/drift-c/issues/95)
-  - Depends on: #68, #78, #94
+- [ ] [#55 — Implement track limits, cuts, wrong-way, contact, and penalty rules](https://github.com/nickth3man/circuit-c/issues/55)
+  - Depends on: #28, #38, #54
 
-- [ ] [#96 — Complete race HUD, classified results, records, retry, and next-session flow](https://github.com/nickth3man/drift-c/issues/96)
-  - Depends on: #87, #90, #94, #95
+- [ ] [#56 — Complete race HUD, classified results, records, retry, and next-session flow](https://github.com/nickth3man/circuit-c/issues/56)
+  - Depends on: #47, #50, #54, #55
 
 ## Pits and event structure lane
 
-- [ ] [#97 — Implement pit lane, speed limiter, stops, fuel/tire/damage service, and AI strategy hooks](https://github.com/nickth3man/drift-c/issues/97)
-  - Depends on: #62, #64, #68, #77, #95
+- [ ] [#57 — Implement pit lane, speed limiter, stops, fuel/tire/damage service, and AI strategy hooks](https://github.com/nickth3man/circuit-c/issues/57)
+  - Depends on: #22, #24, #28, #37, #55
 
-- [ ] [#98 — Add practice, qualifying, race weekends, championships, points, and progression](https://github.com/nickth3man/drift-c/issues/98)
-  - Depends on: #73, #96, #97
+- [ ] [#58 — Add practice, qualifying, race weekends, championships, points, and progression](https://github.com/nickth3man/circuit-c/issues/58)
+  - Depends on: #33, #56, #57
 
 ## Phase 6 gate
 
@@ -365,8 +365,8 @@ Start #94 after both the grid/start and basic live-AI requirements are complete.
 
 # Phase 7 — Core Target Release Gate
 
-- [ ] [#100 — Define and pass the target acceptance demo, documentation, and release gate](https://github.com/nickth3man/drift-c/issues/100)
-  - Depends on: #45, #51, #68, #73, #83, #84, #85, #86, #96, #97, #98
+- [ ] [#60 — Define and pass the target acceptance demo, documentation, and release gate](https://github.com/nickth3man/circuit-c/issues/60)
+  - Depends on: #5, #11, #28, #33, #43, #44, #45, #46, #56, #57, #58
 
 ## Final core acceptance checklist
 
@@ -384,7 +384,7 @@ Start #94 after both the grid/start and basic live-AI requirements are complete.
 - [ ] No obsolete Drifty or drift-scoring identity remains.
 - [ ] Windows and Linux release packages pass clean-install smoke tests.
 - [ ] Performance meets the documented 120 Hz entrant budget.
-- [ ] Issue #100 is closed.
+- [ ] Issue #60 is closed.
 
 ---
 
@@ -392,8 +392,8 @@ Start #94 after both the grid/start and basic live-AI requirements are complete.
 
 This work closes the multiplayer gap but does not block the stated AI-racing target.
 
-- [ ] [#99 — Close the post-core local and network multiplayer gap](https://github.com/nickth3man/drift-c/issues/99)
-  - Depends on: #84, #85, #86, #96
+- [ ] [#59 — Close the post-core local and network multiplayer gap](https://github.com/nickth3man/circuit-c/issues/59)
+  - Depends on: #44, #45, #46, #56
 
 ## Post-core multiplayer gate
 

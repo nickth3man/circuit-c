@@ -7,8 +7,8 @@
  *
  * This translation unit must not call any raylib function.
  */
-#ifndef DRIFTY_SURFACE_H
-#define DRIFTY_SURFACE_H
+#ifndef CIRCUIT_SURFACE_H
+#define CIRCUIT_SURFACE_H
 
 #include "physics/vehicle.h" /* SurfaceId */
 
@@ -24,4 +24,4 @@ typedef struct {
 /* Never returns NULL; out-of-range id is clamped to SURFACE_ASPHALT. */
 const SurfaceSpec *Surface_Get(SurfaceId id);
 
-#endif /* DRIFTY_SURFACE_H */
+#endif /* CIRCUIT_SURFACE_H */

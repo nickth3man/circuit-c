@@ -7,8 +7,8 @@
  * users) and read by the physics telemetry scenario; set_vehicle_rolling_speed is implemented
  * in physics_tests.c and used by the physics, handling and gameplay groups.
  */
-#ifndef DRIFTY_SCENARIO_SHARED_H
-#define DRIFTY_SCENARIO_SHARED_H
+#ifndef CIRCUIT_SCENARIO_SHARED_H
+#define CIRCUIT_SCENARIO_SHARED_H
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -43,4 +43,4 @@ uint32_t run_playback(Game *game, const ReplayBuffer *timeline, const ScriptFram
 /* Put the vehicle at a steady speed with every wheel already rolling at it. */
 void set_vehicle_rolling_speed(Game *game, float velocityLongitudinalMps);
 
-#endif /* DRIFTY_SCENARIO_SHARED_H */
+#endif /* CIRCUIT_SCENARIO_SHARED_H */

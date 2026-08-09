@@ -2,7 +2,7 @@
  * main.c — platform layer (Windows only).
  *
  * Owns the window, the raylib context, the Game allocation, and the fixed-timestep loop.
- * It is not hot-reloadable: editing this file requires restarting drifty.exe.
+ * It is not hot-reloadable: editing this file requires restarting circuit.exe.
  *
  * The Game block is allocated here, once, and handed to the game module by pointer on every
  * entry point. That is what lets the module be swapped while the game keeps its state.
@@ -25,7 +25,7 @@
  * Both terminate on their own. Nothing in this file ever waits for a developer.
  */
 #ifndef _WIN32
-#error Drifty currently supports Windows only.
+#error Circuit currently supports Windows only.
 #endif
 
 #include <direct.h>
@@ -77,15 +77,16 @@ typedef struct {
 static const CaptureScene g_captureScenes[] = {
     { "debug_overlay", "accel", 240, true, false, DEV_SCOPE_PRESET_HANDLING, false, false },
     { "tire_curves", "skidpad", 600, true, false, DEV_SCOPE_PRESET_GRIP, false, false },
-    { "drift_hud", "handbrake-entry", 500, true, false, DEV_SCOPE_PRESET_HANDLING, false,
-      false },
+    { "limit_handling_hud", "handbrake-entry", 500, true, false, DEV_SCOPE_PRESET_HANDLING,
+      false, false },
     { "physics_lab", "skidpad", 480, false, true, DEV_SCOPE_PRESET_HANDLING, false, false },
     { "accel_load", "accel-load", 600, false, true, DEV_SCOPE_PRESET_LOAD, true, true },
     { "brake_load", "brake-load", 760, false, true, DEV_SCOPE_PRESET_LOAD, true, true },
     { "skidpad_p3", "skidpad", 1500, false, true, DEV_SCOPE_PRESET_GRIP, true, true },
     { "lift_off", "lift-off", 850, false, true, DEV_SCOPE_PRESET_LOAD, true, true },
     { "transition_p3", "transition", 900, false, true, DEV_SCOPE_PRESET_GRIP, true, true },
-    { "catchable", "catchable-drift", 820, false, true, DEV_SCOPE_PRESET_GRIP, true, true },
+    { "sideslip_recovery", "sideslip-recovery", 820, false, true, DEV_SCOPE_PRESET_GRIP, true,
+      true },
 };
 
 #define CAPTURE_SCENE_COUNT ((int)(sizeof(g_captureScenes) / sizeof(g_captureScenes[0])))
@@ -757,9 +758,9 @@ static int run_validate_lap(Game *game, const Options *options)
     rep.fixedHz = FIXED_HZ;
     rep.telemetryHz = VIDEO_FPS;
     rep.videoFps = VIDEO_FPS;
-    rep.buildCommit = DRIFTY_BUILD_COMMIT;
-    rep.buildDirty =
-        (strcmp(DRIFTY_BUILD_DIRTY, "clean") != 0 && strcmp(DRIFTY_BUILD_DIRTY, "false") != 0);
+    rep.buildCommit = CIRCUIT_BUILD_COMMIT;
+    rep.buildDirty = (strcmp(CIRCUIT_BUILD_DIRTY, "clean") != 0 &&
+                      strcmp(CIRCUIT_BUILD_DIRTY, "false") != 0);
     rep.finalStateChecksum = checksumHex;
     rep.tickBudget = budgetTicks;
     rep.ticksRun = ticksRun;
@@ -847,7 +848,7 @@ int main(int argc, char **argv)
 
     if (options.validateLap) {
         if (!options.noVideo) {
-            InitWindow(options.width, options.height, "Drifty - lap validation");
+            InitWindow(options.width, options.height, "Circuit - lap validation");
             if (!IsWindowReady()) {
                 fprintf(stderr, "FATAL: InitWindow failed (%dx%d)\n", options.width,
                         options.height);

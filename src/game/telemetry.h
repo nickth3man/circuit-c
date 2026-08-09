@@ -16,8 +16,8 @@
  * Formatting is fixed-precision (%.6f) rather than %g so that byte-for-byte diffs against a
  * committed baseline are meaningful.
  */
-#ifndef DRIFTY_TELEMETRY_H
-#define DRIFTY_TELEMETRY_H
+#ifndef CIRCUIT_TELEMETRY_H
+#define CIRCUIT_TELEMETRY_H
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -158,4 +158,4 @@ bool telemetry_close(TelemetryWriter *writer);
 /* The exact header line (without newline) that telemetry_open() writes. */
 const char *telemetry_header(void);
 
-#endif /* DRIFTY_TELEMETRY_H */
+#endif /* CIRCUIT_TELEMETRY_H */

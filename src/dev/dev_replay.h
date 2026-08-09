@@ -16,8 +16,8 @@
  *
  * raylib-free: linked into the headless test executable as well as the game module.
  */
-#ifndef DRIFTY_DEV_REPLAY_H
-#define DRIFTY_DEV_REPLAY_H
+#ifndef CIRCUIT_DEV_REPLAY_H
+#define CIRCUIT_DEV_REPLAY_H
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -77,4 +77,4 @@ int dev_replay_collect_events(const ReplayBuffer *rb, DevReplayEvent *out, int c
 /* Retained frame at window index i (0 = oldest), or NULL when out of range. */
 const ReplayFrame *dev_replay_frame_at(const ReplayBuffer *rb, int index);
 
-#endif /* DRIFTY_DEV_REPLAY_H */
+#endif /* CIRCUIT_DEV_REPLAY_H */

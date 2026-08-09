@@ -6,8 +6,8 @@
  * The archetype translation unit is the sole owner of the ArchetypeDef table. Invalid
  * indices or null outputs return false / NULL.
  */
-#ifndef DRIFTY_CAR_CORPUS_INTERNAL_H
-#define DRIFTY_CAR_CORPUS_INTERNAL_H
+#ifndef CIRCUIT_CAR_CORPUS_INTERNAL_H
+#define CIRCUIT_CAR_CORPUS_INTERNAL_H
 
 #include <stdbool.h>
 
@@ -18,4 +18,4 @@ bool car_corpus_archetype_build(int index, VehicleSpec *out);
 const char *car_corpus_archetype_name(int index);
 const char *car_corpus_archetype_description(int index);
 
-#endif /* DRIFTY_CAR_CORPUS_INTERNAL_H */
+#endif /* CIRCUIT_CAR_CORPUS_INTERNAL_H */

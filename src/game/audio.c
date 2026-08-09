@@ -1,7 +1,7 @@
 /*
  * audio.c — sample-based audio system (Phase 6).
  *
- * All raylib audio calls are guarded by #if !defined(DRIFTY_HEADLESS) so the headless test
+ * All raylib audio calls are guarded by #if !defined(CIRCUIT_HEADLESS) so the headless test
  * binary compiles this TU into no-op stubs and never touches the audio device.
  *
  * Hot-reload safety:
@@ -21,7 +21,7 @@
 #include <math.h>
 #include <stdbool.h>
 
-#if !defined(DRIFTY_HEADLESS)
+#if !defined(CIRCUIT_HEADLESS)
 
 #include "raylib.h"
 #include "core/config.h"     /* FIXED_DT_S */
@@ -202,7 +202,7 @@ void audio_play_collision_thud(void)
     PlaySound(s_thudSound);
 }
 
-#else /* ── DRIFTY_HEADLESS: complete no-op stubs ──────────────────────── */
+#else /* ── CIRCUIT_HEADLESS: complete no-op stubs ──────────────────────── */
 
 void audio_init(void) {}
 void audio_shutdown(void) {}
@@ -220,4 +220,4 @@ void audio_update(float engineRpm, float idleRpm, float redlineRpm, bool physica
 }
 void audio_play_collision_thud(void) {}
 
-#endif /* !DRIFTY_HEADLESS */
+#endif /* !CIRCUIT_HEADLESS */

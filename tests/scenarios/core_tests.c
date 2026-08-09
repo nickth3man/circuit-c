@@ -17,10 +17,10 @@
 
 #if defined(_WIN32)
 #include <direct.h>
-#define DRIFTY_RMDIR(path) _rmdir(path)
+#define CIRCUIT_RMDIR(path) _rmdir(path)
 #else
 #include <unistd.h>
-#define DRIFTY_RMDIR(path) rmdir(path)
+#define CIRCUIT_RMDIR(path) rmdir(path)
 #endif
 
 #include "support/test_harness.h"
@@ -204,10 +204,10 @@ static void scenario_math(void)
 
     /* wrap_angle: canonical range is [-PI, +PI) */
     check_near_angle(wrap_angle(0.0f), 0.0f, 1e-6f, "wrap_angle(0)");
-    check_near((double)wrap_angle(DRIFTY_PI), -(double)DRIFTY_PI, 1e-5,
+    check_near((double)wrap_angle(CIRCUIT_PI), -(double)CIRCUIT_PI, 1e-5,
                "wrap_angle(+PI) returns -PI (range is closed below, open above)");
-    check_near((double)wrap_angle(-DRIFTY_PI), -(double)DRIFTY_PI, 1e-5, "wrap_angle(-PI)");
-    check_near_angle(wrap_angle(3.0f * DRIFTY_PI), DRIFTY_PI, 1e-4f, "wrap_angle(3*PI)");
+    check_near((double)wrap_angle(-CIRCUIT_PI), -(double)CIRCUIT_PI, 1e-5, "wrap_angle(-PI)");
+    check_near_angle(wrap_angle(3.0f * CIRCUIT_PI), CIRCUIT_PI, 1e-4f, "wrap_angle(3*PI)");
     check_near((double)wrap_angle(0.5f), 0.5, 1e-6,
                "wrap_angle leaves an in-range angle alone");
     {
@@ -216,9 +216,9 @@ static void scenario_math(void)
         for (int i = -2000; i <= 2000; i++) {
             const float a = (float)i * 0.37f;
             const float w = wrap_angle(a);
-            if (!(w >= -DRIFTY_PI && w < DRIFTY_PI)) inRange = false;
+            if (!(w >= -CIRCUIT_PI && w < CIRCUIT_PI)) inRange = false;
             /* w must differ from a by a whole number of turns */
-            const float turns = (a - w) / DRIFTY_TWO_PI;
+            const float turns = (a - w) / CIRCUIT_TWO_PI;
             if (fabsf(turns - roundf(turns)) > 1e-3f) equivalent = false;
         }
         check(inRange, "wrap_angle output is always within [-PI, +PI)");
@@ -259,7 +259,7 @@ static void scenario_math(void)
     {
         /* 3.0 -> -3.0 is 0.283 rad the short way (across +-PI), 5.999 rad the long way. */
         const float mid = lerp_angle(3.0f, -3.0f, 0.5f);
-        check_near_angle(mid, DRIFTY_PI, 1e-4f,
+        check_near_angle(mid, CIRCUIT_PI, 1e-4f,
                          "lerp_angle crosses +-PI rather than sweeping back through zero");
         check(fabsf(mid) > 3.0f, "lerp_angle result stays near +-PI (got %.6f)", (double)mid);
 
@@ -328,9 +328,9 @@ static void scenario_units(void)
 
     /* Heading (radians, CCW positive) -> raylib rotation (degrees, CW positive). */
     check_near((double)units_heading_to_rotation_deg(0.0f), 0.0, 1e-6, "heading 0 -> 0 deg");
-    check_near((double)units_heading_to_rotation_deg(DRIFTY_PI * 0.5f), -90.0, 1e-4,
+    check_near((double)units_heading_to_rotation_deg(CIRCUIT_PI * 0.5f), -90.0, 1e-4,
                "a counterclockwise quarter turn maps to -90 render degrees");
-    check_near((double)units_heading_to_rotation_deg(-DRIFTY_PI), 180.0, 1e-3,
+    check_near((double)units_heading_to_rotation_deg(-CIRCUIT_PI), 180.0, 1e-3,
                "heading -PI -> +180 render degrees");
     check_near((double)units_rotation_deg_to_heading(units_heading_to_rotation_deg(0.7f)), 0.7,
                1e-5, "heading <-> rotation round-trips");
@@ -818,7 +818,7 @@ static void scenario_metamorphic_steer_mirror_symmetry(void)
  *
  * Inherited from the testing-overhaul plan, Track F1/F2 (not a fresh arXiv finding this round):
  * "F1: extend failure_bundle to record the seeded random state and entire input timeline...
- * F2: new `drifty_tests --replay-bundle <dir>` mode... A known-bad bundle on main fails with
+ * F2: new `circuit_tests --replay-bundle <dir>` mode... A known-bad bundle on main fails with
  * the same offending check text; a known-good bundle passes." Placed in core_tests.c (not
  * gameplay, where round 2's plan-inherited scaffolds landed) because reproducibility is a
  * property of the record/replay infrastructure in scenario_shared.h and dev/failure_bundle.h,
@@ -971,8 +971,8 @@ static void scenario_replay_bundle_seed_reproduction(void)
             snprintf(path, sizeof(path), "%s/%s", directory, files[i]);
             remove(path);
         }
-        DRIFTY_RMDIR(directory);
-        DRIFTY_RMDIR(root);
+        CIRCUIT_RMDIR(directory);
+        CIRCUIT_RMDIR(root);
     }
 
     free(recorder);
@@ -1042,8 +1042,8 @@ static void scenario_multi_failure_bundle_capture(void)
         remove(path);
         snprintf(path, sizeof(path), "%s/git_info.txt", directory);
         remove(path);
-        DRIFTY_RMDIR(directory);
-        DRIFTY_RMDIR(root);
+        CIRCUIT_RMDIR(directory);
+        CIRCUIT_RMDIR(root);
     }
 
     free(game);

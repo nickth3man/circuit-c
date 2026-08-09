@@ -25,7 +25,7 @@ const HEADLINE = [
   "archetype_05_sports_car",
   "archetype_06_supercar",
   "archetype_07_muscle_car",
-  "archetype_11_drift_car",
+  "archetype_11_high_angle_rwd",
 ];
 
 async function configure(page, { zoom, labels, overlay }) {
@@ -81,7 +81,7 @@ test("diagnostics panel", async ({ page }) => {
 
   // Also emit the verdicts as text, so a diff between two runs is readable without opening
   // an image viewer.
-  const diag = await page.evaluate(() => window.DRIFTY_DIAGNOSTICS);
+  const diag = await page.evaluate(() => window.CIRCUIT_DIAGNOSTICS);
   fs.writeFileSync(
     path.join(OUT, "diagnostics.txt"),
     diag.map((d) => `[${d.cls.toUpperCase().padEnd(4)}] ${d.k}: ${d.v}`).join("\n") + "\n"
@@ -104,7 +104,7 @@ test("per-sweep strips isolate one parameter at a time", async ({ page }) => {
   await page.setViewportSize({ width: 1500, height: 1400 });
   await configure(page, { zoom: 7, labels: false, overlay: false });
 
-  const data = await page.evaluate(() => window.DRIFTY_DATA);
+  const data = await page.evaluate(() => window.CIRCUIT_DATA);
   const sweeps = [
     ...new Set(
       data.cars

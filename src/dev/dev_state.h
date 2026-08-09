@@ -1,7 +1,7 @@
 /*
  * dev_state.h — the development-tool state that lives inside the persistent Game block.
  *
- * WHY THIS IS NOT #ifdef'd OUT. drifty.exe and build/game.dll both include game.h and both
+ * WHY THIS IS NOT #ifdef'd OUT. circuit.exe and build/game.dll both include game.h and both
  * must agree byte-for-byte on the layout of Game, or the first hot reload hands the module a
  * pointer it will misread. Making DevState conditional would make that agreement depend on
  * two independent compiler invocations defining the same macro. So the *data* is always
@@ -14,8 +14,8 @@
  * This translation unit is raylib-free apart from the Vector2 type, so it also links into
  * the headless test executable.
  */
-#ifndef DRIFTY_DEV_STATE_H
-#define DRIFTY_DEV_STATE_H
+#ifndef CIRCUIT_DEV_STATE_H
+#define CIRCUIT_DEV_STATE_H
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -235,4 +235,4 @@ void dev_state_set_status(DevState *dev, bool isError, const char *format, ...);
 /* Clear a latched invariant violation. */
 void dev_state_clear_invariants(DevState *dev);
 
-#endif /* DRIFTY_DEV_STATE_H */
+#endif /* CIRCUIT_DEV_STATE_H */

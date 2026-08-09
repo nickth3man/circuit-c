@@ -9,7 +9,7 @@ Two directories with "visual" in the name, doing different jobs:
 
 | | What it looks at | How it decides | Gate? |
 | --- | --- | --- | --- |
-| `tests/visual/` | Rendered game scenes from `drifty.exe --capture-scene` | ImageMagick RMSE against committed PNG baselines | Yes — `make visual-test` passes or fails |
+| `tests/visual/` | Rendered game scenes from `circuit.exe --capture-scene` | ImageMagick RMSE against committed PNG baselines | Yes — `make visual-test` passes or fails |
 | `tools/visual/` (here) | The appearance grammar: per-car sprites, feature-label maps, parameter sweeps | Human reading, plus Playwright measurements | No — evidence only |
 
 The overlap is that both end up looking at pictures of cars. The difference is that

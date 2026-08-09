@@ -1,7 +1,7 @@
 /*
  * car_visual_raster.h — CPU rasterizer: CarVisual -> RGBA8 pixels.
  *
- * ONE RASTERIZER, TWO CONSUMERS. drifty_tests composites these buffers into the vehicle
+ * ONE RASTERIZER, TWO CONSUMERS. circuit_tests composites these buffers into the vehicle
  * contact sheet with no GPU and no window; src/render/render.c uploads the same buffer as a texture
  * and draws it rotated with point filtering. Because both read the identical pixels, the
  * gallery cannot drift away from what the game shows.
@@ -18,8 +18,8 @@
  * orientation of the reference sheets rotates the finished buffer by an exact 90 degrees,
  * which is lossless.
  */
-#ifndef DRIFTY_CAR_VISUAL_RASTER_H
-#define DRIFTY_CAR_VISUAL_RASTER_H
+#ifndef CIRCUIT_CAR_VISUAL_RASTER_H
+#define CIRCUIT_CAR_VISUAL_RASTER_H
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -91,7 +91,7 @@ size_t car_raster_bytes(CarRasterInfo info);
  *
  * Deterministic: the same visual and info always produce byte-identical output within a
  * binary. Do not compare buffers produced by two DIFFERENT binaries — game.dll builds at -O0
- * and drifty_tests at -O2, so float results may differ in the last bit. */
+ * and circuit_tests at -O2, so float results may differ in the last bit. */
 bool car_raster_draw(const CarVisual *visual, CarRasterInfo info, unsigned char *rgba,
                      size_t bytes);
 
@@ -154,4 +154,4 @@ bool car_raster_draw_labels(const CarVisual *visual, CarRasterInfo info, unsigne
 float car_raster_difference(const unsigned char *labelsA, const unsigned char *labelsB,
                             int width, int height);
 
-#endif /* DRIFTY_CAR_VISUAL_RASTER_H */
+#endif /* CIRCUIT_CAR_VISUAL_RASTER_H */

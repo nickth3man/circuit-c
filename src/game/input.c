@@ -28,7 +28,7 @@ bool input_has_oneshot(const Input *in)
            in->shiftDownPressed || in->toggleAutoPressed;
 }
 
-#if !defined(DRIFTY_HEADLESS)
+#if !defined(CIRCUIT_HEADLESS)
 
 #include <math.h>
 
@@ -61,7 +61,7 @@ static float kb_pedal_ramp(float current, bool held, float dt)
 
 /* Radial deadzone for the left stick. Returns the deadzone-corrected x deflection.
  * The y is passed only to compute the radial magnitude; it is not returned because
- * Drifty only uses the X axis for steering. Values outside the deadzone are rescaled
+ * Circuit only uses the X axis for steering. Values outside the deadzone are rescaled
  * from [deadzone..1] to [0..1] so full deflection still reaches 1.0. */
 static float gamepad_radial_deadzone_x(float x, float y, float deadzone)
 {
@@ -105,7 +105,7 @@ void input_sample(Input *in)
     /* --- Gamepad sample (gamepad 0 if available) --- */
     float gp_steer = 0.0f, gp_throttle = 0.0f, gp_brake = 0.0f, gp_handbrake = 0.0f;
     if (IsGamepadAvailable(0)) {
-        /* Left stick X: raylib reports -1=left, +1=right. Drifty steer is +1=left,
+        /* Left stick X: raylib reports -1=left, +1=right. Circuit steer is +1=left,
          * so negate. Apply a radial deadzone using both X and Y so diagonal stick
          * noise does not bleed into steering. */
         const float lx = GetGamepadAxisMovement(0, GAMEPAD_AXIS_LEFT_X);
@@ -156,4 +156,4 @@ void input_sample(Input *in)
     }
 }
 
-#endif /* !DRIFTY_HEADLESS */
+#endif /* !CIRCUIT_HEADLESS */

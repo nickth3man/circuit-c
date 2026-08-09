@@ -128,7 +128,7 @@ static const SweepAxis kSweepAxes[SWEEP_AXES] = {
  * wing and the whole rear silhouette. Phase B made the silhouette endpoints explicit
  * ([identity] body.nose_width / body.tail_width) and retired the derived taper, which is what
  * closed the measured 3x tail-closure gap — and left aero.lift_rear moving only the wing
- * bolted to the deck. Measured with `drifty_tests --measure-sweep aero.lift_rear` after that
+ * bolted to the deck. Measured with `circuit_tests --measure-sweep aero.lift_rear` after that
  * change, its adjacent steps read:
  *
  *     pair 0-1  pixels 0.0313  L2 0.2447  Linf 0.2337 m   (L2 below the 0.25 floor)
@@ -177,7 +177,7 @@ static const SweepAxis kSweepAxes[SWEEP_AXES] = {
  * ([identity] body.roof_start_x / roof_end_x / roof_width, plus the two rakes), which is what
  * lets a bus and a coupe declare their greenhouses rather than deriving them from a single
  * scalar — and left body.height_overall moving only the `height_visual` signature component.
- * Measured with `drifty_tests --measure-sweep body.height_overall` after that change:
+ * Measured with `circuit_tests --measure-sweep body.height_overall` after that change:
  *
  *     pair 0-1  pixels 0.0521  L2 0.5806  Linf 0.4185 m
  *     pair 1-2  pixels 0.0295  L2 0.2582  Linf 0.1793 m   (pixels below the 0.030 floor)

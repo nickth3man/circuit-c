@@ -22,16 +22,16 @@
 #include "render/render.h"
 #include "world/track.h"
 
-#if !defined(DRIFTY_HEADLESS)
+#if !defined(CIRCUIT_HEADLESS)
 #include "raylib.h"
 #endif
 
 #if defined(_WIN32)
 #include <direct.h>
-#define DRIFTY_MKDIR(path) _mkdir(path)
+#define CIRCUIT_MKDIR(path) _mkdir(path)
 #else
 #include <sys/stat.h>
-#define DRIFTY_MKDIR(path) mkdir(path, 0755)
+#define CIRCUIT_MKDIR(path) mkdir(path, 0755)
 #endif
 
 #define FNV1A_OFFSET_BASIS 2166136261u
@@ -242,7 +242,7 @@ GAME_API void game_init(Game *game)
     game->autoTrans.enabled = true;
     game->autoTrans.forwardOnly = false;
     game->autoTrans.driveState = AUTO_DRIVE;
-#if defined(DRIFTY_HEADLESS)
+#if defined(CIRCUIT_HEADLESS)
     game->state = STATE_PLAYING; /* headless: no menus, simulate immediately */
 #else
     game->state = STATE_MENU;
@@ -263,7 +263,7 @@ GAME_API void game_init(Game *game)
                                .zoom = CAMERA_BASE_ZOOM };
     replay_begin_recording(&game->replay, 0);
     dev_state_init(&game->dev);
-#if !defined(DRIFTY_HEADLESS)
+#if !defined(CIRCUIT_HEADLESS)
     /* Load the community gamepad mapping database so non-XInput controllers
      * (DualSense, DualShock 4, Switch Pro, etc.) are recognized by raylib on
      * Windows. The file is optional — if missing, built-in GLFW mappings
@@ -278,7 +278,7 @@ GAME_API void game_init(Game *game)
 #endif
     game->stateChecksum = game_state_checksum(game);
     game->initialized = true;
-#if !defined(DRIFTY_HEADLESS)
+#if !defined(CIRCUIT_HEADLESS)
     TRACELOG(LOG_INFO, "GAME: initialised (particles, camera, state machine)");
 #endif
 }
@@ -287,7 +287,7 @@ GAME_API void game_pre_reload(Game *game)
 {
     if (game == NULL) return;
     if (game->replay.mode == REPLAY_MODE_RECORDING) replay_stop(&game->replay);
-#if !defined(DRIFTY_HEADLESS)
+#if !defined(CIRCUIT_HEADLESS)
     audio_pre_reload();
     /* Same contract as the sounds above: the baked vehicle textures are raylib-tracked GPU
      * resources held in the render module's statics, and a handle from the outgoing module
@@ -307,7 +307,7 @@ GAME_API void game_post_reload(Game *game)
 
     game->reloadCount++;
     game->reloadFlashTimerS = RELOAD_FLASH_S;
-#if !defined(DRIFTY_HEADLESS)
+#if !defined(CIRCUIT_HEADLESS)
     audio_post_reload();
     render_post_reload();
     TRACELOG(LOG_INFO, "GAME: post-reload #%d (tick %llu, checksum %08x)", game->reloadCount,
@@ -318,7 +318,7 @@ GAME_API void game_post_reload(Game *game)
 GAME_API void game_fixed_update(Game *game, float dt)
 {
     if (game == NULL) return;
-    DRIFTY_ZONE_BEGIN(fixedUpdate, "FixedUpdate");
+    CIRCUIT_ZONE_BEGIN(fixedUpdate, "FixedUpdate");
     Input tickInput;
     input_zero(&tickInput);
     bool fromPlayback = false;
@@ -351,7 +351,7 @@ GAME_API void game_fixed_update(Game *game, float dt)
         auto_transmission_update(&game->autoTrans, &game->vehicle, &game->spec, &game->derived,
                                  &tickInput, dt);
 
-        DRIFTY_ZONE_BEGIN(physics, "Physics");
+        CIRCUIT_ZONE_BEGIN(physics, "Physics");
         /* Start-of-tick position, for the checkpoint crossing test below.
          *
          * It has to be currPositionM read HERE, before the physics step. physics_fixed_update
@@ -380,7 +380,7 @@ GAME_API void game_fixed_update(Game *game, float dt)
         }
         physics_fixed_update(&game->spec, &game->vehicle, &game->derived, &game->renderState,
                              &tickInput, dt);
-        DRIFTY_ZONE_END(physics);
+        CIRCUIT_ZONE_END(physics);
 
         /* Checkpoint crossing: check whether the car passed a gate this tick. The event is
          * kept for the tick so telemetry and the validation runner can record which gate was
@@ -467,10 +467,10 @@ GAME_API void game_fixed_update(Game *game, float dt)
      * state, writes only to game->dev, and is excluded from the checksum, so it cannot
      * influence the simulation. */
     dev_state_record(game, &tickInput);
-    DRIFTY_ZONE_END(fixedUpdate);
+    CIRCUIT_ZONE_END(fixedUpdate);
 }
 
-#if defined(DRIFTY_HEADLESS)
+#if defined(CIRCUIT_HEADLESS)
 GAME_API void game_draw(Game *game, float interpolationAlpha)
 {
     (void)game;
@@ -501,7 +501,7 @@ GAME_API void game_shutdown(Game *game)
 
     /* Every instrumented zone lives in this module, so this is where the table is. Compiles
      * to nothing unless the build asked for a profiling backend. */
-    DRIFTY_PROFILE_REPORT(stdout);
+    CIRCUIT_PROFILE_REPORT(stdout);
 }
 #endif
 

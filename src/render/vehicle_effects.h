@@ -5,8 +5,8 @@
  * outputs are transient presentation values: they must not invalidate the baked sprite, enter
  * the simulation checksum, or feed any solver.
  */
-#ifndef DRIFTY_VEHICLE_EFFECTS_H
-#define DRIFTY_VEHICLE_EFFECTS_H
+#ifndef CIRCUIT_VEHICLE_EFFECTS_H
+#define CIRCUIT_VEHICLE_EFFECTS_H
 
 #include "physics/vehicle.h"
 
@@ -34,4 +34,4 @@ typedef struct {
  * overlays until the real derivation lands. */
 VehicleVisualEffects vehicle_visual_effects_derive(const VehicleEffectInputs *inputs);
 
-#endif /* DRIFTY_VEHICLE_EFFECTS_H */
+#endif /* CIRCUIT_VEHICLE_EFFECTS_H */

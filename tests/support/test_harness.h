@@ -5,8 +5,8 @@
  * functions rather than writable globals: only the runner is allowed to read the accumulated
  * state, and it does so through one snapshot so a scenario cannot reach in and edit a total.
  */
-#ifndef DRIFTY_TEST_HARNESS_H
-#define DRIFTY_TEST_HARNESS_H
+#ifndef CIRCUIT_TEST_HARNESS_H
+#define CIRCUIT_TEST_HARNESS_H
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -53,4 +53,4 @@ Game *alloc_game(void);
 void check_run_invariants(const Game *game, const char *name, bool allFinite,
                           float peakFrictionUsage, float peakSpeedMps);
 
-#endif /* DRIFTY_TEST_HARNESS_H */
+#endif /* CIRCUIT_TEST_HARNESS_H */

@@ -40,9 +40,9 @@ float wrap_angle(float angleRad)
 {
     /* fmodf's magnitude is strictly less than its divisor, so the shifted remainder lies
      * in [0, 2PI) and the returned value lies in [-PI, +PI). */
-    float shifted = fmodf(angleRad + DRIFTY_PI, DRIFTY_TWO_PI);
-    if (shifted < 0.0f) shifted += DRIFTY_TWO_PI;
-    return shifted - DRIFTY_PI;
+    float shifted = fmodf(angleRad + CIRCUIT_PI, CIRCUIT_TWO_PI);
+    if (shifted < 0.0f) shifted += CIRCUIT_TWO_PI;
+    return shifted - CIRCUIT_PI;
 }
 
 float smoothstep(float edge0, float edge1, float x)

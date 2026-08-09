@@ -43,7 +43,7 @@ radius, recovery time. `mk report NAME=<scenario>` produces them.
 ## Hot reload
 
 - [ ] No change to the layout of `Game`
-- [ ] `Game` layout changed — the developer must restart `drifty.exe` once
+- [ ] `Game` layout changed — the developer must restart `circuit.exe` once
 - [ ] `main.c` / `hotreload_windows.c` changed — platform layer is not reloadable
 
 ## Evidence

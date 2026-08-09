@@ -5,8 +5,8 @@
  * they are tools rather than assertions: they generate artifacts, measure throughput, or
  * exercise the failure-bundle writer on purpose.
  */
-#ifndef DRIFTY_TEST_COMMANDS_H
-#define DRIFTY_TEST_COMMANDS_H
+#ifndef CIRCUIT_TEST_COMMANDS_H
+#define CIRCUIT_TEST_COMMANDS_H
 
 int test_run_benchmark(int ticks);
 int test_verify_failure_bundle(const char *rootDir);
@@ -20,4 +20,4 @@ int test_dump_corpus_sheet(const char *dir);
 int test_list_cars(void);
 int test_generate_roster(const char *dir);
 
-#endif /* DRIFTY_TEST_COMMANDS_H */
+#endif /* CIRCUIT_TEST_COMMANDS_H */

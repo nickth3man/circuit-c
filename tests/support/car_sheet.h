@@ -1,5 +1,5 @@
 /*
- * car_sheet.h — the vehicle contact sheet, written headlessly from drifty_tests.
+ * car_sheet.h — the vehicle contact sheet, written headlessly from circuit_tests.
  *
  * No GPU, no window, no raylib call: the cars are rasterized on the CPU by
  * src/render/car_visual_raster.c and written as PNGs by the vendored stb_image_write. That is what
@@ -19,8 +19,8 @@
  *     never see. The HTML then upscales page images by an integer factor with
  *     nearest-neighbour so a human can inspect them without the pixels being a lie.
  */
-#ifndef DRIFTY_CAR_SHEET_H
-#define DRIFTY_CAR_SHEET_H
+#ifndef CIRCUIT_CAR_SHEET_H
+#define CIRCUIT_CAR_SHEET_H
 
 #include <stdbool.h>
 
@@ -67,4 +67,4 @@ bool car_sheet_write_cards(const char *outDir, float pxPerM);
  * written; the caller reports that rather than losing the failure silently. */
 bool car_sheet_write_pair_failure(const char *outDir, int indexA, int indexB, float pxPerM);
 
-#endif /* DRIFTY_CAR_SHEET_H */
+#endif /* CIRCUIT_CAR_SHEET_H */

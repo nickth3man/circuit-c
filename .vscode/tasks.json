@@ -1,12 +1,12 @@
 {
     // Shared tasks. Every one of them terminates on its own except "Run the game", which is
     // the developer's to start — an agent rebuilds with "Build hot-reload module" instead and
-    // lets the already-running build/dev/drifty.exe pick the module up.
+    // lets the already-running build/dev/circuit.exe pick the module up.
     "version": "2.0.0",
     "tasks": [
         {
             "label": "Build hot-reload module",
-            "detail": "build.bat — rebuilds build/dev/game.dll (and build/dev/drifty.exe when it is not running)",
+            "detail": "build.bat — rebuilds build/dev/game.dll (and build/dev/circuit.exe when it is not running)",
             "type": "shell",
             "command": "${workspaceFolder}\\build.bat",
             "group": { "kind": "build", "isDefault": true },
@@ -25,7 +25,7 @@
             "label": "Run headless tests",
             "detail": "every scenario, with telemetry",
             "type": "shell",
-            "command": "${workspaceFolder}\\build\\tests\\drifty_tests.exe",
+            "command": "${workspaceFolder}\\build\\tests\\circuit_tests.exe",
             "dependsOn": "Build headless tests",
             "group": { "kind": "test", "isDefault": true },
             "problemMatcher": []
@@ -34,7 +34,7 @@
             "label": "Run one scenario",
             "detail": "pick from the scenario list",
             "type": "shell",
-            "command": "${workspaceFolder}\\build\\tests\\drifty_tests.exe",
+            "command": "${workspaceFolder}\\build\\tests\\circuit_tests.exe",
             "args": ["--scenario", "${input:scenario}"],
             "dependsOn": "Build headless tests",
             "group": "test",
@@ -84,7 +84,7 @@
             "label": "Run the game (developer only)",
             "detail": "does not return until the window is closed",
             "type": "shell",
-            "command": "${workspaceFolder}\\build\\dev\\drifty.exe",
+            "command": "${workspaceFolder}\\build\\dev\\circuit.exe",
             "dependsOn": "Build hot-reload module",
             "isBackground": true,
             "problemMatcher": []

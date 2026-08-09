@@ -108,7 +108,7 @@ bool run_report_write(const char *path, const RunReportInput *in)
             "  \"sim\": { \"fixed_hz\": %d, \"telemetry_hz\": %d, \"video_fps\": %d, "
             "\"build_commit\": ",
             in->fixedHz, in->telemetryHz, in->videoFps);
-    write_json_string(file, in->buildCommit != NULL ? in->buildCommit : DRIFTY_BUILD_COMMIT);
+    write_json_string(file, in->buildCommit != NULL ? in->buildCommit : CIRCUIT_BUILD_COMMIT);
     fprintf(file, ", \"build_dirty\": %s, \"final_state_checksum\": ",
             in->buildDirty ? "true" : "false");
     write_json_string(file, in->finalStateChecksum != NULL ? in->finalStateChecksum : "");

@@ -1,6 +1,6 @@
 # Changelog
 
-Notable changes to Drifty. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+Notable changes to Circuit. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 The project is pre-release and has no version tags yet, so entries are grouped under
 `Unreleased` until the first one is cut.
@@ -13,7 +13,7 @@ The project is pre-release and has no version tags yet, so entries are grouped u
   while vendoring zlib-licensed raygui and public-domain/MIT stb_image_write.
 - Continuous integration (`.github/workflows/ci.yml`): a Windows UCRT64 job for the canonical
   toolchain and a Linux job for the headless targets and the sanitizers.
-- `DRIFTY_STRICT=1`, which turns a missing tool from a `SKIP` into a build failure. Without
+- `CIRCUIT_STRICT=1`, which turns a missing tool from a `SKIP` into a build failure. Without
   it `make ci` could exit 0 having run almost nothing.
 - Python linting and formatting with ruff (`pyproject.toml`, `requirements-dev.txt`), plus
   `make format-py` and `make lint-py`.

@@ -29,8 +29,8 @@
  * combined slip. Phase 3 adds longitudinal load transfer from a filtered previous-step
  * acceleration, and uses separated aerodynamic drag and per-wheel rolling resistance.
  */
-#ifndef DRIFTY_CONFIG_H
-#define DRIFTY_CONFIG_H
+#ifndef CIRCUIT_CONFIG_H
+#define CIRCUIT_CONFIG_H
 
 /* -------------------------------------------------------------------------------------
  * Render scale (rendering only — never read by simulation code)
@@ -397,4 +397,4 @@
 #define PIXEL_ART_TARGET_W (SCREEN_W / PIXEL_ART_UPSCALE)
 #define PIXEL_ART_TARGET_H (SCREEN_H / PIXEL_ART_UPSCALE)
 
-#endif /* DRIFTY_CONFIG_H */
+#endif /* CIRCUIT_CONFIG_H */

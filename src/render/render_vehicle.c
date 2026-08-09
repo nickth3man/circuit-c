@@ -2,9 +2,9 @@
  * render_vehicle.c — the baked vehicle sprites: upload, compositing, the running game's
  * single cached car, and the corpus gallery. No styling or geometry decision lives here;
  * the pixels come from car_visual.c and car_visual_raster.c, this file only uploads and
- * draws them. Compiled to an empty translation unit under DRIFTY_HEADLESS.
+ * draws them. Compiled to an empty translation unit under CIRCUIT_HEADLESS.
  */
-#if !defined(DRIFTY_HEADLESS)
+#if !defined(CIRCUIT_HEADLESS)
 
 #include "render/render_internal.h"
 
@@ -294,7 +294,7 @@ void render_vehicle_resources_reset(void)
 #define GALLERY_PER_PAGE (GALLERY_COLS * GALLERY_ROWS)
 #define GALLERY_SCALE 2.0f
 /* Front wheels turned so lock, Ackermann and static toe are all legible in a still image. */
-#define GALLERY_STEER_RAD (8.0f * DRIFTY_DEG2RAD)
+#define GALLERY_STEER_RAD (8.0f * CIRCUIT_DEG2RAD)
 
 int render_gallery_page_count(void)
 {
@@ -395,4 +395,4 @@ void render_draw_gallery(struct Game *game, int page)
     }
 }
 
-#endif /* !DRIFTY_HEADLESS */
+#endif /* !CIRCUIT_HEADLESS */

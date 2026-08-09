@@ -932,7 +932,7 @@ static void scenario_corpus(void)
      * truth.
      * That only stays true if it is asserted: without this the files rot silently and the
      * next reader trusts a stale one. Regenerate with
-     *     build/tests/drifty_tests.exe --generate-corpus data/vehicles/corpus                 */
+     *     build/tests/circuit_tests.exe --generate-corpus data/vehicles/corpus                 */
     {
         int missing = 0, mismatched = 0;
         const char *firstMissing = NULL;
@@ -969,7 +969,7 @@ static void scenario_corpus(void)
         if (missing > 0) {
             printf(
                 "      %d corpus profile(s) missing, first '%s' —"
-                " run: build/tests/drifty_tests.exe --generate-corpus data/vehicles/corpus\n",
+                " run: build/tests/circuit_tests.exe --generate-corpus data/vehicles/corpus\n",
                 missing, (firstMissing != NULL) ? firstMissing : "?");
         }
         check(missing == 0, "every corpus vehicle has a checked-in tuning profile");

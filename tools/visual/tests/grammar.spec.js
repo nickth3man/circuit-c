@@ -6,7 +6,7 @@
  * game actually draws at. Several FAIL on the current grammar; the failure message is the
  * diagnosis, and it names the parameter or rule at fault rather than reporting a pixel count.
  *
- * The data comes from window.DRIFTY_DATA, which the inspector exposes after loading cards.json.
+ * The data comes from window.CIRCUIT_DATA, which the inspector exposes after loading cards.json.
  */
 const { test, expect } = require("@playwright/test");
 
@@ -15,8 +15,8 @@ let DATA;
 test.beforeAll(async ({ browser }) => {
   const page = await browser.newPage();
   await page.goto("/");
-  await page.waitForFunction(() => window.DRIFTY_DATA);
-  DATA = await page.evaluate(() => window.DRIFTY_DATA);
+  await page.waitForFunction(() => window.CIRCUIT_DATA);
+  DATA = await page.evaluate(() => window.CIRCUIT_DATA);
   await page.close();
 });
 

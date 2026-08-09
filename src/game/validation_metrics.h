@@ -12,8 +12,8 @@
  * rules. They are intervals rather than per-tick booleans so a faster sampling rate cannot
  * inflate them.
  */
-#ifndef DRIFTY_VALIDATION_METRICS_H
-#define DRIFTY_VALIDATION_METRICS_H
+#ifndef CIRCUIT_VALIDATION_METRICS_H
+#define CIRCUIT_VALIDATION_METRICS_H
 
 #include "game/telemetry.h"
 
@@ -83,4 +83,4 @@ typedef struct {
  */
 void validation_metrics_compute(const TelemetryRow *rows, int count, ValidationMetrics *out);
 
-#endif /* DRIFTY_VALIDATION_METRICS_H */
+#endif /* CIRCUIT_VALIDATION_METRICS_H */

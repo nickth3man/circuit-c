@@ -9,7 +9,7 @@
  * There are no more [phase-2] constants: the Phase 2 parameter expansion made every needed
  * primary available, and every feature below wires directly to real VehicleSpec fields.
  *
- * Raylib-free: linked into drifty_tests.exe.
+ * Raylib-free: linked into circuit_tests.exe.
  */
 #include "render/car_visual.h"
 

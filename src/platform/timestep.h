@@ -5,7 +5,7 @@
  * render frame. It is a separate translation unit from main.c only because the headless
  * harness must be able to assert the substep cap, the backlog-drop counter, and the
  * interpolation alpha directly. There is exactly one implementation; main.c and
- * drifty_tests share it, so the tested behaviour is the shipped behaviour.
+ * circuit_tests share it, so the tested behaviour is the shipped behaviour.
  *
  * It is NOT compiled into the hot-reloadable game module: the loop lives with the platform
  * layer.
@@ -20,8 +20,8 @@
  * persistent, so this does not violate the reload-safety rule against function pointers in
  * Game.
  */
-#ifndef DRIFTY_TIMESTEP_H
-#define DRIFTY_TIMESTEP_H
+#ifndef CIRCUIT_TIMESTEP_H
+#define CIRCUIT_TIMESTEP_H
 
 #include <stdbool.h>
 
@@ -53,4 +53,4 @@ typedef struct {
 TimestepResult timestep_advance(float *accumulatorS, int *backlogDrops, float frameTimeS,
                                 TimestepFixedUpdateFn fixedUpdate, void *ctx);
 
-#endif /* DRIFTY_TIMESTEP_H */
+#endif /* CIRCUIT_TIMESTEP_H */

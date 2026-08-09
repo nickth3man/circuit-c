@@ -14,7 +14,7 @@ compiles, and `-Ithird_party`, so clangd was quietly wrong about exactly the fil
 opened recently. Reading the manifest is the whole point of this rewrite.
 
 Each translation unit gets the flags of the configuration it is actually built in — the game
-module sees DRIFTY_DEV_TOOLS, the platform layer does not, the tests see DRIFTY_HEADLESS.
+module sees CIRCUIT_DEV_TOOLS, the platform layer does not, the tests see CIRCUIT_HEADLESS.
 """
 
 from __future__ import annotations
@@ -39,10 +39,10 @@ BASE_FLAGS = [
 ]
 
 CONFIGURATIONS: Dict[str, List[str]] = {
-    "module": ["-DDRIFTY_HOT_RELOAD", "-DDRIFTY_GAME_MODULE", "-DDRIFTY_DEV_TOOLS", "-O0", "-g"],
-    "platform": ["-DDRIFTY_HOT_RELOAD", "-O0", "-g"],
-    "tests": ["-DDRIFTY_HEADLESS", "-O2", "-DNDEBUG"],
-    "fuzz": ["-DDRIFTY_HEADLESS", "-O1", "-g"],
+    "module": ["-DCIRCUIT_HOT_RELOAD", "-DCIRCUIT_GAME_MODULE", "-DCIRCUIT_DEV_TOOLS", "-O0", "-g"],
+    "platform": ["-DCIRCUIT_HOT_RELOAD", "-O0", "-g"],
+    "tests": ["-DCIRCUIT_HEADLESS", "-O2", "-DNDEBUG"],
+    "fuzz": ["-DCIRCUIT_HEADLESS", "-O1", "-g"],
 }
 
 # First match wins, so the order encodes which configuration is the truthful one for a file

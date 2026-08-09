@@ -1,17 +1,17 @@
 /*
- * profile.c — the built-in profiling backend (-DDRIFTY_PROFILE).
+ * profile.c — the built-in profiling backend (-DCIRCUIT_PROFILE).
  *
  * Deliberately small: a fixed table of zones keyed by the name pointer, total and worst-case
  * nanoseconds, and a summary printed at shutdown. It answers "which zone got slower?"
  * without a dependency, a server, or a capture file. When that stops being enough, vendor
- * Tracy and rebuild with -DDRIFTY_TRACY; the call sites do not change.
+ * Tracy and rebuild with -DCIRCUIT_TRACY; the call sites do not change.
  *
  * Compiled into every configuration so the build file lists stay identical; without
- * DRIFTY_PROFILE it contains nothing.
+ * CIRCUIT_PROFILE it contains nothing.
  */
 #include "game/profile.h"
 
-#if defined(DRIFTY_PROFILE) && !defined(DRIFTY_TRACY)
+#if defined(CIRCUIT_PROFILE) && !defined(CIRCUIT_TRACY)
 
 #include <string.h>
 
@@ -98,6 +98,6 @@ void profile_report(FILE *out)
 #else
 
 /* ISO C forbids an empty translation unit. */
-typedef int drifty_profile_translation_unit_not_empty;
+typedef int circuit_profile_translation_unit_not_empty;
 
 #endif

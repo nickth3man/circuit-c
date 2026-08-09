@@ -1,4 +1,4 @@
-# Drifty C formatting.
+# Circuit C formatting.
 #
 # This encodes the style the codebase already uses rather than importing someone else's:
 # four spaces, 96 columns, opening brace on its own line for functions and attached

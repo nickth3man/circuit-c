@@ -12,7 +12,8 @@
 /* --------------------------------------------------------------------------- archetypes --
  *
  * The stock baseline at index 0, then the 16 required forms (kei, compact, coupé, sedan,
- * sports, supercar, muscle, GT3, rally, open-wheel, drift, pickup, van, bus, limousine, box
+ * sports, supercar, muscle, GT3, rally, open-wheel, high-angle RWD, pickup, van, bus,
+ * limousine, box
  * truck) at indices 1..16. Each is a set of parameter overrides on the stock spec, and every
  * value stays within its registry [minimum, maximum]. dev_params_apply_assignments handles
  * migration aliases transparently — presets may use legacy keys like "body.mass" alongside
@@ -52,7 +53,8 @@
  * exercises the config.h station defaults.
  *
  * body.fender_flare_[front|rear] is declared only where the form has bolt-on arches — the
- * supercar, muscle car, GT3, rally, drift and pickup. It is zero everywhere else, including on
+ * supercar, muscle car, GT3, rally, high-angle RWD and pickup. It is zero everywhere else,
+ * including on
  * the open-wheel car, whose exposed wheels carry no bodywork over them at all.
  *
  * Values are ordinary engineering estimates, not measurements of specific cars.
@@ -65,7 +67,7 @@
 /* ----------------------------------------------------------------- 0: Stock Baseline --
  * The config.h defaults with no overrides. Always index 0. */
 static const char *const kArchName0 = "Stock Baseline";
-static const char *const kArchDesc0 = "the Drifty defaults; identical to a fresh spec";
+static const char *const kArchDesc0 = "the Circuit defaults; identical to a fresh spec";
 
 /* --------------------------------------------------------------------- 1: Kei Car ----
  * Honda Beat spirit: 660 cc, 760 kg, mid-engine, narrow, tall-ish. */
@@ -534,10 +536,10 @@ static const DevParamAssignment kArch10[] = {
 
 };
 
-/* -------------------------------------------------------------- 11: Drift Car ------
- * Competition drift: extreme steering lock, locked diff, rear tire stagger. */
-static const char *const kArchName11 = "Drift Car";
-static const char *const kArchDesc11 = "competition drift: 65° lock, locked diff, rear stagger";
+/* ---------------------------------------------------------- 11: High-Angle RWD ------
+ * High-angle RWD competition setup: extreme steering lock, locked diff, rear tire stagger. */
+static const char *const kArchName11 = "High-Angle RWD";
+static const char *const kArchDesc11 = "65° lock, locked diff, rear tire stagger";
 static const DevParamAssignment kArch11[] = {
     A("body.mass", 1300.0f),
     A("body.wheelbase", 2.65f),
@@ -550,8 +552,8 @@ static const DevParamAssignment kArch11[] = {
     A("body.ride_height_front", 0.090f),
     A("body.ride_height_rear", 0.095f),
     A("body.cg_height", 0.46f),
-    /* The rear grip deficit IS the drift setup: balance01 reads muFront - muRear, and this
-     * 0.30 spread is the widest in the corpus, which is what makes the axis span its range. */
+    /* The rear grip deficit defines the oversteer balance: balance01 reads muFront - muRear,
+     * and this 0.30 spread is the widest in the corpus, which makes the axis span its range. */
     A("tire.lat_front.mu", 1.35f),
     A("tire.lat_rear.mu", 1.05f),
     A("body.cowl_x", 0.50f),

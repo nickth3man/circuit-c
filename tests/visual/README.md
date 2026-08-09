@@ -16,7 +16,7 @@ mk visual-test
 
 ## Why the captures are reproducible
 
-`drifty.exe --capture-scene NAME` does not run the normal frame loop. It steps the simulation
+`circuit.exe --capture-scene NAME` does not run the normal frame loop. It steps the simulation
 with an exact fixed dt, draws one frame with interpolation alpha 0, writes a PNG, and exits.
 The image therefore depends on the scene, the tick count, and the build — not on how fast the
 machine happened to be that day.
