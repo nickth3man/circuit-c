@@ -306,6 +306,14 @@ an entrant-scoped progress event value; retained telemetry copies remain present
 `VehicleDefinition` also gains stable `id`, content version/hash, display/class metadata, and a
 reference to appearance content. Those are content fields, not runtime state.
 
+Issue 12 records the same assignment field by field, machine-checked: every float in
+`VehicleSpec` carries an owner (`definition`, `setup`, `derived`) and a class (`physics`,
+`derived`, `appearance`, `inactive`) in the `src/dev/dev_params.c` registry, tabulated in
+[VEHICLE_PARAMETERS.md](VEHICLE_PARAMETERS.md). The `param-audit` scenario proves the owner
+by compiling a perturbed definition through `vehicle_instance_derive()` and the class by
+perturbing the field and comparing simulated trajectories. Ownership says who may write a
+field; the class says whether writing it does anything.
+
 ### Vehicle runtime and diagnostics
 
 | Current fields | Target |

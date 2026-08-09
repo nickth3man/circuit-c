@@ -22,6 +22,7 @@
 #   make screenshots      capture the deterministic visual scenes
 #   make visual-test      compare captured scenes against tests/visual/baseline
 #   make gallery          capture every page of the in-game vehicle corpus gallery
+#   make params           regenerate docs/VEHICLE_PARAMETERS.md from the registry
 #   make profile          build with the Tracy hooks enabled (CIRCUIT_TRACY)
 #   make benchmark        fixed-update throughput
 #   make release          release build
@@ -276,7 +277,7 @@ REGRESSION_SCENARIOS := skidpad step-steer transition lift-off \
 all: dev
 
 help:
-	@sed -n '6,39p' Makefile
+	@sed -n '6,40p' Makefile
 
 info:
 	@echo "host        : $(CIRCUIT_HOST)"
@@ -689,6 +690,11 @@ gallery: windows-only dev
 # below reads it, and nothing below needs a window or a GPU.
 cards: tests
 	@./$(EXE_TESTS) --dump-corpus-cards $(ARTIFACTS)/corpus-cards
+
+# The committed parameter table. It is generated, never edited: the `param-audit` scenario
+# fails if docs/VEHICLE_PARAMETERS.md falls behind the registry, and this is the fix.
+params: tests
+	@./$(EXE_TESTS) --dump-params docs/VEHICLE_PARAMETERS.md
 
 # The browser inspector serves tools/visual over artifacts/corpus-cards and blocks until the
 # operator stops it. `visual-diagnose` is the bounded automation path.
