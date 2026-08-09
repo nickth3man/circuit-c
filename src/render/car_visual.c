@@ -603,7 +603,8 @@ void car_visual_derive(const VehicleSpec *spec, CarVisual *out)
     const float discDiaF = 2.0f * maxf(spec->brakeDiscRadiusFrontM, 0.0f) * torqueAugment;
     const float discDiaR = 2.0f * maxf(spec->brakeDiscRadiusRearM, 0.0f) * torqueAugment;
 
-    /* [rule] static toe angle at rest × CV_TOE_VISUAL_GAIN. Reads suspToeFrontRad/RearRad.
+    /* [rule] static toe angle at rest × CV_TOE_VISUAL_GAIN. Reads suspToeFrontRad only;
+     * suspToeRearRad is authored but read by nothing (see docs/VEHICLE_PARAMETERS.md).
      * This is presentation-gained: raw toe is ~0.15°, far below one pixel. */
     const float toeFrontRad = spec->suspToeFrontRad * CV_TOE_VISUAL_GAIN;
     /* [rule] camber visual cos for footprint narrowing × CV_CAMBER_VISUAL_GAIN.
@@ -614,8 +615,9 @@ void car_visual_derive(const VehicleSpec *spec, CarVisual *out)
         cosf(clampf(spec->suspCamberRearRad * CV_CAMBER_VISUAL_GAIN, -0.45f, 0.45f));
 
     /* [rule] wheel poke (lateral offset vs body half-width).
-     * Reads wheelOffsetEt[Front|Rear]Mm and widthOverallM. Positive poke = wheel
-     * outer edge extends beyond the body edge. ET positive offsets push wheel inboard. */
+     * Reads trackWidth[Front|Rear]M, the drawn tire width, and widthOverallM. Positive poke
+     * = wheel outer edge extends beyond the body edge. wheelOffsetEt[Front|Rear]Mm is NOT
+     * read here or anywhere else — it is an inactive authored field. */
     const float bodyHW = spec->widthOverallM * 0.5f;
     const float halfTrackF = 0.5f * spec->trackWidthFrontM;
     const float halfTrackR = 0.5f * spec->trackWidthRearM;

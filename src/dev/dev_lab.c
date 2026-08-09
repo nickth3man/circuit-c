@@ -604,11 +604,14 @@ static void draw_parameter_rows(struct Game *game, Rectangle view, float scrollY
         /* Skip rows scrolled out of view: with ~100 parameters this matters. */
         if (y + 30.0f >= view.y && y <= view.y + view.height) {
             const bool modified = !param->derived && !dev_param_is_default(&game->spec, param);
+            /* The class word is part of the label, not a tooltip: an inactive or
+             * appearance-only parameter beside a live slider is exactly the confusion
+             * issue 12 exists to remove. */
             GuiLabel(labelBounds,
-                     TextFormat("%s%s  [%s]  default %g%s", modified ? "* " : "", param->name,
-                                param->unit[0] != '\0' ? param->unit : "-",
+                     TextFormat("%s%s  [%s]  default %g  (%s)", modified ? "* " : "",
+                                param->name, param->unit[0] != '\0' ? param->unit : "-",
                                 (double)param->defaultValue,
-                                param->derived ? "  (derived)" : ""));
+                                dev_param_class_name(param->classification)));
 
             float value = dev_param_get(&game->spec, param);
             if (param->derived) {
