@@ -1,12 +1,57 @@
 /*
  * render_world.c — everything the camera sees: the track, the tire smoke, and the debug
- * vector overlay. Compiled to an empty translation unit under CIRCUIT_HEADLESS.
+ * vector overlay. Only the pure ribbon-join geometry is compiled under CIRCUIT_HEADLESS.
  */
+#include "render/track_ribbon_geometry.h"
+
+#include <math.h>
+#include <stddef.h>
+
+bool track_ribbon_join_build(const TrackDefinition *track, int nodeIndex, TrackRibbonJoin *out)
+{
+    if (track == NULL || track->nodes == NULL || track->count < 3 || nodeIndex < 0 ||
+        nodeIndex >= track->count || out == NULL) {
+        return false;
+    }
+
+    const int previousIndex = (nodeIndex + track->count - 1) % track->count;
+    const int nextIndex = (nodeIndex + 1) % track->count;
+    const TrackNode *previous = &track->nodes[previousIndex];
+    const TrackNode *current = &track->nodes[nodeIndex];
+    const TrackNode *next = &track->nodes[nextIndex];
+
+    const float previousDx = current->centerM.x - previous->centerM.x;
+    const float previousDy = current->centerM.y - previous->centerM.y;
+    const float nextDx = next->centerM.x - current->centerM.x;
+    const float nextDy = next->centerM.y - current->centerM.y;
+    const float previousLength = sqrtf(previousDx * previousDx + previousDy * previousDy);
+    const float nextLength = sqrtf(nextDx * nextDx + nextDy * nextDy);
+    if (previousLength < 1.0e-6f || nextLength < 1.0e-6f) return false;
+
+    const float previousHalfWidthM = 0.5f * (previous->halfWidthM + current->halfWidthM);
+    const float nextHalfWidthM = 0.5f * (current->halfWidthM + next->halfWidthM);
+    const Vector2 previousNormal = { -previousDy / previousLength,
+                                     previousDx / previousLength };
+    const Vector2 nextNormal = { -nextDy / nextLength, nextDx / nextLength };
+
+    *out = (TrackRibbonJoin){
+        .centerM = current->centerM,
+        .previousLeftM = { current->centerM.x + previousNormal.x * previousHalfWidthM,
+                           current->centerM.y + previousNormal.y * previousHalfWidthM },
+        .previousRightM = { current->centerM.x - previousNormal.x * previousHalfWidthM,
+                            current->centerM.y - previousNormal.y * previousHalfWidthM },
+        .nextLeftM = { current->centerM.x + nextNormal.x * nextHalfWidthM,
+                       current->centerM.y + nextNormal.y * nextHalfWidthM },
+        .nextRightM = { current->centerM.x - nextNormal.x * nextHalfWidthM,
+                        current->centerM.y - nextNormal.y * nextHalfWidthM },
+    };
+    return true;
+}
+
 #if !defined(CIRCUIT_HEADLESS)
 
 #include "render/render_internal.h"
 
-#include <math.h>
 #include <string.h>
 
 #include "core/math_utils.h"
@@ -18,6 +63,21 @@ static Vector2 body_point_to_world(Vector2 bodyPointM, Vector2 positionM, float 
     const float s = sinf(headingRad);
     return (Vector2){ positionM.x + bodyPointM.x * c - bodyPointM.y * s,
                       positionM.y + bodyPointM.x * s + bodyPointM.y * c };
+}
+
+/* DrawTriangle requires visually counter-clockwise vertices. Render coordinates use +Y down,
+ * so their signed area is negative for that winding. Degenerate joins on a straight need no
+ * fill and are skipped. */
+static void draw_triangle_ccw(Vector2 a, Vector2 b, Vector2 c, Color color)
+{
+    const float signedAreaTwice = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+    if (fabsf(signedAreaTwice) < 1.0e-4f) return;
+    if (signedAreaTwice > 0.0f) {
+        const Vector2 swap = b;
+        b = c;
+        c = swap;
+    }
+    DrawTriangle(a, b, c, color);
 }
 
 static Vector2 body_vector_to_world(Vector2 bodyVector, float headingRad)
@@ -162,14 +222,29 @@ void render_world_draw_track(const TrackDefinition *track, const RacerProgress *
 
     /* --- asphalt ribbon (thick filled centreline) ---
      * Width is per segment: the chicane is deliberately narrower than the straights, and a
-     * single sampled half-width would draw it at the wrong size. */
+     * single sampled half-width would draw it at the wrong size. DrawLineEx gives every
+     * segment a flat end, so the bevel triangles in the second loop close the two wedges left
+     * between adjacent end sections whenever the centreline changes direction. */
+    const Color asphalt = { 40, 40, 45, 255 };
     for (int i = 0; i < n; i++) {
         const int j = (i + 1) % n;
         const float segHalfWidthM =
             0.5f * (track->nodes[i].halfWidthM + track->nodes[j].halfWidthM);
         const Vector2 aPx = units_world_to_render_px(track->nodes[i].centerM, ppm);
         const Vector2 bPx = units_world_to_render_px(track->nodes[j].centerM, ppm);
-        DrawLineEx(aPx, bPx, 2.0f * segHalfWidthM * ppm, (Color){ 40, 40, 45, 255 });
+        DrawLineEx(aPx, bPx, 2.0f * segHalfWidthM * ppm, asphalt);
+    }
+    for (int i = 0; i < n; i++) {
+        TrackRibbonJoin join;
+        if (!track_ribbon_join_build(track, i, &join)) continue;
+
+        const Vector2 centerPx = units_world_to_render_px(join.centerM, ppm);
+        const Vector2 previousLeftPx = units_world_to_render_px(join.previousLeftM, ppm);
+        const Vector2 previousRightPx = units_world_to_render_px(join.previousRightM, ppm);
+        const Vector2 nextLeftPx = units_world_to_render_px(join.nextLeftM, ppm);
+        const Vector2 nextRightPx = units_world_to_render_px(join.nextRightM, ppm);
+        draw_triangle_ccw(centerPx, previousLeftPx, nextLeftPx, asphalt);
+        draw_triangle_ccw(centerPx, nextRightPx, previousRightPx, asphalt);
     }
 
     /* --- track limits and barriers (offset polylines) ---

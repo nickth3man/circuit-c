@@ -31,6 +31,7 @@
 #include "dev/car_corpus.h"
 #include "render/car_visual.h"
 #include "render/car_visual_raster.h"
+#include "render/track_ribbon_geometry.h"
 #include "core/config.h"
 #include "dev/dev_params.h"
 #include "dev/dev_replay.h"
@@ -1149,6 +1150,45 @@ static void scenario_replay(void)
 
 static void scenario_renderscale(void)
 {
+    /* Thick line segments have flat ends. A bend therefore needs an explicit join between
+     * the incoming and outgoing edge sections or the grass background shows through. */
+    {
+        TrackNode nodes[3] = {
+            { .centerM = { 0.0f, 0.0f }, .halfWidthM = 2.0f },
+            { .centerM = { 4.0f, 0.0f }, .halfWidthM = 2.0f },
+            { .centerM = { 4.0f, 4.0f }, .halfWidthM = 2.0f },
+        };
+        const TrackDefinition track = { .nodes = nodes, .count = 3 };
+        TrackRibbonJoin join;
+        const bool built = track_ribbon_join_build(&track, 1, &join);
+
+        check(built,
+              "a bent asphalt ribbon builds a join between adjacent flat-ended segments");
+        if (built) {
+            check_near(join.centerM.x, 4.0, 1e-6, "ribbon join stays on the authored node X");
+            check_near(join.centerM.y, 0.0, 1e-6, "ribbon join stays on the authored node Y");
+            check_near(join.previousLeftM.x, 4.0, 1e-6,
+                       "incoming left edge reaches the node cross-section");
+            check_near(join.previousLeftM.y, 2.0, 1e-6,
+                       "incoming left edge uses the segment half-width");
+            check_near(join.nextLeftM.x, 2.0, 1e-6,
+                       "outgoing left edge rotates with the next segment");
+            check_near(join.nextLeftM.y, 0.0, 1e-6,
+                       "outgoing left edge reaches the node cross-section");
+            check_near(join.previousRightM.x, 4.0, 1e-6,
+                       "incoming right edge reaches the node cross-section");
+            check_near(join.previousRightM.y, -2.0, 1e-6,
+                       "incoming right edge uses the segment half-width");
+            check_near(join.nextRightM.x, 6.0, 1e-6,
+                       "outgoing right edge rotates with the next segment");
+            check_near(join.nextRightM.y, 0.0, 1e-6,
+                       "outgoing right edge reaches the node cross-section");
+            check(join.previousLeftM.x != join.nextLeftM.x ||
+                      join.previousLeftM.y != join.nextLeftM.y,
+                  "the regression fixture has a real wedge for the join to fill");
+        }
+    }
+
     ScriptFrame *frames = (ScriptFrame *)calloc(SCRIPT_FRAMES, sizeof(ScriptFrame));
     if (frames == NULL) {
         fprintf(stderr, "FATAL: could not allocate the input script\n");
