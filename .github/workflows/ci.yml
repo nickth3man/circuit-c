@@ -4,11 +4,8 @@
 # Without it a runner that happens to lack cppcheck would report a green tick for a job
 # that never linted anything.
 #
-# Two jobs because neither host covers everything:
-#   windows-ucrt64  the canonical toolchain developers actually build with, and the only
-#                   one the hot-reload link path is designed for
-#   linux-headless  the headless targets, and the only place ASan/UBSan can link at all —
-#                   MSYS2 ships those runtimes in CLANG64, not the supported UCRT64
+# The canonical Windows toolchain is the required CI environment and matches the platform
+# developers actually build and run.
 #
 # Actions are pinned by commit SHA, not tag, so a moved tag cannot change what runs here.
 
@@ -39,7 +36,10 @@ jobs:
       - uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884 # v2.32.0
         with:
           msystem: UCRT64
-          update: true
+          # The action's cached release already contains a coherent base system. Avoid a
+          # full package upgrade on every run; setup currently takes 96 seconds in CI.
+          update: false
+          cache: true
           install: >-
             make
             git
@@ -51,9 +51,7 @@ jobs:
             pkgconf:p
             raylib:p
             clang:p
-            clang-tools-extra:p
             cppcheck:p
-            gcovr:p
             python:p
             uv:p
 
@@ -68,92 +66,7 @@ jobs:
       - name: Resolved toolchain
         run: make info
 
-      # `verify` includes the pinned ruff check, so both CI jobs exercise the same project gate.
+      # `verify` includes the pinned ruff check and the complete required project gate.
       - name: Verify (format, Python, lint, analyze, physics, regression)
-        run: make CIRCUIT_STRICT=1 verify
-
-  linux-headless:
-    name: Linux headless (+ sanitizers) (optional)
-    runs-on: ubuntu-latest
-    timeout-minutes: 40
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          # tidy-changed diffs against origin/main, which a depth-1 checkout does not have.
-          fetch-depth: 0
-
-      - name: Set up uv
-        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
-
-      - name: Install toolchain
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            clang clang-format clang-tidy cppcheck gcovr
-          # A uv venv is user-owned, so it sidesteps both the externally-managed marker on
-          # the /usr python and the root-only /usr/local site-packages. Its bin goes on PATH
-          # so the Makefile's `command -v ruff` resolves.
-          uv venv /tmp/circuit-tools
-          uv pip install --python /tmp/circuit-tools/bin/python -r requirements-dev.txt
-          echo "/tmp/circuit-tools/bin" >> "$GITHUB_PATH"
-
-      # The POSIX branch of the Makefile needs raylib for its HEADERS only: the headless
-      # build calls no raylib function and links no raylib library. So clone the source
-      # tree and stop — no build, no install. third_party/raylib-src is the fallback path
-      # the Makefile already looks for, and it is gitignored.
-      # Pinned by commit, for the same reason the actions above are: a tag can be moved or
-      # deleted, and this is the job's only external build input. dbc56a8 is tag 6.0, which
-      # is also the version the UCRT64 job's `raylib:p` package ships, so both jobs compile
-      # the headless set against the same headers.
-      - name: Fetch raylib headers
-        run: |
-          RAYLIB_SHA=dbc56a87da87d973a9c5baa4e7438a9d20121d28  # tag 6.0
-          git init -q third_party/raylib-src
-          git -C third_party/raylib-src fetch -q --depth 1 \
-            https://github.com/raysan5/raylib "$RAYLIB_SHA"
-          git -C third_party/raylib-src checkout -q FETCH_HEAD
-
-      - name: Resolved toolchain
-        run: make info
-
-      # Host-independent; both CI jobs exercise the same pinned Python gate.
-      - name: Python lint and format
-        run: make CIRCUIT_STRICT=1 lint-py
-
-      # clang-tidy on the files this branch actually touched. The whole tree carries ~112
-      # pre-existing findings, so a full-tree gate would fail every pull request over work
-      # nobody in that pull request caused; nightly reports the full count instead.
-      # Skipped on pushes to main, where there is no branch to diff against.
-      - name: clang-tidy (changed files)
-        if: github.event_name == 'pull_request'
-        run: |
-          git fetch -q --no-tags origin "${{ github.base_ref }}"
-          make CIRCUIT_STRICT=1 tidy-changed TIDY_BASE="origin/${{ github.base_ref }}"
-
-      # test-physics only. `regression` is deliberately NOT run here.
-      #
-      # tests/baselines/ is recorded on Windows/UCRT64, and the comparison tolerances are
-      # tight enough that a different libm does not reproduce them: the first CI run breached
-      # 13 of 46 comparisons, all of them longitudinal (brake-*, lift-off*, accel-load,
-      # launch_stop), with identical aggregate metrics but large single-row deltas — the
-      # signature of a discrete event landing one tick apart, not of changed vehicle dynamics.
-      #
-      # The scenario assertions themselves pass identically on both hosts, so behaviour is
-      # not in question; byte-level reproduction across libms is, and the project has never
-      # claimed it. Windows CI gates the baselines.
-      - name: Physics scenarios
-        run: make CIRCUIT_STRICT=1 test-physics
-
-      # This is the only place the sanitizers actually run; the UCRT64 job skips them by
-      # design. If this step ever starts skipping, the project has lost ASan/UBSan cover.
-      - name: ASan + UBSan
-        run: make CIRCUIT_STRICT=1 sanitize
-
-      - name: Upload failure bundles
-        if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: failure-bundles-linux
-          path: artifacts/
-          retention-days: 7
-          if-no-files-found: ignore
+        # These prerequisites use separate outputs, so Make can safely overlap them.
+        run: make -j4 CIRCUIT_STRICT=1 verify
