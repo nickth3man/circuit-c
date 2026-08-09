@@ -15,11 +15,13 @@
  * overlay — but they are separate axes and the simulation gate reads both: a session only steps
  * when its screen is up AND its phase is one that runs.
  *
- * TIME. `tick` and `clockS` count green-flag simulation only: they do not advance while the
- * session is paused, which is what makes "pause freezes race time" a property rather than a
- * hope. The platform's own fixed-tick counter (`Game.sim.tick`) keeps counting regardless,
- * because it times the application, not the race — a restarted session rewinds its clock while
- * the application tick does not.
+ * TIME. `tick` counts the ticks this session actually simulated, countdown included; `clockS`
+ * counts green-flag seconds and so does not start until the grid is released. Neither advances
+ * while the session is paused, which is what makes "pause freezes race time" a property rather
+ * than a hope. Both are established at the top of a tick by race_session_begin_tick(), so every
+ * event raised anywhere in that tick carries the same stamp. The platform's own fixed-tick
+ * counter (`Game.sim.tick`) keeps counting regardless, because it times the application, not
+ * the race — a restarted session rewinds its clock while the application tick does not.
  *
  * HOT RELOAD. Plain value data with no function pointers and no pointers into the reloadable
  * module, like everything else in the persistent Game block. The event log is a fixed ring, so
@@ -76,9 +78,15 @@ typedef struct {
      * classifies on its first tick exactly as it always did. */
     int targetLaps;
     /* Seconds held on the grid before green. 0 releases immediately, which is what every
-     * existing caller gets and why no recorded trace moves. */
+     * existing caller gets and why no recorded trace moves. Resolved to whole fixed steps at
+     * start and clamped to RACE_COUNTDOWN_MAX_TICKS. */
     float countdownS;
 } RaceRules;
+
+/* Upper bound on a resolved countdown, in fixed steps — ten minutes at the simulation rate.
+ * It exists so that converting a nonsense or non-finite countdown to a tick count is defined
+ * behaviour rather than whatever the cast happens to produce. */
+#define RACE_COUNTDOWN_MAX_TICKS 72000
 
 typedef enum {
     RACE_EVENT_PHASE_CHANGED = 0, /* value is the new RacePhase */
@@ -143,7 +151,8 @@ typedef struct {
      * definition and therefore its own vehicle id. */
     int trackId;
 
-    /* Green-flag time. Neither advances while paused, finished, or on the grid. */
+    /* Session time. `tick` counts simulated ticks including the countdown; `clockS` counts
+     * green-flag seconds only. Neither advances while paused, finished, or configuring. */
     uint64_t tick;
     float clockS;
     /* Fixed steps left before green, counted as an integer rather than a shrinking float.
@@ -193,14 +202,23 @@ void race_session_log_event(RaceSession *session, RaceEventKind kind, EntrantId 
 const RaceEvent *race_session_last_event(const RaceSession *session);
 
 /*
+ * Open a simulating tick: advance the session tick, count down the grid release, and advance
+ * the race clock once green. Call it once, before the tick's other stages, so that every event
+ * they raise is stamped with the same tick and clock. Does nothing when the session is not in a
+ * simulating phase.
+ */
+void race_session_begin_tick(RaceSession *session, float dt);
+
+/*
  * The rules stage, run once per simulating tick after progress has been updated.
  *
- * Advances the countdown or the race clock, marks entrants that have completed the distance,
- * awards finishing positions in the order they finish, and moves the phase to FINISHING and
- * then CLASSIFIED as the mode's finish condition is met. Writes the results snapshot exactly
- * once, on entry to CLASSIFIED.
+ * Marks entrants that have completed the distance, awards finishing positions in the order they
+ * finish, and moves the phase to FINISHING and then CLASSIFIED as the mode's finish condition
+ * is met. Writes the results snapshot exactly once, on entry to CLASSIFIED. Takes no `dt`: time
+ * belongs to race_session_begin_tick(), and a rule that needed the step would be reading the
+ * clock twice.
  */
-void race_session_update_rules(RaceSession *session, float dt);
+void race_session_update_rules(RaceSession *session);
 
 /* True once the session has reached a phase from which it will not simulate again. */
 bool race_session_is_over(const RaceSession *session);

@@ -1560,6 +1560,14 @@ static void scenario_track_runoff(void)
 /* Scenario: race-session — lifecycle, phases, pause, restart, rules, and classification    */
 /* ------------------------------------------------------------------------------------- */
 
+/* Drive one whole simulating tick of a bare session: open it, then run its rules. The Game
+ * path does the same thing with the physics and progress stages in between. */
+static void race_session_tick(RaceSession *session, float dt)
+{
+    race_session_begin_tick(session, dt);
+    race_session_update_rules(session);
+}
+
 /* Count how many events of one kind the session has raised, oldest first. */
 static int session_event_count(const RaceSession *session, RaceEventKind kind)
 {
@@ -1622,7 +1630,7 @@ static void scenario_race_session(void)
     check(race_session_is_simulating(session),
           "a countdown still simulates: the cars settle on the grid");
 
-    for (int i = 0; i < 3; i++) race_session_update_rules(session, FIXED_DT_S);
+    for (int i = 0; i < 3; i++) race_session_tick(session, FIXED_DT_S);
     check(session->phase == RACE_PHASE_RUNNING,
           "the countdown releases after exactly its three ticks (got %d)", (int)session->phase);
     check(session->clockS == 0.0f, "and the race clock has not started yet (got %.6f)",
@@ -1631,14 +1639,14 @@ static void scenario_race_session(void)
           (unsigned long long)session->tick);
 
     /* ---- 4. The race clock counts green-flag time only ---- */
-    for (int i = 0; i < 10; i++) race_session_update_rules(session, FIXED_DT_S);
+    for (int i = 0; i < 10; i++) race_session_tick(session, FIXED_DT_S);
     const float greenClockS = session->clockS;
     check_near((double)greenClockS, (double)(10.0f * FIXED_DT_S), 1e-6,
                "ten green ticks advance the race clock by ten fixed steps");
 
     check(race_session_pause(session) && session->phase == RACE_PHASE_PAUSED,
           "a running race can be paused");
-    for (int i = 0; i < 10; i++) race_session_update_rules(session, FIXED_DT_S);
+    for (int i = 0; i < 10; i++) race_session_tick(session, FIXED_DT_S);
     check(session->clockS == greenClockS,
           "and a paused race's clock does not move, however many ticks arrive (%.6f vs %.6f)",
           (double)session->clockS, (double)greenClockS);
@@ -1676,8 +1684,8 @@ static void scenario_race_session(void)
             /* Exactly one entrant completes the distance in each session. */
             trial->roster.entrants[1].progress.lap = 1;
             field->roster.entrants[1].progress.lap = 1;
-            race_session_update_rules(trial, FIXED_DT_S);
-            race_session_update_rules(field, FIXED_DT_S);
+            race_session_tick(trial, FIXED_DT_S);
+            race_session_tick(field, FIXED_DT_S);
 
             check(trial->phase == RACE_PHASE_CLASSIFIED,
                   "a time trial is over when the timed driver is (got %d)", (int)trial->phase);
@@ -1690,9 +1698,9 @@ static void scenario_race_session(void)
 
             /* The rest of the field finishes; positions follow the order they arrive in. */
             field->roster.entrants[2].progress.lap = 1;
-            race_session_update_rules(field, FIXED_DT_S);
+            race_session_tick(field, FIXED_DT_S);
             field->roster.entrants[0].progress.lap = 1;
-            race_session_update_rules(field, FIXED_DT_S);
+            race_session_tick(field, FIXED_DT_S);
 
             check(field->phase == RACE_PHASE_CLASSIFIED,
                   "the race classifies once the last car is home (got %d)", (int)field->phase);
@@ -1723,6 +1731,69 @@ static void scenario_race_session(void)
     check(race_session_is_over(session) && !session->results.valid,
           "an aborted race is over and produces no results");
     check(!race_session_resume(session), "and cannot be resumed into");
+
+    /* A race that already has an answer cannot be retrospectively abandoned: that would leave
+     * phase ABORTED sitting next to a valid results snapshot. */
+    add_ai_entrants(session, 1);
+    {
+        RaceRules oneLap;
+        race_rules_set_default(&oneLap);
+        oneLap.targetLaps = 1;
+        race_session_start(session, &oneLap);
+        session->roster.entrants[0].progress.lap = 1;
+        race_session_tick(session, FIXED_DT_S);
+        check(session->phase == RACE_PHASE_CLASSIFIED && session->results.valid,
+              "precondition: the session classified");
+        check(!race_session_abort(session) && session->phase == RACE_PHASE_CLASSIFIED &&
+                  session->results.valid,
+              "a classified race refuses to be aborted, so its results stay valid");
+    }
+
+    /* A countdown that is nonsense must not make the tick conversion undefined. */
+    {
+        RaceRules absurd;
+        race_rules_set_default(&absurd);
+        absurd.countdownS = 1.0e30f;
+        race_session_start(session, &absurd);
+        check(session->countdownTicksRemaining == RACE_COUNTDOWN_MAX_TICKS,
+              "an oversized countdown clamps instead of overflowing the cast (got %d)",
+              session->countdownTicksRemaining);
+        check(session->phase == RACE_PHASE_COUNTDOWN, "and still holds the grid");
+    }
+
+    /* Every event a tick raises carries that tick's stamp, whichever stage raised it. */
+    {
+        RaceRules oneLap;
+        race_rules_set_default(&oneLap);
+        oneLap.targetLaps = 1;
+        race_session_start(session, &oneLap);
+        const int eventsBeforeTick = session->events.count; /* the start's own GRID/RUNNING */
+
+        race_session_begin_tick(session, FIXED_DT_S);
+        const uint64_t openedTick = session->tick;
+        const float openedClockS = session->clockS;
+        /* Stand in for the progress stage, which raises its lap event before the rules stage
+         * runs — the two used to straddle the tick increment. */
+        race_session_log_event(session, RACE_EVENT_LAP_COMPLETED,
+                               session->roster.entrants[0].id, 1);
+        session->roster.entrants[0].progress.lap = 1;
+        race_session_update_rules(session);
+
+        const RaceEvent *finish = race_session_last_event(session);
+        check(finish != NULL && finish->kind == RACE_EVENT_PHASE_CHANGED,
+              "the classifying tick ends on a phase change");
+        int raisedThisTick = 0;
+        bool sameStamp = true;
+        for (int i = eventsBeforeTick; i < session->events.count; i++) {
+            const RaceEvent *ev =
+                &session->events.items[(session->events.head + i) % RACE_EVENT_CAPACITY];
+            raisedThisTick++;
+            if (ev->tick != openedTick || ev->timeS != openedClockS) sameStamp = false;
+        }
+        check(raisedThisTick == 3, "the tick raised lap, finish and phase events (got %d)",
+              raisedThisTick);
+        check(sameStamp, "and all three agree about which tick and clock they happened on");
+    }
 
     free(session);
 
@@ -1777,6 +1848,76 @@ static void scenario_race_session(void)
         check(game->session.phase == RACE_PHASE_RUNNING && game->session.clockS <= FIXED_DT_S,
               "a reset restarts the race from tick zero (phase %d, clock %.6f)",
               (int)game->session.phase, (double)game->session.clockS);
+
+        /* And a restart taken on the final lap is a restart, not a bounce off the results
+         * screen: the lap cursor has to go back with the clock. */
+        game->progress.lap = game->session.rules.targetLaps;
+        game->progress.lapTimerS = 12.0f;
+        game->input.resetPressed = true;
+        game_fixed_update(game, FIXED_DT_S);
+        check(game->progress.lap == 0 && game->progress.lapTimerS == 0.0f,
+              "a reset on the final lap rewinds route progress (lap %d, timer %.3f)",
+              game->progress.lap, (double)game->progress.lapTimerS);
+        check(game->state == STATE_PLAYING && game->session.phase == RACE_PHASE_RUNNING,
+              "so the race actually restarts instead of classifying again immediately "
+              "(state %d, phase %d)",
+              (int)game->state, (int)game->session.phase);
+
+        free(game);
+    }
+
+    /* ---- 9. Keeping a track keeps its identity ---- */
+    {
+        Game *game = alloc_game();
+        game_init(game);
+        GameRunConfig config;
+        memset(&config, 0, sizeof(config));
+        config.track = GAME_TRACK_CHICANE;
+        config.targetLaps = 3;
+        check(game_configure_run(game, &config), "a chicane run configures");
+        check(game->session.trackId == (int)GAME_TRACK_CHICANE,
+              "the session records which track is loaded (got %d)", game->session.trackId);
+
+        config.track = GAME_TRACK_KEEP;
+        check(game_configure_run(game, &config), "a follow-up run keeps that track");
+        check(game->session.trackId == (int)GAME_TRACK_CHICANE,
+              "and GAME_TRACK_KEEP keeps its identity rather than reporting the sentinel "
+              "(got %d)",
+              game->session.trackId);
+        check(game->session.rules.targetLaps == 3, "while the rules are re-frozen as asked");
+
+        track_free(&game->trackDef);
+        free(game);
+    }
+
+    /* ---- 10. Playback rewinds the session, not only the car ---- */
+    {
+        Game *game = alloc_game();
+        game_init(game);
+        replay_begin_recording(&game->replay, game->sim.tick);
+        for (int i = 0; i < 20; i++) game_fixed_update(game, FIXED_DT_S);
+        check(game->session.tick == 20u, "precondition: the live session advanced (got %llu)",
+              (unsigned long long)game->session.tick);
+
+        /* The dev lab's play button rewinds the car and begins playback. Whatever the live run
+         * left the session at must not carry into the replay: a session that had reached a
+         * non-simulating phase would make the playback do nothing at all. */
+        game_reset_sim(game);
+        check(replay_begin_playback(&game->replay), "playback begins");
+        const uint64_t simTickBefore = game->sim.tick;
+        game_fixed_update(game, FIXED_DT_S);
+
+        check(game->session.tick == 1u,
+              "the first playback tick rewinds the session rather than continuing the live one "
+              "(got %llu)",
+              (unsigned long long)game->session.tick);
+        check_near((double)game->session.clockS, (double)FIXED_DT_S, 1e-6,
+                   "and its race clock restarts from zero");
+        check(
+            game->sim.tick == simTickBefore + 1u,
+            "while the application tick keeps counting, because it times the app not the race");
+        check(race_session_is_simulating(&game->session),
+              "so a replay always begins in a phase that actually simulates");
 
         free(game);
     }

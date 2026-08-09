@@ -49,11 +49,16 @@ void race_session_start(RaceSession *session, const RaceRules *rules)
     session->clockS = 0.0f;
     session->classifiedCount = 0;
     /* Resolved once, in fixed steps. The simulation rate is a product constant, so a countdown
-     * is a whole number of ticks and lasts the same number of ticks on every machine. */
-    session->countdownTicksRemaining =
-        (session->rules.countdownS > 0.0f)
-            ? (int)ceilf(session->rules.countdownS / (float)FIXED_DT_S)
-            : 0;
+     * is a whole number of ticks and lasts the same number of ticks on every machine.
+     *
+     * Clamped before the conversion, not after: a NaN or an absurd countdown would otherwise
+     * make the float-to-int cast undefined, and "undefined" is not a grid procedure. */
+    session->countdownTicksRemaining = 0;
+    if (session->rules.countdownS > 0.0f) {
+        const float ticks = ceilf(session->rules.countdownS / (float)FIXED_DT_S);
+        session->countdownTicksRemaining =
+            (ticks >= (float)RACE_COUNTDOWN_MAX_TICKS) ? RACE_COUNTDOWN_MAX_TICKS : (int)ticks;
+    }
     memset(&session->events, 0, sizeof(session->events));
     memset(&session->results, 0, sizeof(session->results));
 
@@ -108,8 +113,10 @@ bool race_session_resume(RaceSession *session)
 bool race_session_abort(RaceSession *session)
 {
     if (session == NULL) return false;
-    if (session->phase == RACE_PHASE_ABORTED || session->phase == RACE_PHASE_CONFIGURING)
-        return false;
+    /* Only a race that could still have finished can be abandoned. A classified session already
+     * has an answer, and moving it to ABORTED would leave a finished race claiming it produced
+     * no results while `results.valid` says otherwise. */
+    if (session->phase == RACE_PHASE_CONFIGURING || race_session_is_over(session)) return false;
     set_phase(session, RACE_PHASE_ABORTED);
     session->resumePhase = RACE_PHASE_ABORTED;
     return true;
@@ -192,10 +199,13 @@ static void capture_results(RaceSession *session)
     results->valid = true;
 }
 
-void race_session_update_rules(RaceSession *session, float dt)
+void race_session_begin_tick(RaceSession *session, float dt)
 {
     if (session == NULL || !race_session_is_simulating(session)) return;
 
+    /* Established once, at the top of the tick, so that every event any stage raises during it
+     * carries the same tick and clock. Advancing them halfway through would let a lap crossing
+     * and the finish it triggers disagree about when they happened. */
     session->tick++;
 
     if (session->phase == RACE_PHASE_COUNTDOWN) {
@@ -206,10 +216,17 @@ void race_session_update_rules(RaceSession *session, float dt)
             session->countdownTicksRemaining = 0;
             set_phase(session, RACE_PHASE_RUNNING);
         }
-        return; /* no race clock and no finishing before green */
+        return; /* the race clock does not run before green */
     }
 
     session->clockS += dt;
+}
+
+void race_session_update_rules(RaceSession *session)
+{
+    if (session == NULL) return;
+    /* Nothing finishes before green, and a countdown tick has already returned above. */
+    if (session->phase != RACE_PHASE_RUNNING && session->phase != RACE_PHASE_FINISHING) return;
 
     /* Award finishing positions in ascending EntrantId, so two entrants completing the distance
      * on the same tick are ordered by identity rather than by storage accident. */

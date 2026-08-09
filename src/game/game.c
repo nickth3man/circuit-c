@@ -277,7 +277,10 @@ GAME_API bool game_configure_run(Game *game, const GameRunConfig *config)
     RaceRules rules;
     race_rules_set_default(&rules);
     rules.targetLaps = (config->targetLaps > 0) ? config->targetLaps : RESULTS_TARGET_LAPS;
-    game->session.trackId = (int)config->track;
+    /* GAME_TRACK_KEEP means "leave the loaded track alone", so it must leave the session's
+     * idea of which track is loaded alone too — writing the sentinel would report and checksum
+     * a kept chicane as track 0. */
+    if (config->track != GAME_TRACK_KEEP) game->session.trackId = (int)config->track;
     race_session_start(&game->session, &rules);
 
     if (config->track != GAME_TRACK_KEEP) return game_spawn_on_track(game);
@@ -331,6 +334,17 @@ GAME_API bool game_spawn_on_track_at(Game *game, int checkpointIndex)
 static void restart_session(Game *game)
 {
     game_reset_sim(game);
+    /* Route progress goes back with the cars. Without it a restart taken on or after the final
+     * lap re-satisfies the finish condition on its very next tick and drops straight back to
+     * the results screen, which is the opposite of what the player asked for. It is reset here
+     * rather than inside game_reset_sim() because that entry point is the vehicle half on its
+     * own, and physics scenarios call it mid-run without wanting their lap cursor moved.
+     *
+     * Deliberately NOT shared with the playback rewind below: a recording does not necessarily
+     * begin at gate zero, so a replay that forced one would measure the timeline against the
+     * wrong gate. Restoring a recording's starting progress needs it captured with the
+     * recording, which is the replay snapshot work in issue 44. */
+    track_reset_progress_at(&game->progress, &game->trackDef, 0);
     race_session_start(&game->session, NULL);
 }
 
@@ -378,9 +392,11 @@ static void apply_oneshots(Game *game, const Input *input, const ControllerOutpu
                 game->state = STATE_PLAYING;
                 break;
             case STATE_RESULTS:
-                /* Leaving the results screen abandons the race rather than restarting it: the
-                 * next thing the player does decides what runs, and an aborted session cannot
-                 * be resumed into by accident. */
+                /* Leaving the results screen returns to the menu without restarting anything;
+                 * the next thing the player does decides what runs. A classified session is
+                 * left classified — race_session_abort() refuses it — so its results survive
+                 * for the results screen to keep showing. A race abandoned before it finished
+                 * is a different matter and is abandoned properly. */
                 race_session_abort(&game->session);
                 game->state = STATE_MENU;
                 break;
@@ -543,10 +559,21 @@ static void stage_acquire_inputs(Game *game, TickContext *ctx)
     input_zero(&ctx->sample);
     ctx->fromPlayback = false;
     if (game->replay.mode == REPLAY_MODE_PLAYBACK) {
-        if (game->replay.playbackCursor == 0 && game->replay.initialVehicle.valid &&
-            !replay_restore_initial_vehicle(&game->replay, &game->vehicleDefinition,
-                                            &game->vehicleSetup, &game->vehicleInstance)) {
-            replay_stop(&game->replay);
+        if (game->replay.playbackCursor == 0) {
+            /* Rewind the session alongside the vehicle. The phase is sticky in a way the
+             * screen state never was: leaving it at whatever the live run reached means
+             * replaying into a race that is already classified, and a classified race does not
+             * simulate — so the playback would silently do nothing at all.
+             *
+             * Route progress is deliberately left alone. It is not ours to guess: a recording
+             * need not have started at gate zero, and restoring the real starting cursor means
+             * capturing it with the recording, alongside the vehicle snapshot (issue 44). */
+            race_session_start(&game->session, NULL);
+            if (game->replay.initialVehicle.valid &&
+                !replay_restore_initial_vehicle(&game->replay, &game->vehicleDefinition,
+                                                &game->vehicleSetup, &game->vehicleInstance)) {
+                replay_stop(&game->replay);
+            }
         }
         if (replay_next(&game->replay, &ctx->sample))
             ctx->fromPlayback = true;
@@ -753,9 +780,9 @@ static void stage_collision(Game *game, const TickContext *ctx, float dt)
  * countdown, per-entrant results, the event log, and the screen the classified race hands to
  * the player.
  */
-static void stage_rules(Game *game, float dt)
+static void stage_rules(Game *game)
 {
-    race_session_update_rules(&game->session, dt);
+    race_session_update_rules(&game->session);
     if (game->session.phase == RACE_PHASE_CLASSIFIED) {
         game->state = STATE_RESULTS;
     }
@@ -840,11 +867,16 @@ GAME_API void game_fixed_update(Game *game, float dt)
      * race has to be in a phase that runs. Either one alone would be a lie — a paused overlay
      * over a running clock, or a race stepping forward behind the menu. */
     if (game->state == STATE_PLAYING && race_session_is_simulating(&game->session)) {
+        /* Open the tick before anything can raise an event, so a lap crossing logged in the
+         * progress stage and the finish it triggers in the rules stage agree about when they
+         * happened. */
+        race_session_begin_tick(&game->session, dt);
+
         stage_pre_physics(game, &ctx, dt);
         stage_physics(game, &ctx, dt);
         stage_progress(game, &ctx, dt);
         stage_collision(game, &ctx, dt);
-        stage_rules(game, dt);
+        stage_rules(game);
         stage_presentation(game, dt);
     }
 
