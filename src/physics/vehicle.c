@@ -1,6 +1,7 @@
 #include "physics/vehicle.h"
 
 #include <math.h>
+#include <stdio.h>
 #include <string.h>
 
 static void set_wheel_positions(const VehicleSpec *spec, VehicleState *state)
@@ -420,4 +421,294 @@ void vehicle_state_reset(const VehicleSpec *spec, VehicleState *state, VehicleDe
     renderState->currPositionM = state->positionM;
     renderState->prevHeadingRad = state->headingRad;
     renderState->currHeadingRad = state->headingRad;
+}
+
+static uint32_t vehicle_hash_u32(uint32_t hash, uint32_t value)
+{
+    for (int shift = 0; shift < 32; shift += 8) {
+        hash ^= (value >> shift) & 0xffu;
+        hash *= 0x01000193u;
+    }
+    return hash;
+}
+
+static uint32_t vehicle_hash_f32(uint32_t hash, float value)
+{
+    uint32_t bits = 0u;
+    memcpy(&bits, &value, sizeof(bits));
+    return vehicle_hash_u32(hash, bits);
+}
+
+static uint32_t vehicle_content_hash(const VehicleSpec *spec)
+{
+    uint32_t hash = 0x811c9dc5u;
+#define HASH_FLOAT(field) hash = vehicle_hash_f32(hash, spec->field)
+
+    HASH_FLOAT(wheelbaseM);
+    HASH_FLOAT(trackWidthFrontM);
+    HASH_FLOAT(trackWidthRearM);
+    HASH_FLOAT(frontOverhangM);
+    HASH_FLOAT(rearOverhangM);
+    HASH_FLOAT(widthOverallM);
+    HASH_FLOAT(heightOverallM);
+    HASH_FLOAT(rideHeightFrontM);
+    HASH_FLOAT(rideHeightRearM);
+    HASH_FLOAT(cowlXM);
+    HASH_FLOAT(backlightXM);
+    HASH_FLOAT(bedLengthM);
+    HASH_FLOAT(noseWidthM);
+    HASH_FLOAT(tailWidthM);
+    HASH_FLOAT(shoulderXM);
+    HASH_FLOAT(fenderFlareFrontM);
+    HASH_FLOAT(fenderFlareRearM);
+    HASH_FLOAT(roofStartXM);
+    HASH_FLOAT(roofEndXM);
+    HASH_FLOAT(roofWidthM);
+    HASH_FLOAT(windscreenRakeRad);
+    HASH_FLOAT(backlightRakeRad);
+    HASH_FLOAT(sideWindowCount);
+    HASH_FLOAT(quarterWindowLengthM);
+    HASH_FLOAT(sunroofLengthM);
+    HASH_FLOAT(doorCount);
+    HASH_FLOAT(cabinRows);
+    HASH_FLOAT(roofType);
+    HASH_FLOAT(massEngineKg);
+    HASH_FLOAT(massEngineXM);
+    HASH_FLOAT(massEngineZM);
+    HASH_FLOAT(massGearboxKg);
+    HASH_FLOAT(massGearboxXM);
+    HASH_FLOAT(massGearboxZM);
+    HASH_FLOAT(massFuelKg);
+    HASH_FLOAT(massFuelXM);
+    HASH_FLOAT(massFuelZM);
+    HASH_FLOAT(massDriverKg);
+    HASH_FLOAT(massDriverXM);
+    HASH_FLOAT(massDriverZM);
+    HASH_FLOAT(massChassisKg);
+    HASH_FLOAT(massChassisXM);
+    HASH_FLOAT(massChassisZM);
+    HASH_FLOAT(tireSectionWidthFrontMm);
+    HASH_FLOAT(tireSectionWidthRearMm);
+    HASH_FLOAT(tireAspectFrontPct);
+    HASH_FLOAT(tireAspectRearPct);
+    HASH_FLOAT(tireRimDiameterFrontIn);
+    HASH_FLOAT(tireRimDiameterRearIn);
+    HASH_FLOAT(tireRimWidthFrontIn);
+    HASH_FLOAT(tireRimWidthRearIn);
+    HASH_FLOAT(tirePressureFrontKpa);
+    HASH_FLOAT(tirePressureRearKpa);
+    HASH_FLOAT(suspCamberFrontRad);
+    HASH_FLOAT(suspCamberRearRad);
+    HASH_FLOAT(suspToeFrontRad);
+    HASH_FLOAT(suspToeRearRad);
+    HASH_FLOAT(suspCasterFrontRad);
+    HASH_FLOAT(suspCasterRearRad);
+    HASH_FLOAT(suspWheelRateFrontNpm);
+    HASH_FLOAT(suspWheelRateRearNpm);
+    HASH_FLOAT(suspAntiRollFrontNpm);
+    HASH_FLOAT(suspAntiRollRearNpm);
+    HASH_FLOAT(suspTravelFrontM);
+    HASH_FLOAT(suspTravelRearM);
+    HASH_FLOAT(suspRollCentreFrontM);
+    HASH_FLOAT(suspRollCentreRearM);
+    HASH_FLOAT(wheelOffsetEtFrontMm);
+    HASH_FLOAT(wheelOffsetEtRearMm);
+    HASH_FLOAT(brakeDiscRadiusFrontM);
+    HASH_FLOAT(brakeDiscRadiusRearM);
+    HASH_FLOAT(brakePadFriction);
+    HASH_FLOAT(aeroLiftCoefFront);
+    HASH_FLOAT(aeroLiftCoefRear);
+    HASH_FLOAT(aeroRefAreaFrontM2);
+    HASH_FLOAT(aeroRefAreaRearM2);
+    HASH_FLOAT(aeroCentreOfPressureXM);
+    HASH_FLOAT(drivetrainLayout);
+    HASH_FLOAT(frontTorqueSplit);
+    HASH_FLOAT(engineCylinders);
+    HASH_FLOAT(engineDisplacementL);
+    HASH_FLOAT(massKg);
+    HASH_FLOAT(yawInertiaKgM2);
+    HASH_FLOAT(cgToFrontM);
+    HASH_FLOAT(cgToRearM);
+    HASH_FLOAT(cgHeightM);
+    HASH_FLOAT(lengthOverallM);
+    HASH_FLOAT(wheelRadiusFrontM);
+    HASH_FLOAT(wheelRadiusRearM);
+    HASH_FLOAT(wheelRadiusM);
+    HASH_FLOAT(wheelInertiaKgM2);
+    HASH_FLOAT(frontalAreaM2);
+    HASH_FLOAT(bodyHalfWidthM);
+    HASH_FLOAT(maxBrakeTorqueNm);
+    HASH_FLOAT(rollStiffnessFrontFraction);
+    HASH_FLOAT(tireRelaxationLengthM);
+    HASH_FLOAT(tireLoadRefPerWheelN);
+    HASH_FLOAT(maxRoadWheelAngleRad);
+    HASH_FLOAT(maxSteerRateRadS);
+    HASH_FLOAT(steerReturnRateRadS);
+    HASH_FLOAT(steerSpeedRefMps);
+    HASH_FLOAT(steerSpeedMinFactor);
+    HASH_FLOAT(dragCoefficient);
+    HASH_FLOAT(loadFilterRateHz);
+    HASH_FLOAT(tireBLatFront);
+    HASH_FLOAT(tireCLatFront);
+    HASH_FLOAT(tireMuLatFront);
+    HASH_FLOAT(tireBLatRear);
+    HASH_FLOAT(tireCLatRear);
+    HASH_FLOAT(tireMuLatRear);
+    HASH_FLOAT(tireBLong);
+    HASH_FLOAT(tireCLong);
+    HASH_FLOAT(tireMuLongScale);
+    for (int i = 0; i < MAX_GEARS; i++) HASH_FLOAT(gearRatios[i]);
+    hash = vehicle_hash_u32(hash, (uint32_t)spec->gearCount);
+    HASH_FLOAT(reverseGearRatio);
+    HASH_FLOAT(finalDriveRatio);
+    HASH_FLOAT(drivetrainEfficiency);
+    HASH_FLOAT(engineIdleRpm);
+    HASH_FLOAT(engineRedlineRpm);
+    for (int i = 0; i < ENGINE_CURVE_POINTS; i++) HASH_FLOAT(engineTorqueCurveNm[i]);
+    HASH_FLOAT(engineBrakingTorqueNm);
+    HASH_FLOAT(brakeBiasFront);
+    HASH_FLOAT(handbrakeTorqueNm);
+    HASH_FLOAT(collisionRestitution);
+    HASH_FLOAT(collisionFriction);
+    HASH_FLOAT(tireLoadSensitivityK);
+    HASH_FLOAT(ackermannPercent);
+    HASH_FLOAT(differentialMode);
+    HASH_FLOAT(differentialBiasRatio);
+    HASH_FLOAT(differentialPreloadNm);
+    hash = vehicle_hash_u32(hash, spec->lateralLoadTransferEnabled ? 1u : 0u);
+
+#undef HASH_FLOAT
+    return hash;
+}
+
+bool vehicle_definition_init(VehicleDefinition *definition, const char *id,
+                             const char *appearanceId, uint32_t contentVersion,
+                             const VehicleSpec *spec)
+{
+    if (definition == NULL || id == NULL || id[0] == '\0' || appearanceId == NULL ||
+        appearanceId[0] == '\0' || contentVersion == 0u || spec == NULL)
+        return false;
+
+    VehicleDefinition candidate;
+    memset(&candidate, 0, sizeof(candidate));
+    candidate.spec = *spec;
+    vehicle_spec_refresh_derived(&candidate.spec);
+    if (!vehicle_spec_is_valid(&candidate.spec)) return false;
+
+    if (snprintf(candidate.id, sizeof(candidate.id), "%s", id) >= (int)sizeof(candidate.id) ||
+        snprintf(candidate.appearanceId, sizeof(candidate.appearanceId), "%s", appearanceId) >=
+            (int)sizeof(candidate.appearanceId))
+        return false;
+    candidate.contentVersion = contentVersion;
+    candidate.contentHash = vehicle_content_hash(&candidate.spec);
+    *definition = candidate;
+    return true;
+}
+
+void vehicle_definition_set_default(VehicleDefinition *definition)
+{
+    if (definition == NULL) return;
+    VehicleSpec spec;
+    vehicle_spec_set_default(&spec);
+    (void)vehicle_definition_init(definition, "builtin/default", "builtin/default", 1u, &spec);
+}
+
+void vehicle_setup_set_default(const VehicleDefinition *definition, VehicleSetup *setup)
+{
+    if (definition == NULL || setup == NULL) return;
+    const VehicleSpec *spec = &definition->spec;
+    memset(setup, 0, sizeof(*setup));
+    setup->tirePressureFrontKpa = spec->tirePressureFrontKpa;
+    setup->tirePressureRearKpa = spec->tirePressureRearKpa;
+    setup->suspCamberFrontRad = spec->suspCamberFrontRad;
+    setup->suspCamberRearRad = spec->suspCamberRearRad;
+    setup->suspToeFrontRad = spec->suspToeFrontRad;
+    setup->suspToeRearRad = spec->suspToeRearRad;
+    setup->suspCasterFrontRad = spec->suspCasterFrontRad;
+    setup->suspCasterRearRad = spec->suspCasterRearRad;
+    memcpy(setup->gearRatios, spec->gearRatios, sizeof(setup->gearRatios));
+    setup->gearCount = spec->gearCount;
+    setup->reverseGearRatio = spec->reverseGearRatio;
+    setup->finalDriveRatio = spec->finalDriveRatio;
+    setup->brakeBiasFront = spec->brakeBiasFront;
+    setup->differentialMode = spec->differentialMode;
+    setup->differentialBiasRatio = spec->differentialBiasRatio;
+    setup->differentialPreloadNm = spec->differentialPreloadNm;
+}
+
+static void vehicle_setup_apply(VehicleSpec *spec, const VehicleSetup *setup)
+{
+    spec->tirePressureFrontKpa = setup->tirePressureFrontKpa;
+    spec->tirePressureRearKpa = setup->tirePressureRearKpa;
+    spec->suspCamberFrontRad = setup->suspCamberFrontRad;
+    spec->suspCamberRearRad = setup->suspCamberRearRad;
+    spec->suspToeFrontRad = setup->suspToeFrontRad;
+    spec->suspToeRearRad = setup->suspToeRearRad;
+    spec->suspCasterFrontRad = setup->suspCasterFrontRad;
+    spec->suspCasterRearRad = setup->suspCasterRearRad;
+    memcpy(spec->gearRatios, setup->gearRatios, sizeof(spec->gearRatios));
+    spec->gearCount = setup->gearCount;
+    spec->reverseGearRatio = setup->reverseGearRatio;
+    spec->finalDriveRatio = setup->finalDriveRatio;
+    spec->brakeBiasFront = setup->brakeBiasFront;
+    spec->differentialMode = setup->differentialMode;
+    spec->differentialBiasRatio = setup->differentialBiasRatio;
+    spec->differentialPreloadNm = setup->differentialPreloadNm;
+}
+
+bool vehicle_setup_is_valid(const VehicleDefinition *definition, const VehicleSetup *setup)
+{
+    if (definition == NULL || setup == NULL) return false;
+    VehicleSpec compiled = definition->spec;
+    vehicle_setup_apply(&compiled, setup);
+    vehicle_spec_refresh_derived(&compiled);
+    return vehicle_spec_is_valid(&compiled);
+}
+
+bool vehicle_instance_derive(VehicleInstance *instance, const VehicleDefinition *definition,
+                             const VehicleSetup *setup)
+{
+    if (instance == NULL || definition == NULL || setup == NULL ||
+        !vehicle_setup_is_valid(definition, setup))
+        return false;
+    instance->spec = definition->spec;
+    vehicle_setup_apply(&instance->spec, setup);
+    vehicle_spec_refresh_derived(&instance->spec);
+    return true;
+}
+
+void vehicle_instance_reset(VehicleInstance *instance)
+{
+    if (instance == NULL) return;
+    const bool automaticTransmissionEnabled = instance->autoTrans.enabled;
+    const bool automaticTransmissionForwardOnly = instance->autoTrans.forwardOnly;
+    vehicle_state_reset(&instance->spec, &instance->vehicle, &instance->derived,
+                        &instance->renderState);
+    instance->autoTrans.enabled = automaticTransmissionEnabled;
+    instance->autoTrans.forwardOnly = automaticTransmissionForwardOnly;
+    instance->autoTrans.driveState = AUTO_DRIVE;
+    instance->autoTrans.neutralTimer = 0.0f;
+    memset(&instance->vehicleControls, 0, sizeof(instance->vehicleControls));
+    instance->fuelKg = instance->spec.massFuelKg;
+    for (int i = 0; i < WHEEL_COUNT; i++) {
+        const bool front = i == WHEEL_FRONT_LEFT || i == WHEEL_FRONT_RIGHT;
+        instance->tireState[i].pressureKpa =
+            front ? instance->spec.tirePressureFrontKpa : instance->spec.tirePressureRearKpa;
+        instance->tireState[i].temperatureC = 20.0f;
+        instance->tireState[i].wear = 0.0f;
+    }
+    instance->damage = 0.0f;
+    instance->crashLockoutTimerS = 0.0f;
+}
+
+bool vehicle_instance_init(VehicleInstance *instance, const VehicleDefinition *definition,
+                           const VehicleSetup *setup)
+{
+    if (instance == NULL) return false;
+    memset(instance, 0, sizeof(*instance));
+    if (!vehicle_instance_derive(instance, definition, setup)) return false;
+    instance->autoTrans.enabled = true;
+    instance->autoTrans.forwardOnly = false;
+    vehicle_instance_reset(instance);
+    return true;
 }

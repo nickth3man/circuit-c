@@ -76,6 +76,24 @@ GAME_API uint32_t game_state_checksum(const Game *game)
     h = hash_u32(h, game->sim.shiftUpCount);
     h = hash_u32(h, game->sim.shiftDownCount);
 
+    const VehicleSetup *setup = &game->vehicleSetup;
+    h = hash_f32(h, setup->tirePressureFrontKpa);
+    h = hash_f32(h, setup->tirePressureRearKpa);
+    h = hash_f32(h, setup->suspCamberFrontRad);
+    h = hash_f32(h, setup->suspCamberRearRad);
+    h = hash_f32(h, setup->suspToeFrontRad);
+    h = hash_f32(h, setup->suspToeRearRad);
+    h = hash_f32(h, setup->suspCasterFrontRad);
+    h = hash_f32(h, setup->suspCasterRearRad);
+    h = hash_u32(h, (uint32_t)setup->gearCount);
+    for (int i = 0; i < MAX_GEARS; i++) h = hash_f32(h, setup->gearRatios[i]);
+    h = hash_f32(h, setup->reverseGearRatio);
+    h = hash_f32(h, setup->finalDriveRatio);
+    h = hash_f32(h, setup->brakeBiasFront);
+    h = hash_f32(h, setup->differentialMode);
+    h = hash_f32(h, setup->differentialBiasRatio);
+    h = hash_f32(h, setup->differentialPreloadNm);
+
     const VehicleState *v = &game->vehicle;
     h = hash_f32(h, v->positionM.x);
     h = hash_f32(h, v->positionM.y);
@@ -88,6 +106,8 @@ GAME_API uint32_t game_state_checksum(const Game *game)
     h = hash_u32(h, (uint32_t)v->selectedGear);
     h = hash_f32(h, v->filteredLongAccelMps2);
     h = hash_f32(h, v->prevLongAccelMps2);
+    h = hash_f32(h, v->filteredLatAccelMps2);
+    h = hash_f32(h, v->prevLatAccelMps2);
     for (int i = 0; i < WHEEL_COUNT; i++) {
         const WheelState *wheel = &v->wheels[i];
         h = hash_f32(h, wheel->localPositionM.x);
@@ -99,10 +119,39 @@ GAME_API uint32_t game_state_checksum(const Game *game)
         h = hash_f32(h, wheel->slipRatio);
         h = hash_f32(h, wheel->forceLongitudinalN);
         h = hash_f32(h, wheel->forceLateralN);
+        h = hash_f32(h, wheel->forceLateralRelaxedN);
         h = hash_f32(h, wheel->frictionUsage);
         h = hash_u32(h, wheel->locked ? 1u : 0u);
         h = hash_u32(h, (uint32_t)wheel->surfaceId);
     }
+
+    const VehicleInstance *instance = &game->vehicleInstance;
+    h = hash_f32(h, instance->renderState.prevPositionM.x);
+    h = hash_f32(h, instance->renderState.prevPositionM.y);
+    h = hash_f32(h, instance->renderState.prevHeadingRad);
+    h = hash_f32(h, instance->renderState.currPositionM.x);
+    h = hash_f32(h, instance->renderState.currPositionM.y);
+    h = hash_f32(h, instance->renderState.currHeadingRad);
+    for (int i = 0; i < WHEEL_COUNT; i++) {
+        h = hash_f32(h, instance->renderState.prevWheelAngleRad[i]);
+        h = hash_f32(h, instance->renderState.currWheelAngleRad[i]);
+    }
+    h = hash_u32(h, instance->autoTrans.enabled ? 1u : 0u);
+    h = hash_u32(h, instance->autoTrans.forwardOnly ? 1u : 0u);
+    h = hash_u32(h, (uint32_t)instance->autoTrans.driveState);
+    h = hash_f32(h, instance->autoTrans.neutralTimer);
+    h = hash_f32(h, instance->vehicleControls.steer);
+    h = hash_f32(h, instance->vehicleControls.throttle);
+    h = hash_f32(h, instance->vehicleControls.brake);
+    h = hash_f32(h, instance->vehicleControls.handbrake);
+    h = hash_f32(h, instance->fuelKg);
+    for (int i = 0; i < WHEEL_COUNT; i++) {
+        h = hash_f32(h, instance->tireState[i].pressureKpa);
+        h = hash_f32(h, instance->tireState[i].temperatureC);
+        h = hash_f32(h, instance->tireState[i].wear);
+    }
+    h = hash_f32(h, instance->damage);
+    h = hash_f32(h, instance->crashLockoutTimerS);
 
     /* Route progress is authoritative simulation state: it decides when a lap closes and when
      * the run ends, so a replay that diverged on it was previously undetectable. The bound
@@ -120,16 +169,19 @@ GAME_API uint32_t game_state_checksum(const Game *game)
 GAME_API void game_reset_sim(Game *game)
 {
     if (game == NULL) return;
-    vehicle_state_reset(&game->spec, &game->vehicle, &game->derived, &game->renderState);
-    game->autoTrans.driveState = AUTO_DRIVE;
-    game->autoTrans.neutralTimer = 0.0f;
+    vehicle_instance_reset(&game->vehicleInstance);
 }
 
 GAME_API void game_apply_spec(Game *game, const VehicleSpec *spec)
 {
     if (game == NULL || spec == NULL) return;
-    game->spec = *spec;
-    vehicle_state_reset(&game->spec, &game->vehicle, &game->derived, &game->renderState);
+    VehicleDefinition definition;
+    if (!vehicle_definition_init(&definition, "runtime/profile", "runtime/profile", 1u, spec))
+        return;
+    game->vehicleDefinition = definition;
+    vehicle_setup_set_default(&game->vehicleDefinition, &game->vehicleSetup);
+    (void)vehicle_instance_init(&game->vehicleInstance, &game->vehicleDefinition,
+                                &game->vehicleSetup);
 }
 
 GAME_API bool game_configure_run(Game *game, const GameRunConfig *config)
@@ -168,9 +220,9 @@ GAME_API bool game_spawn_on_track_at(Game *game, int checkpointIndex)
     if (!track_start_pose_at(&game->trackDef, checkpointIndex, &startM, &headingRad))
         return false;
 
-    /* Reset first, then place: vehicle_state_reset() puts the car at the world origin, so
+    /* Reset first, then place: vehicle_instance_reset() puts the car at the world origin, so
      * doing it the other way round would throw the pose away. */
-    vehicle_state_reset(&game->spec, &game->vehicle, &game->derived, &game->renderState);
+    vehicle_instance_reset(&game->vehicleInstance);
     game->vehicle.positionM = startM;
     game->vehicle.headingRad = headingRad;
 
@@ -251,11 +303,10 @@ GAME_API void game_init(Game *game)
     if (game == NULL) return;
     input_zero(&game->input);
     memset(&game->sim, 0, sizeof(game->sim));
-    vehicle_spec_set_default(&game->spec);
-    game_reset_sim(game);
-    game->autoTrans.enabled = true;
-    game->autoTrans.forwardOnly = false;
-    game->autoTrans.driveState = AUTO_DRIVE;
+    vehicle_definition_set_default(&game->vehicleDefinition);
+    vehicle_setup_set_default(&game->vehicleDefinition, &game->vehicleSetup);
+    (void)vehicle_instance_init(&game->vehicleInstance, &game->vehicleDefinition,
+                                &game->vehicleSetup);
 #if defined(CIRCUIT_HEADLESS)
     game->state = STATE_PLAYING; /* headless: no menus, simulate immediately */
 #else
@@ -338,6 +389,11 @@ GAME_API void game_fixed_update(Game *game, float dt)
     input_zero(&tickInput);
     bool fromPlayback = false;
     if (game->replay.mode == REPLAY_MODE_PLAYBACK) {
+        if (game->replay.playbackCursor == 0 && game->replay.initialVehicle.valid &&
+            !replay_restore_initial_vehicle(&game->replay, &game->vehicleDefinition,
+                                            &game->vehicleSetup, &game->vehicleInstance)) {
+            replay_stop(&game->replay);
+        }
         if (replay_next(&game->replay, &tickInput))
             fromPlayback = true;
         else
@@ -353,6 +409,10 @@ GAME_API void game_fixed_update(Game *game, float dt)
                            &tickInput);
     }
 
+    if (game->replay.mode == REPLAY_MODE_RECORDING) {
+        replay_capture_initial_vehicle(&game->replay, &game->vehicleDefinition,
+                                       &game->vehicleSetup, &game->vehicleInstance);
+    }
     input_clear_oneshots(&game->input);
     replay_record(&game->replay, &tickInput);
     apply_oneshots(game, &tickInput);
@@ -365,6 +425,10 @@ GAME_API void game_fixed_update(Game *game, float dt)
         /* Auto transmission: override gear and remap throttle/brake */
         auto_transmission_update(&game->autoTrans, &game->vehicle, &game->spec, &game->derived,
                                  &tickInput, dt);
+        game->vehicleControls.steer = tickInput.steer;
+        game->vehicleControls.throttle = tickInput.throttle;
+        game->vehicleControls.brake = tickInput.brake;
+        game->vehicleControls.handbrake = tickInput.handbrake;
 
         CIRCUIT_ZONE_BEGIN(physics, "Physics");
         /* Start-of-tick position, for the checkpoint crossing test below.

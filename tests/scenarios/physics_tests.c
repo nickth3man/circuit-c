@@ -2251,6 +2251,24 @@ static void scenario_dev_replay(void)
     static ReplayBuffer restored;
 
     replay_begin_recording(&source, 100u);
+    VehicleDefinition replayDefinition;
+    VehicleSetup replaySetup;
+    VehicleInstance replayInstance;
+    vehicle_definition_set_default(&replayDefinition);
+    vehicle_setup_set_default(&replayDefinition, &replaySetup);
+    check(vehicle_instance_init(&replayInstance, &replayDefinition, &replaySetup),
+          "the durable replay fixture initializes its vehicle");
+    replaySetup.brakeBiasFront -= 0.02f;
+    check(vehicle_instance_derive(&replayInstance, &replayDefinition, &replaySetup),
+          "the durable replay fixture applies its setup");
+    replayInstance.vehicle.positionM = (Vector2){ 7.0f, -2.0f };
+    replayInstance.vehicle.velocityLongitudinalMps = 12.5f;
+    replayInstance.vehicleControls.throttle = 0.6f;
+    replayInstance.autoTrans.driveState = AUTO_REVERSE;
+    replayInstance.fuelKg = 3.5f;
+    replayInstance.tireState[WHEEL_REAR_RIGHT].wear = 0.15f;
+    replayInstance.damage = 0.25f;
+    replay_capture_initial_vehicle(&source, &replayDefinition, &replaySetup, &replayInstance);
     for (int i = 0; i < 240; i++) {
         Input in;
         input_zero(&in);
@@ -2278,6 +2296,25 @@ static void scenario_dev_replay(void)
     check(info.finalChecksum == 0xdeadbeefu, "the header records the final checksum");
     check(strcmp(info.label, "unit-test") == 0, "the header records the label");
     check(restored.count == source.count, "every frame came back");
+    VehicleSetup restoredSetup;
+    VehicleInstance restoredInstance;
+    memset(&restoredSetup, 0, sizeof(restoredSetup));
+    memset(&restoredInstance, 0, sizeof(restoredInstance));
+    check(replay_restore_initial_vehicle(&restored, &replayDefinition, &restoredSetup,
+                                         &restoredInstance),
+          "the durable replay restores its definition-referenced vehicle snapshot");
+    check(restoredSetup.brakeBiasFront == replaySetup.brakeBiasFront &&
+              restoredInstance.vehicle.positionM.x == replayInstance.vehicle.positionM.x &&
+              restoredInstance.vehicle.velocityLongitudinalMps ==
+                  replayInstance.vehicle.velocityLongitudinalMps &&
+              restoredInstance.vehicleControls.throttle ==
+                  replayInstance.vehicleControls.throttle &&
+              restoredInstance.autoTrans.driveState == replayInstance.autoTrans.driveState &&
+              restoredInstance.fuelKg == replayInstance.fuelKg &&
+              restoredInstance.tireState[WHEEL_REAR_RIGHT].wear ==
+                  replayInstance.tireState[WHEEL_REAR_RIGHT].wear &&
+              restoredInstance.damage == replayInstance.damage,
+          "durable replay vehicle state is field-identical after save/load");
 
     int differences = 0;
     for (int i = 0; i < source.count; i++) {
@@ -3070,6 +3107,126 @@ static void scenario_roster(void)
     }
 }
 
+/* ------------------------------------------------------------------------------------- */
+/* Scenario: vehicle ownership isolation                                                   */
+/* ------------------------------------------------------------------------------------- */
+
+static void scenario_vehicle_instance_isolation(void)
+{
+    VehicleDefinition definition = { 0 };
+    vehicle_definition_set_default(&definition);
+    const VehicleDefinition originalDefinition = definition;
+    check(strcmp(definition.id, "builtin/default") == 0 && definition.contentVersion == 1u &&
+              definition.contentHash != 0u,
+          "definition has a stable content identity and hash");
+
+    VehicleSpec paddedA = definition.spec;
+    VehicleSpec paddedB = definition.spec;
+    const size_t paddingStart = offsetof(VehicleSpec, lateralLoadTransferEnabled) +
+                                sizeof(paddedA.lateralLoadTransferEnabled);
+    memset((unsigned char *)&paddedA + paddingStart, 0xa5, sizeof(paddedA) - paddingStart);
+    memset((unsigned char *)&paddedB + paddingStart, 0x5a, sizeof(paddedB) - paddingStart);
+    VehicleDefinition definitionA;
+    VehicleDefinition definitionB;
+    check(vehicle_definition_init(&definitionA, "padding-test", "padding-test", 1u, &paddedA) &&
+              vehicle_definition_init(&definitionB, "padding-test", "padding-test", 1u,
+                                      &paddedB) &&
+              definitionA.contentHash == definitionB.contentHash,
+          "content hash ignores structure padding and hashes canonical fields");
+
+    VehicleSetup setupA = { 0 };
+    VehicleSetup setupB;
+    vehicle_setup_set_default(&definition, &setupA);
+    setupB = setupA;
+    setupB.tirePressureFrontKpa += 8.0f;
+    setupB.brakeBiasFront -= 0.03f;
+    setupB.finalDriveRatio += 0.15f;
+    check(vehicle_setup_is_valid(&definition, &setupA) &&
+              vehicle_setup_is_valid(&definition, &setupB),
+          "two distinct setups validate against one definition");
+
+    VehicleInstance instanceA = { 0 };
+    VehicleInstance instanceB = { 0 };
+    check(vehicle_instance_init(&instanceA, &definition, &setupA) &&
+              vehicle_instance_init(&instanceB, &definition, &setupB),
+          "two instances initialize from the shared definition");
+    check(instanceA.spec.brakeBiasFront != instanceB.spec.brakeBiasFront &&
+              instanceA.spec.finalDriveRatio != instanceB.spec.finalDriveRatio &&
+              instanceA.tireState[WHEEL_FRONT_LEFT].pressureKpa !=
+                  instanceB.tireState[WHEEL_FRONT_LEFT].pressureKpa,
+          "each setup produces an entrant-local compiled spec and tire state");
+
+    instanceA.vehicle.positionM = (Vector2){ 12.0f, -3.0f };
+    instanceA.vehicleControls.throttle = 0.75f;
+    instanceA.autoTrans.driveState = AUTO_REVERSE;
+    instanceA.fuelKg = 4.0f;
+    instanceA.tireState[WHEEL_REAR_LEFT].temperatureC = 91.0f;
+    instanceA.tireState[WHEEL_REAR_LEFT].wear = 0.2f;
+    instanceA.damage = 0.35f;
+    instanceA.crashLockoutTimerS = 0.4f;
+    check(instanceB.vehicle.positionM.x == 0.0f && instanceB.vehicleControls.throttle == 0.0f &&
+              instanceB.autoTrans.driveState == AUTO_DRIVE &&
+              instanceB.fuelKg == definition.spec.massFuelKg &&
+              instanceB.tireState[WHEEL_REAR_LEFT].temperatureC == 20.0f &&
+              instanceB.damage == 0.0f && instanceB.crashLockoutTimerS == 0.0f,
+          "runtime pose, controls, drivetrain, fuel, tire, and damage state do not cross-talk");
+    check(memcmp(&definition, &originalDefinition, sizeof(definition)) == 0,
+          "runtime and setup changes never write shared definition memory");
+
+    ReplayBuffer *replay = (ReplayBuffer *)calloc(1, sizeof(*replay));
+    check(replay != NULL, "isolation replay buffer allocated");
+    if (replay != NULL) {
+        replay_begin_recording(replay, 0u);
+        replay_capture_initial_vehicle(replay, &definition, &setupA, &instanceA);
+        check(replay->initialVehicle.valid &&
+                  replay->initialVehicle.definitionHash == definition.contentHash &&
+                  memcmp(&replay->initialVehicle.setup, &setupA, sizeof(setupA)) == 0,
+              "replay captures setup and instance state beside a definition identity/hash");
+
+        VehicleSetup restoredSetup;
+        VehicleInstance restoredInstance;
+        memset(&restoredSetup, 0, sizeof(restoredSetup));
+        memset(&restoredInstance, 0, sizeof(restoredInstance));
+        check(replay_restore_initial_vehicle(replay, &definition, &restoredSetup,
+                                             &restoredInstance),
+              "matching immutable content restores the replay snapshot");
+        check(memcmp(&restoredSetup, &setupA, sizeof(setupA)) == 0 &&
+                  memcmp(&restoredInstance.vehicle, &instanceA.vehicle,
+                         sizeof(instanceA.vehicle)) == 0 &&
+                  restoredInstance.fuelKg == instanceA.fuelKg &&
+                  restoredInstance.damage == instanceA.damage &&
+                  restoredInstance.tireState[WHEEL_REAR_LEFT].wear ==
+                      instanceA.tireState[WHEEL_REAR_LEFT].wear,
+              "replay restores setup and authoritative mutable instance values");
+
+        VehicleDefinition wrongDefinition = definition;
+        wrongDefinition.contentHash++;
+        check(!replay_restore_initial_vehicle(replay, &wrongDefinition, &restoredSetup,
+                                              &restoredInstance),
+              "replay rejects a mismatched immutable definition without embedding its blob");
+        free(replay);
+    }
+
+    Game *defaultGame = alloc_game();
+    Game *setupGame = alloc_game();
+    game_init(defaultGame);
+    game_init(setupGame);
+    setupGame->vehicleSetup = setupB;
+    check(vehicle_instance_init(&setupGame->vehicleInstance, &setupGame->vehicleDefinition,
+                                &setupGame->vehicleSetup),
+          "game compatibility storage accepts a distinct validated setup");
+    const uint32_t defaultChecksum = game_state_checksum(defaultGame);
+    const uint32_t setupChecksum = game_state_checksum(setupGame);
+    check(defaultChecksum != setupChecksum,
+          "rolling checksum includes setup and instance state (%08x vs %08x)", defaultChecksum,
+          setupChecksum);
+    defaultGame->vehicleDefinition.contentHash++;
+    check(game_state_checksum(defaultGame) == defaultChecksum,
+          "rolling checksum references no immutable definition blob");
+    free(setupGame);
+    free(defaultGame);
+}
+
 static const TestScenario kPhysicsScenarios[] = {
     { "telemetry", "CSV writer: stable header, row count, failure handling",
       scenario_telemetry },
@@ -3121,6 +3278,9 @@ static const TestScenario kPhysicsScenarios[] = {
     { "drivetrain-layout", "RWD/FWD/AWD torque routing and slip-ratio differential ordering",
       scenario_drivetrain_layout },
     { "roster", "6-car roster: validity, unique ids, profile round-trip", scenario_roster },
+    { "vehicle-instance-isolation",
+      "shared immutable definition with isolated setup and mutable runtime state",
+      scenario_vehicle_instance_isolation },
     { "run-report", "validation metrics reduction and run.json output contract",
       scenario_run_report },
 };

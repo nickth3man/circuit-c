@@ -9,6 +9,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 #include "raylib.h"
 
@@ -301,6 +302,76 @@ typedef struct {
     float currWheelAngleRad[WHEEL_COUNT];
 } VehicleRenderState;
 
+#define VEHICLE_CONTENT_ID_CAPACITY 64
+
+typedef enum { AUTO_DRIVE = 0, AUTO_NEUTRAL = 1, AUTO_REVERSE = 2 } AutoDriveState;
+
+typedef struct {
+    bool enabled;
+    bool forwardOnly;
+    AutoDriveState driveState;
+    float neutralTimer;
+} AutoTransmission;
+
+/* Immutable, shareable vehicle content. `spec` is never used as mutable runtime storage;
+ * callers derive an entrant-local compiled spec at the boundary below. Appearance identity is
+ * a reference rather than render state, so deterministic presentation can resolve it without
+ * putting textures or module-owned pointers in the simulation. */
+typedef struct {
+    char id[VEHICLE_CONTENT_ID_CAPACITY];
+    uint32_t contentVersion;
+    uint32_t contentHash;
+    char appearanceId[VEHICLE_CONTENT_ID_CAPACITY];
+    VehicleSpec spec;
+} VehicleDefinition;
+
+/* The currently supported entrant adjustments. Issue 12 may classify more definition fields
+ * as adjustable, but adding speculative setup controls here would make today's validation
+ * contract dishonest. */
+typedef struct {
+    float tirePressureFrontKpa, tirePressureRearKpa;
+    float suspCamberFrontRad, suspCamberRearRad;
+    float suspToeFrontRad, suspToeRearRad;
+    float suspCasterFrontRad, suspCasterRearRad;
+    float gearRatios[MAX_GEARS];
+    int gearCount;
+    float reverseGearRatio;
+    float finalDriveRatio;
+    float brakeBiasFront;
+    float differentialMode;
+    float differentialBiasRatio;
+    float differentialPreloadNm;
+} VehicleSetup;
+
+typedef struct {
+    float steer;
+    float throttle;
+    float brake;
+    float handbrake;
+} VehicleControlState;
+
+typedef struct {
+    float pressureKpa;
+    float temperatureC;
+    float wear;
+} VehicleTireState;
+
+/* One entrant's complete mutable vehicle state. `spec` is an entrant-local compiled cache,
+ * never an alias of VehicleDefinition memory. Its field order deliberately supports Game's
+ * temporary one-entrant compatibility view while callers migrate subsystem by subsystem. */
+typedef struct {
+    VehicleSpec spec;
+    VehicleState vehicle;
+    VehicleDerived derived;
+    VehicleRenderState renderState;
+    AutoTransmission autoTrans;
+    VehicleControlState vehicleControls;
+    float fuelKg;
+    VehicleTireState tireState[WHEEL_COUNT];
+    float damage;
+    float crashLockoutTimerS;
+} VehicleInstance;
+
 void vehicle_spec_set_default(VehicleSpec *spec);
 /* Staged recompute of derived VehicleSpec fields (dimensions → mass → tires →
  * suspension → brakes). Safe to call repeatedly; does nothing on NULL. */
@@ -310,5 +381,19 @@ bool vehicle_spec_is_valid(const VehicleSpec *spec);
 float vehicle_effective_drag_coefficient(const VehicleSpec *spec);
 void vehicle_state_reset(const VehicleSpec *spec, VehicleState *state, VehicleDerived *derived,
                          VehicleRenderState *renderState);
+
+bool vehicle_definition_init(VehicleDefinition *definition, const char *id,
+                             const char *appearanceId, uint32_t contentVersion,
+                             const VehicleSpec *spec);
+void vehicle_definition_set_default(VehicleDefinition *definition);
+void vehicle_setup_set_default(const VehicleDefinition *definition, VehicleSetup *setup);
+bool vehicle_setup_is_valid(const VehicleDefinition *definition, const VehicleSetup *setup);
+/* The sole definition/setup -> compiled-runtime recomputation boundary. It changes no mutable
+ * simulation state, so callers may choose whether a setup change also resets the entrant. */
+bool vehicle_instance_derive(VehicleInstance *instance, const VehicleDefinition *definition,
+                             const VehicleSetup *setup);
+void vehicle_instance_reset(VehicleInstance *instance);
+bool vehicle_instance_init(VehicleInstance *instance, const VehicleDefinition *definition,
+                           const VehicleSetup *setup);
 
 #endif /* CIRCUIT_VEHICLE_H */

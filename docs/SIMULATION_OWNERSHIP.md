@@ -4,6 +4,15 @@
 
 Accepted for the issue 7–11 architecture refactors.
 
+Issue 8 is implemented by `VehicleDefinition`, `VehicleSetup`, and `VehicleInstance`. The
+definition owns the stable content ID/version/hash, immutable physical inputs, and a separate
+appearance reference. Each entrant owns a validated setup and an instance containing its
+compiled physics cache, pose/velocity, controls, drivetrain, tire, fuel, damage, and render-pose
+state. `vehicle_instance_derive()` is the only definition/setup-to-runtime recomputation
+boundary; reset changes runtime state without writing the shared definition. `Game` temporarily
+exposes the prior one-entrant field names through the same `VehicleInstance` storage while
+subsystems migrate.
+
 ## Context
 
 The current single-car `Game`, `Track`, and `VehicleSpec` aggregates mix immutable content,

@@ -686,6 +686,11 @@ static void scenario_replay(void)
         check(ring->mode == REPLAY_MODE_PLAYBACK,
               "an exhausted timeline leaves playback for the caller to end");
 
+        replay_stop(ring);
+        ring->initialVehicle.valid = true;
+        check(!replay_begin_playback(ring) && ring->mode == REPLAY_MODE_IDLE,
+              "a wrapped timeline rejects a stale vehicle snapshot instead of diverging");
+
         free(ring);
     }
 }
