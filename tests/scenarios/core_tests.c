@@ -504,6 +504,454 @@ static void scenario_timestep(void)
 }
 
 /* ------------------------------------------------------------------------------------- */
+/* Scenario: controller — the output contract every entrant's driving arrives through      */
+/* ------------------------------------------------------------------------------------- */
+
+/*
+ * What this asserts is the boundary itself, not any driving.
+ *
+ * A controller may read the world and its own memory and may write nothing but one
+ * ControllerOutput; that output is clamped on the way out; the application commands on the
+ * input sample are NOT vehicle controls and no controller can reach or consume them; and the
+ * private decision memory is explicit enough to be cleared without disturbing who is driving.
+ */
+static void scenario_controller(void)
+{
+    /* ---- 1. Conversion, and the single clamping path ---- */
+    {
+        Input sample;
+        input_zero(&sample);
+        sample.steer = 4.0f;      /* out of range on purpose */
+        sample.throttle = 9.0f;   /* likewise */
+        sample.brake = -3.0f;     /* likewise */
+        sample.handbrake = 0.50f; /* in range, must pass through untouched */
+        sample.shiftUpPressed = true;
+        sample.pausePressed = true;
+        sample.resetPressed = true;
+        sample.debugPressed = true;
+        sample.toggleAutoPressed = true;
+        const Input beforeUpdate = sample;
+
+        Controller human;
+        controller_init(&human, CONTROLLER_KIND_HUMAN);
+
+        ControllerTickView view;
+        memset(&view, 0, sizeof(view));
+        view.sample = &sample;
+        view.dt = FIXED_DT_S;
+
+        ControllerOutput out;
+        controller_update(&human, human.kind, &view, &out);
+
+        check(out.steer == 1.0f, "steer is clamped into [-1, +1] (got %.3f)",
+              (double)out.steer);
+        check(out.throttle == 1.0f, "throttle is clamped into [0, 1] (got %.3f)",
+              (double)out.throttle);
+        check(out.brake == 0.0f, "a negative brake clamps to zero (got %.3f)",
+              (double)out.brake);
+        check(out.handbrake == 0.50f, "an in-range control passes through unchanged (got %.3f)",
+              (double)out.handbrake);
+        check(out.shiftUp && !out.shiftDown,
+              "a shift press becomes this entrant's gear request, and only that one");
+        check(memcmp(&sample, &beforeUpdate, sizeof(Input)) == 0,
+              "a controller reads the tick sample and cannot write to it: pause, reset, debug "
+              "and the automatic-transmission toggle are session commands, not vehicle "
+              "controls, and are still pending for the session to consume");
+
+        /* A non-finite demand must not reach the integrator. */
+        sample.steer = (float)NAN;
+        sample.throttle = (float)INFINITY;
+        sample.brake = -(float)INFINITY;
+        controller_update(&human, human.kind, &view, &out);
+        check(out.steer == 0.0f && out.throttle == 0.0f && out.brake == 0.0f,
+              "a non-finite demand is replaced by zero rather than passed through");
+
+        /* No sample at all is "hands off", not last tick's controls. */
+        view.sample = NULL;
+        controller_update(&human, human.kind, &view, &out);
+        check(out.steer == 0.0f && out.throttle == 0.0f && out.brake == 0.0f &&
+                  out.handbrake == 0.0f && !out.shiftUp && !out.shiftDown,
+              "a missing sample yields a zeroed output, never a stale one");
+    }
+
+    /* ---- 2. Kind selects the source, and playback overrides the entrant's own kind ---- */
+    {
+        Input recorded;
+        input_zero(&recorded);
+        recorded.throttle = 0.25f;
+        recorded.shiftDownPressed = true;
+
+        ControllerTickView view;
+        memset(&view, 0, sizeof(view));
+        view.sample = &recorded;
+        view.dt = FIXED_DT_S;
+
+        Controller entrant;
+        controller_init(&entrant, CONTROLLER_KIND_AI);
+
+        ControllerOutput out;
+        controller_update(&entrant, CONTROLLER_KIND_REPLAY, &view, &out);
+        check(out.throttle == 0.25f,
+              "playback overrides the entrant's own kind: the recorded output is authoritative "
+              "and the AI does not re-decide (got %.3f)",
+              (double)out.throttle);
+        check(out.shiftDown, "and the recorded gear request travels with it");
+        check(entrant.memory.ai.planLayerCount == 0,
+              "an overridden controller does not run, so its private memory is untouched");
+    }
+
+    /* ---- 3. Private memory is explicit and resettable ---- */
+    {
+        Game *game = alloc_game();
+        game_init(game);
+        track_load_chicane(&game->trackDef);
+        check(game_spawn_on_track(game), "the car was placed on the start line");
+        game->autoTrans.enabled = true;
+        game->autoTrans.forwardOnly = true;
+        game->state = STATE_PLAYING;
+        controller_init(&game->controller, CONTROLLER_KIND_AI);
+
+        const AiDriverConfig configAtStart = game->controller.config.ai;
+
+        bool everShifted = false;
+        bool everBothPedals = false;
+        for (int t = 0; t < 240; t++) {
+            game_fixed_update(game, FIXED_DT_S);
+            if (game->controllerOutput.shiftUp || game->controllerOutput.shiftDown)
+                everShifted = true;
+            if (game->controllerOutput.throttle > 0.0f && game->controllerOutput.brake > 0.0f)
+                everBothPedals = true;
+        }
+
+        check(!everShifted,
+              "the AI controller asks for no gear change: shifting is the automatic box's job");
+        check(!everBothPedals, "and it never presses both pedals in the same tick");
+        check(game->controller.memory.ai.planLayerCount > 0,
+              "the AI controller accumulated private decision memory (%d plan layers)",
+              game->controller.memory.ai.planLayerCount);
+
+        controller_reset(&game->controller);
+        Controller blank;
+        memset(&blank, 0, sizeof(blank));
+        check(memcmp(&game->controller.memory, &blank.memory, sizeof(blank.memory)) == 0,
+              "controller_reset clears every byte of the private memory");
+        check(memcmp(&game->controller.config.ai, &configAtStart, sizeof(configAtStart)) == 0 &&
+                  game->controller.kind == CONTROLLER_KIND_AI,
+              "and preserves the kind and the frozen configuration: a reset changes the "
+              "situation, not who is driving");
+
+        track_free(&game->trackDef);
+        free(game);
+    }
+
+    /* ---- 4. A gear request reaches the gearbox only if a CONTROLLER made it ---- */
+    {
+        Game *game = alloc_game();
+        game_init(game);
+        track_load_chicane(&game->trackDef);
+        check(game_spawn_on_track(game), "the car was placed on the start line");
+        game->state = STATE_PLAYING;
+        game->autoTrans.enabled = false; /* gear requests are only live in manual */
+        game->vehicle.selectedGear = 2;
+        controller_init(&game->controller, CONTROLLER_KIND_AI);
+
+        /* A stray shift press on the session's input source, alongside a genuine session
+         * command. The AI controller asks for no shift, so the gearbox must not move — while
+         * the session command on the very same sample is still consumed exactly once. */
+        game->input.shiftUpPressed = true;
+        game->input.pausePressed = true;
+        game_fixed_update(game, FIXED_DT_S);
+
+        check(game->sim.shiftUpCount == 0u && game->vehicle.selectedGear == 2,
+              "a shift nobody's controller asked for cannot reach the gearbox (count %u, "
+              "gear %d)",
+              game->sim.shiftUpCount, game->vehicle.selectedGear);
+        check(game->sim.pauseToggleCount == 1u,
+              "while the session command on the same sample is consumed exactly once (got %u)",
+              game->sim.pauseToggleCount);
+
+        track_free(&game->trackDef);
+        free(game);
+    }
+}
+
+/* ------------------------------------------------------------------------------------- */
+/* Scenario: controller-conflict — two controllers, conflicting one-shots, one tick        */
+/* ------------------------------------------------------------------------------------- */
+
+/*
+ * The failure this exists to catch is the one the old design invited: two entrants sharing a
+ * single global Input, where whichever one is updated second sees — or clears — the first
+ * one's one-shot. Issue 10 introduces the second entrant; this scenario asserts the property
+ * now, at the boundary, so the property exists before the storage that could break it.
+ *
+ * Two things must hold on the same tick. A gear request belongs to ONE entrant and cannot
+ * cross to another, and an application command belongs to the SESSION and is consumed exactly
+ * once no matter how many controllers ran or how many fixed substeps the render frame drove.
+ */
+static void scenario_controller_conflict(void)
+{
+    /* ---- 1. Two controllers, opposite gear requests, the same tick ---- */
+    {
+        Input sampleUp;
+        input_zero(&sampleUp);
+        sampleUp.throttle = 1.0f;
+        sampleUp.shiftUpPressed = true;
+        sampleUp.pausePressed = true;
+
+        Input sampleDown;
+        input_zero(&sampleDown);
+        sampleDown.brake = 1.0f;
+        sampleDown.shiftDownPressed = true;
+
+        const Input beforeUp = sampleUp;
+        const Input beforeDown = sampleDown;
+
+        Controller first;
+        Controller second;
+        controller_init(&first, CONTROLLER_KIND_HUMAN);
+        controller_init(&second, CONTROLLER_KIND_SCRIPT);
+
+        ControllerTickView viewUp;
+        ControllerTickView viewDown;
+        memset(&viewUp, 0, sizeof(viewUp));
+        memset(&viewDown, 0, sizeof(viewDown));
+        viewUp.sample = &sampleUp;
+        viewUp.dt = FIXED_DT_S;
+        viewDown.sample = &sampleDown;
+        viewDown.dt = FIXED_DT_S;
+
+        ControllerOutput outUp;
+        ControllerOutput outDown;
+        controller_update(&first, first.kind, &viewUp, &outUp);
+        controller_update(&second, second.kind, &viewDown, &outDown);
+
+        check(outUp.shiftUp && !outUp.shiftDown,
+              "the first controller emits its own upshift and nothing else");
+        check(outDown.shiftDown && !outDown.shiftUp,
+              "the second controller emits its own downshift, unaffected by the first");
+        check(outUp.throttle == 1.0f && outUp.brake == 0.0f && outDown.throttle == 0.0f &&
+                  outDown.brake == 1.0f,
+              "and the held controls stay with the entrant that asked for them");
+        check(memcmp(&sampleUp, &beforeUp, sizeof(Input)) == 0 &&
+                  memcmp(&sampleDown, &beforeDown, sizeof(Input)) == 0,
+              "neither controller consumed or cleared an input sample: consumption is the "
+              "session's job, so one entrant cannot swallow another's command");
+    }
+
+    /* ---- 2. The same conflict driven through two one-entrant sessions ---- */
+    {
+        Game *up = alloc_game();
+        Game *down = alloc_game();
+        game_init(up);
+        game_init(down);
+        up->state = STATE_PLAYING;
+        down->state = STATE_PLAYING;
+        up->autoTrans.enabled = false; /* gear requests are only live in manual */
+        down->autoTrans.enabled = false;
+        up->vehicle.selectedGear = 2;
+        down->vehicle.selectedGear = 2;
+
+        /* One render frame, latched exactly as input_sample() latches a press, driving the
+         * maximum number of fixed substeps. */
+        up->input.shiftUpPressed = true;
+        down->input.shiftDownPressed = true;
+
+        (void)timestep_advance(&up->accumulatorS, &up->physicsBacklogDrops,
+                               (float)MAX_PHYSICS_STEPS * FIXED_DT_S, fixed_update_adapter, up);
+        (void)timestep_advance(&down->accumulatorS, &down->physicsBacklogDrops,
+                               (float)MAX_PHYSICS_STEPS * FIXED_DT_S, fixed_update_adapter,
+                               down);
+
+        check(up->sim.shiftUpCount == 1u && up->sim.shiftDownCount == 0u,
+              "the upshift entrant shifted up exactly once across %d substeps (up %u, down %u)",
+              MAX_PHYSICS_STEPS, up->sim.shiftUpCount, up->sim.shiftDownCount);
+        check(down->sim.shiftDownCount == 1u && down->sim.shiftUpCount == 0u,
+              "the downshift entrant shifted down exactly once (up %u, down %u)",
+              down->sim.shiftUpCount, down->sim.shiftDownCount);
+        check(up->vehicle.selectedGear == 3 && down->vehicle.selectedGear == 1,
+              "the two conflicting requests moved their own gearboxes and only their own "
+              "(up %d, down %d)",
+              up->vehicle.selectedGear, down->vehicle.selectedGear);
+
+        /* A second frame with nothing newly latched must not repeat either request. */
+        (void)timestep_advance(&up->accumulatorS, &up->physicsBacklogDrops,
+                               (float)MAX_PHYSICS_STEPS * FIXED_DT_S, fixed_update_adapter, up);
+        (void)timestep_advance(&down->accumulatorS, &down->physicsBacklogDrops,
+                               (float)MAX_PHYSICS_STEPS * FIXED_DT_S, fixed_update_adapter,
+                               down);
+        check(up->sim.shiftUpCount == 1u && down->sim.shiftDownCount == 1u,
+              "and neither is re-consumed on the next render frame (up %u, down %u)",
+              up->sim.shiftUpCount, down->sim.shiftDownCount);
+
+        free(down);
+        free(up);
+    }
+
+    /* ---- 3. A session command is consumed once, whoever is driving ---- */
+    {
+        Game *game = alloc_game();
+        game_init(game);
+        game->state = STATE_PLAYING;
+        game->autoTrans.enabled = false;
+
+        /* Pause and an upshift latched together: one is the session's, one is the entrant's,
+         * and each must fire exactly once even though the frame runs many substeps. */
+        game->input.pausePressed = true;
+        game->input.shiftUpPressed = true;
+        (void)timestep_advance(&game->accumulatorS, &game->physicsBacklogDrops,
+                               (float)MAX_PHYSICS_STEPS * FIXED_DT_S, fixed_update_adapter,
+                               game);
+
+        check(game->sim.pauseToggleCount == 1u,
+              "the session command fired exactly once (got %u)", game->sim.pauseToggleCount);
+        check(game->sim.shiftUpCount == 1u,
+              "the entrant's gear request fired exactly once on the same tick (got %u)",
+              game->sim.shiftUpCount);
+        check(!input_has_oneshot(&game->input),
+              "and the latch is empty afterwards, so nothing can be consumed twice");
+
+        free(game);
+    }
+}
+
+/* ------------------------------------------------------------------------------------- */
+/* Scenario: controller-stream — a recorded controller stream reproduces the checksum      */
+/* ------------------------------------------------------------------------------------- */
+
+/*
+ * The determinism claim the whole boundary rests on: what is recorded is the entrant's
+ * ControllerOutput, and feeding that stream back reproduces the run bit-for-bit.
+ *
+ * Three runs of one scripted stream. The first drives it live through a human controller and
+ * records; the second replays what the first recorded; the third replays a timeline BUILT
+ * DIRECTLY from the same intended stream, never having been near the live run. All three must
+ * agree, and the recorded frames must equal the intended stream — otherwise "the recording
+ * reproduces the run" could be true of a recording of the wrong thing.
+ */
+#define CONTROLLER_STREAM_TICKS 900
+
+static ControllerOutput controller_stream_at(int tick)
+{
+    ControllerOutput out;
+    memset(&out, 0, sizeof(out));
+    const int phase = tick % 300;
+    out.throttle = (phase < 180) ? 1.0f : 0.0f;
+    out.brake = (phase >= 220 && phase < 260) ? 0.85f : 0.0f;
+    out.steer = (phase < 90) ? 0.0f : ((phase < 200) ? 0.6f : -0.45f);
+    out.handbrake = (phase >= 280) ? 1.0f : 0.0f;
+    /* Gear requests are controller output too, so the stream has to carry some. */
+    out.shiftUp = (phase == 60);
+    out.shiftDown = (phase == 240);
+    return out;
+}
+
+static void controller_stream_prepare(Game *game)
+{
+    game_init(game);
+    game->state = STATE_PLAYING;
+    game->autoTrans.enabled = false; /* the stream drives the gearbox itself */
+}
+
+static void scenario_controller_stream(void)
+{
+    /* ---- Run 1: live through the human controller, recording as it goes ---- */
+    Game *live = alloc_game();
+    controller_stream_prepare(live);
+    for (int t = 0; t < CONTROLLER_STREAM_TICKS; t++) {
+        const ControllerOutput want = controller_stream_at(t);
+        input_zero(&live->input);
+        live->input.steer = want.steer;
+        live->input.throttle = want.throttle;
+        live->input.brake = want.brake;
+        live->input.handbrake = want.handbrake;
+        live->input.shiftUpPressed = want.shiftUp;
+        live->input.shiftDownPressed = want.shiftDown;
+        game_fixed_update(live, FIXED_DT_S);
+    }
+    const uint32_t liveChecksum = live->stateChecksum;
+
+    check(live->replay.count == CONTROLLER_STREAM_TICKS,
+          "one timeline entry was recorded per fixed tick (%d of %d)", live->replay.count,
+          CONTROLLER_STREAM_TICKS);
+
+    /* What was recorded must BE the controller output, entry by entry. */
+    int frameMismatches = 0;
+    for (int t = 0; t < live->replay.count; t++) {
+        const ControllerOutput want = controller_stream_at(t);
+        const ReplayFrame *frame =
+            &live->replay.frames[(live->replay.head + t) % REPLAY_CAPACITY_TICKS];
+        if (frame->steer != want.steer || frame->throttle != want.throttle ||
+            frame->brake != want.brake || frame->handbrake != want.handbrake ||
+            ((frame->oneshotBits & REPLAY_BIT_SHIFT_UP) != 0u) != want.shiftUp ||
+            ((frame->oneshotBits & REPLAY_BIT_SHIFT_DOWN) != 0u) != want.shiftDown)
+            frameMismatches++;
+    }
+    check(frameMismatches == 0,
+          "the timeline records the entrant's ControllerOutput exactly (%d entries differ)",
+          frameMismatches);
+    check(live->sim.shiftUpCount > 0u && live->sim.shiftDownCount > 0u,
+          "the stream actually exercised gear requests (up %u, down %u)",
+          live->sim.shiftUpCount, live->sim.shiftDownCount);
+
+    /* ---- Run 2: replay what run 1 recorded ---- */
+    Game *replayed = alloc_game();
+    controller_stream_prepare(replayed);
+    replayed->replay = live->replay;
+    check(replay_begin_playback(&replayed->replay), "the recorded stream begins playback");
+    for (int t = 0; t < CONTROLLER_STREAM_TICKS; t++) {
+        input_zero(&replayed->input); /* nothing live: the stream is the only authority */
+        game_fixed_update(replayed, FIXED_DT_S);
+    }
+    check(replayed->stateChecksum == liveChecksum,
+          "replaying the recorded controller stream reproduces the checksum (%08x vs %08x)",
+          replayed->stateChecksum, liveChecksum);
+
+    /* ---- Run 3: replay a timeline built straight from the intended stream ---- */
+    ReplayBuffer *authored = (ReplayBuffer *)calloc(1, sizeof(ReplayBuffer));
+    if (authored == NULL) {
+        fprintf(stderr, "FATAL: could not allocate a ReplayBuffer\n");
+        exit(126);
+    }
+    replay_begin_recording(authored, 0);
+    for (int t = 0; t < CONTROLLER_STREAM_TICKS; t++) {
+        const ControllerOutput want = controller_stream_at(t);
+        Input frame;
+        input_zero(&frame);
+        frame.steer = want.steer;
+        frame.throttle = want.throttle;
+        frame.brake = want.brake;
+        frame.handbrake = want.handbrake;
+        frame.shiftUpPressed = want.shiftUp;
+        frame.shiftDownPressed = want.shiftDown;
+        replay_record(authored, &frame);
+    }
+
+    Game *authoredRun = alloc_game();
+    controller_stream_prepare(authoredRun);
+    authoredRun->replay = *authored;
+    check(replay_begin_playback(&authoredRun->replay), "the authored stream begins playback");
+    for (int t = 0; t < CONTROLLER_STREAM_TICKS; t++) {
+        input_zero(&authoredRun->input);
+        game_fixed_update(authoredRun, FIXED_DT_S);
+    }
+    check(authoredRun->stateChecksum == liveChecksum,
+          "the same stream authored as controller output, never recorded from the live run, "
+          "reproduces the identical checksum (%08x vs %08x)",
+          authoredRun->stateChecksum, liveChecksum);
+    check(memcmp(&authoredRun->vehicle, &live->vehicle, sizeof(VehicleState)) == 0,
+          "and the full vehicle state with it");
+
+    printf("    checksum: live %08x  recorded-replay %08x  authored-stream %08x\n",
+           liveChecksum, replayed->stateChecksum, authoredRun->stateChecksum);
+
+    free(authoredRun);
+    free(authored);
+    free(replayed);
+    free(live);
+}
+
+/* ------------------------------------------------------------------------------------- */
 /* Scenario: oneshot                                                                       */
 /* ------------------------------------------------------------------------------------- */
 
@@ -1060,6 +1508,13 @@ static const TestScenario kCoreScenarios[] = {
     { "timestep", "substep cap, backlog drops, frame clamp, interpolation alpha",
       scenario_timestep },
     { "oneshot", "one-shot commands consumed exactly once per press", scenario_oneshot },
+    { "controller", "ControllerOutput conversion, clamping, kind dispatch, resettable memory",
+      scenario_controller },
+    { "controller-conflict",
+      "two controllers issuing conflicting one-shots on the same tick stay independent",
+      scenario_controller_conflict },
+    { "controller-stream", "a recorded controller stream reproduces an identical checksum",
+      scenario_controller_stream },
     { "replay", "deterministic recording, repeatable playback, ring overflow",
       scenario_replay },
     { "renderscale", "simulation state is independent of PIXELS_PER_METER",
