@@ -8,7 +8,9 @@
  *   - tuning-profile save and load (dev_params_save / dev_params_load),
  *   - reset-to-default behaviour,
  *   - the telemetry metadata block written beside a run,
- *   - the documentation table printed by `circuit_tests --dump-params`.
+ *   - the documentation table printed by `circuit_tests --dump-params`
+ *     (committed as docs/VEHICLE_PARAMETERS.md),
+ *   - the honest classification of what each parameter actually affects.
  *
  * That is the whole point: defaults, UI limits, saved profiles, and the specification cannot
  * drift apart because there is only one place to change.
@@ -38,6 +40,32 @@ typedef enum {
     DEV_TIER_EXPERT = 2     /* numerical model internals and readouts */
 } DevParamTier;
 
+/* What a parameter actually does, as opposed to what its name suggests (issue 12).
+ *
+ * Exactly one class per entry, and each class is machine-checked by the "param-audit"
+ * scenario rather than asserted in prose: a physics input must change a simulated trajectory,
+ * an appearance or inactive parameter must not, and a derived value must be recomputed by
+ * vehicle_spec_refresh_derived(). The vehicle carries several physically suggestive fields —
+ * camber, toe, caster, wheel and anti-roll rates, travel, roll centres, tire pressure, aero
+ * lift — that no dynamics path reads. Naming that here is the point: activating them is a
+ * separate change, and until then nothing may claim they affect handling.
+ */
+typedef enum {
+    DEV_CLASS_PHYSICS_INPUT = 0, /* a dynamics path reads it; perturbing it moves the car */
+    DEV_CLASS_DERIVED = 1,       /* recomputed by vehicle_spec_refresh_derived(); read-only */
+    DEV_CLASS_APPEARANCE = 2,    /* only the appearance grammar reads it; handling unchanged */
+    DEV_CLASS_INACTIVE = 3       /* nothing reads it; authored, inert, explicitly reserved */
+} DevParamClass;
+
+/* Which of the issue-8 owners the field belongs to, matching the VehicleSpec migration map in
+ * docs/SIMULATION_OWNERSHIP.md. Setup-owned entries are the ones VehicleSetup overwrites when
+ * vehicle_instance_derive() compiles a definition; definition-owned entries survive it. */
+typedef enum {
+    DEV_OWNER_DEFINITION = 0, /* immutable VehicleDefinition content   */
+    DEV_OWNER_SETUP = 1,      /* entrant-selectable VehicleSetup value */
+    DEV_OWNER_DERIVED = 2     /* compiled beside the definition        */
+} DevParamOwner;
+
 /* Description of one tunable float inside VehicleSpec. */
 typedef struct {
     const char *name;   /* stable dotted key, e.g. "tire.lat_front.mu" */
@@ -54,9 +82,17 @@ typedef struct {
      * and a profile or preset that names one is migrated onto the primaries that produce it
      * (see the alias table in dev_params.c). */
     bool derived;
-    int tier; /* DevParamTier */
+    int tier;           /* DevParamTier  */
+    int classification; /* DevParamClass */
+    int owner;          /* DevParamOwner */
     const char *description;
 } DevParameter;
+
+/* Stable lowercase words for the two enums above: "physics", "derived", "appearance",
+ * "inactive"; "definition", "setup", "derived". They are written into the parameter table,
+ * the telemetry metadata block, and the Physics Lab, so they are part of those formats. */
+const char *dev_param_class_name(int classification);
+const char *dev_param_owner_name(int owner);
 
 /* Registry access. The table is immutable and its order is stable. */
 int dev_params_count(void);

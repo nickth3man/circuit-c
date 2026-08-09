@@ -18,41 +18,55 @@
  *
  * Ranges are development limits, not physical claims: they bound what a slider can reach.
  * Phase 2 spans kei-car to two-axle commercial examples.
+ *
+ * `classification` and `owner` are the issue-12 audit answer, and the "param-audit" scenario
+ * proves both rather than trusting them: a `physics` entry must move a simulated trajectory
+ * when perturbed, an `appearance` or `inactive` entry must leave it bit-identical, a `derived`
+ * entry must be recomputed by vehicle_spec_refresh_derived(), and a `setup` entry must be the
+ * one vehicle_instance_derive() overwrites. Every float in VehicleSpec is described here
+ * exactly once, by byte offset, so a new field cannot be added without being classified.
  */
 static const DevParameter g_params[] = {
     { "body.wheelbase", "Body", "m", SPEC_OFFSET(wheelbaseM), VEH_WHEELBASE_M, 1.8f, 7.0f,
-      0.01f, true, false, 0,
+      0.01f, true, false, 0, DEV_CLASS_PHYSICS_INPUT, DEV_OWNER_DEFINITION,
       "Wheelbase; primary. CG distances derive from this plus mass particles." },
     { "body.track_front", "Body", "m", SPEC_OFFSET(trackWidthFrontM), VEH_TRACK_FRONT_M, 1.0f,
-      2.6f, 0.01f, true, false, 0, "Front track width." },
+      2.6f, 0.01f, true, false, 0, DEV_CLASS_PHYSICS_INPUT, DEV_OWNER_DEFINITION,
+      "Front track width." },
     { "body.track_rear", "Body", "m", SPEC_OFFSET(trackWidthRearM), VEH_TRACK_REAR_M, 1.0f,
-      2.6f, 0.01f, true, false, 0, "Rear track width." },
+      2.6f, 0.01f, true, false, 0, DEV_CLASS_PHYSICS_INPUT, DEV_OWNER_DEFINITION,
+      "Rear track width." },
     { "body.front_overhang", "Body", "m", SPEC_OFFSET(frontOverhangM), VEH_FRONT_OVERHANG_M,
-      0.2f, 2.5f, 0.01f, false, false, 1, "Body ahead of the front axle." },
+      0.2f, 2.5f, 0.01f, false, false, 1, DEV_CLASS_APPEARANCE, DEV_OWNER_DEFINITION,
+      "Body ahead of the front axle." },
     { "body.rear_overhang", "Body", "m", SPEC_OFFSET(rearOverhangM), VEH_REAR_OVERHANG_M, 0.2f,
-      2.5f, 0.01f, false, false, 1, "Body behind the rear axle." },
+      2.5f, 0.01f, false, false, 1, DEV_CLASS_APPEARANCE, DEV_OWNER_DEFINITION,
+      "Body behind the rear axle." },
     { "body.width_overall", "Body", "m", SPEC_OFFSET(widthOverallM), VEH_WIDTH_OVERALL_M, 1.2f,
-      2.6f, 0.01f, true, false, 0, "Overall body width; derives collision half-width." },
+      2.6f, 0.01f, true, false, 0, DEV_CLASS_PHYSICS_INPUT, DEV_OWNER_DEFINITION,
+      "Overall body width; derives collision half-width." },
     { "body.height_overall", "Body", "m", SPEC_OFFSET(heightOverallM), VEH_HEIGHT_OVERALL_M,
-      1.0f, 3.2f, 0.01f, false, false, 0,
+      1.0f, 3.2f, 0.01f, false, false, 0, DEV_CLASS_PHYSICS_INPUT, DEV_OWNER_DEFINITION,
       "Overall body height; derives frontal area with width." },
     { "body.ride_height_front", "Body", "m", SPEC_OFFSET(rideHeightFrontM),
-      VEH_RIDE_HEIGHT_FRONT_M, 0.04f, 0.5f, 0.005f, false, false, 1,
-      "Front ride height / arch clearance." },
+      VEH_RIDE_HEIGHT_FRONT_M, 0.04f, 0.5f, 0.005f, false, false, 1, DEV_CLASS_APPEARANCE,
+      DEV_OWNER_DEFINITION, "Front ride height / arch clearance." },
     { "body.ride_height_rear", "Body", "m", SPEC_OFFSET(rideHeightRearM),
-      VEH_RIDE_HEIGHT_REAR_M, 0.04f, 0.5f, 0.005f, false, false, 1,
-      "Rear ride height / arch clearance." },
+      VEH_RIDE_HEIGHT_REAR_M, 0.04f, 0.5f, 0.005f, false, false, 1, DEV_CLASS_APPEARANCE,
+      DEV_OWNER_DEFINITION, "Rear ride height / arch clearance." },
     { "body.cowl_x", "Body", "m", SPEC_OFFSET(cowlXM), VEH_COWL_X_M, -2.0f, 2.0f, 0.01f, false,
-      false, 1, "Cowl X in layout frame (axle midpoint origin)." },
+      false, 1, DEV_CLASS_APPEARANCE, DEV_OWNER_DEFINITION,
+      "Cowl X in layout frame (axle midpoint origin)." },
     { "body.backlight_x", "Body", "m", SPEC_OFFSET(backlightXM), VEH_BACKLIGHT_X_M, -2.0f, 2.0f,
-      0.01f, false, false, 1, "Backlight X in layout frame." },
+      0.01f, false, false, 1, DEV_CLASS_APPEARANCE, DEV_OWNER_DEFINITION,
+      "Backlight X in layout frame." },
     /* Maximum is 1.5 m, not the ~2.0 m of a real long bed, because this is a sweep axis and
      * car_visual.c clamps the bed to the space behind the greenhouse — about 1.57 m on the
      * stock car. A range reaching past that would make the top sweep steps clamp to the same
      * value and collapse into each other. Ranges here are development limits, not physical
      * claims; a longer bed on a longer truck is a corpus question, not a registry one. */
     { "body.bed_length", "Body", "m", SPEC_OFFSET(bedLengthM), VEH_BED_LENGTH_M, 0.0f, 1.5f,
-      0.05f, false, false, 1,
+      0.05f, false, false, 1, DEV_CLASS_APPEARANCE, DEV_OWNER_DEFINITION,
       "Open cargo bed forward from the tail; 0 = none. Declared, never inferred." },
     /* Phase B silhouette control. nose_width and tail_width are [identity] hull endpoints:
      * the half-width the rasterizer draws at the foremost/rearmost station is exactly half
@@ -60,306 +74,465 @@ static const DevParameter g_params[] = {
      * Ranges are development limits, not physical claims; the px effect at 13.2 px/m is stated
      * in each entry, and validity rejects an endpoint wider than widthOverallM (see vehicle.c). */
     { "body.nose_width", "Body", "m", SPEC_OFFSET(noseWidthM), VEH_NOSE_WIDTH_M, 0.8f, 2.2f,
-      0.01f, false, false, 1,
+      0.01f, false, false, 1, DEV_CLASS_APPEARANCE, DEV_OWNER_DEFINITION,
       "Width at the foremost hull station (full width). [identity] endpoint; 0.8..2.2 m = "
       "11..29 px." },
     { "body.tail_width", "Body", "m", SPEC_OFFSET(tailWidthM), VEH_TAIL_WIDTH_M, 0.8f, 2.4f,
-      0.01f, false, false, 1,
+      0.01f, false, false, 1, DEV_CLASS_APPEARANCE, DEV_OWNER_DEFINITION,
       "Width at the rearmost hull station (full width). [identity] endpoint; 0.8..2.4 m = "
       "11..32 px." },
     { "body.shoulder_x", "Body", "m", SPEC_OFFSET(shoulderXM), VEH_SHOULDER_X_M, -2.0f, 2.0f,
-      0.01f, false, false, 1,
+      0.01f, false, false, 1, DEV_CLASS_APPEARANCE, DEV_OWNER_DEFINITION,
       "Station of maximum body width, layout frame (axle midpoint origin). Same convention as "
       "cowl_x/backlight_x; moves the widest point over ~53 px of body length at stock." },
     { "body.fender_flare_front", "Body", "m", SPEC_OFFSET(fenderFlareFrontM),
-      VEH_FENDER_FLARE_FRONT_M, 0.0f, 0.12f, 0.002f, false, false, 1,
+      VEH_FENDER_FLARE_FRONT_M, 0.0f, 0.12f, 0.002f, false, false, 1, DEV_CLASS_APPEARANCE,
+      DEV_OWNER_DEFINITION,
       "Front arch flare proud of the hull over the wheel arch; 0 = none. 0..0.12 m = 0..1.6 "
       "px." },
     { "body.fender_flare_rear", "Body", "m", SPEC_OFFSET(fenderFlareRearM),
-      VEH_FENDER_FLARE_REAR_M, 0.0f, 0.15f, 0.002f, false, false, 1,
+      VEH_FENDER_FLARE_REAR_M, 0.0f, 0.15f, 0.002f, false, false, 1, DEV_CLASS_APPEARANCE,
+      DEV_OWNER_DEFINITION,
       "Rear arch flare proud of the hull over the wheel arch; 0 = none. 0..0.15 m = 0..2 px." },
     /* Phase C greenhouse. Longitudinal stations remain in the layout frame. Rake angles are
      * SI radians; comments state the degree envelope used by vehicle measurements. */
     { "body.roof_start_x", "Body", "m", SPEC_OFFSET(roofStartXM), VEH_ROOF_START_X_M, -4.0f,
-      4.0f, 0.01f, false, false, 1,
+      4.0f, 0.01f, false, false, 1, DEV_CLASS_APPEARANCE, DEV_OWNER_DEFINITION,
       "Forward roof edge, layout frame; -4..4 m moves over 106 px." },
     { "body.roof_end_x", "Body", "m", SPEC_OFFSET(roofEndXM), VEH_ROOF_END_X_M, -4.0f, 4.0f,
-      0.01f, false, false, 1, "Aft roof edge, layout frame; -4..4 m moves over 106 px." },
+      0.01f, false, false, 1, DEV_CLASS_APPEARANCE, DEV_OWNER_DEFINITION,
+      "Aft roof edge, layout frame; -4..4 m moves over 106 px." },
     { "body.roof_width", "Body", "m", SPEC_OFFSET(roofWidthM), VEH_ROOF_WIDTH_M, 0.3f, 2.3f,
-      0.01f, false, false, 1,
+      0.01f, false, false, 1, DEV_CLASS_APPEARANCE, DEV_OWNER_DEFINITION,
       "Full physical roof width; 0.3..2.3 m = 4..30 px. Tumblehome inset is "
       "(body width - roof width)/2." },
     { "body.windscreen_rake", "Body", "rad", SPEC_OFFSET(windscreenRakeRad),
       VEH_WINDSCREEN_RAKE_RAD, VEH_WINDSCREEN_RAKE_MIN_RAD, VEH_WINDSCREEN_RAKE_MAX_RAD, 0.01f,
-      false, false, 1,
+      false, false, 1, DEV_CLASS_PHYSICS_INPUT, DEV_OWNER_DEFINITION,
       "A-pillar angle from vertical, 20..70 deg; moves glass by ~7 px and feeds effective "
       "Cd." },
     { "body.backlight_rake", "Body", "rad", SPEC_OFFSET(backlightRakeRad),
       VEH_BACKLIGHT_RAKE_RAD, VEH_BACKLIGHT_RAKE_MIN_RAD, VEH_BACKLIGHT_RAKE_MAX_RAD, 0.01f,
-      false, false, 1, "Rear-screen angle from vertical, 15..75 deg; moves glass by ~6 px." },
+      false, false, 1, DEV_CLASS_APPEARANCE, DEV_OWNER_DEFINITION,
+      "Rear-screen angle from vertical, 15..75 deg; moves glass by ~6 px." },
     { "body.side_window_count", "Body", "", SPEC_OFFSET(sideWindowCount), VEH_SIDE_WINDOW_COUNT,
-      2.0f, 6.0f, 1.0f, false, false, 1,
+      2.0f, 6.0f, 1.0f, false, false, 1, DEV_CLASS_APPEARANCE, DEV_OWNER_DEFINITION,
       "Side-glass segment count; exact integer 2..6, each segment about 8..10 px." },
     { "body.quarter_window", "Body", "m", SPEC_OFFSET(quarterWindowLengthM),
-      VEH_QUARTER_WINDOW_LENGTH_M, 0.0f, 0.4f, 0.02f, false, false, 1,
+      VEH_QUARTER_WINDOW_LENGTH_M, 0.0f, 0.4f, 0.02f, false, false, 1, DEV_CLASS_APPEARANCE,
+      DEV_OWNER_DEFINITION,
       "Quarter glass aft of the rear door; 0 = none, otherwise 0.2..0.4 m = 3..5 px." },
     { "body.sunroof_length", "Body", "m", SPEC_OFFSET(sunroofLengthM), VEH_SUNROOF_LENGTH_M,
-      0.0f, 1.0f, 0.05f, false, false, 1,
+      0.0f, 1.0f, 0.05f, false, false, 1, DEV_CLASS_APPEARANCE, DEV_OWNER_DEFINITION,
       "Roof glass length; 0 = none, otherwise 0.4..1.0 m = 5..13 px." },
     { "body.door_count", "Body", "", SPEC_OFFSET(doorCount), VEH_DOOR_COUNT, 2.0f, 5.0f, 1.0f,
-      false, false, 1, "Door count; exact domain 2, 4, or 5; drives visible pillars." },
+      false, false, 1, DEV_CLASS_APPEARANCE, DEV_OWNER_DEFINITION,
+      "Door count; exact domain 2, 4, or 5; drives visible pillars." },
     { "body.cabin_rows", "Body", "", SPEC_OFFSET(cabinRows), VEH_CABIN_ROWS, 1.0f, 3.0f, 1.0f,
-      false, false, 1, "Seat rows; exact integer 1..3, packaged rearward from mass.driver_x." },
+      false, false, 1, DEV_CLASS_APPEARANCE, DEV_OWNER_DEFINITION,
+      "Seat rows; exact integer 1..3, packaged rearward from mass.driver_x." },
     { "body.roof_type", "Body", "", SPEC_OFFSET(roofType), VEH_ROOF_TYPE, 0.0f, 2.0f, 1.0f,
-      false, false, 1, "Roof enum: 0=fixed, 1=targa, 2=convertible." },
+      false, false, 1, DEV_CLASS_APPEARANCE, DEV_OWNER_DEFINITION,
+      "Roof enum: 0=fixed, 1=targa, 2=convertible." },
     { "body.drag_coefficient", "Body", "", SPEC_OFFSET(dragCoefficient), DRAG_COEFFICIENT, 0.1f,
-      1.2f, 0.01f, false, false, 1, "Cd in 0.5*rho*Cd*A*v^2." },
+      1.2f, 0.01f, false, false, 1, DEV_CLASS_PHYSICS_INPUT, DEV_OWNER_DEFINITION,
+      "Cd in 0.5*rho*Cd*A*v^2." },
     { "body.load_filter_rate", "Body", "Hz", SPEC_OFFSET(loadFilterRateHz), LOAD_FILTER_RATE_HZ,
-      1.0f, 60.0f, 0.5f, false, false, 2, "Load-transfer accel filter corner frequency." },
+      1.0f, 60.0f, 0.5f, false, false, 2, DEV_CLASS_PHYSICS_INPUT, DEV_OWNER_DEFINITION,
+      "Load-transfer accel filter corner frequency." },
     { "body.roll_stiffness_front", "Body", "", SPEC_OFFSET(rollStiffnessFrontFraction),
       ROLL_STIFFNESS_FRONT_FRACTION, 0.0f, 1.0f, 0.01f, false, false, 1,
-      "Front axle share of roll moment." },
+      DEV_CLASS_PHYSICS_INPUT, DEV_OWNER_DEFINITION, "Front axle share of roll moment." },
     { "body.mass", "Body", "kg", SPEC_OFFSET(massKg), VEH_MASS_KG, 400.0f, 15000.0f, 10.0f,
-      false, true, 0, "Total mass from particles (read-only)." },
+      false, true, 0, DEV_CLASS_DERIVED, DEV_OWNER_DERIVED,
+      "Total mass from particles (read-only)." },
     { "body.yaw_inertia", "Body", "kg*m^2", SPEC_OFFSET(yawInertiaKgM2), VEH_YAW_INERTIA_KGM2,
-      200.0f, 40000.0f, 25.0f, false, true, 1, "Yaw inertia from particles (read-only)." },
+      200.0f, 40000.0f, 25.0f, false, true, 1, DEV_CLASS_DERIVED, DEV_OWNER_DERIVED,
+      "Yaw inertia from particles (read-only)." },
     { "body.cg_to_front", "Body", "m", SPEC_OFFSET(cgToFrontM), VEH_CG_TO_FRONT_M, 0.4f, 4.0f,
-      0.01f, true, true, 0, "CG to front axle (derived)." },
+      0.01f, true, true, 0, DEV_CLASS_DERIVED, DEV_OWNER_DERIVED,
+      "CG to front axle (derived)." },
     { "body.cg_to_rear", "Body", "m", SPEC_OFFSET(cgToRearM), VEH_CG_TO_REAR_M, 0.4f, 4.0f,
-      0.01f, true, true, 0, "CG to rear axle (derived)." },
+      0.01f, true, true, 0, DEV_CLASS_DERIVED, DEV_OWNER_DERIVED,
+      "CG to rear axle (derived)." },
     { "body.cg_height", "Body", "m", SPEC_OFFSET(cgHeightM), VEH_CG_HEIGHT_M, 0.15f, 1.5f,
-      0.01f, false, true, 1, "CG height (derived)." },
+      0.01f, false, true, 1, DEV_CLASS_DERIVED, DEV_OWNER_DERIVED, "CG height (derived)." },
     { "body.frontal_area", "Body", "m^2", SPEC_OFFSET(frontalAreaM2),
       VEH_WIDTH_OVERALL_M * VEH_HEIGHT_OVERALL_M * VEH_FRONTAL_AREA_FILL, 1.0f, 8.0f, 0.05f,
-      false, true, 1, "Frontal area from width*height*fill (derived)." },
+      false, true, 1, DEV_CLASS_DERIVED, DEV_OWNER_DERIVED,
+      "Frontal area from width*height*fill (derived)." },
     { "body.length_overall", "Body", "m", SPEC_OFFSET(lengthOverallM), VEH_LENGTH_OVERALL_M,
-      2.5f, 12.0f, 0.01f, false, true, 1, "Overall length = wheelbase + overhangs." },
+      2.5f, 12.0f, 0.01f, false, true, 1, DEV_CLASS_DERIVED, DEV_OWNER_DERIVED,
+      "Overall length = wheelbase + overhangs." },
     { "mass.engine", "Mass", "kg", SPEC_OFFSET(massEngineKg), MASS_ENGINE_KG, 20.0f, 8000.0f,
-      5.0f, false, false, 0, "Engine mass particle." },
+      5.0f, false, false, 0, DEV_CLASS_PHYSICS_INPUT, DEV_OWNER_DEFINITION,
+      "Engine mass particle." },
     { "mass.engine_x", "Mass", "m", SPEC_OFFSET(massEngineXM), MASS_ENGINE_X_M, -4.0f, 4.0f,
-      0.01f, false, false, 0, "Engine X in layout frame." },
+      0.01f, false, false, 0, DEV_CLASS_PHYSICS_INPUT, DEV_OWNER_DEFINITION,
+      "Engine X in layout frame." },
     { "mass.engine_z", "Mass", "m", SPEC_OFFSET(massEngineZM), MASS_ENGINE_Z_M, 0.05f, 2.0f,
-      0.01f, false, false, 2, "Engine Z (height) in layout frame." },
+      0.01f, false, false, 2, DEV_CLASS_PHYSICS_INPUT, DEV_OWNER_DEFINITION,
+      "Engine Z (height) in layout frame." },
     { "mass.gearbox", "Mass", "kg", SPEC_OFFSET(massGearboxKg), MASS_GEARBOX_KG, 20.0f, 8000.0f,
-      5.0f, false, false, 1, "Gearbox mass particle." },
+      5.0f, false, false, 1, DEV_CLASS_PHYSICS_INPUT, DEV_OWNER_DEFINITION,
+      "Gearbox mass particle." },
     { "mass.gearbox_x", "Mass", "m", SPEC_OFFSET(massGearboxXM), MASS_GEARBOX_X_M, -4.0f, 4.0f,
-      0.01f, false, false, 1, "Gearbox X in layout frame." },
+      0.01f, false, false, 1, DEV_CLASS_PHYSICS_INPUT, DEV_OWNER_DEFINITION,
+      "Gearbox X in layout frame." },
     { "mass.gearbox_z", "Mass", "m", SPEC_OFFSET(massGearboxZM), MASS_GEARBOX_Z_M, 0.05f, 2.0f,
-      0.01f, false, false, 2, "Gearbox Z (height) in layout frame." },
+      0.01f, false, false, 2, DEV_CLASS_PHYSICS_INPUT, DEV_OWNER_DEFINITION,
+      "Gearbox Z (height) in layout frame." },
     { "mass.fuel", "Mass", "kg", SPEC_OFFSET(massFuelKg), MASS_FUEL_KG, 20.0f, 8000.0f, 5.0f,
-      false, false, 1, "Fuel mass particle." },
+      false, false, 1, DEV_CLASS_PHYSICS_INPUT, DEV_OWNER_DEFINITION, "Fuel mass particle." },
     { "mass.fuel_x", "Mass", "m", SPEC_OFFSET(massFuelXM), MASS_FUEL_X_M, -4.0f, 4.0f, 0.01f,
-      false, false, 1, "Fuel X in layout frame." },
+      false, false, 1, DEV_CLASS_PHYSICS_INPUT, DEV_OWNER_DEFINITION,
+      "Fuel X in layout frame." },
     { "mass.fuel_z", "Mass", "m", SPEC_OFFSET(massFuelZM), MASS_FUEL_Z_M, 0.05f, 2.0f, 0.01f,
-      false, false, 2, "Fuel Z (height) in layout frame." },
+      false, false, 2, DEV_CLASS_PHYSICS_INPUT, DEV_OWNER_DEFINITION,
+      "Fuel Z (height) in layout frame." },
     { "mass.driver", "Mass", "kg", SPEC_OFFSET(massDriverKg), MASS_DRIVER_KG, 20.0f, 8000.0f,
-      5.0f, false, false, 1, "Driver mass particle." },
+      5.0f, false, false, 1, DEV_CLASS_PHYSICS_INPUT, DEV_OWNER_DEFINITION,
+      "Driver mass particle." },
     { "mass.driver_x", "Mass", "m", SPEC_OFFSET(massDriverXM), MASS_DRIVER_X_M, -4.0f, 4.0f,
-      0.01f, false, false, 1, "Driver X in layout frame." },
+      0.01f, false, false, 1, DEV_CLASS_PHYSICS_INPUT, DEV_OWNER_DEFINITION,
+      "Driver X in layout frame." },
     { "mass.driver_z", "Mass", "m", SPEC_OFFSET(massDriverZM), MASS_DRIVER_Z_M, 0.05f, 2.0f,
-      0.01f, false, false, 2, "Driver Z (height) in layout frame." },
+      0.01f, false, false, 2, DEV_CLASS_PHYSICS_INPUT, DEV_OWNER_DEFINITION,
+      "Driver Z (height) in layout frame." },
     { "mass.chassis", "Mass", "kg", SPEC_OFFSET(massChassisKg), MASS_CHASSIS_KG, 20.0f, 8000.0f,
-      5.0f, false, false, 0, "Chassis mass particle." },
+      5.0f, false, false, 0, DEV_CLASS_PHYSICS_INPUT, DEV_OWNER_DEFINITION,
+      "Chassis mass particle." },
     { "mass.chassis_x", "Mass", "m", SPEC_OFFSET(massChassisXM), MASS_CHASSIS_X_M, -4.0f, 4.0f,
-      0.01f, false, false, 1, "Chassis X in layout frame." },
+      0.01f, false, false, 1, DEV_CLASS_PHYSICS_INPUT, DEV_OWNER_DEFINITION,
+      "Chassis X in layout frame." },
     { "mass.chassis_z", "Mass", "m", SPEC_OFFSET(massChassisZM), MASS_CHASSIS_Z_M, 0.05f, 2.0f,
-      0.01f, false, false, 2, "Chassis Z (height) in layout frame." },
+      0.01f, false, false, 2, DEV_CLASS_PHYSICS_INPUT, DEV_OWNER_DEFINITION,
+      "Chassis Z (height) in layout frame." },
     { "wheel.inertia", "Wheels", "kg*m^2", SPEC_OFFSET(wheelInertiaKgM2), WHEEL_INERTIA_KGM2,
-      0.3f, 8.0f, 0.05f, false, false, 1, "Rotational inertia of one wheel." },
+      0.3f, 8.0f, 0.05f, false, false, 1, DEV_CLASS_PHYSICS_INPUT, DEV_OWNER_DEFINITION,
+      "Rotational inertia of one wheel." },
     { "wheel.radius", "Wheels", "m", SPEC_OFFSET(wheelRadiusM), WHEEL_RADIUS_M, 0.15f, 0.6f,
-      0.005f, false, true, 1, "Legacy rear rolling radius (derived)." },
+      0.005f, false, true, 1, DEV_CLASS_DERIVED, DEV_OWNER_DERIVED,
+      "Legacy rear rolling radius (derived)." },
     { "wheel.radius_front", "Wheels", "m", SPEC_OFFSET(wheelRadiusFrontM), WHEEL_RADIUS_M,
-      0.15f, 0.6f, 0.005f, false, true, 0, "Front loaded rolling radius (derived)." },
+      0.15f, 0.6f, 0.005f, false, true, 0, DEV_CLASS_DERIVED, DEV_OWNER_DERIVED,
+      "Front loaded rolling radius (derived)." },
     { "wheel.radius_rear", "Wheels", "m", SPEC_OFFSET(wheelRadiusRearM), WHEEL_RADIUS_M, 0.15f,
-      0.6f, 0.005f, false, true, 0, "Rear loaded rolling radius (derived)." },
+      0.6f, 0.005f, false, true, 0, DEV_CLASS_DERIVED, DEV_OWNER_DERIVED,
+      "Rear loaded rolling radius (derived)." },
     { "wheel.offset_et_front", "Wheels", "mm", SPEC_OFFSET(wheelOffsetEtFrontMm),
-      WHEEL_OFFSET_ET_FRONT_MM, -20.0f, 60.0f, 1.0f, false, false, 2,
-      "Front wheel ET offset." },
+      WHEEL_OFFSET_ET_FRONT_MM, -20.0f, 60.0f, 1.0f, false, false, 2, DEV_CLASS_INACTIVE,
+      DEV_OWNER_DEFINITION,
+      "Front wheel ET offset. Inactive: wheel poke is drawn from track width and tire width, "
+      "never from ET. Kept as authored hardware." },
     { "wheel.offset_et_rear", "Wheels", "mm", SPEC_OFFSET(wheelOffsetEtRearMm),
-      WHEEL_OFFSET_ET_REAR_MM, -20.0f, 60.0f, 1.0f, false, false, 2, "Rear wheel ET offset." },
+      WHEEL_OFFSET_ET_REAR_MM, -20.0f, 60.0f, 1.0f, false, false, 2, DEV_CLASS_INACTIVE,
+      DEV_OWNER_DEFINITION,
+      "Rear wheel ET offset. Inactive: wheel poke is drawn from track width and tire width, "
+      "never from ET. Kept as authored hardware." },
     { "tire.section_width_front", "Tires", "mm", SPEC_OFFSET(tireSectionWidthFrontMm),
-      TIRE_SECTION_WIDTH_MM, 145.0f, 355.0f, 5.0f, false, false, 0,
-      "Front tire section width." },
+      TIRE_SECTION_WIDTH_MM, 145.0f, 355.0f, 5.0f, false, false, 0, DEV_CLASS_PHYSICS_INPUT,
+      DEV_OWNER_DEFINITION, "Front tire section width." },
     { "tire.aspect_front", "Tires", "%", SPEC_OFFSET(tireAspectFrontPct), TIRE_ASPECT_RATIO_PCT,
-      25.0f, 80.0f, 1.0f, false, false, 1, "Front tire aspect ratio." },
+      25.0f, 80.0f, 1.0f, false, false, 1, DEV_CLASS_PHYSICS_INPUT, DEV_OWNER_DEFINITION,
+      "Front tire aspect ratio." },
     { "tire.rim_diameter_front", "Tires", "in", SPEC_OFFSET(tireRimDiameterFrontIn),
-      TIRE_RIM_DIAMETER_IN, 12.0f, 22.0f, 0.5f, false, false, 1, "Front rim diameter." },
+      TIRE_RIM_DIAMETER_IN, 12.0f, 22.0f, 0.5f, false, false, 1, DEV_CLASS_PHYSICS_INPUT,
+      DEV_OWNER_DEFINITION, "Front rim diameter." },
     { "tire.rim_width_front", "Tires", "in", SPEC_OFFSET(tireRimWidthFrontIn),
-      TIRE_RIM_WIDTH_IN, 4.0f, 14.0f, 0.5f, false, false, 2, "Front rim width." },
+      TIRE_RIM_WIDTH_IN, 4.0f, 14.0f, 0.5f, false, false, 2, DEV_CLASS_APPEARANCE,
+      DEV_OWNER_DEFINITION, "Front rim width. Appearance only: sets the drawn tire width." },
     { "tire.pressure_front", "Tires", "kPa", SPEC_OFFSET(tirePressureFrontKpa),
-      TIRE_PRESSURE_KPA, 120.0f, 400.0f, 5.0f, false, false, 2, "Front cold pressure." },
+      TIRE_PRESSURE_KPA, 120.0f, 400.0f, 5.0f, false, false, 2, DEV_CLASS_INACTIVE,
+      DEV_OWNER_SETUP,
+      "Front cold pressure. Inactive: carried by VehicleSetup and hashed, but no dynamics or "
+      "appearance path reads it. Kept as the authored setup value." },
     { "tire.section_width_rear", "Tires", "mm", SPEC_OFFSET(tireSectionWidthRearMm),
-      TIRE_SECTION_WIDTH_MM, 145.0f, 355.0f, 5.0f, false, false, 0,
-      "Rear tire section width." },
+      TIRE_SECTION_WIDTH_MM, 145.0f, 355.0f, 5.0f, false, false, 0, DEV_CLASS_PHYSICS_INPUT,
+      DEV_OWNER_DEFINITION, "Rear tire section width." },
     { "tire.aspect_rear", "Tires", "%", SPEC_OFFSET(tireAspectRearPct), TIRE_ASPECT_RATIO_PCT,
-      25.0f, 80.0f, 1.0f, false, false, 1, "Rear tire aspect ratio." },
+      25.0f, 80.0f, 1.0f, false, false, 1, DEV_CLASS_PHYSICS_INPUT, DEV_OWNER_DEFINITION,
+      "Rear tire aspect ratio." },
     { "tire.rim_diameter_rear", "Tires", "in", SPEC_OFFSET(tireRimDiameterRearIn),
-      TIRE_RIM_DIAMETER_IN, 12.0f, 22.0f, 0.5f, false, false, 1, "Rear rim diameter." },
+      TIRE_RIM_DIAMETER_IN, 12.0f, 22.0f, 0.5f, false, false, 1, DEV_CLASS_PHYSICS_INPUT,
+      DEV_OWNER_DEFINITION, "Rear rim diameter." },
     { "tire.rim_width_rear", "Tires", "in", SPEC_OFFSET(tireRimWidthRearIn), TIRE_RIM_WIDTH_IN,
-      4.0f, 14.0f, 0.5f, false, false, 2, "Rear rim width." },
+      4.0f, 14.0f, 0.5f, false, false, 2, DEV_CLASS_APPEARANCE, DEV_OWNER_DEFINITION,
+      "Rear rim width. Appearance only: sets the drawn tire width." },
     { "tire.pressure_rear", "Tires", "kPa", SPEC_OFFSET(tirePressureRearKpa), TIRE_PRESSURE_KPA,
-      120.0f, 400.0f, 5.0f, false, false, 2, "Rear cold pressure." },
+      120.0f, 400.0f, 5.0f, false, false, 2, DEV_CLASS_INACTIVE, DEV_OWNER_SETUP,
+      "Rear cold pressure. Inactive: carried by VehicleSetup and hashed, but no dynamics or "
+      "appearance path reads it. Kept as the authored setup value." },
     { "tire.lat_front.b", "Tires", "", SPEC_OFFSET(tireBLatFront), TIRE_B_LAT_FRONT, 2.0f,
-      25.0f, 0.1f, false, false, 1, "Front lateral stiffness factor." },
+      25.0f, 0.1f, false, false, 1, DEV_CLASS_PHYSICS_INPUT, DEV_OWNER_DEFINITION,
+      "Front lateral stiffness factor." },
     { "tire.lat_front.c", "Tires", "", SPEC_OFFSET(tireCLatFront), TIRE_C_LAT_FRONT, 1.0f, 2.2f,
-      0.01f, false, false, 1, "Front lateral shape factor." },
+      0.01f, false, false, 1, DEV_CLASS_PHYSICS_INPUT, DEV_OWNER_DEFINITION,
+      "Front lateral shape factor." },
     { "tire.lat_front.mu", "Tires", "", SPEC_OFFSET(tireMuLatFront), TIRE_MU_LAT_FRONT, 0.3f,
-      2.0f, 0.01f, false, false, 1, "Front lateral peak friction." },
+      2.0f, 0.01f, false, false, 1, DEV_CLASS_PHYSICS_INPUT, DEV_OWNER_DEFINITION,
+      "Front lateral peak friction." },
     { "tire.lat_rear.b", "Tires", "", SPEC_OFFSET(tireBLatRear), TIRE_B_LAT_REAR, 2.0f, 25.0f,
-      0.1f, false, false, 1, "Rear lateral stiffness factor." },
+      0.1f, false, false, 1, DEV_CLASS_PHYSICS_INPUT, DEV_OWNER_DEFINITION,
+      "Rear lateral stiffness factor." },
     { "tire.lat_rear.c", "Tires", "", SPEC_OFFSET(tireCLatRear), TIRE_C_LAT_REAR, 1.0f, 2.2f,
-      0.01f, false, false, 1, "Rear lateral shape factor." },
+      0.01f, false, false, 1, DEV_CLASS_PHYSICS_INPUT, DEV_OWNER_DEFINITION,
+      "Rear lateral shape factor." },
     { "tire.lat_rear.mu", "Tires", "", SPEC_OFFSET(tireMuLatRear), TIRE_MU_LAT_REAR, 0.3f, 2.0f,
-      0.01f, false, false, 1, "Rear lateral peak friction." },
+      0.01f, false, false, 1, DEV_CLASS_PHYSICS_INPUT, DEV_OWNER_DEFINITION,
+      "Rear lateral peak friction." },
     { "tire.long.b", "Tires", "", SPEC_OFFSET(tireBLong), TIRE_B_LONG, 2.0f, 30.0f, 0.1f, false,
-      false, 1, "Longitudinal stiffness factor." },
+      false, 1, DEV_CLASS_PHYSICS_INPUT, DEV_OWNER_DEFINITION,
+      "Longitudinal stiffness factor." },
     { "tire.long.c", "Tires", "", SPEC_OFFSET(tireCLong), TIRE_C_LONG, 1.0f, 2.2f, 0.01f, false,
-      false, 1, "Longitudinal shape factor." },
+      false, 1, DEV_CLASS_PHYSICS_INPUT, DEV_OWNER_DEFINITION, "Longitudinal shape factor." },
     { "tire.long.mu_scale", "Tires", "", SPEC_OFFSET(tireMuLongScale), TIRE_MU_LONG_SCALE, 0.3f,
-      2.0f, 0.01f, false, false, 1, "Longitudinal friction scale." },
+      2.0f, 0.01f, false, false, 1, DEV_CLASS_PHYSICS_INPUT, DEV_OWNER_DEFINITION,
+      "Longitudinal friction scale." },
     { "tire.relaxation_length", "Tires", "m", SPEC_OFFSET(tireRelaxationLengthM),
-      TIRE_RELAXATION_LENGTH_M, 0.0f, 1.0f, 0.01f, false, false, 2,
-      "Lateral force relaxation length." },
+      TIRE_RELAXATION_LENGTH_M, 0.0f, 1.0f, 0.01f, false, false, 2, DEV_CLASS_PHYSICS_INPUT,
+      DEV_OWNER_DEFINITION, "Lateral force relaxation length." },
     { "tire.load_sensitivity_k", "Tires", "", SPEC_OFFSET(tireLoadSensitivityK),
-      TIRE_LOAD_SENSITIVITY_K, 0.0f, 0.05f, 0.001f, false, false, 2,
-      "Load sensitivity exponent." },
+      TIRE_LOAD_SENSITIVITY_K, 0.0f, 0.05f, 0.001f, false, false, 2, DEV_CLASS_PHYSICS_INPUT,
+      DEV_OWNER_DEFINITION, "Load sensitivity exponent." },
     { "tire.load_ref_per_wheel", "Tires", "N", SPEC_OFFSET(tireLoadRefPerWheelN),
-      TIRE_LOAD_REF_PER_WHEEL_N, 500.0f, 15000.0f, 10.0f, false, true, 2,
-      "Reference load = m*g/4 (derived)." },
+      TIRE_LOAD_REF_PER_WHEEL_N, 500.0f, 15000.0f, 10.0f, false, true, 2, DEV_CLASS_DERIVED,
+      DEV_OWNER_DERIVED, "Reference load = m*g/4 (derived)." },
     { "steer.max_angle", "Steering", "rad", SPEC_OFFSET(maxRoadWheelAngleRad), STEER_MAX_RAD,
-      0.2f, 1.2f, 0.01f, false, false, 0, "Max road-wheel angle." },
+      0.2f, 1.2f, 0.01f, false, false, 0, DEV_CLASS_PHYSICS_INPUT, DEV_OWNER_DEFINITION,
+      "Max road-wheel angle." },
     { "steer.rate", "Steering", "rad/s", SPEC_OFFSET(maxSteerRateRadS), STEER_RATE_RAD_S, 0.5f,
-      20.0f, 0.1f, false, false, 1, "Steer follow rate." },
+      20.0f, 0.1f, false, false, 1, DEV_CLASS_PHYSICS_INPUT, DEV_OWNER_DEFINITION,
+      "Steer follow rate." },
     { "steer.return_rate", "Steering", "rad/s", SPEC_OFFSET(steerReturnRateRadS),
-      STEER_RETURN_RATE_RAD_S, 0.5f, 25.0f, 0.1f, false, false, 1, "Steer return rate." },
+      STEER_RETURN_RATE_RAD_S, 0.5f, 25.0f, 0.1f, false, false, 1, DEV_CLASS_PHYSICS_INPUT,
+      DEV_OWNER_DEFINITION, "Steer return rate." },
     { "steer.speed_ref", "Steering", "m/s", SPEC_OFFSET(steerSpeedRefMps), STEER_SPEED_REF_MPS,
-      1.0f, 30.0f, 0.5f, false, false, 1, "Speed below which steering is at full rate." },
+      1.0f, 30.0f, 0.5f, false, false, 1, DEV_CLASS_PHYSICS_INPUT, DEV_OWNER_DEFINITION,
+      "Speed below which steering is at full rate." },
     { "steer.speed_min_factor", "Steering", "", SPEC_OFFSET(steerSpeedMinFactor),
-      STEER_SPEED_MIN_FACTOR, 0.05f, 1.0f, 0.01f, false, false, 2,
-      "Minimum steering rate fraction at high speed." },
+      STEER_SPEED_MIN_FACTOR, 0.05f, 1.0f, 0.01f, false, false, 2, DEV_CLASS_PHYSICS_INPUT,
+      DEV_OWNER_DEFINITION, "Minimum steering rate fraction at high speed." },
     { "steer.ackermann_percent", "Steering", "", SPEC_OFFSET(ackermannPercent),
-      ACKERMANN_PERCENT, 0.0f, 1.0f, 0.01f, false, false, 1, "Ackermann blend." },
+      ACKERMANN_PERCENT, 0.0f, 1.0f, 0.01f, false, false, 1, DEV_CLASS_PHYSICS_INPUT,
+      DEV_OWNER_DEFINITION, "Ackermann blend." },
     { "susp.camber_front", "Suspension", "rad", SPEC_OFFSET(suspCamberFrontRad),
-      SUSP_CAMBER_FRONT_RAD, -0.12f, 0.05f, 0.001f, false, false, 2, "Front static camber." },
+      SUSP_CAMBER_FRONT_RAD, -0.12f, 0.05f, 0.001f, false, false, 2, DEV_CLASS_APPEARANCE,
+      DEV_OWNER_SETUP,
+      "Front static camber. Appearance only: narrows the drawn contact patch. It does not "
+      "change tire force." },
     { "susp.camber_rear", "Suspension", "rad", SPEC_OFFSET(suspCamberRearRad),
-      SUSP_CAMBER_REAR_RAD, -0.12f, 0.05f, 0.001f, false, false, 2, "Rear static camber." },
+      SUSP_CAMBER_REAR_RAD, -0.12f, 0.05f, 0.001f, false, false, 2, DEV_CLASS_APPEARANCE,
+      DEV_OWNER_SETUP,
+      "Rear static camber. Appearance only: narrows the drawn contact patch. It does not "
+      "change tire force." },
     { "susp.toe_front", "Suspension", "rad", SPEC_OFFSET(suspToeFrontRad), SUSP_TOE_FRONT_RAD,
-      -0.05f, 0.05f, 0.001f, false, false, 2, "Front static toe." },
+      -0.05f, 0.05f, 0.001f, false, false, 2, DEV_CLASS_APPEARANCE, DEV_OWNER_SETUP,
+      "Front static toe. Appearance only: toes the drawn front wheels. It does not change "
+      "steering or tire force." },
     { "susp.toe_rear", "Suspension", "rad", SPEC_OFFSET(suspToeRearRad), SUSP_TOE_REAR_RAD,
-      -0.05f, 0.05f, 0.001f, false, false, 2, "Rear static toe." },
+      -0.05f, 0.05f, 0.001f, false, false, 2, DEV_CLASS_INACTIVE, DEV_OWNER_SETUP,
+      "Rear static toe. Inactive: only the front value reaches the appearance grammar. Kept as "
+      "the rear half of a symmetric setup pair." },
     { "susp.caster_front", "Suspension", "rad", SPEC_OFFSET(suspCasterFrontRad),
-      SUSP_CASTER_FRONT_RAD, 0.0f, 0.25f, 0.001f, false, false, 2, "Front caster." },
+      SUSP_CASTER_FRONT_RAD, 0.0f, 0.25f, 0.001f, false, false, 2, DEV_CLASS_INACTIVE,
+      DEV_OWNER_SETUP,
+      "Front caster. Inactive: no steering or tire path reads it. Kept as the authored setup "
+      "value." },
     { "susp.caster_rear", "Suspension", "rad", SPEC_OFFSET(suspCasterRearRad),
-      SUSP_CASTER_REAR_RAD, 0.0f, 0.25f, 0.001f, false, false, 2, "Rear caster." },
+      SUSP_CASTER_REAR_RAD, 0.0f, 0.25f, 0.001f, false, false, 2, DEV_CLASS_INACTIVE,
+      DEV_OWNER_SETUP,
+      "Rear caster. Inactive: no steering or tire path reads it. Kept as the authored setup "
+      "value." },
     { "susp.wheel_rate_front", "Suspension", "N/m", SPEC_OFFSET(suspWheelRateFrontNpm),
-      SUSP_WHEEL_RATE_FRONT_NPM, 5000.0f, 80000.0f, 100.0f, false, false, 2,
-      "Front wheel rate." },
+      SUSP_WHEEL_RATE_FRONT_NPM, 5000.0f, 80000.0f, 100.0f, false, false, 2, DEV_CLASS_INACTIVE,
+      DEV_OWNER_DEFINITION,
+      "Front wheel rate. Inactive: no suspension is simulated; load transfer is quasi-static. "
+      "Kept as authored hardware for a later ride-model change." },
     { "susp.wheel_rate_rear", "Suspension", "N/m", SPEC_OFFSET(suspWheelRateRearNpm),
-      SUSP_WHEEL_RATE_REAR_NPM, 5000.0f, 80000.0f, 100.0f, false, false, 2,
-      "Rear wheel rate." },
+      SUSP_WHEEL_RATE_REAR_NPM, 5000.0f, 80000.0f, 100.0f, false, false, 2, DEV_CLASS_INACTIVE,
+      DEV_OWNER_DEFINITION,
+      "Rear wheel rate. Inactive: no suspension is simulated; load transfer is quasi-static. "
+      "Kept as authored hardware for a later ride-model change." },
     { "susp.anti_roll_front", "Suspension", "N/m", SPEC_OFFSET(suspAntiRollFrontNpm),
-      SUSP_ANTI_ROLL_FRONT_NPM, 0.0f, 60000.0f, 100.0f, false, false, 2,
-      "Front anti-roll stiffness." },
+      SUSP_ANTI_ROLL_FRONT_NPM, 0.0f, 60000.0f, 100.0f, false, false, 2, DEV_CLASS_INACTIVE,
+      DEV_OWNER_DEFINITION,
+      "Front anti-roll stiffness. Inactive: the roll split comes from "
+      "body.roll_stiffness_front, not from these rates. Kept as authored hardware." },
     { "susp.anti_roll_rear", "Suspension", "N/m", SPEC_OFFSET(suspAntiRollRearNpm),
-      SUSP_ANTI_ROLL_REAR_NPM, 0.0f, 60000.0f, 100.0f, false, false, 2,
-      "Rear anti-roll stiffness." },
+      SUSP_ANTI_ROLL_REAR_NPM, 0.0f, 60000.0f, 100.0f, false, false, 2, DEV_CLASS_INACTIVE,
+      DEV_OWNER_DEFINITION,
+      "Rear anti-roll stiffness. Inactive: the roll split comes from "
+      "body.roll_stiffness_front, not from these rates. Kept as authored hardware." },
     { "susp.travel_front", "Suspension", "m", SPEC_OFFSET(suspTravelFrontM),
-      SUSP_TRAVEL_FRONT_M, 0.03f, 0.25f, 0.005f, false, false, 1, "Front suspension travel." },
+      SUSP_TRAVEL_FRONT_M, 0.03f, 0.25f, 0.005f, false, false, 1, DEV_CLASS_APPEARANCE,
+      DEV_OWNER_DEFINITION,
+      "Front suspension travel. Appearance only: sets the arch gap with ride height." },
     { "susp.travel_rear", "Suspension", "m", SPEC_OFFSET(suspTravelRearM), SUSP_TRAVEL_REAR_M,
-      0.03f, 0.25f, 0.005f, false, false, 1, "Rear suspension travel." },
+      0.03f, 0.25f, 0.005f, false, false, 1, DEV_CLASS_APPEARANCE, DEV_OWNER_DEFINITION,
+      "Rear suspension travel. Appearance only: sets the arch gap with ride height." },
     { "susp.roll_centre_front", "Suspension", "m", SPEC_OFFSET(suspRollCentreFrontM),
-      SUSP_ROLL_CENTRE_FRONT_M, 0.0f, 0.4f, 0.005f, false, false, 2,
-      "Front roll-centre height." },
+      SUSP_ROLL_CENTRE_FRONT_M, 0.0f, 0.4f, 0.005f, false, false, 2, DEV_CLASS_INACTIVE,
+      DEV_OWNER_DEFINITION,
+      "Front roll-centre height. Inactive: lateral load transfer uses the CG height and the "
+      "roll-stiffness fraction. Kept as authored hardware." },
     { "susp.roll_centre_rear", "Suspension", "m", SPEC_OFFSET(suspRollCentreRearM),
-      SUSP_ROLL_CENTRE_REAR_M, 0.0f, 0.4f, 0.005f, false, false, 2,
-      "Rear roll-centre height." },
+      SUSP_ROLL_CENTRE_REAR_M, 0.0f, 0.4f, 0.005f, false, false, 2, DEV_CLASS_INACTIVE,
+      DEV_OWNER_DEFINITION,
+      "Rear roll-centre height. Inactive: lateral load transfer uses the CG height and the "
+      "roll-stiffness fraction. Kept as authored hardware." },
     { "drive.gear1", "Drivetrain", "", SPEC_ARRAY_OFFSET(gearRatios, 0), 3.55f, 0.4f, 6.0f,
-      0.01f, false, false, 1, "First gear ratio." },
+      0.01f, false, false, 1, DEV_CLASS_PHYSICS_INPUT, DEV_OWNER_SETUP, "First gear ratio." },
     { "drive.gear2", "Drivetrain", "", SPEC_ARRAY_OFFSET(gearRatios, 1), 2.05f, 0.4f, 6.0f,
-      0.01f, false, false, 1, "Second gear ratio." },
+      0.01f, false, false, 1, DEV_CLASS_PHYSICS_INPUT, DEV_OWNER_SETUP, "Second gear ratio." },
     { "drive.gear3", "Drivetrain", "", SPEC_ARRAY_OFFSET(gearRatios, 2), 1.38f, 0.4f, 6.0f,
-      0.01f, false, false, 1, "Third gear ratio." },
+      0.01f, false, false, 1, DEV_CLASS_PHYSICS_INPUT, DEV_OWNER_SETUP, "Third gear ratio." },
     { "drive.gear4", "Drivetrain", "", SPEC_ARRAY_OFFSET(gearRatios, 3), 1.00f, 0.4f, 6.0f,
-      0.01f, false, false, 1, "Fourth gear ratio." },
+      0.01f, false, false, 1, DEV_CLASS_PHYSICS_INPUT, DEV_OWNER_SETUP, "Fourth gear ratio." },
     { "drive.gear5", "Drivetrain", "", SPEC_ARRAY_OFFSET(gearRatios, 4), 0.82f, 0.4f, 6.0f,
-      0.01f, false, false, 1, "Fifth gear ratio." },
+      0.01f, false, false, 1, DEV_CLASS_PHYSICS_INPUT, DEV_OWNER_SETUP, "Fifth gear ratio." },
     { "drive.reverse", "Drivetrain", "", SPEC_OFFSET(reverseGearRatio), REVERSE_GEAR_RATIO,
-      0.4f, 6.0f, 0.01f, false, false, 1, "Reverse gear ratio." },
+      0.4f, 6.0f, 0.01f, false, false, 1, DEV_CLASS_PHYSICS_INPUT, DEV_OWNER_SETUP,
+      "Reverse gear ratio." },
     { "drive.final", "Drivetrain", "", SPEC_OFFSET(finalDriveRatio), FINAL_DRIVE_RATIO, 1.0f,
-      8.0f, 0.01f, false, false, 1, "Final drive ratio." },
+      8.0f, 0.01f, false, false, 1, DEV_CLASS_PHYSICS_INPUT, DEV_OWNER_SETUP,
+      "Final drive ratio." },
     { "drive.efficiency", "Drivetrain", "", SPEC_OFFSET(drivetrainEfficiency),
-      DRIVETRAIN_EFFICIENCY, 0.5f, 1.0f, 0.01f, false, false, 2, "Drivetrain efficiency." },
+      DRIVETRAIN_EFFICIENCY, 0.5f, 1.0f, 0.01f, false, false, 2, DEV_CLASS_PHYSICS_INPUT,
+      DEV_OWNER_DEFINITION, "Drivetrain efficiency." },
     { "drive.diff_mode", "Drivetrain", "", SPEC_OFFSET(differentialMode),
       (float)DIFFERENTIAL_MODE_DEFAULT, 0.0f, 2.0f, 1.0f, false, false, 1,
-      "0=locked 1=open 2=LSD." },
+      DEV_CLASS_PHYSICS_INPUT, DEV_OWNER_SETUP, "0=locked 1=open 2=LSD." },
     { "drive.diff_bias_ratio", "Drivetrain", "", SPEC_OFFSET(differentialBiasRatio), 2.0f, 1.0f,
-      5.0f, 0.1f, false, false, 2, "LSD bias ratio." },
+      5.0f, 0.1f, false, false, 2, DEV_CLASS_PHYSICS_INPUT, DEV_OWNER_SETUP,
+      "LSD bias ratio." },
     { "drive.diff_preload", "Drivetrain", "N*m", SPEC_OFFSET(differentialPreloadNm), 60.0f,
-      0.0f, 400.0f, 5.0f, false, false, 2, "LSD preload." },
+      0.0f, 400.0f, 5.0f, false, false, 2, DEV_CLASS_PHYSICS_INPUT, DEV_OWNER_SETUP,
+      "LSD preload." },
     { "drive.layout", "Drivetrain", "", SPEC_OFFSET(drivetrainLayout),
-      DRIVETRAIN_LAYOUT_DEFAULT, 0.0f, 2.0f, 1.0f, false, false, 0, "0=RWD 1=FWD 2=AWD." },
+      DRIVETRAIN_LAYOUT_DEFAULT, 0.0f, 2.0f, 1.0f, false, false, 0, DEV_CLASS_PHYSICS_INPUT,
+      DEV_OWNER_DEFINITION, "0=RWD 1=FWD 2=AWD." },
     { "drive.front_torque_split", "Drivetrain", "", SPEC_OFFSET(frontTorqueSplit),
       DRIVETRAIN_FRONT_TORQUE_SPLIT, 0.0f, 1.0f, 0.01f, false, false, 1,
-      "AWD front torque share." },
+      DEV_CLASS_PHYSICS_INPUT, DEV_OWNER_DEFINITION, "AWD front torque share." },
     { "engine.idle_rpm", "Drivetrain", "rpm", SPEC_OFFSET(engineIdleRpm), ENGINE_IDLE_RPM,
-      500.0f, 2000.0f, 25.0f, false, false, 1, "Idle RPM." },
+      500.0f, 2000.0f, 25.0f, false, false, 1, DEV_CLASS_PHYSICS_INPUT, DEV_OWNER_DEFINITION,
+      "Idle RPM." },
     { "engine.redline_rpm", "Drivetrain", "rpm", SPEC_OFFSET(engineRedlineRpm),
-      ENGINE_REDLINE_RPM, 3000.0f, 10000.0f, 100.0f, false, false, 0, "Redline RPM." },
+      ENGINE_REDLINE_RPM, 3000.0f, 10000.0f, 100.0f, false, false, 0, DEV_CLASS_PHYSICS_INPUT,
+      DEV_OWNER_DEFINITION, "Redline RPM." },
     { "engine.torque_p0", "Drivetrain", "N*m", SPEC_ARRAY_OFFSET(engineTorqueCurveNm, 0),
-      140.0f, 0.0f, 600.0f, 5.0f, false, false, 1, "Torque curve point 0." },
+      140.0f, 0.0f, 600.0f, 5.0f, false, false, 1, DEV_CLASS_PHYSICS_INPUT,
+      DEV_OWNER_DEFINITION, "Torque curve point 0." },
     { "engine.torque_p1", "Drivetrain", "N*m", SPEC_ARRAY_OFFSET(engineTorqueCurveNm, 1),
-      200.0f, 0.0f, 600.0f, 5.0f, false, false, 1, "Torque curve point 1." },
+      200.0f, 0.0f, 600.0f, 5.0f, false, false, 1, DEV_CLASS_PHYSICS_INPUT,
+      DEV_OWNER_DEFINITION, "Torque curve point 1." },
     { "engine.torque_p2", "Drivetrain", "N*m", SPEC_ARRAY_OFFSET(engineTorqueCurveNm, 2),
-      240.0f, 0.0f, 600.0f, 5.0f, false, false, 1, "Torque curve point 2." },
+      240.0f, 0.0f, 600.0f, 5.0f, false, false, 1, DEV_CLASS_PHYSICS_INPUT,
+      DEV_OWNER_DEFINITION, "Torque curve point 2." },
     { "engine.torque_p3", "Drivetrain", "N*m", SPEC_ARRAY_OFFSET(engineTorqueCurveNm, 3),
-      255.0f, 0.0f, 600.0f, 5.0f, false, false, 1, "Torque curve point 3." },
+      255.0f, 0.0f, 600.0f, 5.0f, false, false, 1, DEV_CLASS_PHYSICS_INPUT,
+      DEV_OWNER_DEFINITION, "Torque curve point 3." },
     { "engine.torque_p4", "Drivetrain", "N*m", SPEC_ARRAY_OFFSET(engineTorqueCurveNm, 4),
-      250.0f, 0.0f, 600.0f, 5.0f, false, false, 1, "Torque curve point 4." },
+      250.0f, 0.0f, 600.0f, 5.0f, false, false, 1, DEV_CLASS_PHYSICS_INPUT,
+      DEV_OWNER_DEFINITION, "Torque curve point 4." },
     { "engine.torque_p5", "Drivetrain", "N*m", SPEC_ARRAY_OFFSET(engineTorqueCurveNm, 5),
-      230.0f, 0.0f, 600.0f, 5.0f, false, false, 1, "Torque curve point 5." },
+      230.0f, 0.0f, 600.0f, 5.0f, false, false, 1, DEV_CLASS_PHYSICS_INPUT,
+      DEV_OWNER_DEFINITION, "Torque curve point 5." },
     { "engine.torque_p6", "Drivetrain", "N*m", SPEC_ARRAY_OFFSET(engineTorqueCurveNm, 6),
-      195.0f, 0.0f, 600.0f, 5.0f, false, false, 1, "Torque curve point 6." },
+      195.0f, 0.0f, 600.0f, 5.0f, false, false, 1, DEV_CLASS_PHYSICS_INPUT,
+      DEV_OWNER_DEFINITION, "Torque curve point 6." },
     { "engine.braking_torque", "Drivetrain", "N*m", SPEC_OFFSET(engineBrakingTorqueNm),
-      ENGINE_BRAKING_TORQUE_NM, 0.0f, 200.0f, 1.0f, false, false, 2, "Engine braking torque." },
+      ENGINE_BRAKING_TORQUE_NM, 0.0f, 200.0f, 1.0f, false, false, 2, DEV_CLASS_PHYSICS_INPUT,
+      DEV_OWNER_DEFINITION, "Engine braking torque." },
     { "engine.cylinders", "Drivetrain", "", SPEC_OFFSET(engineCylinders), ENGINE_CYLINDERS,
-      2.0f, 12.0f, 1.0f, false, false, 1, "Cylinder count." },
+      2.0f, 12.0f, 1.0f, false, false, 1, DEV_CLASS_APPEARANCE, DEV_OWNER_DEFINITION,
+      "Cylinder count. Appearance only: feeds the appearance identity and engine-bay grammar; "
+      "the torque curve is authored directly." },
     { "engine.displacement", "Drivetrain", "L", SPEC_OFFSET(engineDisplacementL),
-      ENGINE_DISPLACEMENT_L, 0.5f, 8.0f, 0.1f, false, false, 1, "Displacement litres." },
+      ENGINE_DISPLACEMENT_L, 0.5f, 8.0f, 0.1f, false, false, 1, DEV_CLASS_APPEARANCE,
+      DEV_OWNER_DEFINITION,
+      "Displacement litres. Appearance only: feeds the appearance identity; the torque curve "
+      "is authored directly." },
     { "brake.max_torque", "Brakes", "N*m", SPEC_OFFSET(maxBrakeTorqueNm), MAX_BRAKE_TORQUE_NM,
-      0.0f, 8000.0f, 50.0f, false, false, 0, "Total service brake torque." },
+      0.0f, 8000.0f, 50.0f, false, false, 0, DEV_CLASS_PHYSICS_INPUT, DEV_OWNER_DEFINITION,
+      "Total service brake torque." },
     { "brake.bias_front", "Brakes", "", SPEC_OFFSET(brakeBiasFront), BRAKE_BIAS_FRONT, 0.0f,
-      1.0f, 0.01f, false, false, 1, "Front brake bias." },
+      1.0f, 0.01f, false, false, 1, DEV_CLASS_PHYSICS_INPUT, DEV_OWNER_SETUP,
+      "Front brake bias." },
     { "brake.handbrake_torque", "Brakes", "N*m", SPEC_OFFSET(handbrakeTorqueNm),
-      HANDBRAKE_TORQUE_NM, 0.0f, 6000.0f, 50.0f, false, false, 1, "Handbrake torque." },
+      HANDBRAKE_TORQUE_NM, 0.0f, 6000.0f, 50.0f, false, false, 1, DEV_CLASS_PHYSICS_INPUT,
+      DEV_OWNER_DEFINITION, "Handbrake torque." },
     { "brake.disc_radius_front", "Brakes", "m", SPEC_OFFSET(brakeDiscRadiusFrontM),
-      BRAKE_DISC_RADIUS_FRONT_M, 0.08f, 0.22f, 0.005f, false, false, 2, "Front disc radius." },
+      BRAKE_DISC_RADIUS_FRONT_M, 0.08f, 0.22f, 0.005f, false, false, 2, DEV_CLASS_APPEARANCE,
+      DEV_OWNER_DEFINITION,
+      "Front disc radius. Appearance only: sizes the drawn disc. Brake torque comes from "
+      "brake.max_torque." },
     { "brake.disc_radius_rear", "Brakes", "m", SPEC_OFFSET(brakeDiscRadiusRearM),
-      BRAKE_DISC_RADIUS_REAR_M, 0.08f, 0.22f, 0.005f, false, false, 2, "Rear disc radius." },
+      BRAKE_DISC_RADIUS_REAR_M, 0.08f, 0.22f, 0.005f, false, false, 2, DEV_CLASS_APPEARANCE,
+      DEV_OWNER_DEFINITION,
+      "Rear disc radius. Appearance only: sizes the drawn disc. Brake torque comes from "
+      "brake.max_torque." },
     { "brake.pad_friction", "Brakes", "", SPEC_OFFSET(brakePadFriction), BRAKE_PAD_FRICTION,
-      0.15f, 0.6f, 0.01f, false, false, 2, "Pad friction coefficient." },
+      0.15f, 0.6f, 0.01f, false, false, 2, DEV_CLASS_INACTIVE, DEV_OWNER_DEFINITION,
+      "Pad friction coefficient. Inactive: brake torque is authored directly as "
+      "brake.max_torque. Kept as authored hardware." },
     { "aero.lift_front", "Aero", "", SPEC_OFFSET(aeroLiftCoefFront), AERO_LIFT_COEF_FRONT,
-      -2.0f, 1.0f, 0.01f, false, false, 1, "Front lift coefficient." },
+      -2.0f, 1.0f, 0.01f, false, false, 1, DEV_CLASS_APPEARANCE, DEV_OWNER_DEFINITION,
+      "Front lift coefficient. Appearance only: sizes the splitter and dive planes. No "
+      "aerodynamic vertical load is computed anywhere." },
     { "aero.lift_rear", "Aero", "", SPEC_OFFSET(aeroLiftCoefRear), AERO_LIFT_COEF_REAR, -3.0f,
-      1.0f, 0.01f, false, false, 1, "Rear lift coefficient." },
+      1.0f, 0.01f, false, false, 1, DEV_CLASS_APPEARANCE, DEV_OWNER_DEFINITION,
+      "Rear lift coefficient. Appearance only: sizes the rear wing. No aerodynamic vertical "
+      "load is computed anywhere." },
     { "aero.ref_area_front", "Aero", "m^2", SPEC_OFFSET(aeroRefAreaFrontM2),
-      AERO_REF_AREA_FRONT_M2, 0.05f, 2.0f, 0.01f, false, false, 2,
-      "Front aero reference area." },
+      AERO_REF_AREA_FRONT_M2, 0.05f, 2.0f, 0.01f, false, false, 2, DEV_CLASS_APPEARANCE,
+      DEV_OWNER_DEFINITION,
+      "Front aero reference area. Appearance only: scales the front aero device with "
+      "aero.lift_front." },
     { "aero.ref_area_rear", "Aero", "m^2", SPEC_OFFSET(aeroRefAreaRearM2),
-      AERO_REF_AREA_REAR_M2, 0.05f, 2.0f, 0.01f, false, false, 2, "Rear aero reference area." },
+      AERO_REF_AREA_REAR_M2, 0.05f, 2.0f, 0.01f, false, false, 2, DEV_CLASS_APPEARANCE,
+      DEV_OWNER_DEFINITION,
+      "Rear aero reference area. Appearance only: scales the rear wing with aero.lift_rear." },
     { "aero.cop_x", "Aero", "m", SPEC_OFFSET(aeroCentreOfPressureXM), AERO_COP_X_M, -2.0f, 2.0f,
-      0.01f, false, false, 2, "Centre of pressure X." },
+      0.01f, false, false, 2, DEV_CLASS_INACTIVE, DEV_OWNER_DEFINITION,
+      "Centre of pressure X. Inactive: drag acts at the CG and no aerodynamic vertical load "
+      "exists, so there is no pressure centre to place." },
     { "collision.half_width", "Collision", "m", SPEC_OFFSET(bodyHalfWidthM),
-      VEHICLE_BODY_HALF_WIDTH_M, 0.4f, 1.5f, 0.01f, true, true, 1,
-      "Collision capsule half-width = width/2 (derived)." },
+      VEHICLE_BODY_HALF_WIDTH_M, 0.4f, 1.5f, 0.01f, true, true, 1, DEV_CLASS_DERIVED,
+      DEV_OWNER_DERIVED, "Collision capsule half-width = width/2 (derived)." },
     { "collision.restitution", "Collision", "", SPEC_OFFSET(collisionRestitution),
-      COLLISION_RESTITUTION, 0.0f, 0.9f, 0.01f, false, false, 2, "Barrier restitution." },
+      COLLISION_RESTITUTION, 0.0f, 0.9f, 0.01f, false, false, 2, DEV_CLASS_PHYSICS_INPUT,
+      DEV_OWNER_DEFINITION, "Barrier restitution." },
     { "collision.friction", "Collision", "", SPEC_OFFSET(collisionFriction), COLLISION_FRICTION,
-      0.0f, 1.5f, 0.01f, false, false, 2, "Barrier friction." },
+      0.0f, 1.5f, 0.01f, false, false, 2, DEV_CLASS_PHYSICS_INPUT, DEV_OWNER_DEFINITION,
+      "Barrier friction." },
 };
 
 #define PARAM_COUNT ((int)(sizeof(g_params) / sizeof(g_params[0])))
 
 /* ------------------------------------------------------------------------------- access -- */
+
+const char *dev_param_class_name(int classification)
+{
+    switch (classification) {
+        case DEV_CLASS_DERIVED: return "derived";
+        case DEV_CLASS_APPEARANCE: return "appearance";
+        case DEV_CLASS_INACTIVE: return "inactive";
+        case DEV_CLASS_PHYSICS_INPUT:
+        default: return "physics";
+    }
+}
+
+const char *dev_param_owner_name(int owner)
+{
+    switch (owner) {
+        case DEV_OWNER_SETUP: return "setup";
+        case DEV_OWNER_DERIVED: return "derived";
+        case DEV_OWNER_DEFINITION:
+        default: return "definition";
+    }
+}
 
 int dev_params_count(void)
 {
@@ -885,48 +1058,92 @@ void dev_params_write_markdown(FILE *out)
 
     fprintf(out, "<!-- Generated by `build/tests/circuit_tests.exe --dump-params`. Do not edit "
                  "by hand. -->\n");
-    fprintf(out, "# Tunable parameters\n\n");
+    fprintf(out, "# Vehicle parameters\n\n");
     fprintf(
         out,
         "Every row is one entry in the `src/dev/dev_params.c` registry, which is also what\n");
     fprintf(out, "generates the Physics Lab sliders and the tuning-profile format.\n");
 
+    fprintf(out, "\n## Classification\n\n");
+    fprintf(out, "`Class` is the audit answer to \"does this parameter affect handling?\" and "
+                 "every\n");
+    fprintf(out,
+            "value is proved by the `param-audit` scenario rather than asserted here.\n\n");
+    fprintf(out, "| Class | Meaning | How it is checked |\n|---|---|---|\n");
+    fprintf(out, "| `physics` | A dynamics code path reads it | perturbing it must change a "
+                 "simulated trajectory |\n");
+    fprintf(out, "| `derived` | `vehicle_spec_refresh_derived()` recomputes it | overwriting "
+                 "it must be undone by a refresh |\n");
+    fprintf(out, "| `appearance` | Only the appearance grammar reads it | perturbing it must "
+                 "leave the trajectory bit-identical |\n");
+    fprintf(out, "| `inactive` | Nothing reads it; authored, inert, reserved | perturbing it "
+                 "must leave the trajectory bit-identical |\n");
+    fprintf(out, "\n`Owner` follows the `VehicleSpec` migration map in "
+                 "`docs/SIMULATION_OWNERSHIP.md`:\n");
+    fprintf(out, "`definition` values survive `vehicle_instance_derive()`, `setup` values are "
+                 "overwritten\n");
+    fprintf(out, "by the entrant's `VehicleSetup`, and `derived` values are recompiled.\n");
+
+    /* The honest core of the audit, listed on its own so it cannot be missed: the fields whose
+     * names promise dynamics that no code delivers. Each row states the decision that was
+     * recorded for it. */
+    fprintf(out, "\n## Inactive parameters\n\n");
+    fprintf(out, "These are authored, validated, hashed and saved, and read by nothing. They "
+                 "do not\n");
+    fprintf(out, "affect handling or appearance. They are listed here rather than removed so "
+                 "that the\n");
+    fprintf(out, "decision is explicit; activating any of them is a separate change with its "
+                 "own\n");
+    fprintf(out, "validation.\n\n");
+    fprintf(out, "| Parameter | Owner | Decision |\n|---|---|---|\n");
+    int inactiveCount = 0;
+    for (int i = 0; i < PARAM_COUNT; i++) {
+        const DevParameter *param = &g_params[i];
+        if (param->classification != DEV_CLASS_INACTIVE) continue;
+        fprintf(out, "| `%s` | `%s` | %s |\n", param->name, dev_param_owner_name(param->owner),
+                param->description);
+        inactiveCount++;
+    }
+    fprintf(out, "\n%d of %d parameters are inactive.\n", inactiveCount, PARAM_COUNT);
+
     const int groups = dev_params_group_count();
     for (int g = 0; g < groups; g++) {
         const char *group = dev_params_group_name(g);
         fprintf(out, "\n## %s\n\n", group);
-        fprintf(out, "| Parameter | Default | Unit | Range | Step | Tier | Derived | Reset | "
-                     "Meaning |\n");
-        fprintf(out, "|---|---:|---|---|---:|---|:-:|:-:|---|\n");
+        fprintf(out, "| Parameter | Class | Owner | Default | Unit | Range | Step | Tier | "
+                     "Reset | Meaning |\n");
+        fprintf(out, "|---|---|---|---:|---|---|---:|---|:-:|---|\n");
         for (int i = 0; i < PARAM_COUNT; i++) {
             const DevParameter *param = &g_params[i];
             if (strcmp(param->group, group) != 0) continue;
             const char *tierName = param->tier == DEV_TIER_ESSENTIAL  ? "essential"
                                    : param->tier == DEV_TIER_ADVANCED ? "advanced"
                                                                       : "expert";
-            fprintf(out, "| `%s` | %g | %s | %g .. %g | %g | %s | %s | %s | %s |\n",
-                    param->name, (double)param->defaultValue,
+            fprintf(out, "| `%s` | `%s` | `%s` | %g | %s | %g .. %g | %g | %s | %s | %s |\n",
+                    param->name, dev_param_class_name(param->classification),
+                    dev_param_owner_name(param->owner), (double)param->defaultValue,
                     param->unit[0] != '\0' ? param->unit : "—", (double)param->minimum,
                     (double)param->maximum, (double)param->step, tierName,
-                    param->derived ? "yes" : "—", param->requiresRestart ? "yes" : "—",
-                    param->description);
+                    param->requiresRestart ? "yes" : "—", param->description);
         }
     }
 
     fprintf(out,
             "\n`Reset` marks a parameter that only takes full effect after a simulation\n");
-    fprintf(out, "reset, because it moves the wheel contact points. `Derived` rows are\n");
+    fprintf(out, "reset, because it moves the wheel contact points. `derived` rows are\n");
     fprintf(out, "read-only; write the primaries that produce them.\n");
 }
 
 void dev_params_write_metadata(FILE *out, const VehicleSpec *spec)
 {
     if (out == NULL || spec == NULL) return;
-    fprintf(out, "# parameter,value,default,unit\n");
+    fprintf(out, "# parameter,value,default,unit,class,owner\n");
     for (int i = 0; i < PARAM_COUNT; i++) {
         const DevParameter *param = &g_params[i];
-        fprintf(out, "# %s,%.6f,%.6f,%s\n", param->name, (double)dev_param_get(spec, param),
-                (double)param->defaultValue, param->unit[0] != '\0' ? param->unit : "-");
+        fprintf(
+            out, "# %s,%.6f,%.6f,%s,%s,%s\n", param->name, (double)dev_param_get(spec, param),
+            (double)param->defaultValue, param->unit[0] != '\0' ? param->unit : "-",
+            dev_param_class_name(param->classification), dev_param_owner_name(param->owner));
     }
 }
 
