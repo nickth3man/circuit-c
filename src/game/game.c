@@ -103,6 +103,17 @@ GAME_API uint32_t game_state_checksum(const Game *game)
         h = hash_u32(h, wheel->locked ? 1u : 0u);
         h = hash_u32(h, (uint32_t)wheel->surfaceId);
     }
+
+    /* Route progress is authoritative simulation state: it decides when a lap closes and when
+     * the run ends, so a replay that diverged on it was previously undetectable. The bound
+     * definition hash is deliberately NOT hashed here — an immutable input belongs to the
+     * session compatibility digest, not to the rolling checksum. */
+    const RacerProgress *p = &game->progress;
+    h = hash_u32(h, (uint32_t)p->nextCheckpoint);
+    h = hash_u32(h, (uint32_t)p->lap);
+    h = hash_u32(h, (uint32_t)p->lapStartCheckpoint);
+    h = hash_f32(h, p->lapTimerS);
+    h = hash_f32(h, p->lastLapTimeS);
     return h;
 }
 
