@@ -187,6 +187,7 @@ GAME_API void game_apply_spec(Game *game, const VehicleSpec *spec)
     vehicle_setup_set_default(&game->vehicleDefinition, &game->vehicleSetup);
     (void)vehicle_instance_init(&game->vehicleInstance, &game->vehicleDefinition,
                                 &game->vehicleSetup);
+    controller_reset(&game->controller);
 }
 
 GAME_API bool game_configure_run(Game *game, const GameRunConfig *config)
@@ -228,6 +229,7 @@ GAME_API bool game_spawn_on_track_at(Game *game, int checkpointIndex)
     /* Reset first, then place: vehicle_instance_reset() puts the car at the world origin, so
      * doing it the other way round would throw the pose away. */
     vehicle_instance_reset(&game->vehicleInstance);
+    controller_reset(&game->controller);
     game->vehicle.positionM = startM;
     game->vehicle.headingRad = headingRad;
 

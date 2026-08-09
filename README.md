@@ -266,8 +266,8 @@ the game) and **`mk inspect`** (serves the browser inspector) — use `mk visual
 instead of the latter, since it starts and stops its own server.
 
 Press **F2** in the running game for the Physics Lab: scenario selector, pause and single
-step, live sliders for every tunable in the registry with its default, unit and class — currently
-140, tabulated in [docs/VEHICLE_PARAMETERS.md](docs/VEHICLE_PARAMETERS.md) — tuning profiles, overlay toggles,
+step, live sliders for every tunable in the registry with its default, unit and class, tabulated
+in [docs/VEHICLE_PARAMETERS.md](docs/VEHICLE_PARAMETERS.md) — tuning profiles, overlay toggles,
 an eight-channel scope with a baseline ghost, and an invariant panel. **F3** opens the replay
 inspector.
 

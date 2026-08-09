@@ -641,6 +641,24 @@ static void scenario_controller(void)
               "and preserves the kind and the frozen configuration: a reset changes the "
               "situation, not who is driving");
 
+        memset(&game->controller.memory, 0xA5, sizeof(game->controller.memory));
+        check(game_spawn_on_track(game),
+              "the running AI car can be returned to the start line");
+        check(memcmp(&game->controller.memory, &blank.memory, sizeof(blank.memory)) == 0,
+              "spawning an existing car clears its controller's old plan and axis history");
+        check(memcmp(&game->controller.config.ai, &configAtStart, sizeof(configAtStart)) == 0 &&
+                  game->controller.kind == CONTROLLER_KIND_AI,
+              "spawning preserves the controller kind and frozen configuration");
+
+        const VehicleSpec replacement = game->spec;
+        memset(&game->controller.memory, 0xA5, sizeof(game->controller.memory));
+        game_apply_spec(game, &replacement);
+        check(memcmp(&game->controller.memory, &blank.memory, sizeof(blank.memory)) == 0,
+              "replacing a vehicle clears its controller's old plan and axis history");
+        check(memcmp(&game->controller.config.ai, &configAtStart, sizeof(configAtStart)) == 0 &&
+                  game->controller.kind == CONTROLLER_KIND_AI,
+              "replacing a vehicle preserves the controller kind and frozen configuration");
+
         track_free(&game->trackDef);
         free(game);
     }
