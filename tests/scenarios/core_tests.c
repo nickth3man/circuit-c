@@ -835,6 +835,291 @@ static void scenario_controller_conflict(void)
 }
 
 /* ------------------------------------------------------------------------------------- */
+/* Scenario: race-entrant — bounded, ordered, isolated multi-vehicle storage               */
+/* ------------------------------------------------------------------------------------- */
+
+/* Spawn one entrant with an explicit id and controller kind, and fail the run if the roster
+ * refused — every spawn in this scenario is expected to succeed. */
+static EntrantId spawn_entrant(RaceRoster *roster, EntrantId id, ControllerKind kind,
+                               bool localPlayer, int gridSlot)
+{
+    const RaceEntrantSpawn spawn = {
+        .id = id, .controllerKind = kind, .localPlayer = localPlayer, .gridSlot = gridSlot
+    };
+    EntrantId assigned = RACE_ENTRANT_ID_NONE;
+    const bool ok = race_roster_spawn(roster, &spawn, &assigned);
+    check(ok && assigned == id, "spawned entrant %u (ok %d, assigned %u)", id, (int)ok,
+          assigned);
+    return assigned;
+}
+
+/* Ascending ids with a distinguishable pose per entrant, so a roster whose order or contents
+ * differ cannot accidentally hash the same. */
+static void build_grid(RaceRoster *roster, const EntrantId *order, int count)
+{
+    race_roster_init(roster);
+    for (int i = 0; i < count; i++) {
+        const EntrantId id = order[i];
+        (void)spawn_entrant(roster, id, (id == 1u) ? CONTROLLER_KIND_HUMAN : CONTROLLER_KIND_AI,
+                            id == 1u, (int)id - 1);
+        RaceEntrant *entrant = race_roster_find(roster, id);
+        if (entrant != NULL) entrant->instance.vehicle.positionM.x = (float)id * 10.0f;
+    }
+}
+
+/*
+ * What this asserts is the storage contract, not any driving.
+ *
+ * A grid is a bounded, explicitly ordered collection; iteration order follows ascending
+ * EntrantId and not the order entrants happened to be added; every entrant owns its own
+ * vehicle, controller memory, progress, transmission and result, so nothing one does reaches
+ * another; spawn, reset and despawn have defined effects on identity; and the one-car session
+ * the rest of the suite exercises is that same collection with one slot filled.
+ */
+static void scenario_race_entrant(void)
+{
+    RaceRoster *roster = (RaceRoster *)calloc(1, sizeof(RaceRoster));
+    RaceRoster *shuffled = (RaceRoster *)calloc(1, sizeof(RaceRoster));
+    check(roster != NULL && shuffled != NULL, "roster fixtures allocated");
+    if (roster == NULL || shuffled == NULL) {
+        free(shuffled);
+        free(roster);
+        return;
+    }
+
+    /* ---- 1. A grid: one human-designated entrant plus three AI ---- */
+    static const EntrantId kAscending[4] = { 1u, 2u, 3u, 4u };
+    build_grid(roster, kAscending, 4);
+
+    check(roster->count == 4, "the roster holds all four entrants (got %d)", roster->count);
+    check(roster->localEntrantId == 1u,
+          "entrant 1 is the human-designated local player (got %u)", roster->localEntrantId);
+    check(race_roster_local(roster) == &roster->entrants[0],
+          "race_roster_local() resolves to that entrant's slot");
+    check(roster->entrants[0].controller.kind == CONTROLLER_KIND_HUMAN &&
+              roster->entrants[1].controller.kind == CONTROLLER_KIND_AI &&
+              roster->entrants[2].controller.kind == CONTROLLER_KIND_AI &&
+              roster->entrants[3].controller.kind == CONTROLLER_KIND_AI,
+          "one human entrant and three AI entrants share one storage path");
+    check(vehicle_spec_is_valid(&roster->entrants[3].instance.spec),
+          "every entrant got a compiled, valid spec of its own");
+    check(roster->entrants[2].gridSlot == 2, "each entrant keeps the grid slot it spawned in");
+
+    /* ---- 2. Insertion history cannot change iteration order ---- */
+    static const EntrantId kShuffled[4] = { 4u, 1u, 3u, 2u };
+    build_grid(shuffled, kShuffled, 4);
+
+    bool ascending = true;
+    for (int i = 0; i < shuffled->count; i++) {
+        if (shuffled->entrants[i].id != (EntrantId)(i + 1)) ascending = false;
+    }
+    check(ascending,
+          "entrants added last-to-first still iterate in ascending EntrantId order (%u, %u, "
+          "%u, %u)",
+          shuffled->entrants[0].id, shuffled->entrants[1].id, shuffled->entrants[2].id,
+          shuffled->entrants[3].id);
+
+    /* ---- 3. Rejected spawns leave the roster exactly as it was ---- */
+    {
+        const RaceEntrantSpawn duplicate = { .id = 3u };
+        check(!race_roster_spawn(roster, &duplicate, NULL) && roster->count == 4,
+              "a duplicate EntrantId is refused and adds nothing (count %d)", roster->count);
+
+        const RaceEntrantSpawn secondLocal = { .localPlayer = true };
+        check(!race_roster_spawn(roster, &secondLocal, NULL) && roster->count == 4 &&
+                  roster->localEntrantId == 1u,
+              "a second local designation is refused rather than moving presentation onto the "
+              "car that spawned last (local %u)",
+              roster->localEntrantId);
+
+        const RaceEntrantSpawn beyondRange = { .id = RACE_ENTRANT_ID_MAX + 1u };
+        check(!race_roster_spawn(roster, &beyondRange, NULL) && roster->count == 4,
+              "an id past RACE_ENTRANT_ID_MAX is refused, so the id cursor cannot wrap onto "
+              "the reserved zero");
+
+        int accepted = 0;
+        for (int i = 0; i < RACE_MAX_ENTRANTS + 2; i++) {
+            const RaceEntrantSpawn extra = { .gridSlot = -1 };
+            if (race_roster_spawn(roster, &extra, NULL)) accepted++;
+        }
+        check(
+            accepted == RACE_MAX_ENTRANTS - 4 && roster->count == RACE_MAX_ENTRANTS,
+            "the roster fills to its bound and then refuses (accepted %d, count %d, bound %d)",
+            accepted, roster->count, RACE_MAX_ENTRANTS);
+    }
+
+    /* ---- 4. Isolation: one entrant's state is unreachable from another ---- */
+    build_grid(roster, kAscending, 4);
+    {
+        RaceEntrant *target = race_roster_find(roster, 2u);
+        check(target != NULL, "entrant 2 is findable by id");
+        if (target != NULL) {
+            target->instance.vehicle.yawRateRadS = 1.25f;
+            target->instance.vehicle.selectedGear = 4;
+            target->instance.autoTrans.driveState = AUTO_REVERSE;
+            target->instance.autoTrans.neutralTimer = 0.75f;
+            target->instance.damage = 0.5f;
+            target->progress.lap = 3;
+            target->progress.nextCheckpoint = 5;
+            target->controller.memory.ai.hasPrevError = true;
+            target->controller.memory.ai.prevCrossTrackErrorM = 2.0f;
+            target->result.finished = true;
+            target->result.finishPosition = 1;
+        }
+
+        bool othersUntouched = true;
+        for (int i = 0; i < roster->count; i++) {
+            const RaceEntrant *e = &roster->entrants[i];
+            if (e->id == 2u) continue;
+            if (e->instance.vehicle.yawRateRadS != 0.0f) othersUntouched = false;
+            if (e->instance.vehicle.selectedGear == 4) othersUntouched = false;
+            if (e->instance.autoTrans.driveState != AUTO_DRIVE) othersUntouched = false;
+            if (e->instance.damage != 0.0f) othersUntouched = false;
+            if (e->progress.lap != 0 || e->progress.nextCheckpoint != 0)
+                othersUntouched = false;
+            if (e->controller.memory.ai.hasPrevError) othersUntouched = false;
+            if (e->result.finished || e->result.finishPosition != 0) othersUntouched = false;
+        }
+        check(othersUntouched,
+              "driving, gear, transmission, damage, progress, controller memory and result all "
+              "belong to one entrant and reach no other");
+    }
+
+    /* ---- 5. Reset returns cars to the grid without changing who is racing ---- */
+    {
+        race_roster_reset(roster);
+        const RaceEntrant *target = race_roster_find_const(roster, 2u);
+        check(target != NULL, "entrant 2 survives the reset");
+        if (target != NULL) {
+            check(target->instance.vehicle.yawRateRadS == 0.0f &&
+                      target->instance.vehicle.selectedGear == 1 &&
+                      target->instance.damage == 0.0f,
+                  "reset zeroes the vehicle state");
+            check(
+                !target->controller.memory.ai.hasPrevError &&
+                    target->controller.memory.ai.prevCrossTrackErrorM == 0.0f,
+                "reset clears the private controller memory, so nobody drives to a stale plan");
+            check(!target->result.finished && target->result.finishPosition == 0,
+                  "reset clears the entrant's result");
+            check(target->controller.kind == CONTROLLER_KIND_AI && target->gridSlot == 1 &&
+                      target->id == 2u,
+                  "identity, controller kind and grid slot survive a reset");
+            check(target->progress.lap == 3,
+                  "lap progress is track state and is not reset here (got %d)",
+                  target->progress.lap);
+        }
+    }
+
+    /* ---- 6. Despawn compacts, preserves order, and never recycles an id ---- */
+    {
+        check(race_roster_despawn(roster, 2u) && roster->count == 3,
+              "despawning a middle entrant removes exactly one slot (count %d)", roster->count);
+        check(roster->entrants[0].id == 1u && roster->entrants[1].id == 3u &&
+                  roster->entrants[2].id == 4u,
+              "the survivors stay packed and ascending (%u, %u, %u)", roster->entrants[0].id,
+              roster->entrants[1].id, roster->entrants[2].id);
+        check(!race_roster_despawn(roster, 2u), "a second despawn of the same id does nothing");
+
+        EntrantId reborn = RACE_ENTRANT_ID_NONE;
+        const RaceEntrantSpawn nextUp = { .gridSlot = -1 };
+        check(race_roster_spawn(roster, &nextUp, &reborn) && reborn == 5u,
+              "the next spawn takes a fresh id rather than the departed entrant's (got %u)",
+              reborn);
+
+        /* The identity is retired, not merely vacated: asking for it by name must fail too, or
+         * results and events recorded against the departed entrant would alias its successor. */
+        const RaceEntrantSpawn impostor = { .id = 2u, .gridSlot = -1 };
+        check(!race_roster_spawn(roster, &impostor, NULL) && roster->count == 4,
+              "a despawned id cannot be claimed back by an explicit spawn (count %d)",
+              roster->count);
+
+        check(
+            race_roster_despawn(roster, 1u) && roster->localEntrantId == RACE_ENTRANT_ID_NONE &&
+                race_roster_local(roster) == NULL,
+            "losing the local entrant clears the designation instead of promoting a stranger");
+
+        const RaceEntrantSpawn replacement = { .localPlayer = true, .gridSlot = 0 };
+        check(race_roster_spawn(roster, &replacement, NULL) &&
+                  race_roster_local(roster) != NULL,
+              "and a new local entrant may then be designated, the seat now being vacant");
+    }
+
+    /* ---- 7. Pair ordering is deterministic and history-independent ---- */
+    {
+        build_grid(roster, kAscending, 4);
+        check(race_roster_pair_count(roster) == 6,
+              "four entrants make six unordered pairs (got %d)",
+              race_roster_pair_count(roster));
+
+        bool ordered = true;
+        bool matchesShuffled = true;
+        for (int i = 0; i < race_roster_pair_count(roster); i++) {
+            int a = -1, b = -1, sa = -1, sb = -1;
+            if (!race_roster_pair_at(roster, i, &a, &b)) ordered = false;
+            if (!race_roster_pair_at(shuffled, i, &sa, &sb)) matchesShuffled = false;
+            if (a >= b) ordered = false;
+            if (roster->entrants[a].id >= roster->entrants[b].id) ordered = false;
+            if (sa != a || sb != b) matchesShuffled = false;
+        }
+        check(ordered, "every pair is emitted once, low EntrantId first");
+        check(matchesShuffled,
+              "and the pair sequence is identical for a roster built in a different order");
+        check(!race_roster_pair_at(roster, 6, NULL, NULL),
+              "one past the last pair is refused rather than wrapping");
+    }
+
+    /* ---- 8. Two sessions, two loading orders, one checksum ---- */
+    {
+        Game *sequential = alloc_game();
+        Game *reordered = alloc_game();
+        game_init(sequential);
+        game_init(reordered);
+
+        build_grid(&sequential->roster, kAscending, 4);
+        build_grid(&reordered->roster, kShuffled, 4);
+
+        const uint32_t sequentialChecksum = game_state_checksum(sequential);
+        const uint32_t reorderedChecksum = game_state_checksum(reordered);
+        check(sequentialChecksum == reorderedChecksum,
+              "a four-entrant session checksums identically however its entrants were loaded "
+              "(%08x vs %08x)",
+              sequentialChecksum, reorderedChecksum);
+
+        /* And the checksum is genuinely watching the roster: losing an entrant must show. */
+        check(race_roster_despawn(&reordered->roster, 3u),
+              "entrant 3 leaves the second session");
+        check(game_state_checksum(reordered) != sequentialChecksum,
+              "a session that lost an entrant no longer checksums like one that did not");
+
+        free(reordered);
+        free(sequential);
+    }
+
+    /* ---- 9. The one-car session is the same collection with one slot filled ---- */
+    {
+        Game *game = alloc_game();
+        game_init(game);
+        check(game->roster.count == 1 && game->roster.localEntrantId == 1u,
+              "game_init() spawns exactly one local entrant through the roster (count %d, "
+              "local %u)",
+              game->roster.count, game->roster.localEntrantId);
+        check(&game->vehicle == &game->roster.entrants[0].instance.vehicle &&
+                  &game->progress == &game->roster.entrants[0].progress &&
+                  &game->controller == &game->roster.entrants[0].controller,
+              "the one-entrant compatibility spellings name that roster slot and not a "
+              "separate copy");
+
+        game->vehicle.yawRateRadS = 0.5f;
+        check(game->roster.entrants[0].instance.vehicle.yawRateRadS == 0.5f,
+              "so the existing single-car paths drive the collection's storage directly");
+        free(game);
+    }
+
+    free(shuffled);
+    free(roster);
+}
+
+/* ------------------------------------------------------------------------------------- */
 /* Scenario: controller-stream — a recorded controller stream reproduces the checksum      */
 /* ------------------------------------------------------------------------------------- */
 
@@ -1571,6 +1856,8 @@ static const TestScenario kCoreScenarios[] = {
     { "controller-conflict",
       "two controllers issuing conflicting one-shots on the same tick stay independent",
       scenario_controller_conflict },
+    { "race-entrant", "bounded ordered entrant storage: spawn, order, isolation, reset, pairs",
+      scenario_race_entrant },
     { "controller-stream", "a recorded controller stream reproduces an identical checksum",
       scenario_controller_stream },
     { "replay", "deterministic recording, repeatable playback, ring overflow",

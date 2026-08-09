@@ -26,6 +26,19 @@ the automatic-transmission toggle remain session commands on `Input`. `Game` own
 excluded from the rolling checksum: adding it would make a live AI run and its replay hash
 differently, so it is expanded with the entrant/session owners in issues 10–11.
 
+Issue 10 is implemented by `RaceEntrant` and `RaceRoster` in `src/game/race_entrant.h`. One
+entrant owns its `VehicleInstance`, `Controller`, `ControllerOutput`, `RacerProgress`, frozen
+`VehicleSetup`, its own copy of the immutable `VehicleDefinition`, and its grid slot and result.
+The roster is a fixed-capacity array stored packed in ascending `EntrantId`: ids are assigned in
+ascending order, are never reused, and a spawn that names its own id is inserted at its sorted
+position, so iteration, pair enumeration `(minId, maxId)` and the rolling checksum do not depend
+on the order entrants were added. `Game` holds exactly one roster and keeps the pre-issue-10
+one-entrant field names as a compile-time-asserted view of `entrants[0]` while collision,
+progress, telemetry and rendering migrate to entrant iteration. Presentation — audio and tire
+smoke today — follows `race_roster_local()` rather than the first slot. The rolling checksum now
+covers entrant count and per-entrant identity; issue 11 owns the ordered session stages that
+advance more than one entrant per tick.
+
 ## Context
 
 The current single-car `Game`, `Track`, and `VehicleSpec` aggregates mix immutable content,

@@ -65,19 +65,28 @@ static uint32_t hash_u64(uint32_t h, uint64_t value)
     return hash_bytes(h, &value, sizeof(value));
 }
 
-GAME_API uint32_t game_state_checksum(const Game *game)
+/*
+ * One entrant's authoritative mutable state, in a fixed field order.
+ *
+ * Identity is hashed first because ordering and membership are part of the result: two rosters
+ * holding the same cars under different ids, or one that lost an entrant, must not agree.
+ *
+ * The private controller memory is the one piece of persistent entrant state deliberately left
+ * out, and it is not an oversight. Playback calls controller_update() with
+ * CONTROLLER_KIND_REPLAY, so a recorded run's AI memory is never rebuilt during replay while a
+ * live run updates it every tick. Hashing it would make a live AI lap and its own replay
+ * disagree on every tick — the "ai-no-privilege" scenario measures exactly that parity — which
+ * would report a divergence where there is none. It is added when replay drives controllers
+ * through their own memory rather than around it; see docs/SIMULATION_OWNERSHIP.md.
+ */
+static uint32_t hash_entrant(uint32_t h, const RaceEntrant *entrant)
 {
-    if (game == NULL) return 0u;
-    uint32_t h = FNV1A_OFFSET_BASIS;
-    h = hash_u32(h, (uint32_t)game->state);
-    h = hash_u64(h, game->sim.tick);
-    h = hash_u32(h, game->sim.resetCount);
-    h = hash_u32(h, game->sim.pauseToggleCount);
-    h = hash_u32(h, game->sim.debugToggleCount);
-    h = hash_u32(h, game->sim.shiftUpCount);
-    h = hash_u32(h, game->sim.shiftDownCount);
+    h = hash_u32(h, entrant->id);
+    h = hash_u32(h, (uint32_t)entrant->gridSlot);
+    h = hash_u32(h, entrant->result.finished ? 1u : 0u);
+    h = hash_u32(h, (uint32_t)entrant->result.finishPosition);
 
-    const VehicleSetup *setup = &game->vehicleSetup;
+    const VehicleSetup *setup = &entrant->setup;
     h = hash_f32(h, setup->tirePressureFrontKpa);
     h = hash_f32(h, setup->tirePressureRearKpa);
     h = hash_f32(h, setup->suspCamberFrontRad);
@@ -95,7 +104,7 @@ GAME_API uint32_t game_state_checksum(const Game *game)
     h = hash_f32(h, setup->differentialBiasRatio);
     h = hash_f32(h, setup->differentialPreloadNm);
 
-    const VehicleState *v = &game->vehicle;
+    const VehicleState *v = &entrant->instance.vehicle;
     h = hash_f32(h, v->positionM.x);
     h = hash_f32(h, v->positionM.y);
     h = hash_f32(h, v->headingRad);
@@ -126,7 +135,7 @@ GAME_API uint32_t game_state_checksum(const Game *game)
         h = hash_u32(h, (uint32_t)wheel->surfaceId);
     }
 
-    const VehicleInstance *instance = &game->vehicleInstance;
+    const VehicleInstance *instance = &entrant->instance;
     h = hash_f32(h, instance->renderState.prevPositionM.x);
     h = hash_f32(h, instance->renderState.prevPositionM.y);
     h = hash_f32(h, instance->renderState.prevHeadingRad);
@@ -158,7 +167,7 @@ GAME_API uint32_t game_state_checksum(const Game *game)
      * the run ends, so a replay that diverged on it was previously undetectable. The bound
      * definition hash is deliberately NOT hashed here — an immutable input belongs to the
      * session compatibility digest, not to the rolling checksum. */
-    const RacerProgress *p = &game->progress;
+    const RacerProgress *p = &entrant->progress;
     h = hash_u32(h, (uint32_t)p->nextCheckpoint);
     h = hash_u32(h, (uint32_t)p->lap);
     h = hash_u32(h, (uint32_t)p->lapStartCheckpoint);
@@ -167,27 +176,60 @@ GAME_API uint32_t game_state_checksum(const Game *game)
     return h;
 }
 
+GAME_API uint32_t game_state_checksum(const Game *game)
+{
+    if (game == NULL) return 0u;
+    uint32_t h = FNV1A_OFFSET_BASIS;
+    h = hash_u32(h, (uint32_t)game->state);
+    h = hash_u64(h, game->sim.tick);
+    h = hash_u32(h, game->sim.resetCount);
+    h = hash_u32(h, game->sim.pauseToggleCount);
+    h = hash_u32(h, game->sim.debugToggleCount);
+    h = hash_u32(h, game->sim.shiftUpCount);
+    h = hash_u32(h, game->sim.shiftDownCount);
+
+    /* Ascending EntrantId, which is the roster's storage order.
+     *
+     * The two id cursors are hashed with the count because they decide what a LATER spawn is
+     * called: a session that spawned and despawned an entrant and one that never spawned it
+     * can hold identical entrants today and still name their next car differently, and a
+     * divergence the checksum cannot see is the kind this project exists to catch.
+     *
+     * Which entrant the local presentation follows is deliberately absent: that is a
+     * camera/audio decision, and a checksum that moved when the view changed would stop
+     * meaning "the simulation diverged". */
+    h = hash_u32(h, (uint32_t)game->roster.count);
+    h = hash_u32(h, game->roster.nextId);
+    h = hash_u32(h, game->roster.reuseFloorId);
+    for (int i = 0; i < game->roster.count; i++) {
+        h = hash_entrant(h, &game->roster.entrants[i]);
+    }
+    return h;
+}
+
 GAME_API void game_reset_sim(Game *game)
 {
     if (game == NULL) return;
-    vehicle_instance_reset(&game->vehicleInstance);
-    /* A car put back on the grid must not steer to a plan computed for where it used to be,
-     * so the entrant's private controller memory goes with its vehicle state. Kind and frozen
-     * configuration survive: the reset changes the situation, not who is driving. */
-    controller_reset(&game->controller);
+    /* Every entrant, in roster order. A car put back on the grid must not steer to a plan
+     * computed for where it used to be, so each entrant's private controller memory goes with
+     * its vehicle state; kind and frozen configuration survive, because the reset changes the
+     * situation rather than who is driving. */
+    race_roster_reset(&game->roster);
 }
 
 GAME_API void game_apply_spec(Game *game, const VehicleSpec *spec)
 {
     if (game == NULL || spec == NULL) return;
+    RaceEntrant *entrant = race_roster_local(&game->roster);
+    if (entrant == NULL) return;
+
     VehicleDefinition definition;
     if (!vehicle_definition_init(&definition, "runtime/profile", "runtime/profile", 1u, spec))
         return;
-    game->vehicleDefinition = definition;
-    vehicle_setup_set_default(&game->vehicleDefinition, &game->vehicleSetup);
-    (void)vehicle_instance_init(&game->vehicleInstance, &game->vehicleDefinition,
-                                &game->vehicleSetup);
-    controller_reset(&game->controller);
+    entrant->definition = definition;
+    vehicle_setup_set_default(&entrant->definition, &entrant->setup);
+    (void)vehicle_instance_init(&entrant->instance, &entrant->definition, &entrant->setup);
+    controller_reset(&entrant->controller);
 }
 
 GAME_API bool game_configure_run(Game *game, const GameRunConfig *config)
@@ -317,13 +359,16 @@ GAME_API void game_init(Game *game)
 {
     if (game == NULL) return;
     input_zero(&game->input);
-    controller_init(&game->controller, CONTROLLER_KIND_HUMAN);
-    controller_output_zero(&game->controllerOutput);
     memset(&game->sim, 0, sizeof(game->sim));
-    vehicle_definition_set_default(&game->vehicleDefinition);
-    vehicle_setup_set_default(&game->vehicleDefinition, &game->vehicleSetup);
-    (void)vehicle_instance_init(&game->vehicleInstance, &game->vehicleDefinition,
-                                &game->vehicleSetup);
+
+    /* One entrant, spawned through the same roster path a full grid uses: the default car,
+     * driven by the human at the keyboard, in grid slot 0. Everything downstream reads it
+     * either through race_roster_local() or through the compatibility view in game.h. */
+    race_roster_init(&game->roster);
+    const RaceEntrantSpawn playerSpawn = { .controllerKind = CONTROLLER_KIND_HUMAN,
+                                           .localPlayer = true,
+                                           .gridSlot = 0 };
+    (void)race_roster_spawn(&game->roster, &playerSpawn, NULL);
 #if defined(CIRCUIT_HEADLESS)
     game->state = STATE_PLAYING; /* headless: no menus, simulate immediately */
 #else
@@ -551,10 +596,21 @@ GAME_API void game_fixed_update(Game *game, float dt)
             }
         }
 
+        /* --- Presentation follows the local entrant, not "the first car" ---
+         *
+         * Audio and tyre smoke describe what the player is driving, so they read the entrant
+         * the roster designates as local. A session with no local entrant — a headless AI-only
+         * field — produces neither, which is precisely the partition that keeps presentation
+         * from depending on simulation storage order. */
+        const RaceEntrant *localEntrant = race_roster_local_const(&game->roster);
+
         /* Audio: per-tick engine pitch and tyre screech (after physics). */
-        audio_update(game->vehicle.engineRpm, game->spec.engineIdleRpm,
-                     game->spec.engineRedlineRpm, game->derived.physicallySliding,
-                     game->derived.speedMps, dt);
+        if (localEntrant != NULL) {
+            const VehicleInstance *localCar = &localEntrant->instance;
+            audio_update(localCar->vehicle.engineRpm, localCar->spec.engineIdleRpm,
+                         localCar->spec.engineRedlineRpm, localCar->derived.physicallySliding,
+                         localCar->derived.speedMps, dt);
+        }
 
         /* Results trigger: when the run's target lap count is reached, transition to
          * STATE_RESULTS. The car is no longer simulated after this tick. */
@@ -565,9 +621,10 @@ GAME_API void game_fixed_update(Game *game, float dt)
         /* Particle spawn: tire smoke from the rear wheels while physically sliding.
          * Two spawns per rear wheel per tick at 120 Hz ≈ 480 / s while sliding,
          * which the 512-slot pool sustains over the 0.8 s particle life. */
-        if (game->derived.physicallySliding && game->derived.speedMps > 5.0f) {
-            const float heading = game->vehicle.headingRad;
-            const float speedMps = fminf(game->derived.speedMps, 50.0f);
+        if (localEntrant != NULL && localEntrant->instance.derived.physicallySliding &&
+            localEntrant->instance.derived.speedMps > 5.0f) {
+            const float heading = localEntrant->instance.vehicle.headingRad;
+            const float speedMps = fminf(localEntrant->instance.derived.speedMps, 50.0f);
 
             /* Base velocity: rearward, opposite to the car's heading. */
             const float baseBackX = -cosf(heading) * speedMps * 0.25f;
@@ -576,7 +633,7 @@ GAME_API void game_fixed_update(Game *game, float dt)
             for (int w = 0; w < 2; w++) {
                 const WheelId wheelId = (w == 0) ? WHEEL_REAR_LEFT : WHEEL_REAR_RIGHT;
                 const Vector2 wheelWorldM =
-                    physics_wheel_world_position(&game->vehicle, wheelId);
+                    physics_wheel_world_position(&localEntrant->instance.vehicle, wheelId);
 
                 for (int s = 0; s < 2; s++) {
                     /* Deterministic spread that varies per-tick for visual variety. */
