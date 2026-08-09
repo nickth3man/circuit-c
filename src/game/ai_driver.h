@@ -181,7 +181,8 @@ void ai_driver_config_default(AiDriverConfig *cfg);
  * one-shot exactly as it found it, so a caller may still latch its own pause or reset.
  * Does nothing when the track has fewer than three centreline nodes.
  */
-void ai_driver_update(const AiDriverConfig *cfg, AiDriverState *state, const Track *track,
+void ai_driver_update(const AiDriverConfig *cfg, AiDriverState *state,
+                      const TrackDefinition *track, const TrackRuntime *runtime,
                       const VehicleState *vehicle, const VehicleDerived *derived,
                       const VehicleSpec *spec, Input *out, float dt);
 
@@ -191,6 +192,7 @@ void ai_driver_update(const AiDriverConfig *cfg, AiDriverState *state, const Tra
  * debug overlay drawing it. Nodes outside the current plan window fall back to the centreline.
  * Returns the centreline point when there is no plan.
  */
-Vector2 ai_driver_plan_point(const AiDriverState *state, const Track *track, int nodeIndex);
+Vector2 ai_driver_plan_point(const AiDriverState *state, const TrackDefinition *track,
+                             int nodeIndex);
 
 #endif /* CIRCUIT_AI_DRIVER_H */

@@ -44,7 +44,8 @@ static void draw_world_vector(Vector2 startM, Vector2 vectorM, float ppm, Color 
 
 /* ---- track rendering --------------------------------------------------------------- */
 
-void render_world_draw_track(const Track *track, float ppm)
+void render_world_draw_track(const TrackDefinition *track, const RacerProgress *progress,
+                             float ppm)
 {
     if (track == NULL || track->nodes == NULL || track->count < 2) return;
 
@@ -231,7 +232,7 @@ void render_world_draw_track(const Track *track, float ppm)
             (Vector2){ c->centerM.x + perp.x, c->centerM.y + perp.y }, ppm);
         const Vector2 bPx = units_world_to_render_px(
             (Vector2){ c->centerM.x - perp.x, c->centerM.y - perp.y }, ppm);
-        const bool isNext = (i == track->nextCheckpoint);
+        const bool isNext = (progress != NULL) && (i == progress->nextCheckpoint);
         const bool isStartFinish = (i == 0);
         Color color = isNext ? (Color){ 250, 210, 70, 220 } : (Color){ 120, 160, 200, 110 };
         if (isStartFinish && !isNext) color = (Color){ 230, 230, 235, 160 };

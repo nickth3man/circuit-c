@@ -29,12 +29,14 @@
  * Resolve collisions between the vehicle capsule and the track boundary.
  *
  * Mutates state (position, velocity, yaw) and renderState->curr*. Sets *crashLockoutTimerS
- * to CRASH_LOCKOUT_S on significant impacts.
+ * to CRASH_LOCKOUT_S on significant impacts. The track definition is read-only: a barrier
+ * strike cannot move a barrier, which is what lets every entrant share one definition.
+ * `runtime` is accepted for the session-wide environment #41 will consult; NULL is valid.
  *
  * Returns the number of contacts resolved (0 if none).
  */
 int collision_resolve_track(const VehicleSpec *spec, VehicleState *state,
-                            VehicleRenderState *renderState, const Track *track,
-                            float *crashLockoutTimerS);
+                            VehicleRenderState *renderState, const TrackDefinition *track,
+                            const TrackRuntime *runtime, float *crashLockoutTimerS);
 
 #endif /* CIRCUIT_COLLISION_H */

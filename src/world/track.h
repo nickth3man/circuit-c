@@ -1,11 +1,17 @@
 /*
- * track.h — track geometry, surface bands, and ordered lap checkpoints.
+ * track.h — track geometry, surface bands, ordered lap checkpoints, and per-racer progress.
  *
- * A Track owns two heap-allocated arrays: a centreline of TrackNode entries and an ordered
- * array of Checkpoint gates. Both survive hot reloads because the memory is heap-allocated
- * and the Game block is platform-owned. Never point either at module static data, and never
- * store a `const char *` in this struct for the same reason — the id and version below are
- * fixed char arrays precisely because Track lives inside Game.
+ * THREE TYPES, THREE OWNERS. Authored geometry and one racer's lap cursor used to share a
+ * single `Track` struct, which meant a track could only ever serve one car. They are now
+ * separate: an immutable TrackDefinition shared by every entrant, one RacerProgress per
+ * entrant, and a TrackRuntime for state that is mutable but session-wide rather than
+ * racer-specific. See docs/SIMULATION_OWNERSHIP.md.
+ *
+ * A TrackDefinition owns two heap-allocated arrays: a centreline of TrackNode entries and an
+ * ordered array of Checkpoint gates. Both survive hot reloads because the memory is
+ * heap-allocated and the Game block is platform-owned. Never point either at module static
+ * data, and never store a `const char *` in this struct for the same reason — the id and
+ * version below are fixed char arrays precisely because the definition lives inside Game.
  *
  * THREE SURFACE BANDS. A node describes the racing surface out to halfWidthM, a runoff band
  * from there out to runoffHalfWidthM, and off-track beyond. Barriers stand at the runoff
@@ -61,6 +67,11 @@ typedef struct {
     float lapTimeS;    /* the completed lap's time; meaningful only when lapCompleted */
 } TrackCheckpointEvent;
 
+/*
+ * Authored track content. Immutable once loaded, and shared by every entrant in a session:
+ * nothing here may be written while a race is running. It owns no lap cursor and no timer,
+ * which is what lets two cars read one definition without disturbing each other.
+ */
 typedef struct {
     TrackNode *nodes; /* heap-allocated, survives reload (plain heap, not module static) */
     int count;
@@ -71,17 +82,38 @@ typedef struct {
     /* Parking lot mode: rectangular open area instead of laned road. */
     bool isParkingLot;
     float lotMinXM, lotMaxXM, lotMinYM, lotMaxYM;
-    int nextCheckpoint;     /* index of the next gate the car must cross */
-    int lap;                /* completed laps */
-    int lapStartCheckpoint; /* gate whose crossing closes one lap for this run */
-    float lapTimerS;        /* seconds elapsed since the last checkpoint/lap */
-    float lastLapTimeS;     /* time of the most recently completed lap */
     /* Identity, for telemetry and run metadata. Fixed arrays, never pointers: see the header
      * comment. `version` changes whenever the geometry changes, so a run recorded against an
      * older shape is identifiable rather than silently comparable. */
     char id[TRACK_ID_CHARS];
     char version[TRACK_VERSION_CHARS];
-} Track;
+} TrackDefinition;
+
+/*
+ * One racer's position around the route. Exactly one per entrant, never shared, and the only
+ * thing a checkpoint crossing writes. A zeroed RacerProgress is a valid "start of an out-lap
+ * from gate 0" state, so a caller that calloc's one does not have to initialise it.
+ */
+typedef struct {
+    int nextCheckpoint;     /* index of the next gate the car must cross */
+    int lap;                /* completed laps */
+    int lapStartCheckpoint; /* gate whose crossing closes one lap for this run */
+    float lapTimerS;        /* seconds elapsed since the last checkpoint/lap */
+    float lastLapTimeS;     /* time of the most recently completed lap */
+} RacerProgress;
+
+/*
+ * Mutable track state that belongs to the session rather than to any one racer.
+ *
+ * Today it holds only the hash of the definition it was bound to, which is what lets a test
+ * prove the shared geometry was not written during a session. Deterministic weather/wetness
+ * and derived query caches join it later; a cache that differs per racer belongs in that
+ * entrant's RacerProgress instead, not here.
+ */
+typedef struct {
+    /* track_geometry_hash() of the definition bound at session start. */
+    uint32_t definitionHash;
+} TrackRuntime;
 
 /*
  * Barrier distance from the centreline for this node.
@@ -98,62 +130,89 @@ static inline float track_node_barrier_half_width(const TrackNode *node)
                                                        : node->halfWidthM;
 }
 
-void track_init(Track *track); /* allocate + populate the parking lot */
-void track_free(Track *track); /* free arrays, zero the struct */
+void track_init(TrackDefinition *track); /* allocate + populate the parking lot */
+void track_free(TrackDefinition *track); /* free arrays, zero the struct */
+
+/*
+ * Bind a runtime to the definition a session is about to race on, recording its geometry
+ * hash. Call after the definition is loaded and before the first fixed update.
+ */
+void track_runtime_bind(TrackRuntime *runtime, const TrackDefinition *track);
+
+/*
+ * True when `track` still hashes to what `runtime` recorded at bind time — that is, when the
+ * shared definition was not mutated during the session. This is the immutability check the
+ * ownership split exists to make possible.
+ */
+bool track_runtime_definition_unchanged(const TrackRuntime *runtime,
+                                        const TrackDefinition *track);
 
 /* The chicane validation circuit: two straights joined by 180-degree curves, with a
  * left-right chicane set into the far straight. Closed loop, 8 required gates, gate 0 the
  * start/finish. This is the track Milestone 1 validates every car against. */
-void track_load_chicane(Track *track);
+void track_load_chicane(TrackDefinition *track);
 /* A second authored layout for multi-track AI validation. It preserves the checkpoint contract
  * while changing the stadium proportions and chicane displacement. */
-void track_load_sprint(Track *track);
+void track_load_sprint(TrackDefinition *track);
 /* A tighter technical layout derived from the authored chicane with shorter radii and narrower runoff. */
-void track_load_technical(Track *track);
+void track_load_technical(TrackDefinition *track);
 
 /* Derive one gate per centreline node, forward-facing and spanning the node width — the
  * implicit scheme the checkpoint code used before gates became explicit data. Lets a caller
  * that hand-builds a node ribbon get lap validation without authoring gates by hand. */
-bool track_build_checkpoints_from_nodes(Track *track);
+bool track_build_checkpoints_from_nodes(TrackDefinition *track);
 
-/* Put lap progress back to the start of an out-lap: no laps completed, timers zeroed, and
- * the next required gate set to the one after start/finish, because a standing start places
- * the car ON the start/finish line and it must not score that gate without driving a lap. */
-void track_reset_progress(Track *track);
-/* Reset progress for a standing start at an arbitrary checkpoint. */
-void track_reset_progress_at(Track *track, int startCheckpointIndex);
+/*
+ * Put one racer's progress back to the start of an out-lap at `startCheckpointIndex`: no laps
+ * completed, timers zeroed, and the next required gate set to the one after it, because a
+ * standing start places the car ON its gate and it must not score that gate without driving a
+ * lap. Reads the definition only for its gate count; resetting one racer cannot touch another.
+ */
+void track_reset_progress_at(RacerProgress *progress, const TrackDefinition *track,
+                             int startCheckpointIndex);
 
 /* Where a standing start puts the car: the start/finish gate's midpoint, facing along its
  * forward direction. Returns false (and writes nothing) when the track has no gates. */
-bool track_start_pose(const Track *track, Vector2 *positionM, float *headingRad);
+bool track_start_pose(const TrackDefinition *track, Vector2 *positionM, float *headingRad);
 /* Start pose at an arbitrary checkpoint, facing that gate's forward direction. */
-bool track_start_pose_at(const Track *track, int checkpointIndex, Vector2 *positionM,
+bool track_start_pose_at(const TrackDefinition *track, int checkpointIndex, Vector2 *positionM,
                          float *headingRad);
 
 /* FNV-1a over the node and checkpoint arrays. Two tracks with the same hash have the same
  * shape, so a run's metadata can prove which geometry produced it even if `version` was not
  * bumped after an edit. */
-uint32_t track_geometry_hash(const Track *track);
+uint32_t track_geometry_hash(const TrackDefinition *track);
 
 /* Total centreline length, meters. */
-float track_length_m(const Track *track);
+float track_length_m(const TrackDefinition *track);
 
-SurfaceId Track_SurfaceAt(const Track *track, Vector2 pointM);
+/* Surface under a world point. `runtime` carries the session-wide environment the query will
+ * consult once wetness exists; it is accepted now so the call sites do not move again, and
+ * NULL is valid and means "definition only". */
+SurfaceId Track_SurfaceAt(const TrackDefinition *track, const TrackRuntime *runtime,
+                          Vector2 pointM);
 
 /* Distance from pointM to the nearest centreline segment, in metres.
  * Returns 0.0f if track is NULL or has no nodes. Optionally writes
  * the half-width of that segment to *halfWidthM when non-NULL. */
-float track_distance_to_centerline_m(const Track *track, Vector2 pointM, float *halfWidthM);
+float track_distance_to_centerline_m(const TrackDefinition *track, Vector2 pointM,
+                                     float *halfWidthM);
 
 /*
- * Advance checkpoint/lap state from the car's movement this tick.
+ * Advance ONE racer's checkpoint/lap state from that car's movement this tick.
  *
  * prevPosM/currPosM are world meters, the car's position at the start and end of the tick.
  * EVERY gate is tested, not only the expected one, so a car that cuts the course is reported
  * through TrackCheckpointEvent.outOfOrder instead of silently failing to advance. Only the
  * expected gate advances progress. Crossings against a gate's forward direction are ignored,
  * so reversing over a line cannot score it.
+ *
+ * The definition is read-only: the gates a car is measured against cannot change because a
+ * car drove through one, and two entrants may call this against the same definition in the
+ * same tick without interacting.
  */
-TrackCheckpointEvent track_update_checkpoints(Track *track, Vector2 prevPosM, Vector2 currPosM);
+TrackCheckpointEvent track_update_checkpoints(const TrackDefinition *track,
+                                              RacerProgress *progress, Vector2 prevPosM,
+                                              Vector2 currPosM);
 
 #endif /* CIRCUIT_TRACK_H */
