@@ -958,7 +958,7 @@ static void scenario_ai_lap(void)
     game->state = STATE_PLAYING;
     /* The run is longer than a race, so it must say so: the results trigger would otherwise
      * stop simulating the car at the gameplay default and strand the last timed lap. */
-    game->targetLaps = VALIDATION_RUN_LAPS;
+    game->session.rules.targetLaps = VALIDATION_RUN_LAPS;
 
     controller_init(&game->controller, CONTROLLER_KIND_AI);
     const AiDriverConfig cfg = game->controller.config.ai;
@@ -1199,7 +1199,7 @@ static void scenario_ai_lap(void)
         repeat->autoTrans.enabled = true;
         repeat->autoTrans.forwardOnly = true;
         repeat->state = STATE_PLAYING;
-        repeat->targetLaps = VALIDATION_RUN_LAPS;
+        repeat->session.rules.targetLaps = VALIDATION_RUN_LAPS;
 
         controller_init(&repeat->controller, CONTROLLER_KIND_AI);
         for (int tick = 0; tick < ticksRun; tick++) {
@@ -1309,7 +1309,7 @@ static void scenario_ai_roster_laps(void)
         game->autoTrans.enabled = true;
         game->autoTrans.forwardOnly = true;
         game->state = STATE_PLAYING;
-        game->targetLaps = VALIDATION_RUN_LAPS;
+        game->session.rules.targetLaps = VALIDATION_RUN_LAPS;
 
         controller_init(&game->controller, CONTROLLER_KIND_AI);
 
@@ -1556,6 +1556,232 @@ static void scenario_track_runoff(void)
  * only the FINAL gate crossing is needed here — the crossing mechanics are
  * checkpoint-lap's job, not this scenario's.
  */
+/* ------------------------------------------------------------------------------------- */
+/* Scenario: race-session — lifecycle, phases, pause, restart, rules, and classification    */
+/* ------------------------------------------------------------------------------------- */
+
+/* Count how many events of one kind the session has raised, oldest first. */
+static int session_event_count(const RaceSession *session, RaceEventKind kind)
+{
+    int found = 0;
+    for (int i = 0; i < session->events.count; i++) {
+        const int slot = (session->events.head + i) % RACE_EVENT_CAPACITY;
+        if (session->events.items[slot].kind == kind) found++;
+    }
+    return found;
+}
+
+/* Spawn `count` AI entrants beside whatever the session already holds. */
+static void add_ai_entrants(RaceSession *session, int count)
+{
+    for (int i = 0; i < count; i++) {
+        const RaceEntrantSpawn spawn = { .controllerKind = CONTROLLER_KIND_AI, .gridSlot = -1 };
+        check(race_roster_spawn(&session->roster, &spawn, NULL), "AI entrant %d spawned", i);
+    }
+}
+
+/*
+ * The race lifecycle, driven headlessly from configuration to classified results.
+ *
+ * What this asserts is the session authority itself: that phases move only along legal edges,
+ * that a paused race freezes its own clock without disturbing the lap timing or the command
+ * latch, that a restart really does return every piece of session state to its starting value,
+ * and that the two finish rules differ in the one way they are supposed to.
+ */
+static void scenario_race_session(void)
+{
+    /* ---- 1. A fresh session is configured, not racing ---- */
+    RaceSession *session = (RaceSession *)calloc(1, sizeof(RaceSession));
+    check(session != NULL, "session fixture allocated");
+    if (session == NULL) return;
+
+    race_session_init(session);
+    check(session->phase == RACE_PHASE_CONFIGURING,
+          "an initialised session is CONFIGURING, not racing (got %d)", (int)session->phase);
+    check(!race_session_is_simulating(session), "and it does not simulate");
+    check(!race_session_pause(session), "a race that has not started cannot be paused");
+    check(!race_session_abort(session), "nor aborted");
+
+    /* ---- 2. Starting releases through the grid ---- */
+    RaceRules rules;
+    race_rules_set_default(&rules);
+    rules.targetLaps = 2;
+    race_session_start(session, &rules);
+    check(session->phase == RACE_PHASE_RUNNING,
+          "no countdown releases straight to RUNNING (got %d)", (int)session->phase);
+    check(race_session_is_simulating(session), "a running session simulates");
+    check(session_event_count(session, RACE_EVENT_PHASE_CHANGED) == 2,
+          "the grid is still passed through, so a listener sees GRID then RUNNING (got %d)",
+          session_event_count(session, RACE_EVENT_PHASE_CHANGED));
+
+    /* ---- 3. A countdown holds the grid for exactly its configured number of ticks ---- */
+    rules.countdownS = 3.0f * FIXED_DT_S;
+    race_session_start(session, &rules);
+    check(session->phase == RACE_PHASE_COUNTDOWN,
+          "a configured countdown starts in COUNTDOWN (got %d)", (int)session->phase);
+    check(race_session_is_simulating(session),
+          "a countdown still simulates: the cars settle on the grid");
+
+    for (int i = 0; i < 3; i++) race_session_update_rules(session, FIXED_DT_S);
+    check(session->phase == RACE_PHASE_RUNNING,
+          "the countdown releases after exactly its three ticks (got %d)", (int)session->phase);
+    check(session->clockS == 0.0f, "and the race clock has not started yet (got %.6f)",
+          (double)session->clockS);
+    check(session->tick == 3u, "the session ticked through the countdown (got %llu)",
+          (unsigned long long)session->tick);
+
+    /* ---- 4. The race clock counts green-flag time only ---- */
+    for (int i = 0; i < 10; i++) race_session_update_rules(session, FIXED_DT_S);
+    const float greenClockS = session->clockS;
+    check_near((double)greenClockS, (double)(10.0f * FIXED_DT_S), 1e-6,
+               "ten green ticks advance the race clock by ten fixed steps");
+
+    check(race_session_pause(session) && session->phase == RACE_PHASE_PAUSED,
+          "a running race can be paused");
+    for (int i = 0; i < 10; i++) race_session_update_rules(session, FIXED_DT_S);
+    check(session->clockS == greenClockS,
+          "and a paused race's clock does not move, however many ticks arrive (%.6f vs %.6f)",
+          (double)session->clockS, (double)greenClockS);
+    check(!race_session_pause(session), "pausing a paused race is refused, not stacked");
+    check(race_session_resume(session) && session->phase == RACE_PHASE_RUNNING,
+          "resume returns to the phase the pause interrupted");
+    check(!race_session_resume(session), "and resuming a running race is refused");
+
+    /* ---- 5. Restart returns every piece of session state to its start ---- */
+    race_session_start(session, &rules);
+    check(session->tick == 0u && session->clockS == 0.0f && session->classifiedCount == 0 &&
+              !session->results.valid && session->events.totalAppended == 2u,
+          "a restart rewinds clock, tick, classification, results and the event log");
+
+    /* ---- 6. Time trial classifies on the first finisher; a race waits for the field ---- */
+    {
+        RaceSession *trial = (RaceSession *)calloc(1, sizeof(RaceSession));
+        RaceSession *field = (RaceSession *)calloc(1, sizeof(RaceSession));
+        check(trial != NULL && field != NULL, "mode fixtures allocated");
+        if (trial != NULL && field != NULL) {
+            RaceRules trialRules;
+            race_rules_set_default(&trialRules);
+            trialRules.targetLaps = 1;
+
+            race_session_init(trial);
+            add_ai_entrants(trial, 3);
+            trialRules.mode = RACE_MODE_TIME_TRIAL;
+            race_session_start(trial, &trialRules);
+
+            race_session_init(field);
+            add_ai_entrants(field, 3);
+            trialRules.mode = RACE_MODE_RACE;
+            race_session_start(field, &trialRules);
+
+            /* Exactly one entrant completes the distance in each session. */
+            trial->roster.entrants[1].progress.lap = 1;
+            field->roster.entrants[1].progress.lap = 1;
+            race_session_update_rules(trial, FIXED_DT_S);
+            race_session_update_rules(field, FIXED_DT_S);
+
+            check(trial->phase == RACE_PHASE_CLASSIFIED,
+                  "a time trial is over when the timed driver is (got %d)", (int)trial->phase);
+            check(field->phase == RACE_PHASE_FINISHING,
+                  "a race with cars still running is FINISHING, not classified (got %d)",
+                  (int)field->phase);
+            check(field->roster.entrants[1].result.finishPosition == 1,
+                  "the first car home takes position 1 (got %d)",
+                  field->roster.entrants[1].result.finishPosition);
+
+            /* The rest of the field finishes; positions follow the order they arrive in. */
+            field->roster.entrants[2].progress.lap = 1;
+            race_session_update_rules(field, FIXED_DT_S);
+            field->roster.entrants[0].progress.lap = 1;
+            race_session_update_rules(field, FIXED_DT_S);
+
+            check(field->phase == RACE_PHASE_CLASSIFIED,
+                  "the race classifies once the last car is home (got %d)", (int)field->phase);
+            check(field->results.valid && field->results.count == 3,
+                  "and the results snapshot holds every entrant (count %d)",
+                  field->results.count);
+            check(field->results.rows[0].finishPosition == 1 &&
+                      field->results.rows[1].finishPosition == 2 &&
+                      field->results.rows[2].finishPosition == 3,
+                  "ordered by finishing position");
+            check(field->results.rows[0].entrantId == field->roster.entrants[1].id &&
+                      field->results.rows[2].entrantId == field->roster.entrants[0].id,
+                  "and the order is the order they finished, not the order they are stored in");
+            check(session_event_count(field, RACE_EVENT_ENTRANT_FINISHED) == 3,
+                  "one finish event per entrant (got %d)",
+                  session_event_count(field, RACE_EVENT_ENTRANT_FINISHED));
+            check(race_session_is_over(field) && !race_session_is_simulating(field),
+                  "a classified race is over and stops simulating");
+        }
+        free(field);
+        free(trial);
+    }
+
+    /* ---- 7. Abort ends a race without classifying it ---- */
+    race_session_start(session, &rules);
+    check(race_session_abort(session) && session->phase == RACE_PHASE_ABORTED,
+          "a running race can be abandoned");
+    check(race_session_is_over(session) && !session->results.valid,
+          "an aborted race is over and produces no results");
+    check(!race_session_resume(session), "and cannot be resumed into");
+
+    free(session);
+
+    /* ---- 8. The same lifecycle driven through Game, with pause preserving lap timing ---- */
+    {
+        Game *game = alloc_game();
+        game_init(game);
+        check(game->session.phase == RACE_PHASE_RUNNING && game->state == STATE_PLAYING,
+              "game_init() leaves a running session on the playing screen (phase %d, state %d)",
+              (int)game->session.phase, (int)game->state);
+
+        for (int i = 0; i < 30; i++) game_fixed_update(game, FIXED_DT_S);
+        const float clockBefore = game->session.clockS;
+        const float lapTimerBefore = game->progress.lapTimerS;
+        const uint64_t sessionTickBefore = game->session.tick;
+
+        /* Pause and an upshift latched on the same tick: the session must freeze and the
+         * entrant's one-shot must still be consumed exactly once. */
+        game->autoTrans.enabled = false;
+        game->vehicle.selectedGear = 2;
+        game->input.pausePressed = true;
+        game->input.shiftUpPressed = true;
+        game_fixed_update(game, FIXED_DT_S);
+
+        check(game->session.phase == RACE_PHASE_PAUSED && game->state == STATE_PAUSED,
+              "pause moves both axes together (phase %d, state %d)", (int)game->session.phase,
+              (int)game->state);
+        check(game->sim.shiftUpCount == 1u && game->vehicle.selectedGear == 3,
+              "and the gear request latched on the pausing tick is still honoured once "
+              "(count %u, gear %d)",
+              game->sim.shiftUpCount, game->vehicle.selectedGear);
+
+        for (int i = 0; i < 60; i++) game_fixed_update(game, FIXED_DT_S);
+        check(game->session.clockS == clockBefore && game->session.tick == sessionTickBefore,
+              "a paused race freezes its own clock and tick across sixty ticks");
+        check(game->progress.lapTimerS == lapTimerBefore,
+              "and the lap timer with it (%.6f vs %.6f)", (double)game->progress.lapTimerS,
+              (double)lapTimerBefore);
+        check(
+            game->sim.tick > sessionTickBefore,
+            "while the application tick keeps counting, because it times the app not the race");
+
+        game->input.pausePressed = true;
+        game_fixed_update(game, FIXED_DT_S);
+        check(game->session.phase == RACE_PHASE_RUNNING && game->state == STATE_PLAYING,
+              "resume moves both axes back");
+        check(game->session.clockS > clockBefore, "and the race clock starts advancing again");
+
+        /* Reset restarts the session rather than merely moving the car. */
+        game->input.resetPressed = true;
+        game_fixed_update(game, FIXED_DT_S);
+        check(game->session.phase == RACE_PHASE_RUNNING && game->session.clockS <= FIXED_DT_S,
+              "a reset restarts the race from tick zero (phase %d, clock %.6f)",
+              (int)game->session.phase, (double)game->session.clockS);
+
+        free(game);
+    }
+}
+
 static void scenario_lap_target_results(void)
 {
     Game *game = alloc_game();
@@ -2020,6 +2246,8 @@ static const TestScenario kGameplayScenarios[] = {
       scenario_track_surface },
     { "lap-target-results", "reaching RESULTS_TARGET_LAPS live flips PLAYING to RESULTS",
       scenario_lap_target_results },
+    { "race-session", "session lifecycle: phases, countdown, pause, restart, modes, results",
+      scenario_race_session },
     { "collision-barrier", "capsule barrier collision, swept test, impulse, and crash lockout",
       scenario_collision_barrier },
     { "collision-units",

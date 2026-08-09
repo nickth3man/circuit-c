@@ -64,6 +64,7 @@ typedef uint32_t EntrantId;
 typedef struct {
     bool finished;
     int finishPosition; /* 1-based once classified; 0 while the entrant is still racing */
+    float finishTimeS;  /* session clock when the distance was completed; 0 until then */
 } EntrantResult;
 
 /*

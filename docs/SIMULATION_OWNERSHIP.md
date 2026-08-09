@@ -39,6 +39,26 @@ smoke today — follows `race_roster_local()` rather than the first slot. The ro
 covers entrant count and per-entrant identity; issue 11 owns the ordered session stages that
 advance more than one entrant per tick.
 
+Issue 11 is implemented by `RaceSession` in `src/game/race_session.h`. It owns the roster, the
+frozen `RaceRules`, the selected track id, the phase and its resume target, the green-flag tick
+and clock, the countdown, classification, a bounded deterministic event log, and the results
+snapshot. `GameStateId` keeps its one remaining job — choosing the screen the HUD draws — and
+the fixed update simulates only when the screen is the playing screen *and*
+`race_session_is_simulating()` agrees, so a paused overlay can no longer sit over a running
+clock. Session tick and clock count green-flag time only and rewind on restart, which is why
+`Game.sim.tick` stays beside them: it times the application, not the race. The countdown is
+counted in whole fixed steps rather than by subtracting `dt` from a float, so the grid releases
+on the same tick every run.
+
+`game_fixed_update()` is now ten named stages — acquire inputs, controllers, record/commands,
+pre-physics gating, physics, progress, collision, rules, finalize, presentation — each
+documenting what it reads and what it may write. Two deliberate departures from the target
+order above are recorded in the code: progress still runs before collision (the swap was
+measured to change no trace today and belongs with the collision work in issues 26-27), and
+presentation runs before finalize because the deterministic tire-smoke spread is seeded from
+the application tick. The rolling checksum gained phase, rules, session tick/clock, countdown,
+classification and the event-append count.
+
 ## Context
 
 The current single-car `Game`, `Track`, and `VehicleSpec` aggregates mix immutable content,
