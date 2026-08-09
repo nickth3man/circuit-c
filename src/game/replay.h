@@ -94,8 +94,9 @@ void replay_begin_recording(ReplayBuffer *rb, uint64_t startTick);
 void replay_record(ReplayBuffer *rb, const Input *in);
 
 /* Rewind to the oldest retained frame and begin playback. Returns false (and stays IDLE)
- * when there is nothing recorded. Recording stops; the retained frames are preserved, so
- * the same timeline can be replayed repeatedly. */
+ * when there is nothing recorded, or when a vehicle snapshot predates frames discarded by
+ * ring overflow. Input-only timelines may still replay a wrapped window. Recording stops;
+ * the retained frames are preserved, so the same timeline can be replayed repeatedly. */
 bool replay_begin_playback(ReplayBuffer *rb);
 
 /* Pop the next recorded tick into *out. Returns false when the timeline is exhausted or

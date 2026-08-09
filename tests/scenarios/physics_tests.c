@@ -2251,6 +2251,24 @@ static void scenario_dev_replay(void)
     static ReplayBuffer restored;
 
     replay_begin_recording(&source, 100u);
+    VehicleDefinition replayDefinition;
+    VehicleSetup replaySetup;
+    VehicleInstance replayInstance;
+    vehicle_definition_set_default(&replayDefinition);
+    vehicle_setup_set_default(&replayDefinition, &replaySetup);
+    check(vehicle_instance_init(&replayInstance, &replayDefinition, &replaySetup),
+          "the durable replay fixture initializes its vehicle");
+    replaySetup.brakeBiasFront -= 0.02f;
+    check(vehicle_instance_derive(&replayInstance, &replayDefinition, &replaySetup),
+          "the durable replay fixture applies its setup");
+    replayInstance.vehicle.positionM = (Vector2){ 7.0f, -2.0f };
+    replayInstance.vehicle.velocityLongitudinalMps = 12.5f;
+    replayInstance.vehicleControls.throttle = 0.6f;
+    replayInstance.autoTrans.driveState = AUTO_REVERSE;
+    replayInstance.fuelKg = 3.5f;
+    replayInstance.tireState[WHEEL_REAR_RIGHT].wear = 0.15f;
+    replayInstance.damage = 0.25f;
+    replay_capture_initial_vehicle(&source, &replayDefinition, &replaySetup, &replayInstance);
     for (int i = 0; i < 240; i++) {
         Input in;
         input_zero(&in);
@@ -2278,6 +2296,25 @@ static void scenario_dev_replay(void)
     check(info.finalChecksum == 0xdeadbeefu, "the header records the final checksum");
     check(strcmp(info.label, "unit-test") == 0, "the header records the label");
     check(restored.count == source.count, "every frame came back");
+    VehicleSetup restoredSetup;
+    VehicleInstance restoredInstance;
+    memset(&restoredSetup, 0, sizeof(restoredSetup));
+    memset(&restoredInstance, 0, sizeof(restoredInstance));
+    check(replay_restore_initial_vehicle(&restored, &replayDefinition, &restoredSetup,
+                                         &restoredInstance),
+          "the durable replay restores its definition-referenced vehicle snapshot");
+    check(restoredSetup.brakeBiasFront == replaySetup.brakeBiasFront &&
+              restoredInstance.vehicle.positionM.x == replayInstance.vehicle.positionM.x &&
+              restoredInstance.vehicle.velocityLongitudinalMps ==
+                  replayInstance.vehicle.velocityLongitudinalMps &&
+              restoredInstance.vehicleControls.throttle ==
+                  replayInstance.vehicleControls.throttle &&
+              restoredInstance.autoTrans.driveState == replayInstance.autoTrans.driveState &&
+              restoredInstance.fuelKg == replayInstance.fuelKg &&
+              restoredInstance.tireState[WHEEL_REAR_RIGHT].wear ==
+                  replayInstance.tireState[WHEEL_REAR_RIGHT].wear &&
+              restoredInstance.damage == replayInstance.damage,
+          "durable replay vehicle state is field-identical after save/load");
 
     int differences = 0;
     for (int i = 0; i < source.count; i++) {
@@ -3082,6 +3119,20 @@ static void scenario_vehicle_instance_isolation(void)
     check(strcmp(definition.id, "builtin/default") == 0 && definition.contentVersion == 1u &&
               definition.contentHash != 0u,
           "definition has a stable content identity and hash");
+
+    VehicleSpec paddedA = definition.spec;
+    VehicleSpec paddedB = definition.spec;
+    const size_t paddingStart = offsetof(VehicleSpec, lateralLoadTransferEnabled) +
+                                sizeof(paddedA.lateralLoadTransferEnabled);
+    memset((unsigned char *)&paddedA + paddingStart, 0xa5, sizeof(paddedA) - paddingStart);
+    memset((unsigned char *)&paddedB + paddingStart, 0x5a, sizeof(paddedB) - paddingStart);
+    VehicleDefinition definitionA;
+    VehicleDefinition definitionB;
+    check(vehicle_definition_init(&definitionA, "padding-test", "padding-test", 1u, &paddedA) &&
+              vehicle_definition_init(&definitionB, "padding-test", "padding-test", 1u,
+                                      &paddedB) &&
+              definitionA.contentHash == definitionB.contentHash,
+          "content hash ignores structure padding and hashes canonical fields");
 
     VehicleSetup setupA = { 0 };
     VehicleSetup setupB;

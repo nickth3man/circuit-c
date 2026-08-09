@@ -26,7 +26,7 @@
 #include "game/replay.h"
 
 #define DEV_REPLAY_MAGIC 0x4C505244u /* 'DRPL' little-endian */
-#define DEV_REPLAY_VERSION 1u
+#define DEV_REPLAY_VERSION 2u
 #define DEV_REPLAY_LABEL_CHARS 32
 
 /* Everything about a timeline except the frames themselves. */

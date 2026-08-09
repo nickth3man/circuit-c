@@ -423,14 +423,161 @@ void vehicle_state_reset(const VehicleSpec *spec, VehicleState *state, VehicleDe
     renderState->currHeadingRad = state->headingRad;
 }
 
-static uint32_t vehicle_content_hash(const VehicleSpec *spec)
+static uint32_t vehicle_hash_u32(uint32_t hash, uint32_t value)
 {
-    const unsigned char *bytes = (const unsigned char *)spec;
-    uint32_t hash = 0x811c9dc5u;
-    for (size_t i = 0; i < sizeof(*spec); i++) {
-        hash ^= bytes[i];
+    for (int shift = 0; shift < 32; shift += 8) {
+        hash ^= (value >> shift) & 0xffu;
         hash *= 0x01000193u;
     }
+    return hash;
+}
+
+static uint32_t vehicle_hash_f32(uint32_t hash, float value)
+{
+    uint32_t bits = 0u;
+    memcpy(&bits, &value, sizeof(bits));
+    return vehicle_hash_u32(hash, bits);
+}
+
+static uint32_t vehicle_content_hash(const VehicleSpec *spec)
+{
+    uint32_t hash = 0x811c9dc5u;
+#define HASH_FLOAT(field) hash = vehicle_hash_f32(hash, spec->field)
+
+    HASH_FLOAT(wheelbaseM);
+    HASH_FLOAT(trackWidthFrontM);
+    HASH_FLOAT(trackWidthRearM);
+    HASH_FLOAT(frontOverhangM);
+    HASH_FLOAT(rearOverhangM);
+    HASH_FLOAT(widthOverallM);
+    HASH_FLOAT(heightOverallM);
+    HASH_FLOAT(rideHeightFrontM);
+    HASH_FLOAT(rideHeightRearM);
+    HASH_FLOAT(cowlXM);
+    HASH_FLOAT(backlightXM);
+    HASH_FLOAT(bedLengthM);
+    HASH_FLOAT(noseWidthM);
+    HASH_FLOAT(tailWidthM);
+    HASH_FLOAT(shoulderXM);
+    HASH_FLOAT(fenderFlareFrontM);
+    HASH_FLOAT(fenderFlareRearM);
+    HASH_FLOAT(roofStartXM);
+    HASH_FLOAT(roofEndXM);
+    HASH_FLOAT(roofWidthM);
+    HASH_FLOAT(windscreenRakeRad);
+    HASH_FLOAT(backlightRakeRad);
+    HASH_FLOAT(sideWindowCount);
+    HASH_FLOAT(quarterWindowLengthM);
+    HASH_FLOAT(sunroofLengthM);
+    HASH_FLOAT(doorCount);
+    HASH_FLOAT(cabinRows);
+    HASH_FLOAT(roofType);
+    HASH_FLOAT(massEngineKg);
+    HASH_FLOAT(massEngineXM);
+    HASH_FLOAT(massEngineZM);
+    HASH_FLOAT(massGearboxKg);
+    HASH_FLOAT(massGearboxXM);
+    HASH_FLOAT(massGearboxZM);
+    HASH_FLOAT(massFuelKg);
+    HASH_FLOAT(massFuelXM);
+    HASH_FLOAT(massFuelZM);
+    HASH_FLOAT(massDriverKg);
+    HASH_FLOAT(massDriverXM);
+    HASH_FLOAT(massDriverZM);
+    HASH_FLOAT(massChassisKg);
+    HASH_FLOAT(massChassisXM);
+    HASH_FLOAT(massChassisZM);
+    HASH_FLOAT(tireSectionWidthFrontMm);
+    HASH_FLOAT(tireSectionWidthRearMm);
+    HASH_FLOAT(tireAspectFrontPct);
+    HASH_FLOAT(tireAspectRearPct);
+    HASH_FLOAT(tireRimDiameterFrontIn);
+    HASH_FLOAT(tireRimDiameterRearIn);
+    HASH_FLOAT(tireRimWidthFrontIn);
+    HASH_FLOAT(tireRimWidthRearIn);
+    HASH_FLOAT(tirePressureFrontKpa);
+    HASH_FLOAT(tirePressureRearKpa);
+    HASH_FLOAT(suspCamberFrontRad);
+    HASH_FLOAT(suspCamberRearRad);
+    HASH_FLOAT(suspToeFrontRad);
+    HASH_FLOAT(suspToeRearRad);
+    HASH_FLOAT(suspCasterFrontRad);
+    HASH_FLOAT(suspCasterRearRad);
+    HASH_FLOAT(suspWheelRateFrontNpm);
+    HASH_FLOAT(suspWheelRateRearNpm);
+    HASH_FLOAT(suspAntiRollFrontNpm);
+    HASH_FLOAT(suspAntiRollRearNpm);
+    HASH_FLOAT(suspTravelFrontM);
+    HASH_FLOAT(suspTravelRearM);
+    HASH_FLOAT(suspRollCentreFrontM);
+    HASH_FLOAT(suspRollCentreRearM);
+    HASH_FLOAT(wheelOffsetEtFrontMm);
+    HASH_FLOAT(wheelOffsetEtRearMm);
+    HASH_FLOAT(brakeDiscRadiusFrontM);
+    HASH_FLOAT(brakeDiscRadiusRearM);
+    HASH_FLOAT(brakePadFriction);
+    HASH_FLOAT(aeroLiftCoefFront);
+    HASH_FLOAT(aeroLiftCoefRear);
+    HASH_FLOAT(aeroRefAreaFrontM2);
+    HASH_FLOAT(aeroRefAreaRearM2);
+    HASH_FLOAT(aeroCentreOfPressureXM);
+    HASH_FLOAT(drivetrainLayout);
+    HASH_FLOAT(frontTorqueSplit);
+    HASH_FLOAT(engineCylinders);
+    HASH_FLOAT(engineDisplacementL);
+    HASH_FLOAT(massKg);
+    HASH_FLOAT(yawInertiaKgM2);
+    HASH_FLOAT(cgToFrontM);
+    HASH_FLOAT(cgToRearM);
+    HASH_FLOAT(cgHeightM);
+    HASH_FLOAT(lengthOverallM);
+    HASH_FLOAT(wheelRadiusFrontM);
+    HASH_FLOAT(wheelRadiusRearM);
+    HASH_FLOAT(wheelRadiusM);
+    HASH_FLOAT(wheelInertiaKgM2);
+    HASH_FLOAT(frontalAreaM2);
+    HASH_FLOAT(bodyHalfWidthM);
+    HASH_FLOAT(maxBrakeTorqueNm);
+    HASH_FLOAT(rollStiffnessFrontFraction);
+    HASH_FLOAT(tireRelaxationLengthM);
+    HASH_FLOAT(tireLoadRefPerWheelN);
+    HASH_FLOAT(maxRoadWheelAngleRad);
+    HASH_FLOAT(maxSteerRateRadS);
+    HASH_FLOAT(steerReturnRateRadS);
+    HASH_FLOAT(steerSpeedRefMps);
+    HASH_FLOAT(steerSpeedMinFactor);
+    HASH_FLOAT(dragCoefficient);
+    HASH_FLOAT(loadFilterRateHz);
+    HASH_FLOAT(tireBLatFront);
+    HASH_FLOAT(tireCLatFront);
+    HASH_FLOAT(tireMuLatFront);
+    HASH_FLOAT(tireBLatRear);
+    HASH_FLOAT(tireCLatRear);
+    HASH_FLOAT(tireMuLatRear);
+    HASH_FLOAT(tireBLong);
+    HASH_FLOAT(tireCLong);
+    HASH_FLOAT(tireMuLongScale);
+    for (int i = 0; i < MAX_GEARS; i++) HASH_FLOAT(gearRatios[i]);
+    hash = vehicle_hash_u32(hash, (uint32_t)spec->gearCount);
+    HASH_FLOAT(reverseGearRatio);
+    HASH_FLOAT(finalDriveRatio);
+    HASH_FLOAT(drivetrainEfficiency);
+    HASH_FLOAT(engineIdleRpm);
+    HASH_FLOAT(engineRedlineRpm);
+    for (int i = 0; i < ENGINE_CURVE_POINTS; i++) HASH_FLOAT(engineTorqueCurveNm[i]);
+    HASH_FLOAT(engineBrakingTorqueNm);
+    HASH_FLOAT(brakeBiasFront);
+    HASH_FLOAT(handbrakeTorqueNm);
+    HASH_FLOAT(collisionRestitution);
+    HASH_FLOAT(collisionFriction);
+    HASH_FLOAT(tireLoadSensitivityK);
+    HASH_FLOAT(ackermannPercent);
+    HASH_FLOAT(differentialMode);
+    HASH_FLOAT(differentialBiasRatio);
+    HASH_FLOAT(differentialPreloadNm);
+    hash = vehicle_hash_u32(hash, spec->lateralLoadTransferEnabled ? 1u : 0u);
+
+#undef HASH_FLOAT
     return hash;
 }
 

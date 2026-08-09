@@ -85,7 +85,15 @@ void replay_record(ReplayBuffer *rb, const Input *in)
 
 bool replay_begin_playback(ReplayBuffer *rb)
 {
-    if (rb == NULL || rb->count <= 0) return false;
+    if (rb == NULL) return false;
+    /* The vehicle snapshot describes the state immediately before frame zero. Once the ring
+     * drops that frame, reconstructing the exact state at the new head would require a second
+     * state history. Reject the unsafe combination instead of silently replaying retained
+     * inputs from stale vehicle state. Input-only timelines remain usable. */
+    if (rb->count <= 0 || (rb->initialVehicle.valid && rb->overwrittenTicks > 0u)) {
+        rb->mode = REPLAY_MODE_IDLE;
+        return false;
+    }
     rb->playbackCursor = 0;
     rb->mode = REPLAY_MODE_PLAYBACK;
     return true;
