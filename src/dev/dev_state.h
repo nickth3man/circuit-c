@@ -22,7 +22,7 @@
 
 #include "raylib.h" /* Vector2 only */
 
-#include "game/input.h"
+#include "game/controller_output.h"
 
 /* Scope history: 480 samples is four seconds at 120 Hz, which is the whole of any
  * transition worth watching without turning Game into a megabyte. */
@@ -187,7 +187,7 @@ typedef struct {
 
     /* The input the fixed update actually applied — the scripted timeline while a scenario
      * runs, not whatever the keyboard said. Telemetry and the lab both read it. */
-    Input appliedInput;
+    ControllerOutput appliedInput;
 
     /* -------------------------------------------------------------------------- inspector -- */
     int inspectorCursor; /* frame index within the retained replay window */
@@ -207,7 +207,7 @@ void dev_state_init(DevState *dev);
 /* Called at the end of every fixed update with the input that was actually applied — which
  * is the scripted input while a scenario runs, not whatever the keyboard says. Pushes scope
  * samples, extends the trajectory, and evaluates the invariants. Safe in headless builds. */
-void dev_state_record(struct Game *game, const Input *appliedInput);
+void dev_state_record(struct Game *game, const ControllerOutput *appliedInput);
 
 /* Oldest-first accessor over the scope ring. index 0 is the oldest retained sample. */
 float dev_state_scope_value(const DevState *dev, DevScopeChannel channel, int index);

@@ -60,7 +60,7 @@ After #6, #7 and #8 may run in parallel.
 - [x] [#8 — Split VehicleDefinition, VehicleSetup, and VehicleInstance state](https://github.com/nickth3man/circuit-c/issues/8)
   - Depends on: #6
 
-- [ ] [#9 — Unify human, AI, replay, ghost, and scripted control behind Controller output](https://github.com/nickth3man/circuit-c/issues/9)
+- [x] [#9 — Unify human, AI, replay, ghost, and scripted control behind Controller output](https://github.com/nickth3man/circuit-c/issues/9)
   - Depends on: #8
 
 - [ ] [#10 — Introduce RaceEntrant and deterministic multi-vehicle storage](https://github.com/nickth3man/circuit-c/issues/10)
@@ -76,7 +76,7 @@ After #6, #7 and #8 may run in parallel.
 - [x] Technical identity rename builds and tests successfully.
 - [ ] Track content and racer progress have separate ownership.
 - [x] Vehicle definitions, setups, and runtime instances have separate ownership.
-- [ ] All simulated entrants use the same controller contract.
+- [x] All simulated entrants use the same controller contract.
 - [ ] A headless RaceSession can own multiple isolated entrants.
 - [ ] Single-car behavior remains operational through the new architecture.
 
@@ -86,7 +86,7 @@ After #6, #7 and #8 may run in parallel.
 
 These issues establish truthful parameters and safe solver seams before adding physical effects.
 
-- [ ] [#12 — Audit VehicleSpec parameter truthfulness and units](https://github.com/nickth3man/circuit-c/issues/12)
+- [x] [#12 — Audit VehicleSpec parameter truthfulness and units](https://github.com/nickth3man/circuit-c/issues/12)
   - Depends on: #8
 
 - [ ] [#13 — Decompose the planar solver into deterministic, testable stages](https://github.com/nickth3man/circuit-c/issues/13)
@@ -94,11 +94,11 @@ These issues establish truthful parameters and safe solver seams before adding p
 
 ## Phase 1 gate
 
-- [ ] Every vehicle parameter is classified as active, derived, runtime, appearance-only, diagnostic, or inactive/reserved.
-- [ ] Every active parameter has documented units and validation bounds.
-- [ ] No UI or documentation claims inactive parameters affect handling.
+- [x] Every vehicle parameter is classified as active, derived, runtime, appearance-only, diagnostic, or inactive/reserved.
+- [x] Every active parameter has documented units and validation bounds.
+- [x] No UI or documentation claims inactive parameters affect handling.
 - [ ] Physics stages have explicit inputs, outputs, and ordering.
-- [ ] Existing physics baselines and deterministic tests still pass.
+- [x] Existing physics baselines and deterministic tests still pass.
 
 ---
 

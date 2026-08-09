@@ -15,6 +15,7 @@
 #include "dev/dev_scenario.h"
 #include "dev/dev_state.h"
 #include "game/audio.h"
+#include "game/controller.h"
 #include "physics/auto_transmission.h"
 #include "world/collision.h"
 #include "physics/physics.h"
@@ -170,6 +171,10 @@ GAME_API void game_reset_sim(Game *game)
 {
     if (game == NULL) return;
     vehicle_instance_reset(&game->vehicleInstance);
+    /* A car put back on the grid must not steer to a plan computed for where it used to be,
+     * so the entrant's private controller memory goes with its vehicle state. Kind and frozen
+     * configuration survive: the reset changes the situation, not who is driving. */
+    controller_reset(&game->controller);
 }
 
 GAME_API void game_apply_spec(Game *game, const VehicleSpec *spec)
@@ -182,6 +187,7 @@ GAME_API void game_apply_spec(Game *game, const VehicleSpec *spec)
     vehicle_setup_set_default(&game->vehicleDefinition, &game->vehicleSetup);
     (void)vehicle_instance_init(&game->vehicleInstance, &game->vehicleDefinition,
                                 &game->vehicleSetup);
+    controller_reset(&game->controller);
 }
 
 GAME_API bool game_configure_run(Game *game, const GameRunConfig *config)
@@ -223,6 +229,7 @@ GAME_API bool game_spawn_on_track_at(Game *game, int checkpointIndex)
     /* Reset first, then place: vehicle_instance_reset() puts the car at the world origin, so
      * doing it the other way round would throw the pose away. */
     vehicle_instance_reset(&game->vehicleInstance);
+    controller_reset(&game->controller);
     game->vehicle.positionM = startM;
     game->vehicle.headingRad = headingRad;
 
@@ -242,7 +249,15 @@ GAME_API bool game_spawn_on_track_at(Game *game, int checkpointIndex)
     return true;
 }
 
-static void apply_oneshots(Game *game, const Input *input)
+/*
+ * Application/session commands from `input`, gear requests from `output`.
+ *
+ * The split is the point: pause, reset, the debug overlay and the automatic-transmission
+ * toggle belong to the session and are consumed exactly once per tick no matter how many
+ * entrants exist, whereas a gear shift is something one driver asked its own car for and
+ * arrives on that entrant's controller output.
+ */
+static void apply_oneshots(Game *game, const Input *input, const ControllerOutput *output)
 {
     if (input->pausePressed) {
         switch (game->state) {
@@ -285,13 +300,13 @@ static void apply_oneshots(Game *game, const Input *input)
         }
     }
     if (!game->autoTrans.enabled) {
-        if (input->shiftUpPressed) {
+        if (output->shiftUp) {
             if (game->vehicle.selectedGear < game->spec.gearCount) {
                 game->vehicle.selectedGear++;
             }
             game->sim.shiftUpCount++;
         }
-        if (input->shiftDownPressed) {
+        if (output->shiftDown) {
             if (game->vehicle.selectedGear > -1) game->vehicle.selectedGear--;
             game->sim.shiftDownCount++;
         }
@@ -302,6 +317,8 @@ GAME_API void game_init(Game *game)
 {
     if (game == NULL) return;
     input_zero(&game->input);
+    controller_init(&game->controller, CONTROLLER_KIND_HUMAN);
+    controller_output_zero(&game->controllerOutput);
     memset(&game->sim, 0, sizeof(game->sim));
     vehicle_definition_set_default(&game->vehicleDefinition);
     vehicle_setup_set_default(&game->vehicleDefinition, &game->vehicleSetup);
@@ -404,18 +421,54 @@ GAME_API void game_fixed_update(Game *game, float dt)
     /* A running scripted scenario replaces live input, but only when we are not already
      * replaying a timeline: playback must never be second-guessed. The substituted input is
      * recorded like any other, so the scenario itself is replayable. */
-    if (!fromPlayback && game->dev.scenarioRunning) {
+    const bool fromScript = (!fromPlayback && game->dev.scenarioRunning);
+    if (fromScript) {
         dev_scenario_input(game->dev.scenario, game->sim.tick - game->dev.scenarioStartTick,
                            &tickInput);
     }
+
+    /* --- Controller stage ---
+     *
+     * Reads tick-start state and emits exactly one bounded ControllerOutput for this entrant.
+     * It runs BEFORE apply_oneshots so that a controller observes the state at the start of the
+     * tick and not a state a pause or reset has already changed; the validation AI used to be
+     * called by the platform loop immediately before this function, which is the same instant.
+     *
+     * Playback overrides the entrant's own kind: a recorded stream is authoritative, so an AI
+     * entrant replays as recorded instead of re-deciding. */
+    const ControllerKind sourceKind = fromPlayback ? CONTROLLER_KIND_REPLAY
+                                      : fromScript ? CONTROLLER_KIND_SCRIPT
+                                                   : game->controller.kind;
+    const ControllerTickView view = { .sample = &tickInput,
+                                      .track = &game->trackDef,
+                                      .runtime = &game->trackRuntime,
+                                      .vehicle = &game->vehicle,
+                                      .derived = &game->derived,
+                                      .spec = &game->spec,
+                                      .dt = dt };
+    controller_update(&game->controller, sourceKind, &view, &game->controllerOutput);
 
     if (game->replay.mode == REPLAY_MODE_RECORDING) {
         replay_capture_initial_vehicle(&game->replay, &game->vehicleDefinition,
                                        &game->vehicleSetup, &game->vehicleInstance);
     }
     input_clear_oneshots(&game->input);
-    replay_record(&game->replay, &tickInput);
-    apply_oneshots(game, &tickInput);
+
+    /* The timeline records the authoritative controller output plus the application commands
+     * latched for this tick. Recording the OUTPUT rather than the raw sample is what makes an
+     * AI or scripted run replayable through the same path a human run takes. */
+    Input recordedFrame = tickInput;
+    recordedFrame.steer = game->controllerOutput.steer;
+    recordedFrame.throttle = game->controllerOutput.throttle;
+    recordedFrame.brake = game->controllerOutput.brake;
+    recordedFrame.handbrake = game->controllerOutput.handbrake;
+    recordedFrame.shiftUpPressed = game->controllerOutput.shiftUp;
+    recordedFrame.shiftDownPressed = game->controllerOutput.shiftDown;
+    replay_record(&game->replay, &recordedFrame);
+    apply_oneshots(game, &tickInput, &game->controllerOutput);
+
+    /* The gated copy: pre-physics assists rewrite this, never the controller's own output. */
+    ControllerOutput appliedControls = game->controllerOutput;
 
     /* Particle pool: always updates so existing particles fade over time regardless of the
      * game state. Spawn only happens inside the PLAYING gate below. */
@@ -424,11 +477,11 @@ GAME_API void game_fixed_update(Game *game, float dt)
     if (game->state == STATE_PLAYING) {
         /* Auto transmission: override gear and remap throttle/brake */
         auto_transmission_update(&game->autoTrans, &game->vehicle, &game->spec, &game->derived,
-                                 &tickInput, dt);
-        game->vehicleControls.steer = tickInput.steer;
-        game->vehicleControls.throttle = tickInput.throttle;
-        game->vehicleControls.brake = tickInput.brake;
-        game->vehicleControls.handbrake = tickInput.handbrake;
+                                 &appliedControls, dt);
+        game->vehicleControls.steer = appliedControls.steer;
+        game->vehicleControls.throttle = appliedControls.throttle;
+        game->vehicleControls.brake = appliedControls.brake;
+        game->vehicleControls.handbrake = appliedControls.handbrake;
 
         CIRCUIT_ZONE_BEGIN(physics, "Physics");
         /* Start-of-tick position, for the checkpoint crossing test below.
@@ -459,7 +512,7 @@ GAME_API void game_fixed_update(Game *game, float dt)
             }
         }
         physics_fixed_update(&game->spec, &game->vehicle, &game->derived, &game->renderState,
-                             &tickInput, dt);
+                             &appliedControls, dt);
         CIRCUIT_ZONE_END(physics);
 
         /* Checkpoint crossing: check whether the car passed a gate this tick. The event is
@@ -547,7 +600,7 @@ GAME_API void game_fixed_update(Game *game, float dt)
     /* Development history: scope channels, trajectory, and the invariant monitor. Reads the
      * state, writes only to game->dev, and is excluded from the checksum, so it cannot
      * influence the simulation. */
-    dev_state_record(game, &tickInput);
+    dev_state_record(game, &appliedControls);
     CIRCUIT_ZONE_END(fixedUpdate);
 }
 

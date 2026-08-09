@@ -1,6 +1,6 @@
 #include "physics/auto_transmission.h"
 #include "physics/vehicle.h"
-#include "game/input.h"
+#include "game/controller_output.h"
 
 #define AUTO_STOP_THRESHOLD_MPS 0.5f
 #define AUTO_NEUTRAL_DELAY_S 0.15f
@@ -8,7 +8,7 @@
 #define AUTO_SHIFT_DOWN_FACTOR 0.35f
 
 void auto_transmission_update(AutoTransmission *at, VehicleState *vs, const VehicleSpec *spec,
-                              const VehicleDerived *derived, Input *io, float dt)
+                              const VehicleDerived *derived, ControllerOutput *io, float dt)
 {
     if (!at->enabled) return;
 

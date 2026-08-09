@@ -2,14 +2,15 @@
  * ai_driver.h — a baseline lap driver that can only do what a player can do.
  *
  * THE AUDIT BOUNDARY IS THE SIGNATURE. Every argument to ai_driver_update() is `const`
- * except the `Input *out` it fills and the driver's own scratch state. It therefore cannot
- * set a position, a velocity, a wheel state, a gear, or a force: the compiler forbids it,
- * not a convention. Whatever this file does, the car experiences it as steering, throttle
- * and brake arriving on the same struct the keyboard writes to.
+ * except the `ControllerOutput *out` it fills and the driver's own scratch state. It
+ * therefore cannot set a position, a velocity, a wheel state, a gear, or a force: the
+ * compiler forbids it, not a convention. Whatever this file does, the car experiences it as
+ * steering, throttle and brake arriving on the same struct a human controller emits.
  *
- * It does not write `handbrake`, and it never writes a one-shot: no pause, no reset, no
- * manual shift. Gear selection belongs to the automatic transmission, which is what a player
- * driving with it enabled would also get.
+ * It does not write `handbrake`, and it asks for no gear change. Gear selection belongs to
+ * the automatic transmission, which is what a player driving with it enabled would also get.
+ * Pause, reset and the other application commands are not even reachable from here: they are
+ * not part of ControllerOutput.
  *
  * THE DRIVER FINDS ITS OWN PATH. It is given the road — the authored centreline and the
  * half-width either side of it — and searches for the line it wants through that corridor,
@@ -31,7 +32,7 @@
 
 #include "raylib.h" /* Vector2 */
 
-#include "game/input.h"
+#include "game/controller_output.h"
 #include "physics/vehicle.h"
 #include "world/track.h"
 
@@ -177,14 +178,14 @@ void ai_driver_config_default(AiDriverConfig *cfg);
 /*
  * Produce one tick of driving.
  *
- * Writes `steer`, `throttle` and `brake` on `out` and zeroes `handbrake`; leaves every
- * one-shot exactly as it found it, so a caller may still latch its own pause or reset.
+ * Writes `steer`, `throttle` and `brake` on `out` and zeroes `handbrake`; leaves the gear
+ * requests exactly as it found them, which for a caller that zeroed the output is no shift.
  * Does nothing when the track has fewer than three centreline nodes.
  */
 void ai_driver_update(const AiDriverConfig *cfg, AiDriverState *state,
                       const TrackDefinition *track, const TrackRuntime *runtime,
                       const VehicleState *vehicle, const VehicleDerived *derived,
-                      const VehicleSpec *spec, Input *out, float dt);
+                      const VehicleSpec *spec, ControllerOutput *out, float dt);
 
 /*
  * World position of the planned line at centreline node `nodeIndex`, for a caller that wants to

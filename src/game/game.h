@@ -16,6 +16,10 @@
  *
  * Splitting Track into TrackDefinition/TrackRuntime/RacerProgress is likewise a layout
  * change, so it too costs one platform restart.
+ *
+ * Giving the entrant its own Controller (issue 9) is a layout change for the same reason and
+ * costs the same one restart. It stores a kind, a frozen config and private decision memory —
+ * plain values, no function pointer, so the reload invariant above still holds.
  */
 #ifndef CIRCUIT_GAME_H
 #define CIRCUIT_GAME_H
@@ -28,6 +32,7 @@
 #include "core/config.h"
 #include "dev/dev_state.h"
 #include "platform/hotreload.h"
+#include "game/controller.h"
 #include "game/input.h"
 #include "game/particle.h"
 #include "game/replay.h"
@@ -79,7 +84,19 @@ typedef struct {
 
 struct Game {
     GameStateId state;
+    /* The platform's frame-latched device sample and the session's application commands. It is
+     * an input SOURCE, not a vehicle control: the controller stage below converts it into one
+     * entrant's ControllerOutput once per fixed tick. See src/game/controller.h. */
     Input input;
+    /* THIS entrant's controller: kind, frozen config, and private decision memory. Today there
+     * is exactly one entrant, so exactly one Controller lives here; it moves into RaceEntrant
+     * when multi-car storage lands. See docs/SIMULATION_OWNERSHIP.md. */
+    Controller controller;
+    /* What that controller asked for on the most recent fixed tick, before the pre-physics
+     * gating stage (countdown rules, automatic transmission) rewrote it. Excluded from the
+     * state checksum: it is recomputed every tick from the tick's input source and no later
+     * tick reads it. The gated controls physics actually consumed are `vehicleControls`. */
+    ControllerOutput controllerOutput;
     SimState sim;
     VehicleDefinition vehicleDefinition;
     VehicleSetup vehicleSetup;

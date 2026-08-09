@@ -44,6 +44,7 @@
 #include "platform/timestep.h"
 #include "physics/tire.h"
 #include "core/units.h"
+#include "world/collision.h"
 
 /* ------------------------------------------------------------------------------------- */
 /* Scenario: telemetry                                                                     */
@@ -989,8 +990,8 @@ static void scenario_accel_filter(void)
         VehicleDerived derived;
         VehicleRenderState renderState;
         phase1_fixture(&spec, &state, &derived, &renderState);
-        Input input;
-        input_zero(&input);
+        ControllerOutput input;
+        controller_output_zero(&input);
 
         state.velocityLongitudinalMps = 10.0f;
         state.velocityLateralMps = 0.0f;
@@ -1992,8 +1993,8 @@ static void scenario_steering_sign(void)
     VehicleRenderState renderState;
     phase1_fixture(&spec, &state, &derived, &renderState);
     state.velocityLongitudinalMps = 8.0f;
-    Input input;
-    input_zero(&input);
+    ControllerOutput input;
+    controller_output_zero(&input);
     input.steer = 0.5f;
     for (int i = 0; i < 30; i++) {
         physics_fixed_update(&spec, &state, &derived, &renderState, &input, FIXED_DT_S);
@@ -2036,8 +2037,8 @@ static void scenario_lever_arm(void)
     physics_axle_slip_angles(&b, &sb, &bf, &br);
     check(fabsf(af - bf) > 1e-4f, "front lever-arm change alters front slip");
     check(fabsf(ar - br) > 1e-4f, "rear lever-arm change alters rear slip");
-    Input input;
-    input_zero(&input);
+    ControllerOutput input;
+    controller_output_zero(&input);
     input.steer = 0.3f;
     physics_fixed_update(&a, &sa, &da, &ra, &input, FIXED_DT_S);
     physics_fixed_update(&b, &sb, &db, &rb, &input, FIXED_DT_S);
@@ -2054,8 +2055,8 @@ static void scenario_integration(void)
     VehicleDerived derived;
     VehicleRenderState renderState;
     phase1_fixture(&spec, &state, &derived, &renderState);
-    Input input;
-    input_zero(&input);
+    ControllerOutput input;
+    controller_output_zero(&input);
     input.throttle = 1.0f;
     physics_fixed_update(&spec, &state, &derived, &renderState, &input, FIXED_DT_S);
     check_near(state.velocityLongitudinalMps, 0.0, 1e-7,
@@ -2242,6 +2243,493 @@ static void scenario_params(void)
 }
 
 /* ------------------------------------------------------------------------------------- */
+/* Scenario: param-audit — what every VehicleSpec field actually does (issue 12)            */
+/* ------------------------------------------------------------------------------------- */
+
+/*
+ * The registry claims a class for every tunable. This scenario refuses to take that on
+ * trust. It proves four separate things:
+ *
+ *   1. COVERAGE — every float byte of VehicleSpec is described by exactly one registry
+ *      entry, so a new field cannot be added without being classified.
+ *   2. DERIVED — an entry marked derived is exactly one that vehicle_spec_refresh_derived()
+ *      recomputes, and no other entry is touched by a refresh.
+ *   3. OWNER — a setup-owned entry is exactly one that VehicleSetup overwrites when
+ *      vehicle_instance_derive() compiles a definition; a definition-owned entry survives.
+ *   4. EFFECT — perturbing a `physics` entry changes a simulated trajectory, and perturbing
+ *      an `appearance` or `inactive` entry leaves it bit-identical. This is the honest core
+ *      of issue 12: camber, toe, caster, wheel and anti-roll rates, travel, roll centres,
+ *      tire pressure and the aero lift coefficients are all authored and all inert, and this
+ *      check is what stops a future edit from quietly claiming otherwise.
+ *
+ * It deliberately activates nothing. A failure here means the registry's claim and the code
+ * disagree, and the fix is to correct the claim or the code, not to widen the tolerance.
+ */
+
+#define PARAM_AUDIT_DRIVE_TICKS 540
+#define PARAM_AUDIT_COLLIDE_TICKS 150
+
+static uint32_t param_audit_hash_bytes(uint32_t hash, const void *data, size_t size)
+{
+    const unsigned char *bytes = (const unsigned char *)data;
+    for (size_t i = 0; i < size; i++) {
+        hash ^= bytes[i];
+        hash *= 0x01000193u;
+    }
+    return hash;
+}
+
+/* A scripted run that reaches every driveline, steering, brake and tire path: launch from
+ * rest through all five gears at full throttle with steering applied, then trail-brake, then
+ * handbrake, then reverse. Gears are selected directly because physics_fixed_update() does
+ * not shift — that is the transmission's job, not the solver's. */
+static uint32_t param_audit_drive_signature(const VehicleSpec *spec, bool *allFiniteOut)
+{
+    VehicleState state;
+    VehicleDerived derived;
+    VehicleRenderState renderState;
+    vehicle_state_reset(spec, &state, &derived, &renderState);
+
+    ControllerOutput input;
+    controller_output_zero(&input);
+
+    for (int tick = 0; tick < PARAM_AUDIT_DRIVE_TICKS; tick++) {
+        if (tick < 450) {
+            state.selectedGear = 1 + tick / 90;
+            if (state.selectedGear > spec->gearCount) state.selectedGear = spec->gearCount;
+            input.throttle = 1.0f;
+            input.brake = 0.0f;
+            input.handbrake = 0.0f;
+            input.steer = 0.15f;
+        } else if (tick < 500) {
+            input.throttle = 0.0f;
+            input.brake = 1.0f;
+            input.steer = 0.6f;
+        } else if (tick < 520) {
+            input.brake = 0.0f;
+            input.handbrake = 1.0f;
+            input.steer = 0.6f;
+        } else {
+            state.selectedGear = -1;
+            input.handbrake = 0.0f;
+            input.throttle = 1.0f;
+            input.steer = 0.0f;
+        }
+        physics_fixed_update(spec, &state, &derived, &renderState, &input, FIXED_DT_S);
+    }
+
+    if (allFiniteOut != NULL) {
+        *allFiniteOut = isfinite(state.positionM.x) && isfinite(state.positionM.y) &&
+                        isfinite(state.velocityLongitudinalMps) && isfinite(state.yawRateRadS);
+    }
+    return param_audit_hash_bytes(0x811c9dc5u, &state, sizeof(state));
+}
+
+/* A second run that scrubs a barrier, so the collision material parameters are exercised by
+ * the same harness rather than being exempted from it. */
+static uint32_t param_audit_collide_signature(const VehicleSpec *spec,
+                                              const TrackDefinition *track, int *contactsOut)
+{
+    VehicleState state;
+    VehicleDerived derived;
+    VehicleRenderState renderState;
+    vehicle_state_reset(spec, &state, &derived, &renderState);
+
+    /* The parking lot's bottom perimeter runs along y = -150 with a 4 m half-width, so the
+     * outer barrier stands at y = -154. Start just inside it, drifting into it. */
+    state.positionM = (Vector2){ 0.0f, -152.0f };
+    state.velocityLongitudinalMps = 14.0f;
+    state.velocityLateralMps = -3.0f;
+    for (int i = 0; i < WHEEL_COUNT; i++) {
+        state.wheels[i].angularVelocityRadS = 14.0f / vehicle_wheel_radius_m(spec, i);
+    }
+    renderState.prevPositionM = renderState.currPositionM = state.positionM;
+    renderState.prevHeadingRad = renderState.currHeadingRad = state.headingRad;
+
+    ControllerOutput input;
+    controller_output_zero(&input);
+    input.throttle = 0.4f;
+    input.steer = -0.2f;
+    state.selectedGear = 3;
+
+    float crashLockoutTimerS = 0.0f;
+    int contacts = 0;
+    for (int tick = 0; tick < PARAM_AUDIT_COLLIDE_TICKS; tick++) {
+        physics_fixed_update(spec, &state, &derived, &renderState, &input, FIXED_DT_S);
+        contacts += collision_resolve_track(spec, &state, &renderState, track, NULL,
+                                            &crashLockoutTimerS);
+    }
+
+    if (contactsOut != NULL) *contactsOut = contacts;
+    uint32_t hash = param_audit_hash_bytes(0x811c9dc5u, &state, sizeof(state));
+    return param_audit_hash_bytes(hash, &crashLockoutTimerS, sizeof(crashLockoutTimerS));
+}
+
+static uint32_t param_audit_signature(const VehicleSpec *spec, const TrackDefinition *track)
+{
+    const uint32_t drive = param_audit_drive_signature(spec, NULL);
+    const uint32_t collide = param_audit_collide_signature(spec, track, NULL);
+    return param_audit_hash_bytes(drive, &collide, sizeof(collide));
+}
+
+/* Candidate perturbations, largest last: a quarter-range step reaches every continuous
+ * parameter, and the wider steps exist for the enum-valued ones (drive.layout, drive.diff_mode)
+ * where a quarter step truncates back to the same enum. */
+static int param_audit_candidates(const VehicleSpec *base, const DevParameter *param,
+                                  VehicleSpec *out, int capacity)
+{
+    const float span = param->maximum - param->minimum;
+    const float deltas[4] = { 0.25f * span, -0.25f * span, 0.75f * span, -0.75f * span };
+    const float baseValue = dev_param_get(base, param);
+    int count = 0;
+
+    for (int i = 0; i < 4 && count < capacity; i++) {
+        VehicleSpec candidate = *base;
+        float target = baseValue + deltas[i];
+        if (target < param->minimum) target = param->minimum;
+        if (target > param->maximum) target = param->maximum;
+        if (!dev_param_set(&candidate, param, target)) continue;
+        if (fabsf(dev_param_get(&candidate, param) - baseValue) <= 1e-7f) continue;
+        if (!vehicle_spec_is_valid(&candidate)) continue;
+        out[count++] = candidate;
+    }
+    return count;
+}
+
+static void param_audit_check_coverage(void)
+{
+    const int count = dev_params_count();
+    unsigned char covered[sizeof(VehicleSpec)];
+    memset(covered, 0, sizeof(covered));
+
+    int overlaps = 0;
+    for (int i = 0; i < count; i++) {
+        const DevParameter *param = dev_param_at(i);
+        check(param->offset + sizeof(float) <= sizeof(VehicleSpec),
+              "'%s' lies inside VehicleSpec", param->name);
+        for (size_t b = 0; b < sizeof(float); b++) {
+            if (covered[param->offset + b] != 0) overlaps++;
+            covered[param->offset + b] = 1;
+        }
+    }
+    /* The int and bool live in the typed companion audit rather than being exempted. */
+    for (int i = 0; i < dev_spec_field_audit_count(); i++) {
+        const DevSpecFieldAudit *field = dev_spec_field_audit_at(i);
+        check(field->offset + field->size <= sizeof(VehicleSpec),
+              "typed field '%s' lies inside VehicleSpec", field->name);
+        for (size_t b = 0; b < field->size; b++) {
+            if (covered[field->offset + b] != 0) overlaps++;
+            covered[field->offset + b] = 1;
+        }
+    }
+    check(overlaps == 0, "no two audit entries describe the same VehicleSpec bytes");
+    check(dev_spec_field_audit_count() == 2,
+          "both non-float VehicleSpec fields have typed audit entries");
+
+    /* Unused gear-ratio slots are array capacity rather than authored fields. */
+    for (size_t b = (size_t)GEAR_COUNT * sizeof(float); b < (size_t)MAX_GEARS * sizeof(float);
+         b++) {
+        covered[offsetof(VehicleSpec, gearRatios) + b] = 1;
+    }
+
+    int uncovered = 0;
+    size_t firstUncovered = 0;
+    for (size_t b = 0; b < sizeof(VehicleSpec); b++) {
+        if (covered[b] != 0) continue;
+        /* Trailing alignment padding after the final bool is the only legitimate gap. */
+        if (b > offsetof(VehicleSpec, lateralLoadTransferEnabled)) continue;
+        if (uncovered == 0) firstUncovered = b;
+        uncovered++;
+    }
+    check(uncovered == 0,
+          "every VehicleSpec field is classified exactly once (%d unclassified byte(s), "
+          "first at offset %u of %u)",
+          uncovered, (unsigned)firstUncovered, (unsigned)sizeof(VehicleSpec));
+}
+
+static void param_audit_check_derived(const VehicleSpec *defaults)
+{
+    const int count = dev_params_count();
+    for (int i = 0; i < count; i++) {
+        const DevParameter *param = dev_param_at(i);
+
+        check((param->classification == DEV_CLASS_DERIVED) == param->derived,
+              "'%s' agrees with itself about being derived", param->name);
+        check((param->owner == DEV_OWNER_DERIVED) == param->derived,
+              "'%s' derived readouts are owned beside the definition", param->name);
+
+        /* Overwrite the one field, refresh, and see whether the refresh owns it. */
+        VehicleSpec probe = *defaults;
+        float *field = (float *)(void *)((unsigned char *)&probe + param->offset);
+        const float marker = param->defaultValue + 1.0f;
+        *field = marker;
+        vehicle_spec_refresh_derived(&probe);
+
+        if (param->derived) {
+            check(fabsf(*field - param->defaultValue) <=
+                      fmaxf(fabsf(param->defaultValue), 1.0f) * 1e-5f,
+                  "'%s' is recomputed by vehicle_spec_refresh_derived()", param->name);
+        } else {
+            check(*field == marker, "'%s' is authored, not recomputed by a refresh",
+                  param->name);
+        }
+    }
+}
+
+static void param_audit_check_owner(const VehicleSpec *defaults)
+{
+    VehicleDefinition stock;
+    check(vehicle_definition_init(&stock, "audit/stock", "audit/stock", 1u, defaults),
+          "the audit stock definition validates");
+
+    VehicleSetup setup;
+    vehicle_setup_set_default(&stock, &setup);
+
+    const int count = dev_params_count();
+    int skipped = 0;
+    for (int i = 0; i < count; i++) {
+        const DevParameter *param = dev_param_at(i);
+        if (param->derived) continue;
+
+        VehicleSpec perturbed[4];
+        if (param_audit_candidates(defaults, param, perturbed, 1) != 1) {
+            skipped++;
+            continue;
+        }
+
+        /* Move the DEFINITION only, then compile it against the stock setup. A setup-owned
+         * field is overwritten on the way through; a definition-owned field survives. */
+        VehicleDefinition moved;
+        if (!vehicle_definition_init(&moved, "audit/moved", "audit/moved", 1u, &perturbed[0])) {
+            skipped++;
+            continue;
+        }
+        VehicleInstance instance;
+        memset(&instance, 0, sizeof(instance));
+        if (!vehicle_instance_derive(&instance, &moved, &setup)) {
+            skipped++;
+            continue;
+        }
+
+        const float authored = dev_param_get(&perturbed[0], param);
+        const float compiled = dev_param_get(&instance.spec, param);
+        const bool survived =
+            fabsf(compiled - authored) <= 1e-6f * fmaxf(fabsf(authored), 1.0f);
+
+        if (param->owner == DEV_OWNER_SETUP) {
+            check(!survived,
+                  "'%s' is setup-owned: VehicleSetup overwrites the definition value",
+                  param->name);
+        } else {
+            check(survived, "'%s' is definition-owned: it survives vehicle_instance_derive()",
+                  param->name);
+        }
+    }
+    check(skipped == 0, "every primary parameter had a valid owner probe (%d skipped)",
+          skipped);
+}
+
+static void param_audit_check_effect(const VehicleSpec *defaults, const TrackDefinition *track)
+{
+    /* Two baselines, because some parameters are live only under a configuration the stock
+     * car does not use, and "live only when enabled" is still live:
+     *
+     *   - drive.front_torque_split does nothing until the layout is all-wheel drive;
+     *   - steer.speed_ref does nothing while steer.speed_min_factor is 1.0, which is the
+     *     stock value and the documented way to disable speed-sensitive steering.
+     *
+     * Baseline 1 turns both on. Neither is a physics change: it configures the same solver. */
+    VehicleSpec bases[2];
+    bases[0] = *defaults;
+    bases[1] = *defaults;
+    check(dev_param_set(&bases[1], dev_param_find("drive.layout"), (float)DRIVE_LAYOUT_AWD),
+          "the audit second baseline configures an all-wheel-drive layout");
+    check(dev_param_set(&bases[1], dev_param_find("steer.speed_min_factor"), 0.5f),
+          "the audit second baseline enables speed-sensitive steering");
+
+    for (int b = 0; b < 2; b++) {
+        bool allFinite = false;
+        int contacts = 0;
+        (void)param_audit_drive_signature(&bases[b], &allFinite);
+        (void)param_audit_collide_signature(&bases[b], track, &contacts);
+        check(allFinite, "audit baseline %d stays finite through the scripted run", b);
+        check(contacts > 0, "audit baseline %d actually strikes a barrier (%d contacts)", b,
+              contacts);
+    }
+
+    uint32_t baseline[2];
+    for (int b = 0; b < 2; b++) baseline[b] = param_audit_signature(&bases[b], track);
+
+    const int count = dev_params_count();
+    int unproven = 0;
+    int leaked = 0;
+    for (int i = 0; i < count; i++) {
+        const DevParameter *param = dev_param_at(i);
+        if (param->derived) continue;
+
+        bool changed = false;
+        int probes = 0;
+        for (int b = 0; b < 2; b++) {
+            VehicleSpec candidates[4];
+            const int candidateCount = param_audit_candidates(&bases[b], param, candidates, 4);
+            probes += candidateCount;
+            for (int c = 0; c < candidateCount; c++) {
+                if (param_audit_signature(&candidates[c], track) != baseline[b]) {
+                    changed = true;
+                    if (param->classification == DEV_CLASS_PHYSICS_INPUT) break;
+                    /* For an appearance or inactive claim, report the first leak by name. */
+                    check(false, "'%s' is classified %s but changed the simulation",
+                          param->name, dev_param_class_name(param->classification));
+                    leaked++;
+                    break;
+                }
+            }
+            if (changed && param->classification == DEV_CLASS_PHYSICS_INPUT) break;
+        }
+
+        if (probes == 0) {
+            check(false, "'%s' has no in-range perturbation to test", param->name);
+            continue;
+        }
+        if (param->classification == DEV_CLASS_PHYSICS_INPUT && !changed) {
+            check(false, "'%s' is classified physics but changed nothing", param->name);
+            unproven++;
+        }
+    }
+
+    check(unproven == 0, "every physics parameter demonstrably moves the car");
+    check(leaked == 0, "no appearance or inactive parameter reaches the simulation");
+}
+
+static void param_audit_check_typed_fields(const VehicleSpec *defaults,
+                                           const TrackDefinition *track)
+{
+    const DevSpecFieldAudit *gearCount = dev_spec_field_audit_at(0);
+    const DevSpecFieldAudit *loadTransfer = dev_spec_field_audit_at(1);
+
+    check(gearCount != NULL && strcmp(gearCount->name, "drive.gear_count") == 0 &&
+              gearCount->offset == offsetof(VehicleSpec, gearCount) &&
+              gearCount->size == sizeof(defaults->gearCount) &&
+              gearCount->classification == DEV_CLASS_PHYSICS_INPUT &&
+              gearCount->owner == DEV_OWNER_SETUP,
+          "gearCount has one typed physics/setup audit entry");
+    check(loadTransfer != NULL &&
+              strcmp(loadTransfer->name, "physics.lateral_load_transfer_enabled") == 0 &&
+              loadTransfer->offset == offsetof(VehicleSpec, lateralLoadTransferEnabled) &&
+              loadTransfer->size == sizeof(defaults->lateralLoadTransferEnabled) &&
+              loadTransfer->classification == DEV_CLASS_PHYSICS_INPUT &&
+              loadTransfer->owner == DEV_OWNER_SESSION_RULES,
+          "lateralLoadTransferEnabled has one typed physics/session-rules audit entry");
+    check(defaults->gearCount == GEAR_COUNT && defaults->lateralLoadTransferEnabled,
+          "typed-field defaults match their documented sources");
+
+    VehicleSpec fewerGears = *defaults;
+    fewerGears.gearCount = GEAR_COUNT - 1;
+    check(vehicle_spec_is_valid(&fewerGears), "a reduced-gear typed-field probe is valid");
+    check(param_audit_signature(&fewerGears, track) != param_audit_signature(defaults, track),
+          "gearCount demonstrably changes the simulated trajectory");
+
+    VehicleDefinition definition;
+    check(vehicle_definition_init(&definition, "audit/typed", "audit/typed", 1u, defaults),
+          "the typed-field owner probe definition validates");
+    VehicleSetup setup;
+    vehicle_setup_set_default(&definition, &setup);
+    setup.gearCount = GEAR_COUNT - 1;
+    VehicleInstance instance;
+    memset(&instance, 0, sizeof(instance));
+    check(vehicle_instance_derive(&instance, &definition, &setup) &&
+              instance.spec.gearCount == GEAR_COUNT - 1,
+          "gearCount is frozen from VehicleSetup when the instance is derived");
+
+    VehicleSpec noLoadTransfer = *defaults;
+    noLoadTransfer.lateralLoadTransferEnabled = false;
+    check(param_audit_signature(&noLoadTransfer, track) !=
+              param_audit_signature(defaults, track),
+          "lateralLoadTransferEnabled demonstrably changes the simulated trajectory");
+    VehicleDefinition noLoadTransferDefinition;
+    check(vehicle_definition_init(&noLoadTransferDefinition, "audit/no-transfer",
+                                  "audit/no-transfer", 1u, &noLoadTransfer) &&
+              noLoadTransferDefinition.contentHash != definition.contentHash,
+          "the current definition hash covers lateralLoadTransferEnabled until session rules "
+          "own it");
+}
+
+/* The committed table is generated from the registry, so it cannot describe a parameter the
+ * registry does not have — but it can go stale. Check the class word of every row. */
+static void param_audit_check_document(void)
+{
+    const char *path = "docs/VEHICLE_PARAMETERS.md";
+    FILE *file = fopen(path, "rb");
+    if (file == NULL) {
+        check(false, "%s exists (regenerate with `circuit_tests --dump-params %s`)", path,
+              path);
+        return;
+    }
+    fseek(file, 0, SEEK_END);
+    const long size = ftell(file);
+    fseek(file, 0, SEEK_SET);
+    char *text = (size > 0) ? (char *)malloc((size_t)size + 1u) : NULL;
+    if (text == NULL) {
+        fclose(file);
+        check(false, "%s could be read", path);
+        return;
+    }
+    const size_t read = fread(text, 1, (size_t)size, file);
+    fclose(file);
+    text[read] = '\0';
+
+    const int count = dev_params_count();
+    int missing = 0;
+    int stale = 0;
+    for (int i = 0; i < count; i++) {
+        const DevParameter *param = dev_param_at(i);
+        char row[128];
+        snprintf(row, sizeof(row), "| `%s` | `%s` |", param->name,
+                 dev_param_class_name(param->classification));
+        if (strstr(text, row) != NULL) continue;
+        char anyRow[96];
+        snprintf(anyRow, sizeof(anyRow), "| `%s` |", param->name);
+        if (strstr(text, anyRow) == NULL)
+            missing++;
+        else
+            stale++;
+    }
+
+    for (int i = 0; i < dev_spec_field_audit_count(); i++) {
+        const DevSpecFieldAudit *field = dev_spec_field_audit_at(i);
+        char row[160];
+        snprintf(row, sizeof(row), "| `%s` | `%s` | `%s` | `%s` |", field->name, field->cType,
+                 dev_param_class_name(field->classification),
+                 dev_param_owner_name(field->owner));
+        if (strstr(text, row) == NULL) stale++;
+    }
+    free(text);
+
+    check(missing == 0, "%s documents every registry parameter (%d missing)", path, missing);
+    check(stale == 0, "%s states the current class for every parameter (%d stale)", path,
+          stale);
+}
+
+static void scenario_param_audit(void)
+{
+    VehicleSpec defaults;
+    vehicle_spec_set_default(&defaults);
+
+    TrackDefinition track;
+    memset(&track, 0, sizeof(track));
+    track_init(&track);
+
+    param_audit_check_coverage();
+    param_audit_check_derived(&defaults);
+    param_audit_check_owner(&defaults);
+    param_audit_check_effect(&defaults, &track);
+    param_audit_check_typed_fields(&defaults, &track);
+    param_audit_check_document();
+
+    track_free(&track);
+}
+
+/* ------------------------------------------------------------------------------------- */
 /* Scenario: devreplay — durable timelines and the inspector's event markers               */
 /* ------------------------------------------------------------------------------------- */
 
@@ -2382,13 +2870,13 @@ static void scenario_auto_transmission(void)
     VehicleSpec spec;
     VehicleState vs;
     VehicleDerived derived;
-    Input io;
+    ControllerOutput io;
     AutoTransmission at;
 
     vehicle_spec_set_default(&spec);
     memset(&vs, 0, sizeof(vs));
     memset(&derived, 0, sizeof(derived));
-    input_zero(&io);
+    controller_output_zero(&io);
     memset(&at, 0, sizeof(at));
 
     /* Disabled: nothing changes. */
@@ -2570,8 +3058,8 @@ static void scenario_dev_state(void)
     check(!game->dev.scenarioRunning, "scenario stop ends the scripted run");
 
     /* Force a clear invariant violation through the public recorder. */
-    Input applied;
-    input_zero(&applied);
+    ControllerOutput applied;
+    controller_output_zero(&applied);
     game->derived.speedMps = MAX_SAFE_SPEED_MPS + 25.0f;
     dev_state_record(game, &applied);
     check(game->dev.invariantFailed, "overspeed latches invariantFailed");
@@ -2932,8 +3420,8 @@ static void scenario_drivetrain_layout(void)
         vehicle_state_reset(&spec, &state, &derived, &renderState);
         state.velocityLongitudinalMps = 12.0f;
 
-        Input input;
-        input_zero(&input);
+        ControllerOutput input;
+        controller_output_zero(&input);
         input.steer = 0.20f;
         input.throttle = 0.15f;
         for (int i = 0; i < 120; i++)
@@ -2987,8 +3475,8 @@ static void scenario_drivetrain_layout(void)
         vehicle_state_reset(&spec, &state, &derived, &renderState);
         state.velocityLongitudinalMps = 12.0f;
 
-        Input input;
-        input_zero(&input);
+        ControllerOutput input;
+        controller_output_zero(&input);
         input.steer = 0.20f;
         input.throttle = 0.15f;
         for (int i = 0; i < 180; i++)
@@ -3259,6 +3747,9 @@ static const TestScenario kPhysicsScenarios[] = {
     { "integration", "semi-implicit order and heading wrap", scenario_integration },
     { "fixed-rate", "direct stepping matches accumulator stepping", scenario_fixed_rate },
     { "params", "tunable registry, clamping, and tuning-profile round trip", scenario_params },
+    { "param-audit",
+      "every VehicleSpec field is classified, and each class is proved by behaviour",
+      scenario_param_audit },
     { "presets", "driving presets: count, bounds, and deterministic apply", scenario_presets },
     { "auto-trans", "automatic transmission shifts and arcade reverse swap",
       scenario_auto_transmission },

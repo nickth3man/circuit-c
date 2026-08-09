@@ -45,6 +45,7 @@
 #include "dev/dev_replay.h"
 #include "dev/failure_bundle.h"
 #include "game/ai_driver.h"
+#include "game/controller.h"
 #include "game/car_roster.h"
 #include "game/game.h"
 #include "game/input.h"
@@ -589,10 +590,10 @@ static int run_validate_lap(Game *game, const Options *options)
     game->state = STATE_PLAYING;
     game->dev.uiDeterministic = true;
 
-    AiDriverConfig aiCfg;
-    ai_driver_config_default(&aiCfg);
-    AiDriverState aiState;
-    memset(&aiState, 0, sizeof(aiState));
+    /* The validation lap is driven by an AI CONTROLLER owned by the entrant, not by a driver
+     * the platform loop pokes into Game.input. game_fixed_update() runs it in its controller
+     * stage, at the same instant the explicit call used to happen. */
+    controller_init(&game->controller, CONTROLLER_KIND_AI);
 
     const int budgetTicks = REPLAY_CAPACITY_TICKS; /* 300 s max, the replay ring's capacity */
     const int maxRows = budgetTicks / VIDEO_TICKS_PER_FRAME;
@@ -612,8 +613,6 @@ static int run_validate_lap(Game *game, const Options *options)
 
     for (int t = 0; t < budgetTicks && game->progress.lap < VALIDATION_RUN_LAPS && !writeFailed;
          t++) {
-        ai_driver_update(&aiCfg, &aiState, &game->trackDef, &game->trackRuntime, &game->vehicle,
-                         &game->derived, &game->spec, &game->input, FIXED_DT_S);
         game_fixed_update(game, FIXED_DT_S);
         ticksRun++;
 
@@ -646,9 +645,9 @@ static int run_validate_lap(Game *game, const Options *options)
                 vod.speedMps = game->derived.speedMps;
                 vod.lapState = (game->progress.lap < 1) ? 0 : 1;
                 vod.isPassing = (outOfOrder == 0 && allFinite);
-                vod.steerInput = game->input.steer;
-                vod.throttleInput = game->input.throttle;
-                vod.brakeInput = game->input.brake;
+                vod.steerInput = game->controllerOutput.steer;
+                vod.throttleInput = game->controllerOutput.throttle;
+                vod.brakeInput = game->controllerOutput.brake;
 
                 render_set_validation_overlay(&vod);
                 game_draw(game, 0.0f);
@@ -684,9 +683,9 @@ static int run_validate_lap(Game *game, const Options *options)
             vod.speedMps = game->derived.speedMps;
             vod.lapState = (game->progress.lap < 1) ? 0 : 1;
             vod.isPassing = (outOfOrder == 0 && allFinite);
-            vod.steerInput = game->input.steer;
-            vod.throttleInput = game->input.throttle;
-            vod.brakeInput = game->input.brake;
+            vod.steerInput = game->controllerOutput.steer;
+            vod.throttleInput = game->controllerOutput.throttle;
+            vod.brakeInput = game->controllerOutput.brake;
 
             render_set_validation_overlay(&vod);
             game_draw(game, 0.0f);

@@ -266,8 +266,8 @@ the game) and **`mk inspect`** (serves the browser inspector) — use `mk visual
 instead of the latter, since it starts and stops its own server.
 
 Press **F2** in the running game for the Physics Lab: scenario selector, pause and single
-step, live sliders for every tunable in the registry with its default and unit — currently
-123, listed by `circuit_tests --dump-params` — tuning profiles, overlay toggles,
+step, live sliders for every tunable in the registry with its default, unit and class, tabulated
+in [docs/VEHICLE_PARAMETERS.md](docs/VEHICLE_PARAMETERS.md) — tuning profiles, overlay toggles,
 an eight-channel scope with a baseline ghost, and an invariant panel. **F3** opens the replay
 inspector.
 
@@ -275,6 +275,15 @@ inspector.
 
 Every tunable is defined once, in `src/dev/dev_params.c`, and that one definition generates the
 sliders, the profile format, the telemetry metadata, and the `--dump-params` table.
+
+Each entry also carries its honest class — `physics`, `derived`, `appearance` or `inactive` —
+and the `param-audit` scenario proves it: a `physics` parameter must change a simulated
+trajectory when perturbed, and an `appearance` or `inactive` one must leave it bit-identical.
+Fifteen physically suggestive fields — caster, rear toe, wheel and anti-roll rates, roll
+centres, tire pressure, pad friction, wheel offset, aero centre of pressure — are authored but
+read by nothing, and another set (camber, front toe, suspension travel, disc radius, the aero
+lift coefficients) only shapes how the car is drawn. The table says so rather than letting a
+live-looking slider imply otherwise.
 
 ## Known limitations
 
