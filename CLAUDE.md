@@ -1,4 +1,4 @@
-# AGENTS.md
+# CLAUDE.md
 
 Behavioral guidelines for reducing common LLM coding mistakes. Merge these with project-specific instructions; project rules take precedence when they conflict.
 
