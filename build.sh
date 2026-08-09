@@ -256,6 +256,8 @@ if [ "$MODE" = "clean" ]; then
     # built by an older checkout does not keep a stale runnable or generated copy beside the
     # new one.
     rm -rf telemetry replays
+    rm -f drifty.exe drifty_release.exe drifty_tests.exe drifty_hotreload_harness.exe
+    rm -f drifty_tests_asan.exe drifty_tests_cov.exe
     rm -f circuit.exe circuit_release.exe circuit_tests.exe circuit_hotreload_harness.exe
     rm -f circuit_tests_asan.exe circuit_tests_cov.exe
     rm -f libraylib.dll raylib.dll glfw3.dll

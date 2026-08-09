@@ -767,6 +767,9 @@ compile-commands:
 clean:
 	rm -rf $(BUILD_DIR) coverage dist replays corpus
 	rm -rf $(ARTIFACTS)/fuzz $(ARTIFACTS)/plots $(ARTIFACTS)/screenshots
+	rm -f drifty$(EXE_SUFFIX) drifty_release$(EXE_SUFFIX) drifty_tests$(EXE_SUFFIX)
+	rm -f drifty_hotreload_harness$(EXE_SUFFIX)
+	rm -f drifty_tests_asan$(EXE_SUFFIX) drifty_tests_cov$(EXE_SUFFIX)
 	rm -f circuit$(EXE_SUFFIX) circuit_release$(EXE_SUFFIX) circuit_tests$(EXE_SUFFIX)
 	rm -f circuit_hotreload_harness$(EXE_SUFFIX)
 	rm -f circuit_tests_asan$(EXE_SUFFIX) circuit_tests_cov$(EXE_SUFFIX)
