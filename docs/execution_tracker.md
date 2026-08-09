@@ -54,7 +54,7 @@ Start the Identity and Architecture lanes in parallel.
 
 After #6, #7 and #8 may run in parallel.
 
-- [ ] [#7 — Split immutable TrackDefinition from per-entrant RacerProgress](https://github.com/nickth3man/circuit-c/issues/7)
+- [x] [#7 — Split immutable TrackDefinition from per-entrant RacerProgress](https://github.com/nickth3man/circuit-c/issues/7)
   - Depends on: #6
 
 - [x] [#8 — Split VehicleDefinition, VehicleSetup, and VehicleInstance state](https://github.com/nickth3man/circuit-c/issues/8)
@@ -63,7 +63,7 @@ After #6, #7 and #8 may run in parallel.
 - [x] [#9 — Unify human, AI, replay, ghost, and scripted control behind Controller output](https://github.com/nickth3man/circuit-c/issues/9)
   - Depends on: #8
 
-- [ ] [#10 — Introduce RaceEntrant and deterministic multi-vehicle storage](https://github.com/nickth3man/circuit-c/issues/10)
+- [x] [#10 — Introduce RaceEntrant and deterministic multi-vehicle storage](https://github.com/nickth3man/circuit-c/issues/10)
   - Depends on: #7, #8, #9
 
 - [ ] [#11 — Introduce RaceSession lifecycle, rules, and ordered fixed-update stages](https://github.com/nickth3man/circuit-c/issues/11)
@@ -74,7 +74,7 @@ After #6, #7 and #8 may run in parallel.
 - [x] Replacement identity is fully decided.
 - [x] Player-facing drift scoring/game framing has been removed.
 - [x] Technical identity rename builds and tests successfully.
-- [ ] Track content and racer progress have separate ownership.
+- [x] Track content and racer progress have separate ownership.
 - [x] Vehicle definitions, setups, and runtime instances have separate ownership.
 - [x] All simulated entrants use the same controller contract.
 - [ ] A headless RaceSession can own multiple isolated entrants.
