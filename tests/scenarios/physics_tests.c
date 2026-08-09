@@ -2290,8 +2290,8 @@ static uint32_t param_audit_drive_signature(const VehicleSpec *spec, bool *allFi
     VehicleRenderState renderState;
     vehicle_state_reset(spec, &state, &derived, &renderState);
 
-    Input input;
-    input_zero(&input);
+    ControllerOutput input;
+    controller_output_zero(&input);
 
     for (int tick = 0; tick < PARAM_AUDIT_DRIVE_TICKS; tick++) {
         if (tick < 450) {
@@ -2346,8 +2346,8 @@ static uint32_t param_audit_collide_signature(const VehicleSpec *spec,
     renderState.prevPositionM = renderState.currPositionM = state.positionM;
     renderState.prevHeadingRad = renderState.currHeadingRad = state.headingRad;
 
-    Input input;
-    input_zero(&input);
+    ControllerOutput input;
+    controller_output_zero(&input);
     input.throttle = 0.4f;
     input.steer = -0.2f;
     state.selectedGear = 3;
@@ -2412,17 +2412,21 @@ static void param_audit_check_coverage(void)
             covered[param->offset + b] = 1;
         }
     }
-    check(overlaps == 0, "no two registry entries describe the same VehicleSpec bytes");
+    /* The int and bool live in the typed companion audit rather than being exempted. */
+    for (int i = 0; i < dev_spec_field_audit_count(); i++) {
+        const DevSpecFieldAudit *field = dev_spec_field_audit_at(i);
+        check(field->offset + field->size <= sizeof(VehicleSpec),
+              "typed field '%s' lies inside VehicleSpec", field->name);
+        for (size_t b = 0; b < field->size; b++) {
+            if (covered[field->offset + b] != 0) overlaps++;
+            covered[field->offset + b] = 1;
+        }
+    }
+    check(overlaps == 0, "no two audit entries describe the same VehicleSpec bytes");
+    check(dev_spec_field_audit_count() == 2,
+          "both non-float VehicleSpec fields have typed audit entries");
 
-    /* The three fields the registry deliberately does not describe, plus the unused gear
-     * slots above gearCount. Everything else must be covered, so adding a float to
-     * VehicleSpec without classifying it fails here. */
-    for (size_t b = 0; b < sizeof(int); b++) {
-        covered[offsetof(VehicleSpec, gearCount) + b] = 1;
-    }
-    for (size_t b = 0; b < sizeof(bool); b++) {
-        covered[offsetof(VehicleSpec, lateralLoadTransferEnabled) + b] = 1;
-    }
+    /* Unused gear-ratio slots are array capacity rather than authored fields. */
     for (size_t b = (size_t)GEAR_COUNT * sizeof(float); b < (size_t)MAX_GEARS * sizeof(float);
          b++) {
         covered[offsetof(VehicleSpec, gearRatios) + b] = 1;
@@ -2438,7 +2442,7 @@ static void param_audit_check_coverage(void)
         uncovered++;
     }
     check(uncovered == 0,
-          "every VehicleSpec float is classified exactly once (%d unclassified byte(s), "
+          "every VehicleSpec field is classified exactly once (%d unclassified byte(s), "
           "first at offset %u of %u)",
           uncovered, (unsigned)firstUncovered, (unsigned)sizeof(VehicleSpec));
 }
@@ -2597,6 +2601,59 @@ static void param_audit_check_effect(const VehicleSpec *defaults, const TrackDef
     check(leaked == 0, "no appearance or inactive parameter reaches the simulation");
 }
 
+static void param_audit_check_typed_fields(const VehicleSpec *defaults,
+                                           const TrackDefinition *track)
+{
+    const DevSpecFieldAudit *gearCount = dev_spec_field_audit_at(0);
+    const DevSpecFieldAudit *loadTransfer = dev_spec_field_audit_at(1);
+
+    check(gearCount != NULL && strcmp(gearCount->name, "drive.gear_count") == 0 &&
+              gearCount->offset == offsetof(VehicleSpec, gearCount) &&
+              gearCount->size == sizeof(defaults->gearCount) &&
+              gearCount->classification == DEV_CLASS_PHYSICS_INPUT &&
+              gearCount->owner == DEV_OWNER_SETUP,
+          "gearCount has one typed physics/setup audit entry");
+    check(loadTransfer != NULL &&
+              strcmp(loadTransfer->name, "physics.lateral_load_transfer_enabled") == 0 &&
+              loadTransfer->offset == offsetof(VehicleSpec, lateralLoadTransferEnabled) &&
+              loadTransfer->size == sizeof(defaults->lateralLoadTransferEnabled) &&
+              loadTransfer->classification == DEV_CLASS_PHYSICS_INPUT &&
+              loadTransfer->owner == DEV_OWNER_SESSION_RULES,
+          "lateralLoadTransferEnabled has one typed physics/session-rules audit entry");
+    check(defaults->gearCount == GEAR_COUNT && defaults->lateralLoadTransferEnabled,
+          "typed-field defaults match their documented sources");
+
+    VehicleSpec fewerGears = *defaults;
+    fewerGears.gearCount = GEAR_COUNT - 1;
+    check(vehicle_spec_is_valid(&fewerGears), "a reduced-gear typed-field probe is valid");
+    check(param_audit_signature(&fewerGears, track) != param_audit_signature(defaults, track),
+          "gearCount demonstrably changes the simulated trajectory");
+
+    VehicleDefinition definition;
+    check(vehicle_definition_init(&definition, "audit/typed", "audit/typed", 1u, defaults),
+          "the typed-field owner probe definition validates");
+    VehicleSetup setup;
+    vehicle_setup_set_default(&definition, &setup);
+    setup.gearCount = GEAR_COUNT - 1;
+    VehicleInstance instance;
+    memset(&instance, 0, sizeof(instance));
+    check(vehicle_instance_derive(&instance, &definition, &setup) &&
+              instance.spec.gearCount == GEAR_COUNT - 1,
+          "gearCount is frozen from VehicleSetup when the instance is derived");
+
+    VehicleSpec noLoadTransfer = *defaults;
+    noLoadTransfer.lateralLoadTransferEnabled = false;
+    check(param_audit_signature(&noLoadTransfer, track) !=
+              param_audit_signature(defaults, track),
+          "lateralLoadTransferEnabled demonstrably changes the simulated trajectory");
+    VehicleDefinition noLoadTransferDefinition;
+    check(vehicle_definition_init(&noLoadTransferDefinition, "audit/no-transfer",
+                                  "audit/no-transfer", 1u, &noLoadTransfer) &&
+              noLoadTransferDefinition.contentHash != definition.contentHash,
+          "the current definition hash covers lateralLoadTransferEnabled until session rules "
+          "own it");
+}
+
 /* The committed table is generated from the registry, so it cannot describe a parameter the
  * registry does not have — but it can go stale. Check the class word of every row. */
 static void param_audit_check_document(void)
@@ -2637,6 +2694,15 @@ static void param_audit_check_document(void)
         else
             stale++;
     }
+
+    for (int i = 0; i < dev_spec_field_audit_count(); i++) {
+        const DevSpecFieldAudit *field = dev_spec_field_audit_at(i);
+        char row[160];
+        snprintf(row, sizeof(row), "| `%s` | `%s` | `%s` | `%s` |", field->name, field->cType,
+                 dev_param_class_name(field->classification),
+                 dev_param_owner_name(field->owner));
+        if (strstr(text, row) == NULL) stale++;
+    }
     free(text);
 
     check(missing == 0, "%s documents every registry parameter (%d missing)", path, missing);
@@ -2657,6 +2723,7 @@ static void scenario_param_audit(void)
     param_audit_check_derived(&defaults);
     param_audit_check_owner(&defaults);
     param_audit_check_effect(&defaults, &track);
+    param_audit_check_typed_fields(&defaults, &track);
     param_audit_check_document();
 
     track_free(&track);
@@ -3680,7 +3747,8 @@ static const TestScenario kPhysicsScenarios[] = {
     { "integration", "semi-implicit order and heading wrap", scenario_integration },
     { "fixed-rate", "direct stepping matches accumulator stepping", scenario_fixed_rate },
     { "params", "tunable registry, clamping, and tuning-profile round trip", scenario_params },
-    { "param-audit", "every spec float is classified, and each class is proved by behaviour",
+    { "param-audit",
+      "every VehicleSpec field is classified, and each class is proved by behaviour",
       scenario_param_audit },
     { "presets", "driving presets: count, bounds, and deterministic apply", scenario_presets },
     { "auto-trans", "automatic transmission shifts and arcade reverse swap",

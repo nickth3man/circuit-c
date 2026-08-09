@@ -13,6 +13,19 @@ boundary; reset changes runtime state without writing the shared definition. `Ga
 exposes the prior one-entrant field names through the same `VehicleInstance` storage while
 subsystems migrate.
 
+Issue 9 is implemented by `ControllerOutput` (`src/game/controller_output.h`) and `Controller`
+(`src/game/controller.h`). Human, scripted, replayed and AI entrants all produce one
+`ControllerOutput` per fixed tick through `controller_update()`, which ends in the single
+`controller_output_clamp()` validation path; `ai_driver_update()` emits that value and neither
+it nor playback writes `Game.input` any more. `game_fixed_update()` runs the controller stage
+before pre-physics gating, reading tick-start state at the instant the platform loop used to
+call the AI, and the replay timeline records the authoritative controller output alongside the
+application commands. Gear shifts are controller output; pause, reset, the debug overlay and
+the automatic-transmission toggle remain session commands on `Input`. `Game` owns exactly one
+`Controller` until entrant storage lands. Persistent controller memory is deliberately still
+excluded from the rolling checksum: adding it would make a live AI run and its replay hash
+differently, so it is expanded with the entrant/session owners in issues 10–11.
+
 ## Context
 
 The current single-car `Game`, `Track`, and `VehicleSpec` aggregates mix immutable content,
@@ -306,9 +319,10 @@ an entrant-scoped progress event value; retained telemetry copies remain present
 `VehicleDefinition` also gains stable `id`, content version/hash, display/class metadata, and a
 reference to appearance content. Those are content fields, not runtime state.
 
-Issue 12 records the same assignment field by field, machine-checked: every float in
-`VehicleSpec` carries an owner (`definition`, `setup`, `derived`) and a class (`physics`,
-`derived`, `appearance`, `inactive`) in the `src/dev/dev_params.c` registry, tabulated in
+Issue 12 records the same assignment field by field, machine-checked: every field in
+`VehicleSpec` carries an owner (`definition`, `setup`, `derived`, or `session-rules`) and a
+class (`physics`, `derived`, `appearance`, `inactive`) in the `src/dev/dev_params.c` audit,
+tabulated in
 [VEHICLE_PARAMETERS.md](VEHICLE_PARAMETERS.md). The `param-audit` scenario proves the owner
 by compiling a perturbed definition through `vehicle_instance_derive()` and the class by
 perturbing the field and comparing simulated trajectories. Ownership says who may write a
@@ -370,9 +384,9 @@ Each step leaves the headless suite runnable and keeps `game_init`, `game_config
 2. **Issue 8:** introduce `VehicleDefinition`, `VehicleSetup`, and `VehicleInstance`; first copy
    the existing default/spec into one immutable definition and one setup. Keep one-entrant
    `Game` accessors so physics baselines remain unchanged.
-3. **Issue 9:** add the plain-data `Controller` union and `ControllerOutput`; route human,
-   scripted, replay, ghost, and existing AI input through it without changing physics input
-   semantics.
+3. **Issue 9 (implemented):** add the plain-data `Controller` union and `ControllerOutput`;
+   route human, scripted, replay, ghost, and existing AI input through it without changing
+   physics input semantics.
 4. **Issue 10:** introduce `RaceEntrant` and deterministic entrant storage. Start with capacity
    for multiple entrants but configure exactly one in all existing flows; migrate collision,
    progress, telemetry, and rendering to entrant iteration separately.

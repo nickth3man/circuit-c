@@ -511,6 +511,32 @@ static const DevParameter g_params[] = {
 
 #define PARAM_COUNT ((int)(sizeof(g_params) / sizeof(g_params[0])))
 
+/* The float registry above drives sliders and profiles. These two typed fields are not
+ * tunables in that UI, but issue 12 still requires an explicit, machine-checked category,
+ * owner, consumer and determinism role for every VehicleSpec field. */
+#define DEV_STRINGIFY_INNER(value) #value
+#define DEV_STRINGIFY(value) DEV_STRINGIFY_INNER(value)
+static const DevSpecFieldAudit g_specFieldAudits[] = {
+    { "drive.gear_count", "int", DEV_STRINGIFY(GEAR_COUNT), "—",
+      "1 .. " DEV_STRINGIFY(MAX_GEARS), SPEC_OFFSET(gearCount),
+      sizeof(((VehicleSpec *)0)->gearCount), DEV_CLASS_PHYSICS_INPUT, DEV_OWNER_SETUP,
+      "Transmission bounds and selected gear-ratio lookup.",
+      "Frozen setup value; covered by definition and setup compatibility hashes.",
+      "Active setup input; not exposed as a free-standing slider because ratios must change "
+      "with it." },
+    { "physics.lateral_load_transfer_enabled", "bool", "true", "—", "false or true",
+      SPEC_OFFSET(lateralLoadTransferEnabled),
+      sizeof(((VehicleSpec *)0)->lateralLoadTransferEnabled), DEV_CLASS_PHYSICS_INPUT,
+      DEV_OWNER_SESSION_RULES,
+      "Gates quasi-static lateral load transfer in physics_fixed_update().",
+      "Currently covered by the definition hash; moves to frozen session rules.",
+      "Active validation switch, not vehicle content; retained until session rules own it." },
+};
+#undef DEV_STRINGIFY
+#undef DEV_STRINGIFY_INNER
+
+#define SPEC_FIELD_AUDIT_COUNT ((int)(sizeof(g_specFieldAudits) / sizeof(g_specFieldAudits[0])))
+
 /* ------------------------------------------------------------------------------- access -- */
 
 const char *dev_param_class_name(int classification)
@@ -529,6 +555,7 @@ const char *dev_param_owner_name(int owner)
     switch (owner) {
         case DEV_OWNER_SETUP: return "setup";
         case DEV_OWNER_DERIVED: return "derived";
+        case DEV_OWNER_SESSION_RULES: return "session-rules";
         case DEV_OWNER_DEFINITION:
         default: return "definition";
     }
@@ -552,6 +579,17 @@ const DevParameter *dev_param_find(const char *name)
         if (strcmp(g_params[i].name, name) == 0) return &g_params[i];
     }
     return NULL;
+}
+
+int dev_spec_field_audit_count(void)
+{
+    return SPEC_FIELD_AUDIT_COUNT;
+}
+
+const DevSpecFieldAudit *dev_spec_field_audit_at(int index)
+{
+    if (index < 0 || index >= SPEC_FIELD_AUDIT_COUNT) return NULL;
+    return &g_specFieldAudits[index];
 }
 
 int dev_params_group_count(void)
@@ -1083,6 +1121,26 @@ void dev_params_write_markdown(FILE *out)
     fprintf(out, "`definition` values survive `vehicle_instance_derive()`, `setup` values are "
                  "overwritten\n");
     fprintf(out, "by the entrant's `VehicleSetup`, and `derived` values are recompiled.\n");
+    fprintf(out, "Definition values are covered by the definition compatibility hash; setup "
+                 "values by\n");
+    fprintf(out, "the frozen setup hash; derived values are recomputed and are not authored "
+                 "redundantly.\n");
+
+    fprintf(out, "\n## Non-float fields\n\n");
+    fprintf(out, "`VehicleSpec` contains two typed fields outside the float tuning registry. "
+                 "They are\n");
+    fprintf(out, "audited here so no struct field is silently exempt from classification or "
+                 "ownership.\n\n");
+    fprintf(out, "| Field | C type | Class | Owner | Default | Unit | Valid range | Consumer | "
+                 "Determinism role | Decision |\n");
+    fprintf(out, "|---|---|---|---|---|---|---|---|---|---|\n");
+    for (int i = 0; i < SPEC_FIELD_AUDIT_COUNT; i++) {
+        const DevSpecFieldAudit *field = &g_specFieldAudits[i];
+        fprintf(out, "| `%s` | `%s` | `%s` | `%s` | %s | %s | %s | %s | %s | %s |\n",
+                field->name, field->cType, dev_param_class_name(field->classification),
+                dev_param_owner_name(field->owner), field->defaultValue, field->unit,
+                field->validRange, field->consumer, field->determinismRole, field->decision);
+    }
 
     /* The honest core of the audit, listed on its own so it cannot be missed: the fields whose
      * names promise dynamics that no code delivers. Each row states the decision that was

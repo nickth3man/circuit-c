@@ -61,9 +61,10 @@ typedef enum {
  * docs/SIMULATION_OWNERSHIP.md. Setup-owned entries are the ones VehicleSetup overwrites when
  * vehicle_instance_derive() compiles a definition; definition-owned entries survive it. */
 typedef enum {
-    DEV_OWNER_DEFINITION = 0, /* immutable VehicleDefinition content   */
-    DEV_OWNER_SETUP = 1,      /* entrant-selectable VehicleSetup value */
-    DEV_OWNER_DERIVED = 2     /* compiled beside the definition        */
+    DEV_OWNER_DEFINITION = 0,   /* immutable VehicleDefinition content   */
+    DEV_OWNER_SETUP = 1,        /* entrant-selectable VehicleSetup value */
+    DEV_OWNER_DERIVED = 2,      /* compiled beside the definition        */
+    DEV_OWNER_SESSION_RULES = 3 /* temporary validation switch; moves out of content */
 } DevParamOwner;
 
 /* Description of one tunable float inside VehicleSpec. */
@@ -88,9 +89,28 @@ typedef struct {
     const char *description;
 } DevParameter;
 
+/* VehicleSpec also contains an int and a bool which cannot participate in the float tuning
+ * registry. They still need the same issue-12 audit, so they live in this small companion
+ * table instead of being silently exempted from coverage. */
+typedef struct {
+    const char *name;
+    const char *cType;
+    const char *defaultValue;
+    const char *unit;
+    const char *validRange;
+    size_t offset;
+    size_t size;
+    int classification; /* DevParamClass */
+    int owner;          /* DevParamOwner */
+    const char *consumer;
+    const char *determinismRole;
+    const char *decision;
+} DevSpecFieldAudit;
+
 /* Stable lowercase words for the two enums above: "physics", "derived", "appearance",
- * "inactive"; "definition", "setup", "derived". They are written into the parameter table,
- * the telemetry metadata block, and the Physics Lab, so they are part of those formats. */
+ * "inactive"; "definition", "setup", "derived", "session-rules". They are written into the
+ * parameter table, the telemetry metadata block, and the Physics Lab, so they are part of
+ * those formats. */
 const char *dev_param_class_name(int classification);
 const char *dev_param_owner_name(int owner);
 
@@ -98,6 +118,10 @@ const char *dev_param_owner_name(int owner);
 int dev_params_count(void);
 const DevParameter *dev_param_at(int index);
 const DevParameter *dev_param_find(const char *name);
+
+/* Non-float VehicleSpec field audit access. The table is immutable and stable. */
+int dev_spec_field_audit_count(void);
+const DevSpecFieldAudit *dev_spec_field_audit_at(int index);
 
 /* Distinct group names, in first-appearance order. */
 int dev_params_group_count(void);

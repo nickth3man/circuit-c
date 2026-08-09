@@ -19,6 +19,18 @@ value is proved by the `param-audit` scenario rather than asserted here.
 `Owner` follows the `VehicleSpec` migration map in `docs/SIMULATION_OWNERSHIP.md`:
 `definition` values survive `vehicle_instance_derive()`, `setup` values are overwritten
 by the entrant's `VehicleSetup`, and `derived` values are recompiled.
+Definition values are covered by the definition compatibility hash; setup values by
+the frozen setup hash; derived values are recomputed and are not authored redundantly.
+
+## Non-float fields
+
+`VehicleSpec` contains two typed fields outside the float tuning registry. They are
+audited here so no struct field is silently exempt from classification or ownership.
+
+| Field | C type | Class | Owner | Default | Unit | Valid range | Consumer | Determinism role | Decision |
+|---|---|---|---|---|---|---|---|---|---|
+| `drive.gear_count` | `int` | `physics` | `setup` | 5 | — | 1 .. MAX_GEARS | Transmission bounds and selected gear-ratio lookup. | Frozen setup value; covered by definition and setup compatibility hashes. | Active setup input; not exposed as a free-standing slider because ratios must change with it. |
+| `physics.lateral_load_transfer_enabled` | `bool` | `physics` | `session-rules` | true | — | false or true | Gates quasi-static lateral load transfer in physics_fixed_update(). | Currently covered by the definition hash; moves to frozen session rules. | Active validation switch, not vehicle content; retained until session rules own it. |
 
 ## Inactive parameters
 
