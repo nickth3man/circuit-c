@@ -178,7 +178,7 @@ BUILD_DEFINES = -DCIRCUIT_BUILD_COMMIT=\"$(BUILD_COMMIT)\" \
 
 SHARED_SRCS := src/game/input.c src/core/math_utils.c src/dev/dev_scenario.c src/game/profile.c src/render/car_visual.c src/render/car_visual_raster.c src/render/vehicle_effects.c \
                src/game/car_roster.c src/world/track.c src/game/validation_metrics.c src/game/run_report.c \
-               src/game/telemetry.c src/game/ai_driver.c src/game/replay.c src/dev/dev_presets.c src/dev/dev_params.c src/dev/dev_replay.c \
+               src/game/telemetry.c src/game/ai_driver.c src/game/controller.c src/game/replay.c src/dev/dev_presets.c src/dev/dev_params.c src/dev/dev_replay.c \
                src/dev/failure_bundle.c \
                src/physics/surface.c src/physics/vehicle.c
 # failure_bundle.c is SHARED, not DEV: --validate-lap writes a bundle from the platform layer,

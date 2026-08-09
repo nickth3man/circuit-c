@@ -11,7 +11,7 @@
 
 #include <stdbool.h>
 
-#include "game/input.h"
+#include "game/controller_output.h"
 #include "physics/vehicle.h"
 
 typedef struct {
@@ -62,6 +62,7 @@ float physics_low_speed_blend(float velocityLongitudinalMps);
 bool physics_state_is_valid(const VehicleSpec *spec, const VehicleState *state,
                             const VehicleDerived *derived);
 void physics_fixed_update(const VehicleSpec *spec, VehicleState *state, VehicleDerived *derived,
-                          VehicleRenderState *renderState, const Input *input, float dt);
+                          VehicleRenderState *renderState, const ControllerOutput *input,
+                          float dt);
 
 #endif /* CIRCUIT_PHYSICS_H */

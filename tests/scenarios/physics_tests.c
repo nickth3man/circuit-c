@@ -989,8 +989,8 @@ static void scenario_accel_filter(void)
         VehicleDerived derived;
         VehicleRenderState renderState;
         phase1_fixture(&spec, &state, &derived, &renderState);
-        Input input;
-        input_zero(&input);
+        ControllerOutput input;
+        controller_output_zero(&input);
 
         state.velocityLongitudinalMps = 10.0f;
         state.velocityLateralMps = 0.0f;
@@ -1992,8 +1992,8 @@ static void scenario_steering_sign(void)
     VehicleRenderState renderState;
     phase1_fixture(&spec, &state, &derived, &renderState);
     state.velocityLongitudinalMps = 8.0f;
-    Input input;
-    input_zero(&input);
+    ControllerOutput input;
+    controller_output_zero(&input);
     input.steer = 0.5f;
     for (int i = 0; i < 30; i++) {
         physics_fixed_update(&spec, &state, &derived, &renderState, &input, FIXED_DT_S);
@@ -2036,8 +2036,8 @@ static void scenario_lever_arm(void)
     physics_axle_slip_angles(&b, &sb, &bf, &br);
     check(fabsf(af - bf) > 1e-4f, "front lever-arm change alters front slip");
     check(fabsf(ar - br) > 1e-4f, "rear lever-arm change alters rear slip");
-    Input input;
-    input_zero(&input);
+    ControllerOutput input;
+    controller_output_zero(&input);
     input.steer = 0.3f;
     physics_fixed_update(&a, &sa, &da, &ra, &input, FIXED_DT_S);
     physics_fixed_update(&b, &sb, &db, &rb, &input, FIXED_DT_S);
@@ -2054,8 +2054,8 @@ static void scenario_integration(void)
     VehicleDerived derived;
     VehicleRenderState renderState;
     phase1_fixture(&spec, &state, &derived, &renderState);
-    Input input;
-    input_zero(&input);
+    ControllerOutput input;
+    controller_output_zero(&input);
     input.throttle = 1.0f;
     physics_fixed_update(&spec, &state, &derived, &renderState, &input, FIXED_DT_S);
     check_near(state.velocityLongitudinalMps, 0.0, 1e-7,
@@ -2382,13 +2382,13 @@ static void scenario_auto_transmission(void)
     VehicleSpec spec;
     VehicleState vs;
     VehicleDerived derived;
-    Input io;
+    ControllerOutput io;
     AutoTransmission at;
 
     vehicle_spec_set_default(&spec);
     memset(&vs, 0, sizeof(vs));
     memset(&derived, 0, sizeof(derived));
-    input_zero(&io);
+    controller_output_zero(&io);
     memset(&at, 0, sizeof(at));
 
     /* Disabled: nothing changes. */
@@ -2570,8 +2570,8 @@ static void scenario_dev_state(void)
     check(!game->dev.scenarioRunning, "scenario stop ends the scripted run");
 
     /* Force a clear invariant violation through the public recorder. */
-    Input applied;
-    input_zero(&applied);
+    ControllerOutput applied;
+    controller_output_zero(&applied);
     game->derived.speedMps = MAX_SAFE_SPEED_MPS + 25.0f;
     dev_state_record(game, &applied);
     check(game->dev.invariantFailed, "overspeed latches invariantFailed");
@@ -2932,8 +2932,8 @@ static void scenario_drivetrain_layout(void)
         vehicle_state_reset(&spec, &state, &derived, &renderState);
         state.velocityLongitudinalMps = 12.0f;
 
-        Input input;
-        input_zero(&input);
+        ControllerOutput input;
+        controller_output_zero(&input);
         input.steer = 0.20f;
         input.throttle = 0.15f;
         for (int i = 0; i < 120; i++)
@@ -2987,8 +2987,8 @@ static void scenario_drivetrain_layout(void)
         vehicle_state_reset(&spec, &state, &derived, &renderState);
         state.velocityLongitudinalMps = 12.0f;
 
-        Input input;
-        input_zero(&input);
+        ControllerOutput input;
+        controller_output_zero(&input);
         input.steer = 0.20f;
         input.throttle = 0.15f;
         for (int i = 0; i < 180; i++)

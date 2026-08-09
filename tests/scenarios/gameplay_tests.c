@@ -936,9 +936,10 @@ static void scenario_chicane_track(void)
  * line at all. Everything it measures is therefore about the DRIVER, not the car: whether the
  * gates come in order, how far off the centreline it wanders, and whether it touches a wall.
  *
- * The AI is driven through game->input, which is the same field input_sample() writes from the
- * keyboard and the only field the platform loop touches. No branch is added to game.c for it,
- * so there is nothing in the simulation that knows a lap was driven by a program.
+ * The AI is an ordinary entrant CONTROLLER: game_fixed_update() runs it in the same controller
+ * stage a human entrant's latched sample goes through, and it emits the same ControllerOutput.
+ * No branch is added to game.c for it, so there is nothing in the simulation that knows a lap
+ * was driven by a program.
  */
 static void scenario_ai_lap(void)
 {
@@ -959,10 +960,9 @@ static void scenario_ai_lap(void)
      * stop simulating the car at the gameplay default and strand the last timed lap. */
     game->targetLaps = VALIDATION_RUN_LAPS;
 
-    AiDriverConfig cfg;
-    ai_driver_config_default(&cfg);
-    AiDriverState ai;
-    memset(&ai, 0, sizeof(ai));
+    controller_init(&game->controller, CONTROLLER_KIND_AI);
+    const AiDriverConfig cfg = game->controller.config.ai;
+    const AiDriverState *ai = &game->controller.memory.ai;
 
     const int budgetTicks = REPLAY_CAPACITY_TICKS; /* 300 s, the replay buffer's capacity */
     const int targetLaps = VALIDATION_RUN_LAPS;    /* out-lap, then the timed laps */
@@ -1003,12 +1003,15 @@ static void scenario_ai_lap(void)
     float prevSteerStep = 0.0f;
 
     for (int tick = 0; tick < budgetTicks && game->progress.lap < targetLaps; tick++) {
-        ai_driver_update(&cfg, &ai, &game->trackDef, &game->trackRuntime, &game->vehicle,
-                         &game->derived, &game->spec, &game->input, FIXED_DT_S);
+        game_fixed_update(game, FIXED_DT_S);
+        ticksRun++;
 
-        if (game->input.handbrake != 0.0f) handbrakeEverSet = true;
-        if (game->input.throttle > 0.0f && game->input.brake > 0.0f) bothPedalsEverSet = true;
-        if (game->input.throttle >= 0.999f) {
+        /* Everything below reads the output the AI controller emitted for THIS tick, which is
+         * what the entrant's driver asked for before any assist rewrote it. */
+        if (game->controllerOutput.handbrake != 0.0f) handbrakeEverSet = true;
+        if (game->controllerOutput.throttle > 0.0f && game->controllerOutput.brake > 0.0f)
+            bothPedalsEverSet = true;
+        if (game->controllerOutput.throttle >= 0.999f) {
             fullThrottleTicks++;
             currentFullThrottleRun++;
             if (currentFullThrottleRun > longestFullThrottleRun)
@@ -1016,31 +1019,28 @@ static void scenario_ai_lap(void)
         } else {
             currentFullThrottleRun = 0;
         }
-        throttleSumTicks += game->input.throttle;
-        if (game->input.brake > 0.0f) brakingTicks++;
+        throttleSumTicks += game->controllerOutput.throttle;
+        if (game->controllerOutput.brake > 0.0f) brakingTicks++;
 
         {
-            const float step = game->input.throttle - prevThrottle;
+            const float step = game->controllerOutput.throttle - prevThrottle;
             if (tick > 0 && fabsf(step) > maxThrottleStep) maxThrottleStep = fabsf(step);
             if (step * prevThrottleStep < 0.0f &&
                 (fabsf(step) > 1.0e-4f || fabsf(prevThrottleStep) > 1.0e-4f))
                 throttleReversals++;
             prevThrottleStep = step;
-            prevThrottle = game->input.throttle;
+            prevThrottle = game->controllerOutput.throttle;
         }
 
         {
-            const float step = game->input.steer - prevSteer;
+            const float step = game->controllerOutput.steer - prevSteer;
             if (tick > 0 && fabsf(step) > maxSteerStep) maxSteerStep = fabsf(step);
             if (step * prevSteerStep < 0.0f &&
                 (fabsf(step) > 1.0e-4f || fabsf(prevSteerStep) > 1.0e-4f))
                 steerReversals++;
             prevSteerStep = step;
-            prevSteer = game->input.steer;
+            prevSteer = game->controllerOutput.steer;
         }
-
-        game_fixed_update(game, FIXED_DT_S);
-        ticksRun++;
 
         const TrackCheckpointEvent ev = game->lastCheckpointEvent;
         if (ev.crossed) {
@@ -1058,8 +1058,8 @@ static void scenario_ai_lap(void)
         /* The car spawns on the gate centre, which is ON THE CENTRELINE, while the target is
          * the offset racing line — so the first second is a legitimate acquisition transient,
          * not a tracking failure. Measure the control law once it is established. */
-        if (tick > 240 && fabsf(ai.crossTrackErrorM) > maxCrossTrackM)
-            maxCrossTrackM = fabsf(ai.crossTrackErrorM);
+        if (tick > 240 && fabsf(ai->crossTrackErrorM) > maxCrossTrackM)
+            maxCrossTrackM = fabsf(ai->crossTrackErrorM);
         if (game->derived.speedMps > maxSpeedMps) maxSpeedMps = game->derived.speedMps;
         speedSumMps += game->derived.speedMps;
         if (game->derived.maxFrictionUsage > peakFrictionUsage)
@@ -1201,12 +1201,8 @@ static void scenario_ai_lap(void)
         repeat->state = STATE_PLAYING;
         repeat->targetLaps = VALIDATION_RUN_LAPS;
 
-        AiDriverState ai2;
-        memset(&ai2, 0, sizeof(ai2));
+        controller_init(&repeat->controller, CONTROLLER_KIND_AI);
         for (int tick = 0; tick < ticksRun; tick++) {
-            ai_driver_update(&cfg, &ai2, &repeat->trackDef, &repeat->trackRuntime,
-                             &repeat->vehicle, &repeat->derived, &repeat->spec, &repeat->input,
-                             FIXED_DT_S);
             game_fixed_update(repeat, FIXED_DT_S);
         }
         check(repeat->stateChecksum == game->stateChecksum,
@@ -1233,10 +1229,7 @@ static void scenario_ai_no_privilege(void)
     game->autoTrans.forwardOnly = true;
     game->state = STATE_PLAYING;
 
-    AiDriverConfig cfg;
-    ai_driver_config_default(&cfg);
-    AiDriverState ai;
-    memset(&ai, 0, sizeof(ai));
+    controller_init(&game->controller, CONTROLLER_KIND_AI);
 
     const int runTicks = 3600; /* 30 s of driving */
     uint32_t *checksums = (uint32_t *)malloc(sizeof(uint32_t) * (size_t)runTicks);
@@ -1249,8 +1242,6 @@ static void scenario_ai_no_privilege(void)
     replay_begin_recording(&game->replay, game->sim.tick);
 
     for (int t = 0; t < runTicks; t++) {
-        ai_driver_update(&cfg, &ai, &game->trackDef, &game->trackRuntime, &game->vehicle,
-                         &game->derived, &game->spec, &game->input, FIXED_DT_S);
         game_fixed_update(game, FIXED_DT_S);
         checksums[t] = game->stateChecksum;
     }
@@ -1292,15 +1283,12 @@ static void scenario_ai_no_privilege(void)
 
 static void scenario_ai_roster_laps(void)
 {
-    AiDriverConfig cfg;
-    ai_driver_config_default(&cfg);
-
-    /* Milestone 1 acceptance criterion 10: one config drives all six cars. The bytes are
-     * snapshotted here and re-checked after every car, so per-car AI tuning -- the sanctioned
-     * way to make a car that cannot lap appear to pass -- fails this scenario rather than
-     * quietly becoming the new baseline. */
+    /* Milestone 1 acceptance criterion 10: one config drives all six cars. The shared default
+     * is snapshotted here and re-checked against every entrant's frozen controller config after
+     * its run, so per-car AI tuning -- the sanctioned way to make a car that cannot lap appear
+     * to pass -- fails this scenario rather than quietly becoming the new baseline. */
     AiDriverConfig cfgAtStart;
-    memcpy(&cfgAtStart, &cfg, sizeof(cfg));
+    ai_driver_config_default(&cfgAtStart);
 
     const int rosterCount = car_roster_count();
     check(rosterCount == 6, "car roster holds 6 cars");
@@ -1323,8 +1311,7 @@ static void scenario_ai_roster_laps(void)
         game->state = STATE_PLAYING;
         game->targetLaps = VALIDATION_RUN_LAPS;
 
-        AiDriverState ai;
-        memset(&ai, 0, sizeof(ai));
+        controller_init(&game->controller, CONTROLLER_KIND_AI);
 
         const int budgetTicks = REPLAY_CAPACITY_TICKS; /* 300 s max */
         int outOfOrder = 0;
@@ -1337,8 +1324,6 @@ static void scenario_ai_roster_laps(void)
         float prevLockoutS = 0.0f;
 
         for (int t = 0; t < budgetTicks && game->progress.lap < VALIDATION_RUN_LAPS; t++) {
-            ai_driver_update(&cfg, &ai, &game->trackDef, &game->trackRuntime, &game->vehicle,
-                             &game->derived, &game->spec, &game->input, FIXED_DT_S);
             game_fixed_update(game, FIXED_DT_S);
             ticksRun++;
 
@@ -1369,7 +1354,7 @@ static void scenario_ai_roster_laps(void)
               game->progress.lap, ticksRun);
         check(outOfOrder == 0, "car '%s' crossed all gates in order (%d out-of-order)", carId,
               outOfOrder);
-        check(memcmp(&cfg, &cfgAtStart, sizeof(cfg)) == 0,
+        check(memcmp(&game->controller.config.ai, &cfgAtStart, sizeof(cfgAtStart)) == 0,
               "car '%s' was driven with the unmodified shared AiDriverConfig", carId);
 
         track_free(&game->trackDef);
@@ -1414,18 +1399,14 @@ static float drive_planned_lap_s(int which, bool collapseCorridor, int *gatesTak
     game->autoTrans.forwardOnly = true;
     game->state = STATE_PLAYING;
 
-    AiDriverConfig cfg;
-    ai_driver_config_default(&cfg);
-    if (collapseCorridor) cfg.planEdgeMarginM = 1.0e4f;
-    AiDriverState ai;
-    memset(&ai, 0, sizeof(ai));
+    controller_init(&game->controller, CONTROLLER_KIND_AI);
+    if (collapseCorridor) game->controller.config.ai.planEdgeMarginM = 1.0e4f;
+    const AiDriverState *ai = &game->controller.memory.ai;
 
     float timedLapS = -1.0f;
     float worstExcursionM = -1.0e9f;
     int gates = 0, outOfOrder = 0, offTrack = 0;
     for (int t = 0; t < 14400 && game->progress.lap < 2; t++) {
-        ai_driver_update(&cfg, &ai, &game->trackDef, &game->trackRuntime, &game->vehicle,
-                         &game->derived, &game->spec, &game->input, FIXED_DT_S);
         game_fixed_update(game, FIXED_DT_S);
 
         const TrackCheckpointEvent ev = game->lastCheckpointEvent;
@@ -1442,9 +1423,9 @@ static float drive_planned_lap_s(int which, bool collapseCorridor, int *gatesTak
          * once a second: the plan only changes every planReplanTicks, and its window slides one
          * node in that time, so nothing is missed by not looking every tick. */
         if (t % 120 == 0) {
-            for (int L = 0; L < ai.planLayerCount; L++) {
-                const int node = (ai.planBaseNode + L) % game->trackDef.count;
-                const Vector2 p = ai_driver_plan_point(&ai, &game->trackDef, node);
+            for (int L = 0; L < ai->planLayerCount; L++) {
+                const int node = (ai->planBaseNode + L) % game->trackDef.count;
+                const Vector2 p = ai_driver_plan_point(ai, &game->trackDef, node);
                 const float excursion =
                     track_distance_to_centerline_m(&game->trackDef, p, NULL) -
                     game->trackDef.nodes[node].halfWidthM;

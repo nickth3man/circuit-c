@@ -33,7 +33,7 @@
  *
  * Everything read is either geometry the track publishes or grip the car publishes about itself.
  * Nothing here consults a force, a slip angle, or any other quantity a driver could not feel,
- * and nothing here writes anywhere but the Input.
+ * and nothing here writes anywhere but the ControllerOutput.
  */
 #include "game/ai_driver.h"
 
@@ -441,7 +441,7 @@ static void available_grip(const VehicleSpec *spec, const TrackDefinition *track
 void ai_driver_update(const AiDriverConfig *cfg, AiDriverState *state,
                       const TrackDefinition *track, const TrackRuntime *runtime,
                       const VehicleState *vehicle, const VehicleDerived *derived,
-                      const VehicleSpec *spec, Input *out, float dt)
+                      const VehicleSpec *spec, ControllerOutput *out, float dt)
 {
     if (cfg == NULL || state == NULL || out == NULL) return;
     if (track == NULL || track->nodes == NULL || track->count < 3) return;
@@ -626,7 +626,7 @@ void ai_driver_update(const AiDriverConfig *cfg, AiDriverState *state,
     out->brake = maxf(-state->pedalAxis, 0.0f);
 
     /* This driver has no handbrake. Stated as an assignment rather than an omission so that a
-     * caller reusing an Input from a previous tick cannot inherit one. */
+     * caller reusing an output from a previous tick cannot inherit one. */
     out->handbrake = 0.0f;
 
     state->prevCrossTrackErrorM = crossTrackM;

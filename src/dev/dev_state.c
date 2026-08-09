@@ -267,7 +267,7 @@ static void push_marker(DevState *dev, DevMarkerKind kind, uint64_t tick, float 
 #define MARKER_SLIDE_EXIT_RAD 0.10f
 #define MARKER_RECOVERY_SPEED_MPS 3.00f
 
-static void record_markers(struct Game *game, const Input *appliedInput)
+static void record_markers(struct Game *game, const ControllerOutput *appliedInput)
 {
     DevState *dev = &game->dev;
     const uint64_t tick = game->sim.tick;
@@ -332,7 +332,7 @@ static void record_markers(struct Game *game, const Input *appliedInput)
 
 /* ----------------------------------------------------------------------------- recording -- */
 
-void dev_state_record(struct Game *game, const Input *appliedInput)
+void dev_state_record(struct Game *game, const ControllerOutput *appliedInput)
 {
     if (game == NULL) return;
     DevState *dev = &game->dev;

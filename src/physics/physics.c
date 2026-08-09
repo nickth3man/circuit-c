@@ -519,7 +519,8 @@ static void locked_axle_clamp_redline(VehicleState *state, WheelId left, WheelId
 }
 
 void physics_fixed_update(const VehicleSpec *spec, VehicleState *state, VehicleDerived *derived,
-                          VehicleRenderState *renderState, const Input *input, float dt)
+                          VehicleRenderState *renderState, const ControllerOutput *input,
+                          float dt)
 {
     if (!vehicle_spec_is_valid(spec) || state == NULL || derived == NULL ||
         renderState == NULL || input == NULL || !(dt > 0.0f))
