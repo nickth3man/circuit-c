@@ -10,6 +10,18 @@
 
 # Legacy root-level outputs from before the build/ consolidation. Kept ignored so an old
 # working tree does not suddenly show a pile of stale binaries as untracked.
+/drifty
+/drifty.exe
+/drifty_release
+/drifty_release.exe
+/drifty_tests
+/drifty_tests.exe
+/drifty_hotreload_harness
+/drifty_hotreload_harness.exe
+/drifty_tests_cov
+/drifty_tests_cov.exe
+/drifty_tests_asan
+/drifty_tests_asan.exe
 /circuit
 /circuit.exe
 /circuit_release
@@ -113,3 +125,4 @@ PowerShellEditorServices.json
 .slim/*
 # END oh-my-opencode-slim clonedeps
 debug/
+.claude/*
