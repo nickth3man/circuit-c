@@ -126,3 +126,4 @@ PowerShellEditorServices.json
 # END oh-my-opencode-slim clonedeps
 debug/
 .claude/*
+docs/archive/
