@@ -81,10 +81,26 @@ struct Game {
     GameStateId state;
     Input input;
     SimState sim;
-    VehicleSpec spec;
-    VehicleState vehicle;
-    VehicleDerived derived;
-    VehicleRenderState renderState;
+    VehicleDefinition vehicleDefinition;
+    VehicleSetup vehicleSetup;
+    /* Issue #8 compatibility view: existing one-entrant callers keep their field spelling while
+     * all five values are now physically owned by one VehicleInstance. New code should use
+     * `vehicleInstance`; the anonymous view is removed as subsystems migrate. */
+    union {
+        VehicleInstance vehicleInstance;
+        struct {
+            VehicleSpec spec;
+            VehicleState vehicle;
+            VehicleDerived derived;
+            VehicleRenderState renderState;
+            AutoTransmission autoTrans;
+            VehicleControlState vehicleControls;
+            float fuelKg;
+            VehicleTireState tireState[WHEEL_COUNT];
+            float damage;
+            float crashLockoutTimerS;
+        };
+    };
     /* Track ownership is split three ways: `trackDef` is immutable authored content shared by
      * every entrant, `trackRuntime` is session-wide mutable track state, and `progress` is
      * THIS entrant's lap cursor. Today there is exactly one entrant, so exactly one
@@ -125,14 +141,10 @@ struct Game {
     int targetLaps;
 
     /* Presentation and diagnostics. */
-    float crashLockoutTimerS; /* seconds remaining in the post-impact lockout */
     bool debugOverlay;
     int reloadCount;
     float reloadFlashTimerS;
     bool initialized;
-
-    /* Automatic transmission mode (toggle with T). */
-    AutoTransmission autoTrans;
 
     /* Development tooling: Physics Lab, scope history, trajectory, invariant monitor, and
      * the time controls the platform loop reads. Plain value data like everything else here,

@@ -1,6 +1,7 @@
 #include "physics/vehicle.h"
 
 #include <math.h>
+#include <stdio.h>
 #include <string.h>
 
 static void set_wheel_positions(const VehicleSpec *spec, VehicleState *state)
@@ -420,4 +421,147 @@ void vehicle_state_reset(const VehicleSpec *spec, VehicleState *state, VehicleDe
     renderState->currPositionM = state->positionM;
     renderState->prevHeadingRad = state->headingRad;
     renderState->currHeadingRad = state->headingRad;
+}
+
+static uint32_t vehicle_content_hash(const VehicleSpec *spec)
+{
+    const unsigned char *bytes = (const unsigned char *)spec;
+    uint32_t hash = 0x811c9dc5u;
+    for (size_t i = 0; i < sizeof(*spec); i++) {
+        hash ^= bytes[i];
+        hash *= 0x01000193u;
+    }
+    return hash;
+}
+
+bool vehicle_definition_init(VehicleDefinition *definition, const char *id,
+                             const char *appearanceId, uint32_t contentVersion,
+                             const VehicleSpec *spec)
+{
+    if (definition == NULL || id == NULL || id[0] == '\0' || appearanceId == NULL ||
+        appearanceId[0] == '\0' || contentVersion == 0u || spec == NULL)
+        return false;
+
+    VehicleDefinition candidate;
+    memset(&candidate, 0, sizeof(candidate));
+    candidate.spec = *spec;
+    vehicle_spec_refresh_derived(&candidate.spec);
+    if (!vehicle_spec_is_valid(&candidate.spec)) return false;
+
+    if (snprintf(candidate.id, sizeof(candidate.id), "%s", id) >= (int)sizeof(candidate.id) ||
+        snprintf(candidate.appearanceId, sizeof(candidate.appearanceId), "%s", appearanceId) >=
+            (int)sizeof(candidate.appearanceId))
+        return false;
+    candidate.contentVersion = contentVersion;
+    candidate.contentHash = vehicle_content_hash(&candidate.spec);
+    *definition = candidate;
+    return true;
+}
+
+void vehicle_definition_set_default(VehicleDefinition *definition)
+{
+    if (definition == NULL) return;
+    VehicleSpec spec;
+    vehicle_spec_set_default(&spec);
+    (void)vehicle_definition_init(definition, "builtin/default", "builtin/default", 1u, &spec);
+}
+
+void vehicle_setup_set_default(const VehicleDefinition *definition, VehicleSetup *setup)
+{
+    if (definition == NULL || setup == NULL) return;
+    const VehicleSpec *spec = &definition->spec;
+    memset(setup, 0, sizeof(*setup));
+    setup->tirePressureFrontKpa = spec->tirePressureFrontKpa;
+    setup->tirePressureRearKpa = spec->tirePressureRearKpa;
+    setup->suspCamberFrontRad = spec->suspCamberFrontRad;
+    setup->suspCamberRearRad = spec->suspCamberRearRad;
+    setup->suspToeFrontRad = spec->suspToeFrontRad;
+    setup->suspToeRearRad = spec->suspToeRearRad;
+    setup->suspCasterFrontRad = spec->suspCasterFrontRad;
+    setup->suspCasterRearRad = spec->suspCasterRearRad;
+    memcpy(setup->gearRatios, spec->gearRatios, sizeof(setup->gearRatios));
+    setup->gearCount = spec->gearCount;
+    setup->reverseGearRatio = spec->reverseGearRatio;
+    setup->finalDriveRatio = spec->finalDriveRatio;
+    setup->brakeBiasFront = spec->brakeBiasFront;
+    setup->differentialMode = spec->differentialMode;
+    setup->differentialBiasRatio = spec->differentialBiasRatio;
+    setup->differentialPreloadNm = spec->differentialPreloadNm;
+}
+
+static void vehicle_setup_apply(VehicleSpec *spec, const VehicleSetup *setup)
+{
+    spec->tirePressureFrontKpa = setup->tirePressureFrontKpa;
+    spec->tirePressureRearKpa = setup->tirePressureRearKpa;
+    spec->suspCamberFrontRad = setup->suspCamberFrontRad;
+    spec->suspCamberRearRad = setup->suspCamberRearRad;
+    spec->suspToeFrontRad = setup->suspToeFrontRad;
+    spec->suspToeRearRad = setup->suspToeRearRad;
+    spec->suspCasterFrontRad = setup->suspCasterFrontRad;
+    spec->suspCasterRearRad = setup->suspCasterRearRad;
+    memcpy(spec->gearRatios, setup->gearRatios, sizeof(spec->gearRatios));
+    spec->gearCount = setup->gearCount;
+    spec->reverseGearRatio = setup->reverseGearRatio;
+    spec->finalDriveRatio = setup->finalDriveRatio;
+    spec->brakeBiasFront = setup->brakeBiasFront;
+    spec->differentialMode = setup->differentialMode;
+    spec->differentialBiasRatio = setup->differentialBiasRatio;
+    spec->differentialPreloadNm = setup->differentialPreloadNm;
+}
+
+bool vehicle_setup_is_valid(const VehicleDefinition *definition, const VehicleSetup *setup)
+{
+    if (definition == NULL || setup == NULL) return false;
+    VehicleSpec compiled = definition->spec;
+    vehicle_setup_apply(&compiled, setup);
+    vehicle_spec_refresh_derived(&compiled);
+    return vehicle_spec_is_valid(&compiled);
+}
+
+bool vehicle_instance_derive(VehicleInstance *instance, const VehicleDefinition *definition,
+                             const VehicleSetup *setup)
+{
+    if (instance == NULL || definition == NULL || setup == NULL ||
+        !vehicle_setup_is_valid(definition, setup))
+        return false;
+    instance->spec = definition->spec;
+    vehicle_setup_apply(&instance->spec, setup);
+    vehicle_spec_refresh_derived(&instance->spec);
+    return true;
+}
+
+void vehicle_instance_reset(VehicleInstance *instance)
+{
+    if (instance == NULL) return;
+    const bool automaticTransmissionEnabled = instance->autoTrans.enabled;
+    const bool automaticTransmissionForwardOnly = instance->autoTrans.forwardOnly;
+    vehicle_state_reset(&instance->spec, &instance->vehicle, &instance->derived,
+                        &instance->renderState);
+    instance->autoTrans.enabled = automaticTransmissionEnabled;
+    instance->autoTrans.forwardOnly = automaticTransmissionForwardOnly;
+    instance->autoTrans.driveState = AUTO_DRIVE;
+    instance->autoTrans.neutralTimer = 0.0f;
+    memset(&instance->vehicleControls, 0, sizeof(instance->vehicleControls));
+    instance->fuelKg = instance->spec.massFuelKg;
+    for (int i = 0; i < WHEEL_COUNT; i++) {
+        const bool front = i == WHEEL_FRONT_LEFT || i == WHEEL_FRONT_RIGHT;
+        instance->tireState[i].pressureKpa =
+            front ? instance->spec.tirePressureFrontKpa : instance->spec.tirePressureRearKpa;
+        instance->tireState[i].temperatureC = 20.0f;
+        instance->tireState[i].wear = 0.0f;
+    }
+    instance->damage = 0.0f;
+    instance->crashLockoutTimerS = 0.0f;
+}
+
+bool vehicle_instance_init(VehicleInstance *instance, const VehicleDefinition *definition,
+                           const VehicleSetup *setup)
+{
+    if (instance == NULL) return false;
+    memset(instance, 0, sizeof(*instance));
+    if (!vehicle_instance_derive(instance, definition, setup)) return false;
+    instance->autoTrans.enabled = true;
+    instance->autoTrans.forwardOnly = false;
+    vehicle_instance_reset(instance);
+    return true;
 }

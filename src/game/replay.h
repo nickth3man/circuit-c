@@ -35,6 +35,7 @@
 
 #include "core/config.h"
 #include "game/input.h"
+#include "physics/vehicle.h"
 
 /* Packed one-shot commands, one bit each. */
 #define REPLAY_BIT_PAUSE 0x01u
@@ -53,6 +54,24 @@ typedef struct {
 
 typedef enum { REPLAY_MODE_IDLE = 0, REPLAY_MODE_RECORDING, REPLAY_MODE_PLAYBACK } ReplayMode;
 
+/* Authoritative vehicle/setup state at the first recorded tick. Immutable definition content
+ * is referenced by identity and hash, never copied into a replay. */
+typedef struct {
+    bool valid;
+    char definitionId[VEHICLE_CONTENT_ID_CAPACITY];
+    uint32_t definitionVersion;
+    uint32_t definitionHash;
+    VehicleSetup setup;
+    VehicleState vehicle;
+    VehicleRenderState renderState;
+    AutoTransmission autoTrans;
+    VehicleControlState vehicleControls;
+    float fuelKg;
+    VehicleTireState tireState[WHEEL_COUNT];
+    float damage;
+    float crashLockoutTimerS;
+} ReplayVehicleSnapshot;
+
 typedef struct {
     ReplayFrame frames[REPLAY_CAPACITY_TICKS];
     int head;                  /* ring index of the oldest retained frame */
@@ -61,6 +80,7 @@ typedef struct {
     uint64_t firstTick;        /* absolute fixed tick of the oldest retained frame */
     uint64_t overwrittenTicks; /* frames discarded by the ring, cumulative */
     ReplayMode mode;
+    ReplayVehicleSnapshot initialVehicle;
 } ReplayBuffer;
 
 /* Discard everything and return to REPLAY_MODE_IDLE. */
@@ -91,5 +111,9 @@ double replay_frame_time_s(const ReplayBuffer *rb, int index);
 /* Conversions between an Input and its packed timeline representation. */
 ReplayFrame replay_pack(const Input *in);
 void replay_unpack(const ReplayFrame *frame, Input *out);
+void replay_capture_initial_vehicle(ReplayBuffer *rb, const VehicleDefinition *definition,
+                                    const VehicleSetup *setup, const VehicleInstance *instance);
+bool replay_restore_initial_vehicle(const ReplayBuffer *rb, const VehicleDefinition *definition,
+                                    VehicleSetup *setup, VehicleInstance *instance);
 
 #endif /* CIRCUIT_REPLAY_H */

@@ -1,5 +1,6 @@
 #include "game/replay.h"
 
+#include <math.h>
 #include <string.h>
 
 ReplayFrame replay_pack(const Input *in)
@@ -51,6 +52,7 @@ void replay_reset(ReplayBuffer *rb)
     rb->firstTick = 0;
     rb->overwrittenTicks = 0;
     rb->mode = REPLAY_MODE_IDLE;
+    memset(&rb->initialVehicle, 0, sizeof(rb->initialVehicle));
     /* frames[] is left as-is: entries outside [head, head+count) are never read. */
 }
 
@@ -111,4 +113,56 @@ double replay_frame_time_s(const ReplayBuffer *rb, int index)
 {
     if (rb == NULL || index < 0 || index >= rb->count) return 0.0;
     return (double)(rb->firstTick + (uint64_t)index) * (double)FIXED_DT_S;
+}
+
+void replay_capture_initial_vehicle(ReplayBuffer *rb, const VehicleDefinition *definition,
+                                    const VehicleSetup *setup, const VehicleInstance *instance)
+{
+    if (rb == NULL || definition == NULL || setup == NULL || instance == NULL ||
+        rb->initialVehicle.valid)
+        return;
+    ReplayVehicleSnapshot *snapshot = &rb->initialVehicle;
+    memset(snapshot, 0, sizeof(*snapshot));
+    memcpy(snapshot->definitionId, definition->id, sizeof(snapshot->definitionId));
+    snapshot->definitionVersion = definition->contentVersion;
+    snapshot->definitionHash = definition->contentHash;
+    snapshot->setup = *setup;
+    snapshot->vehicle = instance->vehicle;
+    snapshot->renderState = instance->renderState;
+    snapshot->autoTrans = instance->autoTrans;
+    snapshot->vehicleControls = instance->vehicleControls;
+    snapshot->fuelKg = instance->fuelKg;
+    memcpy(snapshot->tireState, instance->tireState, sizeof(snapshot->tireState));
+    snapshot->damage = instance->damage;
+    snapshot->crashLockoutTimerS = instance->crashLockoutTimerS;
+    snapshot->valid = true;
+}
+
+bool replay_restore_initial_vehicle(const ReplayBuffer *rb, const VehicleDefinition *definition,
+                                    VehicleSetup *setup, VehicleInstance *instance)
+{
+    if (rb == NULL || definition == NULL || setup == NULL || instance == NULL) return false;
+    const ReplayVehicleSnapshot *snapshot = &rb->initialVehicle;
+    if (!snapshot->valid || snapshot->definitionVersion != definition->contentVersion ||
+        snapshot->definitionHash != definition->contentHash ||
+        strncmp(snapshot->definitionId, definition->id, sizeof(snapshot->definitionId)) != 0 ||
+        !vehicle_setup_is_valid(definition, &snapshot->setup))
+        return false;
+
+    VehicleInstance restored;
+    memset(&restored, 0, sizeof(restored));
+    if (!vehicle_instance_derive(&restored, definition, &snapshot->setup)) return false;
+    restored.vehicle = snapshot->vehicle;
+    restored.derived.speedMps =
+        hypotf(restored.vehicle.velocityLongitudinalMps, restored.vehicle.velocityLateralMps);
+    restored.renderState = snapshot->renderState;
+    restored.autoTrans = snapshot->autoTrans;
+    restored.vehicleControls = snapshot->vehicleControls;
+    restored.fuelKg = snapshot->fuelKg;
+    memcpy(restored.tireState, snapshot->tireState, sizeof(restored.tireState));
+    restored.damage = snapshot->damage;
+    restored.crashLockoutTimerS = snapshot->crashLockoutTimerS;
+    *setup = snapshot->setup;
+    *instance = restored;
+    return true;
 }

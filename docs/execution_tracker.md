@@ -57,7 +57,7 @@ After #6, #7 and #8 may run in parallel.
 - [ ] [#7 — Split immutable TrackDefinition from per-entrant RacerProgress](https://github.com/nickth3man/circuit-c/issues/7)
   - Depends on: #6
 
-- [ ] [#8 — Split VehicleDefinition, VehicleSetup, and VehicleInstance state](https://github.com/nickth3man/circuit-c/issues/8)
+- [x] [#8 — Split VehicleDefinition, VehicleSetup, and VehicleInstance state](https://github.com/nickth3man/circuit-c/issues/8)
   - Depends on: #6
 
 - [ ] [#9 — Unify human, AI, replay, ghost, and scripted control behind Controller output](https://github.com/nickth3man/circuit-c/issues/9)
@@ -75,7 +75,7 @@ After #6, #7 and #8 may run in parallel.
 - [x] Player-facing drift scoring/game framing has been removed.
 - [x] Technical identity rename builds and tests successfully.
 - [ ] Track content and racer progress have separate ownership.
-- [ ] Vehicle definitions, setups, and runtime instances have separate ownership.
+- [x] Vehicle definitions, setups, and runtime instances have separate ownership.
 - [ ] All simulated entrants use the same controller contract.
 - [ ] A headless RaceSession can own multiple isolated entrants.
 - [ ] Single-car behavior remains operational through the new architecture.
