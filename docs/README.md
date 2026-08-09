@@ -20,6 +20,7 @@ Start elsewhere for the basics: [README](../README.md) for what Circuit is and h
 
 | Document | Covers |
 | --- | --- |
+| [SIMULATION_OWNERSHIP](design/SIMULATION_OWNERSHIP.md) | Ownership, identity, serialization/checksum boundaries, and fixed-step order for sessions and entrants |
 | [CAR_APPEARANCE_IDENTITY](design/CAR_APPEARANCE_IDENTITY.md) | Stable procedural car identity — `CarAppearanceSpec` in `src/render/car_appearance.h` |
 | [CAR_VISUAL_PRIMITIVES](design/CAR_VISUAL_PRIMITIVES.md) | The derived fields on `CarVisual` and the rules that produce them |
 | [DYNAMIC_CAR_VISUAL_EFFECTS](design/DYNAMIC_CAR_VISUAL_EFFECTS.md) | `VehicleVisualEffects` — dynamic feedback derived from vehicle state |

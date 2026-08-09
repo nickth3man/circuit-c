@@ -49,7 +49,7 @@ Start the Identity and Architecture lanes in parallel.
 
 ## Architecture lane
 
-- [ ] [#6 — Define simulation, content, entrant, and session ownership contracts](https://github.com/nickth3man/circuit-c/issues/6)
+- [x] [#6 — Define simulation, content, entrant, and session ownership contracts](https://github.com/nickth3man/circuit-c/issues/6)
   - Depends on: none
 
 After #6, #7 and #8 may run in parallel.
