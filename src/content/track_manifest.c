@@ -6,6 +6,7 @@
 #include "core/json.h"
 
 #include <ctype.h>
+#include <dirent.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -84,12 +85,14 @@ static bool track_id_is_valid(const char *id)
     if (id == NULL || id[0] == '\0') return false;
     const char c0 = id[0];
     if (!((c0 >= 'a' && c0 <= 'z') || (c0 >= '0' && c0 <= '9'))) return false;
+    size_t len = 1;
     for (size_t i = 1; id[i] != '\0'; i++) {
         const char c = id[i];
         if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '.' || c == '_' ||
               c == '-'))
             return false;
-        if (i > 62) return false;
+        len++;
+        if (len >= TRACK_ID_CHARS) return false;
     }
     return true;
 }
@@ -452,7 +455,7 @@ bool track_manifest_parse(const char *text, size_t length, TrackDefinition *out,
 
     const char *id = json_as_string(json_object_get(root, kTopKeyNames[TM_KEY_ID]));
     if (!track_id_is_valid(id)) {
-        set_error(error, errorCap, "id", "must match [a-z0-9][a-z0-9._-]{0,62}");
+        set_error(error, errorCap, "id", "must match [a-z0-9][a-z0-9._-]{0,30} (≤31 chars)");
         json_document_free(doc);
         return false;
     }
@@ -539,6 +542,178 @@ bool track_manifest_load(const char *path, TrackDefinition *out, uint32_t *manif
     const bool ok = track_manifest_parse(buffer, read, out, manifestHashOut, error, errorCap);
     free(buffer);
     return ok;
+}
+
+bool track_manifest_id_is_valid(const char *id)
+{
+    return track_id_is_valid(id);
+}
+
+static int compare_catalog_entry_by_id(const void *a, const void *b)
+{
+    const TrackCatalogEntry *ea = (const TrackCatalogEntry *)a;
+    const TrackCatalogEntry *eb = (const TrackCatalogEntry *)b;
+    return strcmp(ea->definition.id, eb->definition.id);
+}
+
+bool track_catalog_load(const char *dir, TrackCatalog *out, char *error, size_t errorCap)
+{
+    if (out == NULL) return false;
+    memset(out, 0, sizeof(*out));
+    if (error != NULL && errorCap > 0) error[0] = '\0';
+    const char *useDir = (dir != NULL) ? dir : TRACK_CATALOG_DIR;
+    if (useDir == NULL) {
+        set_error(error, errorCap, NULL, "no catalog directory given");
+        return false;
+    }
+    DIR *d = opendir(useDir);
+    if (d == NULL) {
+        set_error(error, errorCap, useDir, "could not open directory");
+        return false;
+    }
+    int fileCount = 0;
+    const struct dirent *entry;
+    const size_t suffixLen = strlen(TRACK_CATALOG_SUFFIX);
+    while ((entry = readdir(d)) != NULL) {
+        const char *name = entry->d_name;
+        const size_t len = strlen(name);
+        if (len > suffixLen && strcmp(name + len - suffixLen, TRACK_CATALOG_SUFFIX) == 0) {
+            fileCount++;
+        }
+    }
+    rewinddir(d);
+    TrackCatalogEntry *items = NULL;
+    if (fileCount > 0) {
+        items = (TrackCatalogEntry *)calloc((size_t)fileCount, sizeof(TrackCatalogEntry));
+        if (items == NULL) {
+            closedir(d);
+            set_error(error, errorCap, NULL, "out of memory");
+            return false;
+        }
+    }
+    int count = 0;
+    bool ok = true;
+    while (ok && (entry = readdir(d)) != NULL) {
+        const char *name = entry->d_name;
+        const size_t len = strlen(name);
+        if (len <= suffixLen || strcmp(name + len - suffixLen, TRACK_CATALOG_SUFFIX) != 0)
+            continue;
+        char path[1024];
+        const int written = snprintf(path, sizeof(path), "%s/%s", useDir, name);
+        if (written < 0 || written >= (int)sizeof(path)) {
+            set_error(error, errorCap, name, "path is too long");
+            ok = false;
+            break;
+        }
+        if (count >= fileCount) {
+            set_error(error, errorCap, useDir, "catalog directory changed during load");
+            ok = false;
+            break;
+        }
+        uint32_t manifestHash = 0;
+        if (!track_manifest_load(path, &items[count].definition, &manifestHash, error,
+                                 errorCap)) {
+            ok = false;
+            break;
+        }
+        /* Filename must match stable id: a file named foo.track.json that contains
+         * id=bar would be selectable as bar via the catalog but missed by
+         * track_load_by_id("bar") which builds the canonical path. Rejecting here
+         * makes the mismatch visible rather than silently shadowing content. */
+        {
+            char base[TRACK_ID_CHARS + 16];
+            const size_t baseLen = len - suffixLen;
+            if (baseLen >= sizeof(base) ||
+                snprintf(base, sizeof(base), "%.*s", (int)baseLen, name) >= (int)sizeof(base)) {
+                set_error(error, errorCap, name, "filename is too long");
+                track_free(&items[count].definition);
+                ok = false;
+                break;
+            }
+            if (strcmp(base, items[count].definition.id) != 0) {
+                char reason[192];
+                snprintf(reason, sizeof(reason),
+                         "filename '%s' does not match manifest id '%s'", name,
+                         items[count].definition.id);
+                set_error(error, errorCap, name, reason);
+                track_free(&items[count].definition);
+                ok = false;
+                break;
+            }
+        }
+        items[count].manifestHash = manifestHash;
+        count++;
+    }
+    closedir(d);
+    if (!ok) {
+        for (int i = 0; i < count; i++) track_free(&items[i].definition);
+        free(items);
+        out->entries = NULL;
+        out->count = 0;
+        return false;
+    }
+    qsort(items, (size_t)count, sizeof(TrackCatalogEntry), compare_catalog_entry_by_id);
+    for (int i = 1; i < count; i++) {
+        if (strcmp(items[i - 1].definition.id, items[i].definition.id) == 0) {
+            char reason[192];
+            snprintf(reason, sizeof(reason), "duplicate content id '%s'",
+                     items[i].definition.id);
+            set_error(error, errorCap, NULL, reason);
+            for (int j = 0; j < count; j++) track_free(&items[j].definition);
+            free(items);
+            out->entries = NULL;
+            out->count = 0;
+            return false;
+        }
+    }
+    out->entries = items;
+    out->count = count;
+    return true;
+}
+
+void track_catalog_free(TrackCatalog *catalog)
+{
+    if (catalog == NULL) return;
+    for (int i = 0; i < catalog->count; i++) track_free(&catalog->entries[i].definition);
+    free(catalog->entries);
+    catalog->entries = NULL;
+    catalog->count = 0;
+}
+
+int track_catalog_find(const TrackCatalog *catalog, const char *id)
+{
+    if (catalog == NULL || id == NULL) return -1;
+    for (int i = 0; i < catalog->count; i++) {
+        if (strcmp(catalog->entries[i].definition.id, id) == 0) return i;
+    }
+    return -1;
+}
+
+bool track_load_by_id(const char *id, TrackDefinition *out, uint32_t *manifestHashOut,
+                      char *error, size_t errorCap)
+{
+    if (out == NULL) return false;
+    memset(out, 0, sizeof(*out));
+    if (error != NULL && errorCap > 0) error[0] = '\0';
+    if (!track_manifest_id_is_valid(id)) {
+        set_error(error, errorCap, "id", "invalid track id");
+        return false;
+    }
+    char path[1024];
+    const int written =
+        snprintf(path, sizeof(path), "%s/%s%s", TRACK_CATALOG_DIR, id, TRACK_CATALOG_SUFFIX);
+    if (written < 0 || written >= (int)sizeof(path)) {
+        set_error(error, errorCap, id, "path is too long");
+        return false;
+    }
+    if (!track_manifest_load(path, out, manifestHashOut, error, errorCap)) return false;
+    if (strcmp(out->id, id) != 0) {
+        track_free(out);
+        memset(out, 0, sizeof(*out));
+        set_error(error, errorCap, "id", "does not match requested track id");
+        return false;
+    }
+    return true;
 }
 
 /* ----------------------------------------------------------------------------------------------- export */

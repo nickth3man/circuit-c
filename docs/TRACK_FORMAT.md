@@ -51,7 +51,7 @@ byte-different files load as the same value.
 |------------------|----------|----------|-------|
 | `schema`         | string   | yes      | Must be `"circuit/track"`. |
 | `version`        | number   | yes      | Must be `1`. |
-| `id`             | string   | yes      | Stable content id. Matches the `[a-z0-9]` then `[a-z0-9._-]` rule used by vehicle ids. |
+| `id`             | string   | yes      | Stable content id. Matches `[a-z0-9][a-z0-9._-]{0,30}` (≤31 chars, fits `TRACK_ID_CHARS`). |
 | `displayName`    | string   | yes      | Human label (≤ 128 chars). |
 | `description`    | string   | no       | Free text (≤ 256 chars). Absent ⇒ empty. |
 | `contentVersion` | string   | yes      | Stored verbatim into `TrackDefinition::version`. |
@@ -154,6 +154,35 @@ The `track-format` scenario asserts, for each built-in layout, that writing then
 reproduces the compiled geometry hash, and that the committed `data/tracks/*.track.json` files
 still parse and match. A hand edit to a committed file is therefore caught rather than silently
 shipping a wrong track.
+
+## Discovery and runtime selection (issue #36)
+
+Tracks are discovered by stable content id, not by a compiled enum. `track_catalog_load()` scans
+`data/tracks/*.track.json`, parses each file, sorts the catalog by stable id, and rejects
+duplicate ids. `track_load_by_id()` loads one track by building the canonical path
+`data/tracks/<id>.track.json` and validating the id before touching the filesystem.
+
+`GameRunConfig` carries a `trackId` string: empty means "keep the current track", otherwise it
+must be a valid id and the corresponding file must parse. `RaceSession` records the same id
+string, which is hashed into the rolling checksum as bytes rather than as an integer enum.
+Command-line `--track` values are normalized (`lot` → `parking_lot`) and then resolved through
+the catalog; unknown, missing, or uppercase ids are rejected with a diagnostic instead of being
+silently ignored.
+
+The four built-in tracks (`parking_lot`, `chicane`, `sprint`, `technical`) all load from
+external files in headless and interactive builds. `sprint` and `technical` are explicit,
+reviewable JSON files rather than runtime transforms of the chicane: the `track-migration`
+scenario asserts that each catalog entry's geometry hash is bit-identical to the legacy
+`track_load_*` output, and that node arrays match exactly.
+
+The legacy loaders (`track_init`, `track_load_chicane`, `track_load_sprint`,
+`track_load_technical`) remain in the codebase only for the temporary legacy-vs-loaded
+comparisons and for `--generate-tracks`. No session code depends on them:
+`game_configure_run()` resolves tracks through the catalog, and `game_init()` (interactive)
+loads `parking_lot` through the catalog as well — a missing, corrupt, or duplicate catalog
+leaves the session without a track rather than silently falling back to compiled geometry,
+and filename/id mismatches (`foo.track.json` containing `id: bar`) are rejected at catalog
+load and at `track_load_by_id()` time.
 
 ## Forward compatibility
 

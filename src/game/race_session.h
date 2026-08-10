@@ -36,6 +36,7 @@
 #include <stdint.h>
 
 #include "game/race_entrant.h"
+#include "world/track.h"
 
 /*
  * Where a race is in its life.
@@ -146,10 +147,10 @@ typedef struct {
     RacePhase resumePhase;
     RaceRules rules;
 
-    /* Selected content, by stable id. The TrackDefinition itself still lives on Game until the
-     * track content catalog lands (issues 34-36); each entrant already carries its own vehicle
-     * definition and therefore its own vehicle id. */
-    int trackId;
+    /* Selected content, by stable id. The TrackDefinition itself still lives on Game (trackDef)
+     * and the session records which id that definition came from; empty means no track selected
+     * yet (the initial configuring phase before any configure call). */
+    char trackId[TRACK_ID_CHARS];
 
     /* Session time. `tick` counts simulated ticks including the countdown; `clockS` counts
      * green-flag seconds only. Neither advances while paused, finished, or configuring. */

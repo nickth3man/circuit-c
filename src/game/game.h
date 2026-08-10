@@ -57,23 +57,17 @@ typedef enum {
     STATE_RESULTS,
     STATE_COUNT
 } GameStateId;
-
-typedef enum {
-    GAME_TRACK_KEEP = 0, /* leave whatever game_init() loaded */
-    GAME_TRACK_PARKING_LOT,
-    GAME_TRACK_CHICANE,
-    GAME_TRACK_SPRINT,
-    GAME_TRACK_TECHNICAL,
-    GAME_TRACK_COUNT
-} GameTrackId;
-
 /*
  * What a bounded run should be set up with. Plain value data passed by pointer from the
  * platform layer, which cannot reach track or vehicle code directly — those live in the
  * reloadable module. Nothing here is retained: game_configure_run() reads it and returns.
+ *
+ * `trackId` is a stable content id (see track_manifest.h). An empty string means
+ * "leave whatever is loaded" (the GAME_TRACK_KEEP sentinel in earlier issues). When non-empty
+ * it must be a valid track id and the corresponding file must exist under data/tracks/.
  */
 struct GameRunConfig {
-    GameTrackId track;
+    char trackId[TRACK_ID_CHARS];
     float cameraZoomOverride; /* 0 leaves the follow camera's own choice alone */
     /* Laps to complete before the run ends and the car stops being simulated. 0 means the
      * gameplay default, RESULTS_TARGET_LAPS. This is a run property rather than a constant

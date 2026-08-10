@@ -995,6 +995,135 @@ static void scenario_track_format(void)
     }
 }
 
+static void scenario_track_migration(void)
+{
+    char error[256];
+    /* The catalog discovers the four built-in tracks from data/tracks/. */
+    TrackCatalog catalog;
+    memset(&catalog, 0, sizeof(catalog));
+    check(track_catalog_load(NULL, &catalog, error, sizeof(error)),
+          "track catalog loads from " TRACK_CATALOG_DIR " (error: %s)",
+          catalog.count > 0 ? "(none)" : error);
+    check(catalog.count == 4, "catalog holds four tracks (got %d)", catalog.count);
+    if (catalog.count != 4) {
+        track_catalog_free(&catalog);
+        return;
+    }
+    /* Id-sorted catalog order is independent of filesystem enumeration. */
+    const char *expectedIds[] = { "chicane", "parking_lot", "sprint", "technical" };
+    for (int i = 0; i < 4 && i < catalog.count; i++) {
+        check(strcmp(catalog.entries[i].definition.id, expectedIds[i]) == 0,
+              "catalog entry %d is %s (got %s)", i, expectedIds[i],
+              catalog.entries[i].definition.id);
+    }
+    for (int i = 0; i < catalog.count; i++) {
+        check(track_catalog_find(&catalog, catalog.entries[i].definition.id) == i,
+              "catalog find returns %d for %s", i, catalog.entries[i].definition.id);
+    }
+    check(track_catalog_find(&catalog, "does_not_exist") == -1,
+          "catalog find returns -1 for missing id");
+
+    /* Legacy vs loaded equivalence: each compiled-in loader must produce the same geometry
+     * hash as the catalog entry with the same id. This is the temporary comparison that proves
+     * the migration preserves surface queries, barriers, checkpoints, lap completion, rendering
+     * and AI validation before the legacy geometry is removed. */
+    struct {
+        const char *id;
+        void (*load)(TrackDefinition *);
+    } legacy[] = {
+        { "parking_lot", track_init },
+        { "chicane", track_load_chicane },
+        { "sprint", track_load_sprint },
+        { "technical", track_load_technical },
+    };
+    for (size_t i = 0; i < sizeof(legacy) / sizeof(legacy[0]); i++) {
+        TrackDefinition compiled;
+        memset(&compiled, 0, sizeof(compiled));
+        legacy[i].load(&compiled);
+        const uint32_t compiledHash = track_geometry_hash(&compiled);
+        const int idx = track_catalog_find(&catalog, legacy[i].id);
+        check(idx >= 0, "catalog contains legacy id %s", legacy[i].id);
+        if (idx >= 0) {
+            const TrackDefinition *loaded = &catalog.entries[idx].definition;
+            const uint32_t loadedHash = track_geometry_hash(loaded);
+            check(loadedHash == compiledHash,
+                  "legacy vs catalog geometry hash for %s matches (%08x)", legacy[i].id,
+                  loadedHash);
+            check(loaded->count == compiled.count, "%s node count matches (%d)", legacy[i].id,
+                  loaded->count);
+            check(loaded->checkpointCount == compiled.checkpointCount,
+                  "%s checkpoint count matches (%d)", legacy[i].id, loaded->checkpointCount);
+            bool nodesEqual = true;
+            for (int n = 0; n < loaded->count && n < compiled.count; n++) {
+                if (loaded->nodes[n].centerM.x != compiled.nodes[n].centerM.x ||
+                    loaded->nodes[n].centerM.y != compiled.nodes[n].centerM.y ||
+                    loaded->nodes[n].halfWidthM != compiled.nodes[n].halfWidthM ||
+                    loaded->nodes[n].runoffHalfWidthM != compiled.nodes[n].runoffHalfWidthM ||
+                    loaded->nodes[n].surfaceId != compiled.nodes[n].surfaceId) {
+                    nodesEqual = false;
+                    break;
+                }
+            }
+            check(nodesEqual, "%s node arrays are bit-identical", legacy[i].id);
+            /* Sprint and technical must be explicit content, not a runtime transform of the
+             * chicane. The catalog entry's id/version comes from the file, and the hash proves
+             * the file's geometry is the same as the legacy transform — so the file is a reviewed
+             * copy, not a derivation performed at startup. */
+            if (strcmp(legacy[i].id, "sprint") == 0 || strcmp(legacy[i].id, "technical") == 0) {
+                check(strcmp(loaded->id, legacy[i].id) == 0, "%s catalog id is explicit (%s)",
+                      legacy[i].id, loaded->id);
+            }
+        }
+        track_free(&compiled);
+    }
+
+    /* Missing and corrupt track handling: stable-id discovery must fail loudly, not silently
+     * skip a validation step. */
+    {
+        TrackDefinition missing;
+        memset(&missing, 0, sizeof(missing));
+        const bool ok =
+            track_load_by_id("does_not_exist", &missing, NULL, error, sizeof(error));
+        check(!ok, "missing track id is rejected (error: %s)", ok ? "(none)" : error);
+        track_free(&missing);
+    }
+    {
+        TrackDefinition bad;
+        memset(&bad, 0, sizeof(bad));
+        const bool ok = track_load_by_id("Chicane", &bad, NULL, error, sizeof(error));
+        check(!ok, "uppercase track id is rejected (error: %s)", ok ? "(none)" : error);
+        track_free(&bad);
+    }
+    {
+        TrackCatalog badCatalog;
+        memset(&badCatalog, 0, sizeof(badCatalog));
+        const bool ok =
+            track_catalog_load("data/tracks/does_not_exist", &badCatalog, error, sizeof(error));
+        check(!ok, "catalog load from missing directory is rejected (error: %s)",
+              ok ? "(none)" : error);
+        track_catalog_free(&badCatalog);
+    }
+    /* Boundary coverage for fixed TRACK_ID_CHARS storage (31-char max). The public
+     * rule for tracks is 0,30 additional chars, not 0,62, so exercise the limit. */
+    {
+        char id31[32] = { 0 };
+        memset(id31, 'a', 31);
+        id31[31] = '\0';
+        check(track_manifest_id_is_valid(id31), "31-char track id is valid");
+        char id32[33] = { 0 };
+        memset(id32, 'a', 32);
+        id32[32] = '\0';
+        check(!track_manifest_id_is_valid(id32), "32-char track id is rejected (too long)");
+        char id63[64] = { 0 };
+        memset(id63, 'a', 63);
+        id63[63] = '\0';
+        check(!track_manifest_id_is_valid(id63),
+              "63-char track id is rejected for track storage");
+    }
+
+    track_catalog_free(&catalog);
+}
+
 /* --------------------------------------------------------------------------------------------- registry */
 
 static const TestScenario kScenarios[] = {
@@ -1012,6 +1141,9 @@ static const TestScenario kScenarios[] = {
     { "track-format",
       "issue #34: external track load, faithful round-trip, hash stability, validation",
       scenario_track_format },
+    { "track-migration",
+      "issue #36: catalog discovery, legacy vs loaded equivalence, missing handling",
+      scenario_track_migration },
 };
 
 TestScenarioGroup test_content_scenarios(void)

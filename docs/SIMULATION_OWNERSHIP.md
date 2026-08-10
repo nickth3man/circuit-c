@@ -198,10 +198,11 @@ application screens; race lifecycle state belongs to `RaceSession`.
 
 ## Stable IDs and compatibility
 
-Content IDs are UTF-8 manifest keys with a restricted, canonical spelling:
-`[a-z0-9][a-z0-9._-]{0,62}`. They are stable across versions and are never inferred from a
-display name or file path. A version/hash change identifies revised content without changing
-the stable ID. Duplicate IDs are a load error.
+Content IDs are UTF-8 manifest keys with a restricted, canonical spelling. Vehicle and class
+IDs satisfy `[a-z0-9][a-z0-9._-]{0,62}` (≤63 chars). Track IDs satisfy
+`[a-z0-9][a-z0-9._-]{0,30}` (≤31 chars, fits `TRACK_ID_CHARS`). They are stable across
+versions and are never inferred from a display name or file path. A version/hash change
+identifies revised content without changing the stable ID. Duplicate IDs are a load error.
 
 `EntrantId` is a nonzero fixed-width integer assigned sequentially when the session roster is
 frozen. Assignment follows the canonical configured roster order and never uses a pointer,

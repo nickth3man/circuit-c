@@ -1906,20 +1906,49 @@ static void scenario_race_session(void)
         game_init(game);
         GameRunConfig config;
         memset(&config, 0, sizeof(config));
-        config.track = GAME_TRACK_CHICANE;
+        snprintf(config.trackId, sizeof(config.trackId), "%s", "chicane");
         config.targetLaps = 3;
         check(game_configure_run(game, &config), "a chicane run configures");
-        check(game->session.trackId == (int)GAME_TRACK_CHICANE,
-              "the session records which track is loaded (got %d)", game->session.trackId);
+        check(strcmp(game->session.trackId, "chicane") == 0,
+              "the session records which track is loaded (got %s)", game->session.trackId);
 
-        config.track = GAME_TRACK_KEEP;
+        memset(&config, 0, sizeof(config));
+        config.targetLaps = 3;
         check(game_configure_run(game, &config), "a follow-up run keeps that track");
-        check(game->session.trackId == (int)GAME_TRACK_CHICANE,
-              "and GAME_TRACK_KEEP keeps its identity rather than reporting the sentinel "
-              "(got %d)",
+        check(strcmp(game->session.trackId, "chicane") == 0,
+              "and an empty trackId keeps its identity rather than reporting the sentinel "
+              "(got %s)",
               game->session.trackId);
         check(game->session.rules.targetLaps == 3, "while the rules are re-frozen as asked");
 
+        track_free(&game->trackDef);
+        free(game);
+    }
+
+    /* ---- 9b. Missing or corrupt track ids are rejected ---- */
+    {
+        Game *game = alloc_game();
+        game_init(game);
+        GameRunConfig config;
+        memset(&config, 0, sizeof(config));
+        snprintf(config.trackId, sizeof(config.trackId), "%s", "chicane");
+        check(game_configure_run(game, &config), "precondition: configuring chicane succeeds");
+        check(strcmp(game->session.trackId, "chicane") == 0,
+              "precondition: session track is chicane (got %s)", game->session.trackId);
+        memset(&config, 0, sizeof(config));
+        snprintf(config.trackId, sizeof(config.trackId), "%s", "does_not_exist");
+        check(!game_configure_run(game, &config),
+              "configuring with a missing track id is rejected");
+        check(strcmp(game->session.trackId, "chicane") == 0,
+              "rejected configure leaves session track unchanged (got %s)",
+              game->session.trackId);
+        memset(&config, 0, sizeof(config));
+        snprintf(config.trackId, sizeof(config.trackId), "%s", "Chicane");
+        check(!game_configure_run(game, &config),
+              "configuring with an uppercase track id is rejected");
+        check(strcmp(game->session.trackId, "chicane") == 0,
+              "uppercase rejection also leaves track unchanged (got %s)",
+              game->session.trackId);
         track_free(&game->trackDef);
         free(game);
     }
