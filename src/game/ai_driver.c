@@ -197,8 +197,22 @@ static float menger_curvature(Vector2 a, Vector2 b, Vector2 c)
 static Vector2 node_normal(const TrackDefinition *track, int i)
 {
     const int count = track->count;
-    const Vector2 prev = track->nodes[(i - 1 + count) % count].centerM;
-    const Vector2 next = track->nodes[(i + 1) % count].centerM;
+    Vector2 prev, next;
+    if (track->routeClosed) {
+        prev = track->nodes[(i - 1 + count) % count].centerM;
+        next = track->nodes[(i + 1) % count].centerM;
+    } else {
+        if (i == 0) {
+            prev = track->nodes[0].centerM;
+            next = track->nodes[1].centerM;
+        } else if (i == count - 1) {
+            prev = track->nodes[count - 2].centerM;
+            next = track->nodes[count - 1].centerM;
+        } else {
+            prev = track->nodes[i - 1].centerM;
+            next = track->nodes[i + 1].centerM;
+        }
+    }
     const Vector2 tangent = vec_sub(next, prev);
     const float length = vec_len(tangent);
     if (length <= 1.0e-6f) return (Vector2){ 0.0f, 0.0f };

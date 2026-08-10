@@ -42,15 +42,16 @@ static float point_to_segment_sq(Vector2 p, Vector2 a, Vector2 b)
 }
 
 /* Closest centreline segment: returns the squared perpendicular distance and sets *closestIdx
- * to the segment index (the i in nodes[i]→nodes[(i+1)%count]). *closestIdx is untouched
- * when closestIdx is NULL. */
-static float nearest_centerline_distance_sq(const TrackNode *nodes, int count, Vector2 point,
-                                            int *closestIdx)
+ * to the segment index (the i in nodes[i]→nodes[(i+1)%count] for closed, or nodes[i]→nodes[i+1]
+ * for open). *closestIdx is untouched when closestIdx is NULL. */
+static float nearest_centerline_distance_sq(const TrackNode *nodes, int count, bool closed,
+                                            Vector2 point, int *closestIdx)
 {
     float best = 1e30f;
     int bestIdx = 0;
-    for (int i = 0; i < count; i++) {
-        const int j = (i + 1) % count;
+    const int limit = closed ? count : count - 1;
+    for (int i = 0; i < limit; i++) {
+        const int j = closed ? (i + 1) % count : i + 1;
         const float dSq = point_to_segment_sq(point, nodes[i].centerM, nodes[j].centerM);
         if (dSq < best) {
             best = dSq;
@@ -178,8 +179,8 @@ SurfaceId Track_SurfaceAt(const TrackDefinition *track, const TrackRuntime *runt
     }
 
     int closestIdx = 0;
-    const float dSq =
-        nearest_centerline_distance_sq(track->nodes, track->count, pointM, &closestIdx);
+    const float dSq = nearest_centerline_distance_sq(track->nodes, track->count,
+                                                     track->routeClosed, pointM, &closestIdx);
     const TrackNode *seg = &track->nodes[closestIdx];
 
     /* Three bands: racing surface, then runoff, then off-track. The runoff band is what makes
@@ -203,8 +204,8 @@ float track_distance_to_centerline_m(const TrackDefinition *track, Vector2 point
         return 0.0f;
     }
     int closestIdx = 0;
-    const float dSq =
-        nearest_centerline_distance_sq(track->nodes, track->count, pointM, &closestIdx);
+    const float dSq = nearest_centerline_distance_sq(track->nodes, track->count,
+                                                     track->routeClosed, pointM, &closestIdx);
     if (halfWidthM != NULL) {
         *halfWidthM = track->nodes[closestIdx].halfWidthM;
     }
@@ -512,9 +513,25 @@ bool track_build_checkpoints_from_nodes(TrackDefinition *track)
 
     for (int i = 0; i < track->count; i++) {
         const TrackNode *node = &track->nodes[i];
-        const TrackNode *next = &track->nodes[(i + 1) % track->count];
-        const float dx = next->centerM.x - node->centerM.x;
-        const float dy = next->centerM.y - node->centerM.y;
+        float dx = 0.0f, dy = 0.0f;
+        if (track->routeClosed) {
+            const TrackNode *next = &track->nodes[(i + 1) % track->count];
+            dx = next->centerM.x - node->centerM.x;
+            dy = next->centerM.y - node->centerM.y;
+        } else {
+            if (i + 1 < track->count) {
+                const TrackNode *next = &track->nodes[i + 1];
+                dx = next->centerM.x - node->centerM.x;
+                dy = next->centerM.y - node->centerM.y;
+            } else if (track->count > 1) {
+                const TrackNode *prev = &track->nodes[i - 1];
+                dx = node->centerM.x - prev->centerM.x;
+                dy = node->centerM.y - prev->centerM.y;
+            } else {
+                dx = 0.0f;
+                dy = 0.0f;
+            }
+        }
         const float len = sqrtf(dx * dx + dy * dy);
 
         track->checkpoints[i].centerM = node->centerM;
@@ -525,7 +542,6 @@ bool track_build_checkpoints_from_nodes(TrackDefinition *track)
         track->checkpoints[i].forwardUnit =
             (len < 1e-12f) ? (Vector2){ 0.0f, 0.0f } : (Vector2){ dx / len, dy / len };
     }
-    track->routeClosed = true;
     return true;
 }
 
@@ -769,31 +785,57 @@ TrackCheckpointEvent track_update_checkpoints(const TrackDefinition *track,
 
     progress->lastCrossedIndex = event.index;
     progress->ticksSinceCross = 0;
+
+    if (track->checkpointCount > 0) {
+        const int firstGate = (progress->lapStartCheckpoint + 1) % track->checkpointCount;
+        if (expected == firstGate) {
+            progress->lapInvalid = false;
+        }
+    }
+
+    bool lapCompletedViaRoute = false;
+    bool sfCrossed = false;
+    if (track->hasStartFinish) {
+        sfCrossed =
+            gate_crossed_generic(track->startFinish.centerM, track->startFinish.forwardUnit,
+                                 track->startFinish.halfWidthM, prevPosM, currPosM);
+    }
+
     if (track->routeClosed) {
         progress->nextCheckpoint++;
         if (progress->nextCheckpoint >= track->checkpointCount) {
             progress->nextCheckpoint = 0;
         }
         const int lapCloseNext = (progress->lapStartCheckpoint + 1) % track->checkpointCount;
-        if (progress->nextCheckpoint == lapCloseNext || track->checkpointCount == 1) {
-            progress->lap++;
-            event.lapCompleted = true;
-            event.lapTimeS = progress->lapTimerS;
-            progress->lastLapTimeS = progress->lapTimerS;
-            progress->lapTimerS = 0.0f;
-            progress->lapInvalid = false;
+        bool shouldCompleteViaRoute =
+            (progress->nextCheckpoint == lapCloseNext || track->checkpointCount == 1);
+        if (track->hasStartFinish) {
+            shouldCompleteViaRoute = false;
+        }
+        if (shouldCompleteViaRoute) {
+            lapCompletedViaRoute = true;
+        }
+        if (track->hasStartFinish && sfCrossed) {
+            lapCompletedViaRoute = true;
         }
     } else {
         progress->nextCheckpoint++;
         if (progress->nextCheckpoint >= track->checkpointCount) {
             progress->routeFinished = true;
+            lapCompletedViaRoute = true;
+            progress->nextCheckpoint = track->checkpointCount;
+        }
+    }
+
+    if (lapCompletedViaRoute) {
+        if (!progress->lapInvalid) {
             progress->lap++;
             event.lapCompleted = true;
             event.lapTimeS = progress->lapTimerS;
             progress->lastLapTimeS = progress->lapTimerS;
-            progress->lapTimerS = 0.0f;
-            progress->nextCheckpoint = track->checkpointCount;
         }
+        progress->lapTimerS = 0.0f;
+        progress->lapInvalid = false;
     }
 
     return event;

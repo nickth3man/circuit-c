@@ -13,6 +13,9 @@ bool track_ribbon_join_build(const TrackDefinition *track, int nodeIndex, TrackR
         nodeIndex >= track->count || out == NULL) {
         return false;
     }
+    if (!track->routeClosed && (nodeIndex == 0 || nodeIndex == track->count - 1)) {
+        return false;
+    }
 
     const int previousIndex = (nodeIndex + track->count - 1) % track->count;
     const int nextIndex = (nodeIndex + 1) % track->count;
@@ -226,8 +229,9 @@ void render_world_draw_track(const TrackDefinition *track, const RacerProgress *
      * segment a flat end, so the bevel triangles in the second loop close the two wedges left
      * between adjacent end sections whenever the centreline changes direction. */
     const Color asphalt = { 40, 40, 45, 255 };
-    for (int i = 0; i < n; i++) {
-        const int j = (i + 1) % n;
+    const int segCount = track->routeClosed ? n : n - 1;
+    for (int i = 0; i < segCount; i++) {
+        const int j = track->routeClosed ? (i + 1) % n : i + 1;
         const float segHalfWidthM =
             0.5f * (track->nodes[i].halfWidthM + track->nodes[j].halfWidthM);
         const Vector2 aPx = units_world_to_render_px(track->nodes[i].centerM, ppm);
@@ -251,8 +255,8 @@ void render_world_draw_track(const TrackDefinition *track, const RacerProgress *
      * Two distinct edges now exist and the difference matters to a driver: the white line is
      * where the racing surface ends and grip falls away, the red line is where the wall is.
      * A node with no runoff band draws them on top of each other, which is the truth. */
-    for (int i = 0; i < n; i++) {
-        const int j = (i + 1) % n;
+    for (int i = 0; i < segCount; i++) {
+        const int j = track->routeClosed ? (i + 1) % n : i + 1;
         const Vector2 a = track->nodes[i].centerM;
         const Vector2 b = track->nodes[j].centerM;
 

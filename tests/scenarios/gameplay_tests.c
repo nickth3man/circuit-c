@@ -538,6 +538,7 @@ static void scenario_checkpoint_lap(void)
     track.count = 4;
     track.offTrackSurfaceId = SURFACE_GRASS;
     track.runoffSurfaceId = SURFACE_GRASS;
+    track.routeClosed = true;
     track.nodes[0] = (TrackNode){ { 0.0f, 0.0f }, 2.0f, SURFACE_ASPHALT, 0.0f };
     track.nodes[1] = (TrackNode){ { 10.0f, 0.0f }, 2.0f, SURFACE_ASPHALT, 0.0f };
     track.nodes[2] = (TrackNode){ { 10.0f, 10.0f }, 2.0f, SURFACE_ASPHALT, 0.0f };
@@ -658,12 +659,12 @@ static void scenario_progress_isolation(void)
     track.count = 4;
     track.offTrackSurfaceId = SURFACE_GRASS;
     track.runoffSurfaceId = SURFACE_GRASS;
+    track.routeClosed = true;
     track.nodes[0] = (TrackNode){ { 0.0f, 0.0f }, 2.0f, SURFACE_ASPHALT, 0.0f };
     track.nodes[1] = (TrackNode){ { 10.0f, 0.0f }, 2.0f, SURFACE_ASPHALT, 0.0f };
     track.nodes[2] = (TrackNode){ { 10.0f, 10.0f }, 2.0f, SURFACE_ASPHALT, 0.0f };
     track.nodes[3] = (TrackNode){ { 0.0f, 10.0f }, 2.0f, SURFACE_ASPHALT, 0.0f };
     check(track_build_checkpoints_from_nodes(&track), "gates derive from the node ribbon");
-
     /* Bind a runtime so the definition can be proved untouched at the end of the session. */
     TrackRuntime runtime;
     memset(&runtime, 0, sizeof(runtime));
@@ -2024,6 +2025,7 @@ static void scenario_lap_target_results(void)
     game->trackDef.nodes = (TrackNode *)calloc(4, sizeof(TrackNode));
     game->trackDef.count = 4;
     game->trackDef.offTrackSurfaceId = SURFACE_GRASS;
+    game->trackDef.routeClosed = true;
     game->trackDef.nodes[0] = (TrackNode){ { 0.0f, 0.0f }, 2.0f, SURFACE_ASPHALT, 0.0f };
     game->trackDef.nodes[1] = (TrackNode){ { 10.0f, 0.0f }, 2.0f, SURFACE_ASPHALT, 0.0f };
     game->trackDef.nodes[2] = (TrackNode){ { 10.0f, 10.0f }, 2.0f, SURFACE_ASPHALT, 0.0f };
