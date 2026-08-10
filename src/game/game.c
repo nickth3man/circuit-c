@@ -987,7 +987,19 @@ static void stage_progress(Game *game, const TickContext *ctx, float dt)
                                        (int32_t)game->progress.lap);
             }
         }
+        TrackSectorEvent sev = track_update_sectors(
+            &game->trackDef, &game->progress, ctx->startPosM, game->renderState.currPositionM);
+        if (sev.crossed && game->session.roster.count > 0) {
+            race_session_log_event(&game->session, RACE_EVENT_SECTOR_COMPLETED,
+                                   game->session.roster.entrants[0].id, sev.index);
+        }
         game->progress.lapTimerS += dt;
+        game->progress.sectorTimerS += dt;
+        /* Mirror to roster entrant 0 when a session is active, so headless tests that inspect
+         * the roster see the same progress as the legacy single-progress path. */
+        if (game->session.roster.count > 0) {
+            game->session.roster.entrants[0].progress = game->progress;
+        }
     } else {
         memset(&game->lastCheckpointEvent, 0, sizeof(game->lastCheckpointEvent));
         game->lastCheckpointEvent.index = -1;

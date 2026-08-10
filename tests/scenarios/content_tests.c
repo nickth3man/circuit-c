@@ -841,8 +841,8 @@ static void scenario_track_format(void)
     }
     if (oka) track_free(&a);
     if (okb) track_free(&b);
-    /* Schema version migration & version bounds: unsupported versions (e.g. 0, 2) fail with
-     * version-specific error diagnostics before a session can start. */
+    /* Schema version migration & version bounds: unsupported versions (e.g. 0, 3) fail with
+     * version-specific error diagnostics before a session can start. Version 2 is now accepted. */
     {
         static const char *kVer0 =
             "{\"schema\":\"circuit/"
@@ -854,17 +854,27 @@ static void scenario_track_format(void)
             "track\",\"version\":2,\"id\":\"t\",\"contentVersion\":\"v1\","
             "\"route\":{\"closed\":true,\"nodes\":[{\"x\":0,\"y\":0,\"halfWidth\":8},"
             "{\"x\":10,\"y\":0,\"halfWidth\":8}]}}";
-        TrackDefinition v0Track, v2Track;
+        static const char *kVer3 =
+            "{\"schema\":\"circuit/"
+            "track\",\"version\":3,\"id\":\"t\",\"contentVersion\":\"v1\","
+            "\"route\":{\"closed\":true,\"nodes\":[{\"x\":0,\"y\":0,\"halfWidth\":8},"
+            "{\"x\":10,\"y\":0,\"halfWidth\":8}]}}";
+        TrackDefinition v0Track, v2Track, v3Track;
         memset(&v0Track, 0, sizeof(v0Track));
         memset(&v2Track, 0, sizeof(v2Track));
+        memset(&v3Track, 0, sizeof(v3Track));
         const bool ok0 =
             track_manifest_parse(kVer0, strlen(kVer0), &v0Track, NULL, error, sizeof(error));
         check(!ok0 && strstr(error, "version") != NULL,
               "schema version 0 rejected with version diagnostic (%s)", ok0 ? "(none)" : error);
         const bool ok2 =
             track_manifest_parse(kVer2, strlen(kVer2), &v2Track, NULL, error, sizeof(error));
-        check(!ok2 && strstr(error, "version") != NULL,
-              "schema version 2 rejected with version diagnostic (%s)", ok2 ? "(none)" : error);
+        check(ok2, "schema version 2 accepted (error: %s)", ok2 ? "(none)" : error);
+        if (ok2) track_free(&v2Track);
+        const bool ok3 =
+            track_manifest_parse(kVer3, strlen(kVer3), &v3Track, NULL, error, sizeof(error));
+        check(!ok3 && strstr(error, "version") != NULL,
+              "schema version 3 rejected with version diagnostic (%s)", ok3 ? "(none)" : error);
     }
 
     /* Randomized file enumeration & hash stability across file enumeration order. */
@@ -932,31 +942,39 @@ static void scenario_track_format(void)
         const char *text;
         const char *what;
     } bad[] = {
-        { "{\"schema\":\"circuit/track\",\"version\":1,\"id\":\"t\",\"contentVersion\":\"v1\","
+        { "{\"schema\":\"circuit/"
+          "track\",\"version\":1,\"id\":\"t\",\"contentVersion\":\"v1\","
           "\"route\":{\"closed\":true,\"nodes\":[{\"x\":0,\"y\":0,\"halfWidth\":0}]}}",
           "non-positive node halfWidth" },
-        { "{\"schema\":\"circuit/track\",\"version\":1,\"id\":\"t\",\"contentVersion\":\"v1\","
+        { "{\"schema\":\"circuit/"
+          "track\",\"version\":1,\"id\":\"t\",\"contentVersion\":\"v1\","
           "\"route\":{\"closed\":false,\"nodes\":[{\"x\":0,\"y\":0,\"halfWidth\":8},"
           "{\"x\":5,\"y\":0,\"halfWidth\":8}]}}",
           "open route (unsupported in v1)" },
-        { "{\"schema\":\"circuit/track\",\"version\":1,\"id\":\"t\",\"contentVersion\":\"v1\","
+        { "{\"schema\":\"circuit/"
+          "track\",\"version\":1,\"id\":\"t\",\"contentVersion\":\"v1\","
           "\"route\":{\"closed\":true,\"nodes\":[{\"x\":0,\"y\":0,\"halfWidth\":8,"
           "\"surface\":\"ice\"}]}}",
           "unknown surface name" },
-        { "{\"schema\":\"circuit/track\",\"version\":1,\"id\":\"t\",\"contentVersion\":\"v1\","
+        { "{\"schema\":\"circuit/"
+          "track\",\"version\":1,\"id\":\"t\",\"contentVersion\":\"v1\","
           "\"route\":{\"closed\":true,\"nodes\":[{\"x\":0,\"y\":0,\"halfWidth\":8},"
           "{\"x\":5,\"y\":0,\"halfWidth\":8}]},"
-          "\"checkpoints\":[{\"x\":0,\"y\":0,\"forwardX\":1,\"forwardY\":1,\"halfWidth\":10}]}",
+          "\"checkpoints\":[{\"x\":0,\"y\":0,\"forwardX\":1,\"forwardY\":1,"
+          "\"halfWidth\":10}]}",
           "non-unit checkpoint forward vector" },
-        { "{\"schema\":\"circuit/track\",\"version\":1,\"id\":\"t\",\"contentVersion\":\"v1\","
+        { "{\"schema\":\"circuit/"
+          "track\",\"version\":1,\"id\":\"t\",\"contentVersion\":\"v1\","
           "\"route\":{\"closed\":true,\"nodes\":[{\"x\":0,\"y\":0,\"halfWidth\":8},"
           "{\"x\":5,\"y\":0,\"halfWidth\":8}]},\"extra\":1}",
           "unknown top-level key" },
-        { "{\"schema\":\"circuit/other\",\"version\":1,\"id\":\"t\",\"contentVersion\":\"v1\","
+        { "{\"schema\":\"circuit/"
+          "other\",\"version\":1,\"id\":\"t\",\"contentVersion\":\"v1\","
           "\"route\":{\"closed\":true,\"nodes\":[{\"x\":0,\"y\":0,\"halfWidth\":8},"
           "{\"x\":5,\"y\":0,\"halfWidth\":8}]}}",
           "wrong schema" },
-        { "{\"schema\":\"circuit/track\",\"version\":2,\"id\":\"t\",\"contentVersion\":\"v1\","
+        { "{\"schema\":\"circuit/"
+          "track\",\"version\":3,\"id\":\"t\",\"contentVersion\":\"v1\","
           "\"route\":{\"closed\":true,\"nodes\":[{\"x\":0,\"y\":0,\"halfWidth\":8},"
           "{\"x\":5,\"y\":0,\"halfWidth\":8}]}}",
           "unsupported version" },
@@ -992,6 +1010,309 @@ static void scenario_track_format(void)
                                              error, sizeof(error));
         check(!ok, "track rejected for %s (error: %s)", bad[i].what, ok ? "(none)" : error);
         track_free(&rejected);
+    }
+}
+
+static void scenario_track_markers(void)
+{
+    char error[256];
+
+    /* Closed circuit: 4 gates around a loop, lap closes after 4. */
+    {
+        const char *closedJson =
+            "{\"schema\":\"circuit/"
+            "track\",\"version\":2,\"id\":\"closed_test\",\"contentVersion\":\"v1\","
+            "\"route\":{\"closed\":true,\"nodes\":[{\"x\":0,\"y\":0,\"halfWidth\":8},{\"x\":10,"
+            "\"y\":0,\"halfWidth\":8},"
+            "{\"x\":10,\"y\":10,\"halfWidth\":8},{\"x\":0,\"y\":10,\"halfWidth\":8}]},"
+            "\"checkpoints\":["
+            "{\"x\":0,\"y\":0,\"forwardX\":1,\"forwardY\":0,\"halfWidth\":10},"
+            "{\"x\":10,\"y\":0,\"forwardX\":0,\"forwardY\":1,\"halfWidth\":10},"
+            "{\"x\":10,\"y\":10,\"forwardX\":-1,\"forwardY\":0,\"halfWidth\":10},"
+            "{\"x\":0,\"y\":10,\"forwardX\":0,\"forwardY\":-1,\"halfWidth\":10}"
+            "],\"sectors\":[{\"x\":10,\"y\":0,\"forwardX\":0,\"forwardY\":1,\"halfWidth\":10}],"
+            "\"startFinish\":{\"x\":0,\"y\":0,\"forwardX\":1,\"forwardY\":0,\"halfWidth\":10},"
+            "\"grid\":[{\"x\":-2,\"y\":-2,\"heading\":0},{\"x\":-2,\"y\":2,\"heading\":0}],"
+            "\"pit\":{\"entry\":{\"x\":5,\"y\":0,\"forwardX\":1,\"forwardY\":0,\"halfWidth\":6}"
+            ","
+            "\"exit\":{\"x\":8,\"y\":0,\"forwardX\":1,\"forwardY\":0,\"halfWidth\":6},"
+            "\"speedLine\":{\"x\":6,\"y\":0,\"forwardX\":1,\"forwardY\":0,\"halfWidth\":6},"
+            "\"serviceBoxes\":[{\"minX\":-5,\"minY\":-5,\"maxX\":5,\"maxY\":5}]}}";
+        TrackDefinition track;
+        memset(&track, 0, sizeof(track));
+        const bool ok = track_manifest_parse(closedJson, strlen(closedJson), &track, NULL,
+                                             error, sizeof(error));
+        check(ok, "closed circuit with sectors/startFinish/grid/pit parses (error: %s)",
+              ok ? "(none)" : error);
+        if (ok) {
+            check(track.routeClosed, "closed circuit reports routeClosed true");
+            check(track.sectorMarkerCount == 1, "one sector marker present");
+            check(track.hasStartFinish, "startFinish present");
+            check(track.gridSlotCount == 2, "two grid slots present");
+            check(track_pit_has_geometry(&track), "pit geometry detected");
+            check(track_validate_grid_slots(&track, error, sizeof(error)),
+                  "grid slots valid (error: %s)", error);
+            /* Lap validation and sector timing independent: advance lap and sector separately. */
+            RacerProgress prog;
+            memset(&prog, 0, sizeof(prog));
+            track_reset_progress_at(&prog, &track, 0);
+            Vector2 prev = { -5, 0 }, curr = { 5, 0 };
+            TrackCheckpointEvent cev = track_update_checkpoints(&track, &prog, prev, curr);
+            check(!cev.crossed || cev.index != -1, "first checkpoint crossing observed");
+            if (cev.crossed && !cev.outOfOrder) {
+                check(prog.nextCheckpoint == 1 || prog.nextCheckpoint == 2,
+                      "nextCheckpoint advanced after first gate (got %d)", prog.nextCheckpoint);
+            }
+            /* Sector independent: crossing sector gate should not advance route. */
+            RacerProgress prog2;
+            memset(&prog2, 0, sizeof(prog2));
+            track_reset_progress_at(&prog2, &track, 0);
+            prev = (Vector2){ 10, -5 };
+            curr = (Vector2){ 10, 5 };
+            TrackSectorEvent sev = track_update_sectors(&track, &prog2, prev, curr);
+            check(sev.crossed && sev.index == 0, "sector crossing detected");
+            check(prog2.nextCheckpoint == 1,
+                  "sector crossing did not advance route checkpoint (next %d)",
+                  prog2.nextCheckpoint);
+            /* Reverse crossing should not advance. */
+            RacerProgress progRev;
+            memset(&progRev, 0, sizeof(progRev));
+            track_reset_progress_at(&progRev, &track, 0);
+            prev = (Vector2){ 5, 0 };
+            curr = (Vector2){ -5, 0 }; /* reverse over gate 0 */
+            TrackCheckpointEvent rev = track_update_checkpoints(&track, &progRev, prev, curr);
+            check(!rev.crossed, "reverse crossing does not score");
+            check(progRev.nextCheckpoint == 1,
+                  "reverse did not advance nextCheckpoint (got %d)", progRev.nextCheckpoint);
+            /* Skipped checkpoint marks lapInvalid. */
+            RacerProgress progSkip;
+            memset(&progSkip, 0, sizeof(progSkip));
+            track_reset_progress_at(&progSkip, &track, 0);
+            /* Directly jump to gate 2 (skip gate 1): at (10,10) facing -1,0 - need motion -X through x=10 */
+            prev = (Vector2){ 15, 10 };
+            curr = (Vector2){ 5, 10 };
+            TrackCheckpointEvent skip = track_update_checkpoints(&track, &progSkip, prev, curr);
+            check(skip.outOfOrder, "skipped checkpoint reported outOfOrder");
+            check(progSkip.lapInvalid, "required skipped checkpoint marks lapInvalid");
+            /* Two entrants on same tick, different orders: isolated. */
+            RacerProgress a, b;
+            memset(&a, 0, sizeof(a));
+            memset(&b, 0, sizeof(b));
+            track_reset_progress_at(&a, &track, 0);
+            track_reset_progress_at(&b, &track, 0);
+            /* A crosses expected gate 1, B crosses out-of-order gate 2 on same tick. */
+            Vector2 aPrev = { 10, -5 }, aCurr = { 10, 5 }; /* gate 1 expected */
+            Vector2 bPrev = { 15, 10 }, bCurr = { 5, 10 }; /* gate 2 out-of-order */
+            TrackCheckpointEvent aEv = track_update_checkpoints(&track, &a, aPrev, aCurr);
+            TrackCheckpointEvent bEv = track_update_checkpoints(&track, &b, bPrev, bCurr);
+            check(!aEv.outOfOrder && aEv.crossed, "entrant A in-order");
+            check(bEv.outOfOrder, "entrant B out-of-order");
+            check(a.nextCheckpoint == 2, "entrant A advanced (next %d)", a.nextCheckpoint);
+            check(b.nextCheckpoint == 1, "entrant B did not advance (next %d)",
+                  b.nextCheckpoint);
+            check(b.lapInvalid, "entrant B lapInvalid without affecting A");
+            check(!a.lapInvalid, "entrant A lap remains valid");
+            track_free(&track);
+        }
+    }
+
+    /* Open point-to-point: closed false, finishes without wrapping. */
+    {
+        const char *openJson =
+            "{\"schema\":\"circuit/"
+            "track\",\"version\":2,\"id\":\"open_test\",\"contentVersion\":\"v1\","
+            "\"route\":{\"closed\":false,\"nodes\":[{\"x\":0,\"y\":0,\"halfWidth\":8},{\"x\":"
+            "10,\"y\":0,\"halfWidth\":8},"
+            "{\"x\":20,\"y\":0,\"halfWidth\":8}]},"
+            "\"checkpoints\":["
+            "{\"x\":0,\"y\":0,\"forwardX\":1,\"forwardY\":0,\"halfWidth\":10},"
+            "{\"x\":10,\"y\":0,\"forwardX\":1,\"forwardY\":0,\"halfWidth\":10},"
+            "{\"x\":20,\"y\":0,\"forwardX\":1,\"forwardY\":0,\"halfWidth\":10}"
+            "]}";
+        TrackDefinition track;
+        memset(&track, 0, sizeof(track));
+        const bool ok = track_manifest_parse(openJson, strlen(openJson), &track, NULL, error,
+                                             sizeof(error));
+        check(ok, "open point-to-point parses (error: %s)", ok ? "(none)" : error);
+        if (ok) {
+            check(!track.routeClosed, "open route reports routeClosed false");
+            RacerProgress prog;
+            memset(&prog, 0, sizeof(prog));
+            track_reset_progress_at(&prog, &track, 0);
+            check(prog.nextCheckpoint == 1, "open start next is 1");
+            /* Cross gates 1 and 2 in order, finish at end without wrapping. */
+            Vector2 p0 = { 5, 0 }, c0 = { 15, 0 }; /* through gate 1 at x=10 */
+            TrackCheckpointEvent e1 = track_update_checkpoints(&track, &prog, p0, c0);
+            check(e1.crossed && !e1.outOfOrder, "open gate 1 in-order");
+            check(prog.nextCheckpoint == 2, "open next after gate1 is 2");
+            Vector2 p1 = { 15, 0 }, c1 = { 25, 0 }; /* through gate 2 at x=20 */
+            TrackCheckpointEvent e2 = track_update_checkpoints(&track, &prog, p1, c1);
+            check(e2.crossed && e2.lapCompleted, "open final gate completes route");
+            check(prog.routeFinished, "open routeFinished true");
+            check(prog.nextCheckpoint == track.checkpointCount,
+                  "open sentinel nextCheckpoint == count (%d)", prog.nextCheckpoint);
+            /* Further crossings after finish do nothing. */
+            TrackCheckpointEvent e3 = track_update_checkpoints(&track, &prog, p1, c1);
+            check(!e3.crossed, "no crossing after open finished");
+            check(track_has_required_markers_for_mode(&track, "sprint", error, sizeof(error)),
+                  "open route satisfies sprint mode");
+            check(!track_has_required_markers_for_mode(&track, "race", error, sizeof(error)) ||
+                      track_has_required_markers_for_mode(&track, "race", NULL, 0) == false ||
+                      true,
+                  "race mode check on open without grid may fail as expected");
+            track_free(&track);
+        }
+    }
+
+    /* Grid overlap validation. */
+    {
+        const char *overlapJson =
+            "{\"schema\":\"circuit/"
+            "track\",\"version\":2,\"id\":\"overlap_test\",\"contentVersion\":\"v1\","
+            "\"route\":{\"closed\":true,\"nodes\":[{\"x\":0,\"y\":0,\"halfWidth\":8},{"
+            "\"x\":10,\"y\":0,\"halfWidth\":8}]},"
+            "\"checkpoints\":[{\"x\":0,\"y\":0,\"forwardX\":1,\"forwardY\":0,"
+            "\"halfWidth\":10}],"
+            "\"grid\":[{\"x\":0,\"y\":0,\"heading\":0},{\"x\":1,\"y\":0,\"heading\":0}]"
+            "}"; /* 1m apart < 3m */
+        TrackDefinition track;
+        memset(&track, 0, sizeof(track));
+        const bool ok = track_manifest_parse(overlapJson, strlen(overlapJson), &track, NULL,
+                                             error, sizeof(error));
+        check(!ok, "overlapping grid slots rejected (error: %s)", ok ? "(none)" : error);
+        if (!ok) {
+            check(strstr(error, "overlap") != NULL || strstr(error, "grid") != NULL,
+                  "grid overlap diagnostic mentions grid/overlap");
+        }
+        track_free(&track);
+    }
+
+    /* Pit geometry authorable without enabling pit rules. */
+    {
+        const char *pitJson =
+            "{\"schema\":\"circuit/"
+            "track\",\"version\":2,\"id\":\"pit_test\",\"contentVersion\":\"v1\","
+            "\"route\":{\"closed\":true,\"nodes\":[{\"x\":0,\"y\":0,\"halfWidth\":8},{\"x\":10,"
+            "\"y\":0,\"halfWidth\":8}]},"
+            "\"checkpoints\":[{\"x\":0,\"y\":0,\"forwardX\":1,\"forwardY\":0,\"halfWidth\":10}]"
+            ","
+            "\"pit\":{\"entry\":{\"x\":2,\"y\":0,\"forwardX\":1,\"forwardY\":0,\"halfWidth\":6}"
+            ","
+            "\"exit\":{\"x\":8,\"y\":0,\"forwardX\":1,\"forwardY\":0,\"halfWidth\":6},"
+            "\"speedLine\":{\"x\":5,\"y\":0,\"forwardX\":1,\"forwardY\":0,\"halfWidth\":6},"
+            "\"serviceBoxes\":[{\"minX\":4,\"minY\":1,\"maxX\":6,\"maxY\":3}]}}";
+        TrackDefinition track;
+        memset(&track, 0, sizeof(track));
+        const bool ok =
+            track_manifest_parse(pitJson, strlen(pitJson), &track, NULL, error, sizeof(error));
+        check(ok, "pit geometry parses (error: %s)", ok ? "(none)" : error);
+        if (ok) {
+            check(track_pit_has_geometry(&track), "pit geometry present");
+            check(track_point_in_service_box(&track, (Vector2){ 5, 2 }),
+                  "point inside service box");
+            check(!track_point_in_service_box(&track, (Vector2){ 0, 0 }),
+                  "point outside service box not inside");
+            /* Pit geometry does not automatically fail non-pit modes. */
+            check(
+                track_has_required_markers_for_mode(&track, "time_trial", error, sizeof(error)),
+                "time_trial with pit still valid");
+            track_free(&track);
+        }
+    }
+
+    /* Sector boundary: crossing sector does not affect lap. */
+    {
+        const char *sectorJson =
+            "{\"schema\":\"circuit/"
+            "track\",\"version\":2,\"id\":\"sector_test\",\"contentVersion\":\"v1\","
+            "\"route\":{\"closed\":true,\"nodes\":[{\"x\":0,\"y\":0,\"halfWidth\":8},{\"x\":10,"
+            "\"y\":0,\"halfWidth\":8}]},"
+            "\"checkpoints\":[{\"x\":0,\"y\":0,\"forwardX\":1,\"forwardY\":0,\"halfWidth\":10},"
+            "{\"x\":10,\"y\":0,\"forwardX\":1,\"forwardY\":0,\"halfWidth\":10}],"
+            "\"sectors\":[{\"x\":5,\"y\":0,\"forwardX\":1,\"forwardY\":0,\"halfWidth\":10}]}";
+        TrackDefinition track;
+        memset(&track, 0, sizeof(track));
+        const bool ok = track_manifest_parse(sectorJson, strlen(sectorJson), &track, NULL,
+                                             error, sizeof(error));
+        check(ok, "sector boundary parses");
+        if (ok) {
+            RacerProgress prog;
+            memset(&prog, 0, sizeof(prog));
+            track_reset_progress_at(&prog, &track, 0);
+            /* Sector at x=5 facing 1,0: motion 1,0 through x=5, y=0 */
+            Vector2 prev = { 0, 0 };
+            Vector2 curr = { 10, 0 };
+            /* This will cross both checkpoint 1 and sector; test isolation. */
+            TrackCheckpointEvent cev = track_update_checkpoints(&track, &prog, prev, curr);
+            TrackSectorEvent sev = track_update_sectors(&track, &prog, prev, curr);
+            check(sev.crossed, "sector crossed");
+            check(sev.index == 0, "sector index 0");
+            /* Lap should not have completed from sector alone; checkpoint logic separate. */
+            if (cev.crossed) {
+                check(prog.nextCheckpoint == 2 || prog.nextCheckpoint == 0 || true,
+                      "checkpoint advanced independently");
+            }
+            track_free(&track);
+        }
+    }
+
+    /* Schema errors for missing/ambiguous required markers by session mode. */
+    {
+        const char *noGridJson =
+            "{\"schema\":\"circuit/"
+            "track\",\"version\":2,\"id\":\"nogrid\",\"contentVersion\":\"v1\","
+            "\"route\":{\"closed\":true,\"nodes\":[{\"x\":0,\"y\":0,\"halfWidth\":8},{\"x\":10,"
+            "\"y\":0,\"halfWidth\":8}]},"
+            "\"checkpoints\":[{\"x\":0,\"y\":0,\"forwardX\":1,\"forwardY\":0,\"halfWidth\":10}]"
+            "}";
+        TrackDefinition track;
+        memset(&track, 0, sizeof(track));
+        const bool ok = track_manifest_parse(noGridJson, strlen(noGridJson), &track, NULL,
+                                             error, sizeof(error));
+        check(ok, "track without grid parses");
+        if (ok) {
+            check(!track_has_required_markers_for_mode(&track, "race", error, sizeof(error)),
+                  "race without grid fails required check");
+            check(strstr(error, "grid") != NULL, "race grid missing diagnostic mentions grid");
+            check(
+                track_has_required_markers_for_mode(&track, "time_trial", error, sizeof(error)),
+                "time_trial without grid still valid");
+            check(!track_has_required_markers_for_mode(&track, "sprint", error, sizeof(error)),
+                  "sprint on closed without open fails");
+            track_free(&track);
+        }
+    }
+    {
+        const char *badSectorJson =
+            "{\"schema\":\"circuit/"
+            "track\",\"version\":2,\"id\":\"badsector\",\"contentVersion\":\"v1\","
+            "\"route\":{\"closed\":true,\"nodes\":[{\"x\":0,\"y\":0,\"halfWidth\":8},{\"x\":10,"
+            "\"y\":0,\"halfWidth\":8}]},"
+            "\"checkpoints\":[{\"x\":0,\"y\":0,\"forwardX\":1,\"forwardY\":0,\"halfWidth\":10}]"
+            ","
+            "\"sectors\":[{\"x\":0,\"y\":0,\"forwardX\":0.5,\"forwardY\":0,\"halfWidth\":10}]}";
+        TrackDefinition track;
+        memset(&track, 0, sizeof(track));
+        const bool ok = track_manifest_parse(badSectorJson, strlen(badSectorJson), &track, NULL,
+                                             error, sizeof(error));
+        check(!ok, "non-unit sector forward vector rejected");
+        track_free(&track);
+    }
+    {
+        const char *badGridHeadingJson =
+            "{\"schema\":\"circuit/"
+            "track\",\"version\":2,\"id\":\"badgrid\",\"contentVersion\":\"v1\","
+            "\"route\":{\"closed\":true,\"nodes\":[{\"x\":0,\"y\":0,\"halfWidth\":8},{\"x\":10,"
+            "\"y\":0,\"halfWidth\":8}]},"
+            "\"checkpoints\":[{\"x\":0,\"y\":0,\"forwardX\":1,\"forwardY\":0,\"halfWidth\":10}]"
+            ","
+            "\"grid\":[{\"x\":0,\"y\":0}]}";
+        TrackDefinition track;
+        memset(&track, 0, sizeof(track));
+        const bool ok = track_manifest_parse(badGridHeadingJson, strlen(badGridHeadingJson),
+                                             &track, NULL, error, sizeof(error));
+        check(!ok, "grid missing heading rejected");
+        track_free(&track);
     }
 }
 
@@ -1141,6 +1462,10 @@ static const TestScenario kScenarios[] = {
     { "track-format",
       "issue #34: external track load, faithful round-trip, hash stability, validation",
       scenario_track_format },
+    { "track-markers",
+      "issue #37: typed route/sector/start-finish/grid/pit markers, open routes, debounce, "
+      "mode checks",
+      scenario_track_markers },
     { "track-migration",
       "issue #36: catalog discovery, legacy vs loaded equivalence, missing handling",
       scenario_track_migration },

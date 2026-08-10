@@ -43,8 +43,10 @@ SurfaceId track_manifest_surface_id(const char *name)
     return (SurfaceId)-1;
 }
 
-/* The keys v1 accepts at the top level. Anything else is rejected so a typo cannot load as a
- * subtly different track. */
+/* The keys accepted at the top level. New v2 keys (sectors, startFinish, grid, pit) are
+ * optional and accepted for both v1 and v2 files; a v1 file simply has no reason to carry
+ * them. This keeps the parser forward-compatible without making equivalent v1-vs-v2 content
+ * load differently when the new keys are absent. */
 typedef enum {
     TM_KEY_SCHEMA,
     TM_KEY_VERSION,
@@ -56,6 +58,10 @@ typedef enum {
     TM_KEY_SURFACES,
     TM_KEY_PARKING_LOT,
     TM_KEY_CHECKPOINTS,
+    TM_KEY_SECTORS,
+    TM_KEY_START_FINISH,
+    TM_KEY_GRID,
+    TM_KEY_PIT,
     TM_KEY_COUNT
 } TrackTopKey;
 
@@ -70,6 +76,10 @@ static const char *const kTopKeyNames[TM_KEY_COUNT] = {
     [TM_KEY_SURFACES] = "surfaces",
     [TM_KEY_PARKING_LOT] = "parkingLot",
     [TM_KEY_CHECKPOINTS] = "checkpoints",
+    [TM_KEY_SECTORS] = "sectors",
+    [TM_KEY_START_FINISH] = "startFinish",
+    [TM_KEY_GRID] = "grid",
+    [TM_KEY_PIT] = "pit",
 };
 
 static bool is_known_top_key(const char *name)
@@ -188,13 +198,11 @@ static bool parse_route(const JsonValue *route, TrackDefinition *out, char *erro
         return false;
     }
     const JsonValue *closed = json_object_get(route, "closed");
-    if (closed == NULL || !json_is_bool(closed) || !json_as_bool(closed)) {
-        /* Version 1 supports closed circuits only; an open route is reserved for a later schema
-         * version so the parser cannot accept a shape the runtime does not yet model. */
-        set_error(error, errorCap, "route.closed",
-                  "must be true (open routes are reserved for a later schema version)");
+    if (closed == NULL || !json_is_bool(closed)) {
+        set_error(error, errorCap, "route.closed", "must be a boolean");
         return false;
     }
+    out->routeClosed = json_as_bool(closed);
     const JsonValue *nodes = json_object_get(route, "nodes");
     if (nodes == NULL || !json_is_array(nodes) || json_array_count(nodes) < 2) {
         set_error(error, errorCap, "route.nodes", "must be an array of at least two nodes");
@@ -213,12 +221,16 @@ static bool parse_route(const JsonValue *route, TrackDefinition *out, char *erro
         }
     }
     /* Validate route segment continuity: consecutive nodes must not coincide.
-     * Closed routes validate the wrap-around closing segment (node[count-1] -> node[0]) unless
-     * the route explicitly closes by repeating node 0 at position count - 1 (e.g. parking_lot). */
+     * Closed routes validate the wrap-around closing segment; open routes do not. */
     const bool closesByDuplicateNode =
         (count > 1 && nodeArr[0].centerM.x == nodeArr[count - 1].centerM.x &&
          nodeArr[0].centerM.y == nodeArr[count - 1].centerM.y);
-    const int segmentsToCheck = (!closesByDuplicateNode) ? count : (count - 1);
+    int segmentsToCheck = 0;
+    if (out->routeClosed) {
+        segmentsToCheck = (!closesByDuplicateNode) ? count : (count - 1);
+    } else {
+        segmentsToCheck = count - 1;
+    }
 
     for (int i = 0; i < segmentsToCheck; i++) {
         const int nextIdx = (i + 1) % count;
@@ -375,6 +387,325 @@ static bool parse_checkpoint(const JsonValue *cp, Checkpoint *out, int index, ch
     return true;
 }
 
+static bool parse_sector_marker(const JsonValue *m, SectorMarker *out, int index, char *error,
+                                size_t errorCap)
+{
+    if (m == NULL || !json_is_object(m)) {
+        set_error(error, errorCap, "sectors", "each sector must be an object");
+        return false;
+    }
+    char field[48];
+    float x = 0.0f, y = 0.0f, fx = 0.0f, fy = 0.0f, halfWidth = 0.0f;
+    snprintf(field, sizeof(field), "sectors[%d].x", index);
+    if (!finite_number(json_object_get(m, "x"), &x, field, error, errorCap)) return false;
+    snprintf(field, sizeof(field), "sectors[%d].y", index);
+    if (!finite_number(json_object_get(m, "y"), &y, field, error, errorCap)) return false;
+    snprintf(field, sizeof(field), "sectors[%d].forwardX", index);
+    if (!finite_number(json_object_get(m, "forwardX"), &fx, field, error, errorCap))
+        return false;
+    snprintf(field, sizeof(field), "sectors[%d].forwardY", index);
+    if (!finite_number(json_object_get(m, "forwardY"), &fy, field, error, errorCap))
+        return false;
+    const float len = sqrtf(fx * fx + fy * fy);
+    if (len < 1e-3f || fabsf(len - 1.0f) > 1e-3f) {
+        snprintf(field, sizeof(field), "sectors[%d].forward", index);
+        set_error(error, errorCap, field, "forward vector must be unit-length within 1e-3");
+        return false;
+    }
+    snprintf(field, sizeof(field), "sectors[%d].halfWidth", index);
+    if (!finite_number(json_object_get(m, "halfWidth"), &halfWidth, field, error, errorCap))
+        return false;
+    if (!(halfWidth > 0.0f && halfWidth <= TRACK_MAX_HALF_WIDTH_M)) {
+        snprintf(field, sizeof(field), "sectors[%d].halfWidth", index);
+        set_error(error, errorCap, field, "halfWidth must be in (0, 100] metres");
+        return false;
+    }
+    out->centerM = (Vector2){ x, y };
+    out->forwardUnit = (Vector2){ fx, fy };
+    out->halfWidthM = halfWidth;
+    return true;
+}
+
+static bool parse_sectors(const JsonValue *sectors, TrackDefinition *out, char *error,
+                          size_t errorCap)
+{
+    if (sectors == NULL) return true;
+    if (!json_is_array(sectors)) {
+        set_error(error, errorCap, "sectors", "must be an array");
+        return false;
+    }
+    const int count = json_array_count(sectors);
+    if (count == 0) return true;
+    if (count > TRACK_MAX_SECTOR_MARKERS) {
+        set_error(error, errorCap, "sectors", "too many sector markers");
+        return false;
+    }
+    SectorMarker *arr = (SectorMarker *)calloc((size_t)count, sizeof(SectorMarker));
+    if (arr == NULL) {
+        set_error(error, errorCap, NULL, "out of memory");
+        return false;
+    }
+    for (int i = 0; i < count; i++) {
+        if (!parse_sector_marker(json_array_at(sectors, i), &arr[i], i, error, errorCap)) {
+            free(arr);
+            return false;
+        }
+    }
+    out->sectorMarkers = arr;
+    out->sectorMarkerCount = count;
+    return true;
+}
+
+static bool parse_start_finish(const JsonValue *sf, TrackDefinition *out, char *error,
+                               size_t errorCap)
+{
+    if (sf == NULL) return true;
+    if (!json_is_object(sf)) {
+        set_error(error, errorCap, "startFinish", "must be an object");
+        return false;
+    }
+    float x = 0.0f, y = 0.0f, fx = 0.0f, fy = 0.0f, halfWidth = 0.0f;
+    if (!finite_number(json_object_get(sf, "x"), &x, "startFinish.x", error, errorCap))
+        return false;
+    if (!finite_number(json_object_get(sf, "y"), &y, "startFinish.y", error, errorCap))
+        return false;
+    if (!finite_number(json_object_get(sf, "forwardX"), &fx, "startFinish.forwardX", error,
+                       errorCap))
+        return false;
+    if (!finite_number(json_object_get(sf, "forwardY"), &fy, "startFinish.forwardY", error,
+                       errorCap))
+        return false;
+    const float len = sqrtf(fx * fx + fy * fy);
+    if (len < 1e-3f || fabsf(len - 1.0f) > 1e-3f) {
+        set_error(error, errorCap, "startFinish.forward",
+                  "forward vector must be unit-length within 1e-3");
+        return false;
+    }
+    if (!finite_number(json_object_get(sf, "halfWidth"), &halfWidth, "startFinish.halfWidth",
+                       error, errorCap))
+        return false;
+    if (!(halfWidth > 0.0f && halfWidth <= TRACK_MAX_HALF_WIDTH_M)) {
+        set_error(error, errorCap, "startFinish.halfWidth",
+                  "halfWidth must be in (0, 100] metres");
+        return false;
+    }
+    out->hasStartFinish = true;
+    out->startFinish.centerM = (Vector2){ x, y };
+    out->startFinish.forwardUnit = (Vector2){ fx, fy };
+    out->startFinish.halfWidthM = halfWidth;
+    return true;
+}
+
+static bool parse_grid(const JsonValue *grid, TrackDefinition *out, char *error,
+                       size_t errorCap)
+{
+    if (grid == NULL) return true;
+    if (!json_is_array(grid)) {
+        set_error(error, errorCap, "grid", "must be an array");
+        return false;
+    }
+    const int count = json_array_count(grid);
+    if (count == 0) return true;
+    if (count > TRACK_MAX_GRID_SLOTS) {
+        set_error(error, errorCap, "grid", "too many grid slots");
+        return false;
+    }
+    GridSlot *arr = (GridSlot *)calloc((size_t)count, sizeof(GridSlot));
+    if (arr == NULL) {
+        set_error(error, errorCap, NULL, "out of memory");
+        return false;
+    }
+    for (int i = 0; i < count; i++) {
+        const JsonValue *slot = json_array_at(grid, i);
+        if (slot == NULL || !json_is_object(slot)) {
+            set_error(error, errorCap, "grid", "each grid slot must be an object");
+            free(arr);
+            return false;
+        }
+        char field[48];
+        float x = 0.0f, y = 0.0f, heading = 0.0f;
+        snprintf(field, sizeof(field), "grid[%d].x", i);
+        if (!finite_number(json_object_get(slot, "x"), &x, field, error, errorCap)) {
+            free(arr);
+            return false;
+        }
+        snprintf(field, sizeof(field), "grid[%d].y", i);
+        if (!finite_number(json_object_get(slot, "y"), &y, field, error, errorCap)) {
+            free(arr);
+            return false;
+        }
+        const JsonValue *hVal = json_object_get(slot, "heading");
+        if (hVal == NULL) hVal = json_object_get(slot, "headingRad");
+        snprintf(field, sizeof(field), "grid[%d].heading", i);
+        if (!finite_number(hVal, &heading, field, error, errorCap)) {
+            free(arr);
+            return false;
+        }
+        if (!isfinite(x) || !isfinite(y) || !isfinite(heading)) {
+            set_error(error, errorCap, field, "grid pose must be finite");
+            free(arr);
+            return false;
+        }
+        arr[i].positionM = (Vector2){ x, y };
+        arr[i].headingRad = heading;
+    }
+    out->gridSlots = arr;
+    out->gridSlotCount = count;
+    char gridError[256];
+    if (!track_validate_grid_slots(out, gridError, sizeof(gridError))) {
+        set_error(error, errorCap, "grid", gridError);
+        free(arr);
+        out->gridSlots = NULL;
+        out->gridSlotCount = 0;
+        return false;
+    }
+    return true;
+}
+
+static bool parse_pit_gate(const JsonValue *obj, PitGate *out, const char *key, char *error,
+                           size_t errorCap)
+{
+    if (obj == NULL || !json_is_object(obj)) {
+        char field[48];
+        snprintf(field, sizeof(field), "pit.%s", key);
+        set_error(error, errorCap, field, "must be an object");
+        return false;
+    }
+    char field[48];
+    float x = 0.0f, y = 0.0f, fx = 0.0f, fy = 0.0f, halfWidth = 0.0f;
+    snprintf(field, sizeof(field), "pit.%s.x", key);
+    if (!finite_number(json_object_get(obj, "x"), &x, field, error, errorCap)) return false;
+    snprintf(field, sizeof(field), "pit.%s.y", key);
+    if (!finite_number(json_object_get(obj, "y"), &y, field, error, errorCap)) return false;
+    snprintf(field, sizeof(field), "pit.%s.forwardX", key);
+    if (!finite_number(json_object_get(obj, "forwardX"), &fx, field, error, errorCap))
+        return false;
+    snprintf(field, sizeof(field), "pit.%s.forwardY", key);
+    if (!finite_number(json_object_get(obj, "forwardY"), &fy, field, error, errorCap))
+        return false;
+    const float len = sqrtf(fx * fx + fy * fy);
+    if (len < 1e-3f || fabsf(len - 1.0f) > 1e-3f) {
+        snprintf(field, sizeof(field), "pit.%s.forward", key);
+        set_error(error, errorCap, field, "forward vector must be unit-length within 1e-3");
+        return false;
+    }
+    snprintf(field, sizeof(field), "pit.%s.halfWidth", key);
+    if (!finite_number(json_object_get(obj, "halfWidth"), &halfWidth, field, error, errorCap))
+        return false;
+    if (!(halfWidth > 0.0f && halfWidth <= TRACK_MAX_HALF_WIDTH_M)) {
+        snprintf(field, sizeof(field), "pit.%s.halfWidth", key);
+        set_error(error, errorCap, field, "halfWidth must be in (0, 100] metres");
+        return false;
+    }
+    out->centerM = (Vector2){ x, y };
+    out->forwardUnit = (Vector2){ fx, fy };
+    out->halfWidthM = halfWidth;
+    return true;
+}
+
+static bool parse_pit(const JsonValue *pit, TrackDefinition *out, char *error, size_t errorCap)
+{
+    if (pit == NULL) return true;
+    if (!json_is_object(pit)) {
+        set_error(error, errorCap, "pit", "must be an object");
+        return false;
+    }
+    const JsonValue *entry = json_object_get(pit, "entry");
+    if (entry != NULL) {
+        if (!parse_pit_gate(entry, &out->pitEntry, "entry", error, errorCap)) return false;
+        out->hasPitEntry = true;
+    }
+    const JsonValue *exit = json_object_get(pit, "exit");
+    if (exit != NULL) {
+        if (!parse_pit_gate(exit, &out->pitExit, "exit", error, errorCap)) return false;
+        out->hasPitExit = true;
+    }
+    const JsonValue *speed = json_object_get(pit, "speedLine");
+    if (speed == NULL) speed = json_object_get(pit, "speedline");
+    if (speed == NULL) speed = json_object_get(pit, "speed");
+    if (speed != NULL) {
+        if (!parse_pit_gate(speed, &out->pitSpeedLine, "speedLine", error, errorCap))
+            return false;
+        out->hasPitSpeedLine = true;
+    }
+    const JsonValue *boxes = json_object_get(pit, "serviceBoxes");
+    if (boxes == NULL) boxes = json_object_get(pit, "serviceBox");
+    if (boxes != NULL) {
+        if (!json_is_array(boxes)) {
+            set_error(error, errorCap, "pit.serviceBoxes", "must be an array");
+            return false;
+        }
+        const int count = json_array_count(boxes);
+        if (count > TRACK_MAX_SERVICE_BOXES) {
+            set_error(error, errorCap, "pit.serviceBoxes", "too many service boxes");
+            return false;
+        }
+        if (count > 0) {
+            ServiceBox *arr = (ServiceBox *)calloc((size_t)count, sizeof(ServiceBox));
+            if (arr == NULL) {
+                set_error(error, errorCap, NULL, "out of memory");
+                return false;
+            }
+            for (int i = 0; i < count; i++) {
+                const JsonValue *box = json_array_at(boxes, i);
+                if (box == NULL || !json_is_object(box)) {
+                    set_error(error, errorCap, "pit.serviceBoxes",
+                              "each box must be an object");
+                    free(arr);
+                    return false;
+                }
+                char field[48];
+                float minX = 0.0f, minY = 0.0f, maxX = 0.0f, maxY = 0.0f;
+                snprintf(field, sizeof(field), "pit.serviceBoxes[%d].minX", i);
+                if (!finite_number(json_object_get(box, "minX"), &minX, field, error,
+                                   errorCap)) {
+                    free(arr);
+                    return false;
+                }
+                snprintf(field, sizeof(field), "pit.serviceBoxes[%d].minY", i);
+                if (!finite_number(json_object_get(box, "minY"), &minY, field, error,
+                                   errorCap)) {
+                    free(arr);
+                    return false;
+                }
+                snprintf(field, sizeof(field), "pit.serviceBoxes[%d].maxX", i);
+                if (!finite_number(json_object_get(box, "maxX"), &maxX, field, error,
+                                   errorCap)) {
+                    free(arr);
+                    return false;
+                }
+                snprintf(field, sizeof(field), "pit.serviceBoxes[%d].maxY", i);
+                if (!finite_number(json_object_get(box, "maxY"), &maxY, field, error,
+                                   errorCap)) {
+                    free(arr);
+                    return false;
+                }
+                if (!(maxX > minX) || !(maxY > minY)) {
+                    set_error(error, errorCap, field, "max must exceed min");
+                    free(arr);
+                    return false;
+                }
+                arr[i].minM = (Vector2){ minX, minY };
+                arr[i].maxM = (Vector2){ maxX, maxY };
+            }
+            out->serviceBoxes = arr;
+            out->serviceBoxCount = count;
+        }
+    }
+    for (int i = 0; i < json_object_count(pit); i++) {
+        const char *k = json_object_key_at(pit, i);
+        if (strcmp(k, "entry") != 0 && strcmp(k, "exit") != 0 && strcmp(k, "speedLine") != 0 &&
+            strcmp(k, "speedline") != 0 && strcmp(k, "speed") != 0 &&
+            strcmp(k, "serviceBoxes") != 0 && strcmp(k, "serviceBox") != 0) {
+            char reason[96];
+            snprintf(reason, sizeof(reason), "unknown pit key '%s'", k);
+            set_error(error, errorCap, "pit", reason);
+            return false;
+        }
+    }
+    return true;
+}
+
 static bool parse_checkpoints(const JsonValue *checkpoints, TrackDefinition *out, char *error,
                               size_t errorCap)
 {
@@ -443,11 +774,15 @@ bool track_manifest_parse(const char *text, size_t length, TrackDefinition *out,
     }
 
     const JsonValue *versionVal = json_object_get(root, kTopKeyNames[TM_KEY_VERSION]);
-    if (versionVal == NULL || !json_is_number(versionVal) ||
-        json_as_number(versionVal) != (double)TRACK_MANIFEST_VERSION) {
+    if (versionVal == NULL || !json_is_number(versionVal)) {
+        set_error(error, errorCap, "version", "must be a number");
+        json_document_free(doc);
+        return false;
+    }
+    const double ver = json_as_number(versionVal);
+    if (ver != 1.0 && ver != 2.0 && ver != (double)TRACK_MANIFEST_VERSION) {
         static char reason[96];
-        snprintf(reason, sizeof(reason), "version must be %d (the only supported version)",
-                 TRACK_MANIFEST_VERSION);
+        snprintf(reason, sizeof(reason), "version must be 1 or %d", TRACK_MANIFEST_VERSION);
         set_error(error, errorCap, "version", reason);
         json_document_free(doc);
         return false;
@@ -483,12 +818,29 @@ bool track_manifest_parse(const char *text, size_t length, TrackDefinition *out,
         track_free(out);
         return false;
     }
+    if (ver == 1.0 && !out->routeClosed) {
+        set_error(error, errorCap, "route.closed",
+                  "must be true for version 1 (open routes require version 2)");
+        json_document_free(doc);
+        track_free(out);
+        return false;
+    }
     if (!parse_surfaces(json_object_get(root, kTopKeyNames[TM_KEY_SURFACES]), out, error,
                         errorCap) ||
         !parse_parking_lot(json_object_get(root, kTopKeyNames[TM_KEY_PARKING_LOT]), out, error,
                            errorCap) ||
         !parse_checkpoints(json_object_get(root, kTopKeyNames[TM_KEY_CHECKPOINTS]), out, error,
                            errorCap)) {
+        json_document_free(doc);
+        track_free(out);
+        return false;
+    }
+    if (!parse_sectors(json_object_get(root, kTopKeyNames[TM_KEY_SECTORS]), out, error,
+                       errorCap) ||
+        !parse_start_finish(json_object_get(root, kTopKeyNames[TM_KEY_START_FINISH]), out,
+                            error, errorCap) ||
+        !parse_grid(json_object_get(root, kTopKeyNames[TM_KEY_GRID]), out, error, errorCap) ||
+        !parse_pit(json_object_get(root, kTopKeyNames[TM_KEY_PIT]), out, error, errorCap)) {
         json_document_free(doc);
         track_free(out);
         return false;
@@ -759,7 +1111,8 @@ bool track_manifest_write(const TrackDefinition *track, const char *displayName,
     write_json_string(out, track->version);
     fprintf(out, ",\n");
 
-    fprintf(out, "  \"route\": {\n    \"closed\": true,\n    \"nodes\": [\n");
+    fprintf(out, "  \"route\": {\n    \"closed\": %s,\n    \"nodes\": [\n",
+            track->routeClosed ? "true" : "false");
     for (int i = 0; i < track->count; i++) {
         const TrackNode *n = &track->nodes[i];
         const char *surface = track_manifest_surface_name(n->surfaceId);
@@ -774,18 +1127,25 @@ bool track_manifest_write(const TrackDefinition *track, const char *displayName,
 
     const bool hasParking = track->isParkingLot;
     const bool hasCheckpoints = (track->checkpointCount > 0);
+    const bool hasSectors = (track->sectorMarkerCount > 0);
+    const bool hasStartFinishFlag = track->hasStartFinish;
+    const bool hasGrid = (track->gridSlotCount > 0);
+    const bool hasPit = track_pit_has_geometry(track);
 
+    const bool surfacesNeedsComma =
+        hasParking || hasCheckpoints || hasSectors || hasStartFinishFlag || hasGrid || hasPit;
     fprintf(out, "  \"surfaces\": { \"offTrack\": \"%s\", \"runoff\": \"%s\" }%s\n",
             track_manifest_surface_name(track->offTrackSurfaceId),
-            track_manifest_surface_name(track->runoffSurfaceId),
-            (hasParking || hasCheckpoints) ? "," : "");
+            track_manifest_surface_name(track->runoffSurfaceId), surfacesNeedsComma ? "," : "");
 
     if (hasParking) {
+        const bool needsComma =
+            hasCheckpoints || hasSectors || hasStartFinishFlag || hasGrid || hasPit;
         fprintf(out,
                 "  \"parkingLot\": { \"minX\": %.9g, \"maxX\": %.9g, \"minY\": %.9g, "
                 "\"maxY\": %.9g }%s\n",
                 (double)track->lotMinXM, (double)track->lotMaxXM, (double)track->lotMinYM,
-                (double)track->lotMaxYM, hasCheckpoints ? "," : "");
+                (double)track->lotMaxYM, needsComma ? "," : "");
     }
 
     if (hasCheckpoints) {
@@ -800,7 +1160,88 @@ bool track_manifest_write(const TrackDefinition *track, const char *displayName,
                     c->required ? "true" : "false",
                     (i + 1 < track->checkpointCount) ? "," : "");
         }
-        fprintf(out, "  ]\n");
+        const bool needsComma = hasSectors || hasStartFinishFlag || hasGrid || hasPit;
+        fprintf(out, "  ]%s\n", needsComma ? "," : "");
+    }
+    if (hasSectors) {
+        fprintf(out, "  \"sectors\": [\n");
+        for (int i = 0; i < track->sectorMarkerCount; i++) {
+            const SectorMarker *s = &track->sectorMarkers[i];
+            fprintf(out,
+                    "      { \"x\": %.9g, \"y\": %.9g, \"forwardX\": %.9g, \"forwardY\": %.9g, "
+                    "\"halfWidth\": %.9g }%s\n",
+                    (double)s->centerM.x, (double)s->centerM.y, (double)s->forwardUnit.x,
+                    (double)s->forwardUnit.y, (double)s->halfWidthM,
+                    (i + 1 < track->sectorMarkerCount) ? "," : "");
+        }
+        const bool needsComma = hasStartFinishFlag || hasGrid || hasPit;
+        fprintf(out, "  ]%s\n", needsComma ? "," : "");
+    }
+    if (hasStartFinishFlag) {
+        const StartFinishLine *sf = &track->startFinish;
+        const bool needsComma = hasGrid || hasPit;
+        fprintf(out,
+                "  \"startFinish\": { \"x\": %.9g, \"y\": %.9g, \"forwardX\": %.9g, "
+                "\"forwardY\": %.9g, \"halfWidth\": %.9g }%s\n",
+                (double)sf->centerM.x, (double)sf->centerM.y, (double)sf->forwardUnit.x,
+                (double)sf->forwardUnit.y, (double)sf->halfWidthM, needsComma ? "," : "");
+    }
+    if (hasGrid) {
+        fprintf(out, "  \"grid\": [\n");
+        for (int i = 0; i < track->gridSlotCount; i++) {
+            const GridSlot *g = &track->gridSlots[i];
+            fprintf(out, "      { \"x\": %.9g, \"y\": %.9g, \"heading\": %.9g }%s\n",
+                    (double)g->positionM.x, (double)g->positionM.y, (double)g->headingRad,
+                    (i + 1 < track->gridSlotCount) ? "," : "");
+        }
+        fprintf(out, "  ]%s\n", hasPit ? "," : "");
+    }
+    if (hasPit) {
+        fprintf(out, "  \"pit\": {\n");
+        bool first = true;
+        if (track->hasPitEntry) {
+            const PitGate *pg = &track->pitEntry;
+            fprintf(out,
+                    "    \"entry\": { \"x\": %.9g, \"y\": %.9g, \"forwardX\": %.9g, "
+                    "\"forwardY\": %.9g, \"halfWidth\": %.9g }",
+                    (double)pg->centerM.x, (double)pg->centerM.y, (double)pg->forwardUnit.x,
+                    (double)pg->forwardUnit.y, (double)pg->halfWidthM);
+            first = false;
+        }
+        if (track->hasPitExit) {
+            const PitGate *pg = &track->pitExit;
+            if (!first) fprintf(out, ",\n");
+            fprintf(out,
+                    "    \"exit\": { \"x\": %.9g, \"y\": %.9g, \"forwardX\": %.9g, "
+                    "\"forwardY\": %.9g, \"halfWidth\": %.9g }",
+                    (double)pg->centerM.x, (double)pg->centerM.y, (double)pg->forwardUnit.x,
+                    (double)pg->forwardUnit.y, (double)pg->halfWidthM);
+            first = false;
+        }
+        if (track->hasPitSpeedLine) {
+            const PitGate *pg = &track->pitSpeedLine;
+            if (!first) fprintf(out, ",\n");
+            fprintf(out,
+                    "    \"speedLine\": { \"x\": %.9g, \"y\": %.9g, \"forwardX\": %.9g, "
+                    "\"forwardY\": %.9g, \"halfWidth\": %.9g }",
+                    (double)pg->centerM.x, (double)pg->centerM.y, (double)pg->forwardUnit.x,
+                    (double)pg->forwardUnit.y, (double)pg->halfWidthM);
+            first = false;
+        }
+        if (track->serviceBoxCount > 0) {
+            if (!first) fprintf(out, ",\n");
+            fprintf(out, "    \"serviceBoxes\": [\n");
+            for (int i = 0; i < track->serviceBoxCount; i++) {
+                const ServiceBox *b = &track->serviceBoxes[i];
+                fprintf(out,
+                        "      { \"minX\": %.9g, \"minY\": %.9g, \"maxX\": %.9g, \"maxY\": "
+                        "%.9g }%s\n",
+                        (double)b->minM.x, (double)b->minM.y, (double)b->maxM.x,
+                        (double)b->maxM.y, (i + 1 < track->serviceBoxCount) ? "," : "");
+            }
+            fprintf(out, "    ]");
+        }
+        fprintf(out, "\n  }\n");
     }
     fprintf(out, "}\n");
     return true;

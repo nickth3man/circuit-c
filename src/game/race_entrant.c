@@ -69,6 +69,8 @@ bool race_roster_spawn(RaceRoster *roster, const RaceEntrantSpawn *spawn, Entran
      * definition/setup pair leaves the collection exactly as it was. */
     RaceEntrant entrant;
     memset(&entrant, 0, sizeof(entrant));
+    entrant.progress.lastCrossedIndex = -1;
+    entrant.progress.ticksSinceCross = 1000;
 
     if (spawn->definition != NULL)
         entrant.definition = *spawn->definition;

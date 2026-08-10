@@ -39,6 +39,10 @@
 
 #define TRACK_ID_CHARS 32
 #define TRACK_VERSION_CHARS 16
+#define TRACK_MAX_GRID_SLOTS 32
+#define TRACK_MAX_SECTOR_MARKERS 16
+#define TRACK_MAX_SERVICE_BOXES 16
+#define TRACK_GRID_MIN_SPACING_M 3.0f
 
 typedef struct {
     Vector2 centerM;     /* authored centreline point, world meters */
@@ -57,6 +61,44 @@ typedef struct {
     bool required;       /* a lap is invalid unless every required gate was taken, in order */
 } Checkpoint;
 
+/* Sector split: independent of route validation. A car crossing a sector marker records
+ * intermediate timing without affecting lap validity. Forward-only, same hysteresis as
+ * route gates. */
+typedef struct {
+    Vector2 centerM;
+    Vector2 forwardUnit;
+    float halfWidthM;
+} SectorMarker;
+
+/* Start/finish line: controls lap timing. When present it is the authoritative lap
+ * boundary; otherwise gate 0 of the route is used. Authored separately so lap validation
+ * and timing are independent. */
+typedef struct {
+    Vector2 centerM;
+    Vector2 forwardUnit;
+    float halfWidthM;
+} StartFinishLine;
+
+/* Deterministic grid slot: where a car starts. Heading is radians CCW from +X. */
+typedef struct {
+    Vector2 positionM;
+    float headingRad;
+} GridSlot;
+
+/* Pit lane markers: each is a forward-gated line like a checkpoint but with distinct
+ * semantics. The track only authors the geometry; RaceSession decides whether to enforce
+ * pit rules. */
+typedef struct {
+    Vector2 centerM;
+    Vector2 forwardUnit;
+    float halfWidthM;
+} PitGate;
+
+typedef struct {
+    Vector2 minM;
+    Vector2 maxM;
+} ServiceBox;
+
 /* What track_update_checkpoints() observed this tick. `crossed` is what the function used to
  * return as a bare bool; the rest is the detail telemetry needs to explain an invalid lap. */
 typedef struct {
@@ -67,6 +109,16 @@ typedef struct {
     float lapTimeS;    /* the completed lap's time; meaningful only when lapCompleted */
 } TrackCheckpointEvent;
 
+/* Sector crossing event, independent of lap validation. */
+typedef struct {
+    bool crossed;
+    int index;         /* which sector marker; -1 when none */
+    float sectorTimeS; /* time since last sector boundary */
+} TrackSectorEvent;
+
+/* ServiceBox crossing not currently gated through a dedicated event; the session can query
+ * containment directly via track_point_in_service_box(). */
+
 /*
  * Authored track content. Immutable once loaded, and shared by every entrant in a session:
  * nothing here may be written while a race is running. It owns no lap cursor and no timer,
@@ -75,20 +127,36 @@ typedef struct {
 typedef struct {
     TrackNode *nodes; /* heap-allocated, survives reload (plain heap, not module static) */
     int count;
-    Checkpoint *checkpoints; /* heap-allocated, ordered; index 0 is start/finish */
+    Checkpoint *
+        checkpoints; /* heap-allocated, ordered; index 0 is start/finish when no explicit start/finish */
     int checkpointCount;
+    bool routeClosed; /* true = closed circuit (lap wraps), false = open point-to-point */
     SurfaceId offTrackSurfaceId; /* surface returned beyond the runoff band */
     SurfaceId runoffSurfaceId;   /* surface between halfWidthM and runoffHalfWidthM */
     /* Parking lot mode: rectangular open area instead of laned road. */
     bool isParkingLot;
     float lotMinXM, lotMaxXM, lotMinYM, lotMaxYM;
+    /* Distributed markers: each owned by the definition, shared read-only by every entrant. */
+    SectorMarker *sectorMarkers;
+    int sectorMarkerCount;
+    bool hasStartFinish;
+    StartFinishLine startFinish;
+    GridSlot *gridSlots;
+    int gridSlotCount;
+    bool hasPitEntry;
+    PitGate pitEntry;
+    bool hasPitExit;
+    PitGate pitExit;
+    bool hasPitSpeedLine;
+    PitGate pitSpeedLine;
+    ServiceBox *serviceBoxes;
+    int serviceBoxCount;
     /* Identity, for telemetry and run metadata. Fixed arrays, never pointers: see the header
      * comment. `version` changes whenever the geometry changes, so a run recorded against an
      * older shape is identifiable rather than silently comparable. */
     char id[TRACK_ID_CHARS];
     char version[TRACK_VERSION_CHARS];
 } TrackDefinition;
-
 /*
  * One racer's position around the route. Exactly one per entrant, never shared, and the only
  * thing a checkpoint crossing writes. A zeroed RacerProgress is a valid "start of an out-lap
@@ -100,6 +168,14 @@ typedef struct {
     int lapStartCheckpoint; /* gate whose crossing closes one lap for this run */
     float lapTimerS;        /* seconds elapsed since the last checkpoint/lap */
     float lastLapTimeS;     /* time of the most recently completed lap */
+    /* Sector timing: independent of route validation. */
+    int nextSector;        /* index of the next sector marker */
+    float sectorTimerS;    /* time since last sector boundary */
+    float lastSectorTimeS; /* time of the most recently completed sector */
+    bool lapInvalid;       /* true if a required checkpoint was skipped (outOfOrder) */
+    bool routeFinished;    /* open point-to-point: true once final checkpoint crossed */
+    int lastCrossedIndex;  /* debounce: last checkpoint index crossed, -1 initially */
+    int ticksSinceCross;   /* hysteresis ticks since last crossing */
 } RacerProgress;
 
 /*
@@ -214,5 +290,29 @@ float track_distance_to_centerline_m(const TrackDefinition *track, Vector2 point
 TrackCheckpointEvent track_update_checkpoints(const TrackDefinition *track,
                                               RacerProgress *progress, Vector2 prevPosM,
                                               Vector2 currPosM);
+
+/* Independent sector timing: advance ONE racer's sector state. Sectors do not affect
+ * lap validity and are ordered independently of route checkpoints. */
+TrackSectorEvent track_update_sectors(const TrackDefinition *track, RacerProgress *progress,
+                                      Vector2 prevPosM, Vector2 currPosM);
+
+/* Grid validation: deterministic, order-independent. Returns false and writes a reason
+ * when slots overlap or lie off the racing surface. */
+bool track_validate_grid_slots(const TrackDefinition *track, char *error, size_t errorCap);
+bool track_grid_slot_pose(const TrackDefinition *track, int slotIndex, Vector2 *positionM,
+                          float *headingRad);
+
+/* Pit geometry queries: the track only authors these; RaceSession decides whether to
+ * enforce pit rules. */
+bool track_pit_has_geometry(const TrackDefinition *track);
+bool track_point_in_service_box(const TrackDefinition *track, Vector2 pointM);
+
+/* Open/closed route semantics. */
+bool track_is_closed(const TrackDefinition *track);
+bool track_is_open(const TrackDefinition *track);
+
+/* Session-mode marker requirements: does this track have the geometry a mode needs? */
+bool track_has_required_markers_for_mode(const TrackDefinition *track, const char *mode,
+                                         char *error, size_t errorCap);
 
 #endif /* CIRCUIT_TRACK_H */

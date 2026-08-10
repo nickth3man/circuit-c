@@ -51,7 +51,7 @@
 #include "world/track.h"
 
 #define TRACK_MANIFEST_SCHEMA "circuit/track"
-#define TRACK_MANIFEST_VERSION 1
+#define TRACK_MANIFEST_VERSION 2
 #define TRACK_CATALOG_DIR "data/tracks"
 #define TRACK_CATALOG_SUFFIX ".track.json"
 

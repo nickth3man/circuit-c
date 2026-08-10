@@ -100,6 +100,7 @@ void track_init(TrackDefinition *track)
 
     track->offTrackSurfaceId = SURFACE_GRASS;
     track->runoffSurfaceId = SURFACE_GRASS;
+    track->routeClosed = true;
 
     /* The lot is an open area, not a circuit, but the perimeter still carries gates so that
      * lap bookkeeping behaves identically to before gates became explicit data. A racer's
@@ -118,8 +119,26 @@ void track_free(TrackDefinition *track)
     free(track->checkpoints);
     track->checkpoints = NULL;
     track->checkpointCount = 0;
+    free(track->sectorMarkers);
+    track->sectorMarkers = NULL;
+    track->sectorMarkerCount = 0;
+    free(track->gridSlots);
+    track->gridSlots = NULL;
+    track->gridSlotCount = 0;
+    free(track->serviceBoxes);
+    track->serviceBoxes = NULL;
+    track->serviceBoxCount = 0;
     track->offTrackSurfaceId = SURFACE_ASPHALT;
     track->runoffSurfaceId = SURFACE_ASPHALT;
+    track->routeClosed = true;
+    track->hasStartFinish = false;
+    memset(&track->startFinish, 0, sizeof(track->startFinish));
+    track->hasPitEntry = false;
+    memset(&track->pitEntry, 0, sizeof(track->pitEntry));
+    track->hasPitExit = false;
+    memset(&track->pitExit, 0, sizeof(track->pitExit));
+    track->hasPitSpeedLine = false;
+    memset(&track->pitSpeedLine, 0, sizeof(track->pitSpeedLine));
     track->id[0] = '\0';
     track->version[0] = '\0';
 }
@@ -314,6 +333,7 @@ void track_load_chicane(TrackDefinition *track)
     track_free(track);
 
     track->isParkingLot = false;
+    track->routeClosed = true;
     track->offTrackSurfaceId = SURFACE_GRASS;
     track->runoffSurfaceId = SURFACE_GRASS;
     snprintf(track->id, sizeof(track->id), "%s", "chicane");
@@ -505,6 +525,7 @@ bool track_build_checkpoints_from_nodes(TrackDefinition *track)
         track->checkpoints[i].forwardUnit =
             (len < 1e-12f) ? (Vector2){ 0.0f, 0.0f } : (Vector2){ dx / len, dy / len };
     }
+    track->routeClosed = true;
     return true;
 }
 
@@ -515,6 +536,13 @@ void track_reset_progress_at(RacerProgress *progress, const TrackDefinition *tra
     progress->lap = 0;
     progress->lapTimerS = 0.0f;
     progress->lastLapTimeS = 0.0f;
+    progress->nextSector = 0;
+    progress->sectorTimerS = 0.0f;
+    progress->lastSectorTimeS = 0.0f;
+    progress->lapInvalid = false;
+    progress->routeFinished = false;
+    progress->lastCrossedIndex = -1;
+    progress->ticksSinceCross = 1000;
     if (track == NULL || track->checkpointCount <= 0) {
         progress->nextCheckpoint = 0;
         progress->lapStartCheckpoint = 0;
@@ -523,14 +551,29 @@ void track_reset_progress_at(RacerProgress *progress, const TrackDefinition *tra
     if (startCheckpointIndex < 0 || startCheckpointIndex >= track->checkpointCount)
         startCheckpointIndex = 0;
     progress->lapStartCheckpoint = startCheckpointIndex;
-    progress->nextCheckpoint = (startCheckpointIndex + 1) % track->checkpointCount;
+    if (track->routeClosed) {
+        progress->nextCheckpoint = (startCheckpointIndex + 1) % track->checkpointCount;
+    } else {
+        progress->nextCheckpoint = startCheckpointIndex + 1;
+        if (progress->nextCheckpoint >= track->checkpointCount) {
+            progress->nextCheckpoint = track->checkpointCount;
+            progress->routeFinished = true;
+        }
+    }
 }
 
 bool track_start_pose_at(const TrackDefinition *track, int checkpointIndex, Vector2 *positionM,
                          float *headingRad)
 {
-    if (track == NULL || track->checkpoints == NULL || track->checkpointCount <= 0)
-        return false;
+    if (track == NULL) return false;
+    if (track->hasStartFinish && checkpointIndex == 0) {
+        if (positionM != NULL) *positionM = track->startFinish.centerM;
+        if (headingRad != NULL)
+            *headingRad =
+                atan2f(track->startFinish.forwardUnit.y, track->startFinish.forwardUnit.x);
+        return true;
+    }
+    if (track->checkpoints == NULL || track->checkpointCount <= 0) return false;
     if (checkpointIndex < 0 || checkpointIndex >= track->checkpointCount) return false;
     const Checkpoint *start = &track->checkpoints[checkpointIndex];
     if (positionM != NULL) *positionM = start->centerM;
@@ -540,6 +583,9 @@ bool track_start_pose_at(const TrackDefinition *track, int checkpointIndex, Vect
 
 bool track_start_pose(const TrackDefinition *track, Vector2 *positionM, float *headingRad)
 {
+    if (track != NULL && track->hasStartFinish) {
+        return track_start_pose_at(track, 0, positionM, headingRad);
+    }
     return track_start_pose_at(track, 0, positionM, headingRad);
 }
 
@@ -576,6 +622,56 @@ uint32_t track_geometry_hash(const TrackDefinition *track)
         h = hash_f32(h, c->halfWidthM);
         h = hash_f32(h, c->required ? 1.0f : 0.0f);
     }
+    h = hash_f32(h, track->routeClosed ? 1.0f : 0.0f);
+    for (int i = 0; i < track->sectorMarkerCount; i++) {
+        const SectorMarker *s = &track->sectorMarkers[i];
+        h = hash_f32(h, s->centerM.x);
+        h = hash_f32(h, s->centerM.y);
+        h = hash_f32(h, s->forwardUnit.x);
+        h = hash_f32(h, s->forwardUnit.y);
+        h = hash_f32(h, s->halfWidthM);
+    }
+    if (track->hasStartFinish) {
+        h = hash_f32(h, track->startFinish.centerM.x);
+        h = hash_f32(h, track->startFinish.centerM.y);
+        h = hash_f32(h, track->startFinish.forwardUnit.x);
+        h = hash_f32(h, track->startFinish.forwardUnit.y);
+        h = hash_f32(h, track->startFinish.halfWidthM);
+    }
+    for (int i = 0; i < track->gridSlotCount; i++) {
+        const GridSlot *g = &track->gridSlots[i];
+        h = hash_f32(h, g->positionM.x);
+        h = hash_f32(h, g->positionM.y);
+        h = hash_f32(h, g->headingRad);
+    }
+    if (track->hasPitEntry) {
+        h = hash_f32(h, track->pitEntry.centerM.x);
+        h = hash_f32(h, track->pitEntry.centerM.y);
+        h = hash_f32(h, track->pitEntry.forwardUnit.x);
+        h = hash_f32(h, track->pitEntry.forwardUnit.y);
+        h = hash_f32(h, track->pitEntry.halfWidthM);
+    }
+    if (track->hasPitExit) {
+        h = hash_f32(h, track->pitExit.centerM.x);
+        h = hash_f32(h, track->pitExit.centerM.y);
+        h = hash_f32(h, track->pitExit.forwardUnit.x);
+        h = hash_f32(h, track->pitExit.forwardUnit.y);
+        h = hash_f32(h, track->pitExit.halfWidthM);
+    }
+    if (track->hasPitSpeedLine) {
+        h = hash_f32(h, track->pitSpeedLine.centerM.x);
+        h = hash_f32(h, track->pitSpeedLine.centerM.y);
+        h = hash_f32(h, track->pitSpeedLine.forwardUnit.x);
+        h = hash_f32(h, track->pitSpeedLine.forwardUnit.y);
+        h = hash_f32(h, track->pitSpeedLine.halfWidthM);
+    }
+    for (int i = 0; i < track->serviceBoxCount; i++) {
+        const ServiceBox *b = &track->serviceBoxes[i];
+        h = hash_f32(h, b->minM.x);
+        h = hash_f32(h, b->minM.y);
+        h = hash_f32(h, b->maxM.x);
+        h = hash_f32(h, b->maxM.y);
+    }
     return h;
 }
 
@@ -583,7 +679,8 @@ float track_length_m(const TrackDefinition *track)
 {
     if (track == NULL || track->nodes == NULL || track->count <= 1) return 0.0f;
     float total = 0.0f;
-    for (int i = 0; i < track->count; i++) {
+    const int limit = track->routeClosed ? track->count : track->count - 1;
+    for (int i = 0; i < limit; i++) {
         const Vector2 a = track->nodes[i].centerM;
         const Vector2 b = track->nodes[(i + 1) % track->count].centerM;
         total += sqrtf((b.x - a.x) * (b.x - a.x) + (b.y - a.y) * (b.y - a.y));
@@ -591,22 +688,25 @@ float track_length_m(const TrackDefinition *track)
     return total;
 }
 
+/* Generic gate test for any forward-gated line (Checkpoint, SectorMarker, PitGate, StartFinish). */
+static bool gate_crossed_generic(Vector2 centerM, Vector2 forwardUnit, float halfWidthM,
+                                 Vector2 prevPosM, Vector2 currPosM)
+{
+    const Vector2 perp = { -forwardUnit.y, forwardUnit.x };
+    const Vector2 gateA = { centerM.x + perp.x * halfWidthM, centerM.y + perp.y * halfWidthM };
+    const Vector2 gateB = { centerM.x - perp.x * halfWidthM, centerM.y - perp.y * halfWidthM };
+    const Vector2 motion = { currPosM.x - prevPosM.x, currPosM.y - prevPosM.y };
+    if (motion.x * motion.x + motion.y * motion.y < 1e-24f) return false;
+    if (motion.x * forwardUnit.x + motion.y * forwardUnit.y <= 0.0f) return false;
+    return segments_intersect(prevPosM, currPosM, gateA, gateB);
+}
+
 /* Did the car's prev->curr motion pass through this gate, travelling the right way? */
 static bool gate_crossed(const Checkpoint *gate, Vector2 prevPosM, Vector2 currPosM)
 {
-    const Vector2 perp = { -gate->forwardUnit.y, gate->forwardUnit.x };
-    const Vector2 gateA = { gate->centerM.x + perp.x * gate->halfWidthM,
-                            gate->centerM.y + perp.y * gate->halfWidthM };
-    const Vector2 gateB = { gate->centerM.x - perp.x * gate->halfWidthM,
-                            gate->centerM.y - perp.y * gate->halfWidthM };
-
-    /* Forward-only: the motion must have a positive component along the gate's forward
-     * direction, so reversing back over a line cannot score it. */
-    const Vector2 motion = { currPosM.x - prevPosM.x, currPosM.y - prevPosM.y };
-    if (motion.x * motion.x + motion.y * motion.y < 1e-24f) return false;
-    if (motion.x * gate->forwardUnit.x + motion.y * gate->forwardUnit.y <= 0.0f) return false;
-
-    return segments_intersect(prevPosM, currPosM, gateA, gateB);
+    if (gate == NULL) return false;
+    return gate_crossed_generic(gate->centerM, gate->forwardUnit, gate->halfWidthM, prevPosM,
+                                currPosM);
 }
 
 TrackCheckpointEvent track_update_checkpoints(const TrackDefinition *track,
@@ -621,23 +721,34 @@ TrackCheckpointEvent track_update_checkpoints(const TrackDefinition *track,
         track->checkpointCount <= 0)
         return event;
 
+    /* Zeroed RacerProgress is the documented "start of an out-lap from gate 0" state. Its
+     * lastCrossedIndex is 0 (from memset) but there has been no crossing yet, so treat it as
+     * no recent crossing for debounce purposes. track_reset_progress_at() and
+     * race_roster_spawn() set it to -1/1000. */
+    if (progress->lastCrossedIndex == 0 && progress->ticksSinceCross == 0 &&
+        progress->nextCheckpoint == 0) {
+        progress->lastCrossedIndex = -1;
+        progress->ticksSinceCross = 1000;
+    }
+    progress->ticksSinceCross++;
+    if (progress->routeFinished) return event;
+
     const int expected = progress->nextCheckpoint;
 
-    /*
-     * Test the expected gate first, then every other one. Order matters: a car doing the
-     * right thing must be recorded as in-order even in the rare tick where its motion segment
-     * also clips a neighbouring gate, and checking the expected gate first guarantees that.
-     * Testing the others at all is what makes a cut course visible — the old scheme only ever
-     * looked at the expected gate, so shortcutting simply failed to advance and was
-     * indistinguishable from not having reached the gate yet.
-     */
-    if (expected >= 0 && expected < track->checkpointCount &&
-        gate_crossed(&track->checkpoints[expected], prevPosM, currPosM)) {
-        event.crossed = true;
-        event.index = expected;
-    } else {
+    bool expectedCrossed = false;
+    if (expected >= 0 && expected < track->checkpointCount) {
+        if (progress->lastCrossedIndex != expected || progress->ticksSinceCross > 6) {
+            if (gate_crossed(&track->checkpoints[expected], prevPosM, currPosM)) {
+                expectedCrossed = true;
+                event.crossed = true;
+                event.index = expected;
+            }
+        }
+    }
+    if (!expectedCrossed) {
         for (int i = 0; i < track->checkpointCount; i++) {
             if (i == expected) continue;
+            if (progress->lastCrossedIndex == i && progress->ticksSinceCross <= 6) continue;
             if (gate_crossed(&track->checkpoints[i], prevPosM, currPosM)) {
                 event.crossed = true;
                 event.index = i;
@@ -647,23 +758,207 @@ TrackCheckpointEvent track_update_checkpoints(const TrackDefinition *track,
         }
     }
 
-    if (!event.crossed || event.outOfOrder) return event;
-
-    /* Only the expected gate advances progress. */
-    progress->nextCheckpoint++;
-    if (progress->nextCheckpoint >= track->checkpointCount) {
-        progress->nextCheckpoint = 0;
+    if (!event.crossed) return event;
+    if (event.outOfOrder) {
+        if (event.index >= 0 && event.index < track->checkpointCount &&
+            track->checkpoints[event.index].required) {
+            progress->lapInvalid = true;
+        }
+        return event;
     }
 
-    /* A lap closes when the ordered route returns to the gate where this run started. */
-    const int lapCloseNext = (progress->lapStartCheckpoint + 1) % track->checkpointCount;
-    if (progress->nextCheckpoint == lapCloseNext || track->checkpointCount == 1) {
-        progress->lap++;
-        event.lapCompleted = true;
-        event.lapTimeS = progress->lapTimerS;
-        progress->lastLapTimeS = progress->lapTimerS;
-        progress->lapTimerS = 0.0f;
+    progress->lastCrossedIndex = event.index;
+    progress->ticksSinceCross = 0;
+    if (track->routeClosed) {
+        progress->nextCheckpoint++;
+        if (progress->nextCheckpoint >= track->checkpointCount) {
+            progress->nextCheckpoint = 0;
+        }
+        const int lapCloseNext = (progress->lapStartCheckpoint + 1) % track->checkpointCount;
+        if (progress->nextCheckpoint == lapCloseNext || track->checkpointCount == 1) {
+            progress->lap++;
+            event.lapCompleted = true;
+            event.lapTimeS = progress->lapTimerS;
+            progress->lastLapTimeS = progress->lapTimerS;
+            progress->lapTimerS = 0.0f;
+            progress->lapInvalid = false;
+        }
+    } else {
+        progress->nextCheckpoint++;
+        if (progress->nextCheckpoint >= track->checkpointCount) {
+            progress->routeFinished = true;
+            progress->lap++;
+            event.lapCompleted = true;
+            event.lapTimeS = progress->lapTimerS;
+            progress->lastLapTimeS = progress->lapTimerS;
+            progress->lapTimerS = 0.0f;
+            progress->nextCheckpoint = track->checkpointCount;
+        }
     }
 
     return event;
+}
+
+TrackSectorEvent track_update_sectors(const TrackDefinition *track, RacerProgress *progress,
+                                      Vector2 prevPosM, Vector2 currPosM)
+{
+    TrackSectorEvent event;
+    memset(&event, 0, sizeof(event));
+    event.index = -1;
+    if (track == NULL || progress == NULL || track->sectorMarkers == NULL ||
+        track->sectorMarkerCount <= 0)
+        return event;
+    const int expected = progress->nextSector;
+    if (expected < 0 || expected >= track->sectorMarkerCount) return event;
+    const SectorMarker *marker = &track->sectorMarkers[expected];
+    if (gate_crossed_generic(marker->centerM, marker->forwardUnit, marker->halfWidthM, prevPosM,
+                             currPosM)) {
+        event.crossed = true;
+        event.index = expected;
+        event.sectorTimeS = progress->sectorTimerS;
+        progress->lastSectorTimeS = progress->sectorTimerS;
+        progress->sectorTimerS = 0.0f;
+        progress->nextSector++;
+        if (progress->nextSector >= track->sectorMarkerCount) {
+            progress->nextSector = 0;
+        }
+    }
+    return event;
+}
+
+bool track_validate_grid_slots(const TrackDefinition *track, char *error, size_t errorCap)
+{
+    if (track == NULL) {
+        if (error != NULL && errorCap > 0) snprintf(error, errorCap, "no track");
+        return false;
+    }
+    if (track->gridSlotCount <= 0) return true;
+    if (track->gridSlotCount > TRACK_MAX_GRID_SLOTS) {
+        if (error != NULL && errorCap > 0)
+            snprintf(error, errorCap, "grid: too many slots (%d > %d)", track->gridSlotCount,
+                     TRACK_MAX_GRID_SLOTS);
+        return false;
+    }
+    for (int i = 0; i < track->gridSlotCount; i++) {
+        const GridSlot *a = &track->gridSlots[i];
+        if (!isfinite(a->positionM.x) || !isfinite(a->positionM.y) ||
+            !isfinite(a->headingRad)) {
+            if (error != NULL && errorCap > 0)
+                snprintf(error, errorCap, "grid[%d]: non-finite pose", i);
+            return false;
+        }
+        if (!track->isParkingLot) {
+            float halfWidth = 0.0f;
+            const float dist = track_distance_to_centerline_m(track, a->positionM, &halfWidth);
+            if (dist > halfWidth + 5.0f) {
+                if (error != NULL && errorCap > 0)
+                    snprintf(error, errorCap,
+                             "grid[%d]: off-track placement (dist %.1f > width)", i,
+                             (double)dist);
+                return false;
+            }
+        }
+        for (int j = i + 1; j < track->gridSlotCount; j++) {
+            const GridSlot *b = &track->gridSlots[j];
+            const float dx = a->positionM.x - b->positionM.x;
+            const float dy = a->positionM.y - b->positionM.y;
+            const float distSq = dx * dx + dy * dy;
+            if (distSq < TRACK_GRID_MIN_SPACING_M * TRACK_GRID_MIN_SPACING_M) {
+                if (error != NULL && errorCap > 0)
+                    snprintf(error, errorCap, "grid: slots %d and %d overlap (%.1f m apart)", i,
+                             j, (double)sqrtf(distSq));
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+bool track_grid_slot_pose(const TrackDefinition *track, int slotIndex, Vector2 *positionM,
+                          float *headingRad)
+{
+    if (track == NULL || track->gridSlots == NULL || slotIndex < 0 ||
+        slotIndex >= track->gridSlotCount)
+        return false;
+    const GridSlot *slot = &track->gridSlots[slotIndex];
+    if (positionM != NULL) *positionM = slot->positionM;
+    if (headingRad != NULL) *headingRad = slot->headingRad;
+    return true;
+}
+
+bool track_pit_has_geometry(const TrackDefinition *track)
+{
+    if (track == NULL) return false;
+    return track->hasPitEntry || track->hasPitExit || track->hasPitSpeedLine ||
+           track->serviceBoxCount > 0;
+}
+
+bool track_point_in_service_box(const TrackDefinition *track, Vector2 pointM)
+{
+    if (track == NULL || track->serviceBoxes == NULL || track->serviceBoxCount <= 0)
+        return false;
+    for (int i = 0; i < track->serviceBoxCount; i++) {
+        const ServiceBox *b = &track->serviceBoxes[i];
+        if (pointM.x >= b->minM.x && pointM.x <= b->maxM.x && pointM.y >= b->minM.y &&
+            pointM.y <= b->maxM.y)
+            return true;
+    }
+    return false;
+}
+
+bool track_is_closed(const TrackDefinition *track)
+{
+    if (track == NULL) return false;
+    return track->routeClosed;
+}
+
+bool track_is_open(const TrackDefinition *track)
+{
+    if (track == NULL) return false;
+    return !track->routeClosed;
+}
+
+bool track_has_required_markers_for_mode(const TrackDefinition *track, const char *mode,
+                                         char *error, size_t errorCap)
+{
+    if (track == NULL || mode == NULL) {
+        if (error != NULL && errorCap > 0) snprintf(error, errorCap, "no track or mode");
+        return false;
+    }
+    if (strcmp(mode, "race") == 0) {
+        if (track->gridSlotCount <= 1) {
+            if (error != NULL && errorCap > 0)
+                snprintf(error, errorCap, "race: need at least 2 grid slots (got %d)",
+                         track->gridSlotCount);
+            return false;
+        }
+        if (!track->routeClosed && track->checkpointCount < 2) {
+            if (error != NULL && errorCap > 0)
+                snprintf(error, errorCap, "race: open route needs checkpoints");
+            return false;
+        }
+        return true;
+    }
+    if (strcmp(mode, "time_trial") == 0) {
+        if (!track->hasStartFinish && track->checkpointCount <= 0) {
+            if (error != NULL && errorCap > 0)
+                snprintf(error, errorCap, "time_trial: need start/finish or checkpoints");
+            return false;
+        }
+        return true;
+    }
+    if (strcmp(mode, "sprint") == 0) {
+        if (track->routeClosed) {
+            if (error != NULL && errorCap > 0)
+                snprintf(error, errorCap, "sprint: open route required, got closed");
+            return false;
+        }
+        if (track->checkpointCount < 2) {
+            if (error != NULL && errorCap > 0)
+                snprintf(error, errorCap, "sprint: need checkpoints");
+            return false;
+        }
+        return true;
+    }
+    return true;
 }
