@@ -244,6 +244,47 @@ leaves the session without a track rather than silently falling back to compiled
 and filename/id mismatches (`foo.track.json` containing `id: bar`) are rejected at catalog
 load and at `track_load_by_id()` time.
 
+## Route localization (issue #38)
+
+Nothing in the file format changes for localization: it is a runtime reading of the same
+authored centreline, and a track file that loaded before still loads and hashes identically.
+The contract is recorded here because it is what the `route` section *means* at runtime.
+
+`route_localize_global()` / `route_localize_near()` in `src/world/route_localization.c` answer
+"where on this route is this pose" as one `RouteLocation`: the centreline segment and parameter,
+the closest point and that segment's forward direction, arc length from node 0, signed lateral
+offset (positive left of travel), heading error, and a confidence that is 1 on the racing
+surface, falls linearly to 0 across the runoff band, and is 0 at and beyond the barrier. The
+closest point and forward direction are also the rejoin pose for a car being recovered onto the
+route.
+
+Containment — `onRoute` and `confidence` — is measured from the distance to the closest point,
+not from the lateral offset. The two agree whenever the projection lands inside a segment, but
+where the closest point is a clamped endpoint the displacement can be almost entirely
+longitudinal, so a pose well past the end of an open route has a lateral offset of nearly zero.
+`lateralM` answers which *side* of the route the car is on; it is not a distance.
+
+Two properties follow from the authored geometry rather than from tuning:
+
+- **Continuity beats proximity.** Only segments within 25 m of arc length either side of the
+  previous position are candidates. Where a route runs beside itself — a crossing, a hairpin,
+  a lane parallel to the main straight — the geometrically nearest segment can belong to the
+  opposite direction of travel, which would reverse a car's heading error and its progress.
+  Authoring two strands closer together than the racing width is therefore safe.
+- **Ties are resolved by rule.** A global scan takes the lowest segment index; a windowed scan
+  takes the candidate nearest the previous position, and the one ahead at equal remove. An
+  exactly equidistant point at an intersection localizes the same way in every run.
+
+`route.closed` matters here too: a closed route wraps its last node onto its first and treats
+the shorter way round the seam as the true longitudinal delta, so accumulated race distance
+keeps rising across start/finish. An open route has no closing segment, so a pose past the last
+node clamps to the final real segment rather than wrapping onto a segment that does not exist.
+
+Per-entrant ownership, the checksum classification, and the wrong-way hysteresis are specified
+in [SIMULATION_OWNERSHIP.md](SIMULATION_OWNERSHIP.md); the `route-localization` scenario asserts
+all of it, including that continuity reproduces brute force wherever the nearest segment is
+unambiguous.
+
 ## Forward compatibility
 
 v2 adds: open routes (`route.closed: false`), sector/start-finish/grid/pit geometry. Each is

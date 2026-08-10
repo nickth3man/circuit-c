@@ -141,7 +141,7 @@ After #35, track migration can proceed while race semantics are developed.
 - [x] [#37 — Separate route checkpoints, timing sectors, start/finish, grid, and pit semantics](https://github.com/nickth3man/circuit-c/issues/37)
   - Depends on: #11, #34
 
-- [ ] [#38 — Implement per-entrant route localization, progress, ordering, and wrong-way detection](https://github.com/nickth3man/circuit-c/issues/38)
+- [x] [#38 — Implement per-entrant route localization, progress, ordering, and wrong-way detection](https://github.com/nickth3man/circuit-c/issues/38)
   - Depends on: #10, #37
 
 ## Phase 2 gate
@@ -154,7 +154,7 @@ After #35, track migration can proceed while race semantics are developed.
 - [x] Tracks load from versioned external files.
 - [x] All original tracks pass loader, collision, timing, and replay tests.
 - [x] Checkpoints, sectors, start/finish, grid, and pit metadata are distinct.
-- [ ] Every entrant has independent route localization and progress.
+- [x] Every entrant has independent route localization and progress.
 
 ---
 
@@ -410,7 +410,7 @@ This work closes the multiplayer gap but does not block the stated AI-racing tar
 
 - [x] Phase 0 — Identity and Core Architecture
 - [x] Phase 1 — Physics Foundations
-- [ ] Phase 2 — Data-Driven Cars and Track Foundations
+- [x] Phase 2 — Data-Driven Cars and Track Foundations
 - [ ] Phase 3 — Physics Implementation
 - [ ] Phase 4 — Complete Track System
 - [ ] Phase 5 — Cross-Cutting Quality and Player Foundations
