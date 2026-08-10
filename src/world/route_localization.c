@@ -117,17 +117,32 @@ static RouteLocation make_location(const TrackDefinition *track, int segmentInde
     loc.lateralM = (posM.x - pointM.x) * (-forward.y) + (posM.y - pointM.y) * forward.x;
     loc.headingErrorRad = wrap_angle(headingRad - atan2f(forward.y, forward.x));
 
+    /*
+     * Containment is measured from the FULL distance to the closest point, not from the
+     * lateral component.
+     *
+     * They are the same number whenever the projection lands inside the segment, which is the
+     * ordinary case. They part company when the closest point is a clamped endpoint: there the
+     * displacement can be almost entirely along the segment, leaving a lateral component of
+     * nearly zero for a pose that is nowhere near the route. Driving straight on past an open
+     * route's final node is exactly that, and judging it by lateral offset alone would report a
+     * car half a kilometre into the scenery as on the racing surface with full confidence.
+     *
+     * `lateralM` keeps its own job: which SIDE of the route the car is on, and how far off line
+     * it is while it is genuinely alongside the route.
+     */
+    const float offRouteM = sqrtf((posM.x - pointM.x) * (posM.x - pointM.x) +
+                                  (posM.y - pointM.y) * (posM.y - pointM.y));
     const TrackNode *node = &track->nodes[segmentIndex];
-    const float absLateralM = fabsf(loc.lateralM);
     const float halfWidthM = node->halfWidthM;
     const float barrierM = track_node_barrier_half_width(node);
-    loc.onRoute = (absLateralM <= halfWidthM);
+    loc.onRoute = (offRouteM <= halfWidthM);
     if (loc.onRoute) {
         loc.confidence = 1.0f;
     } else if (barrierM > halfWidthM) {
         /* Linear across the runoff band. A node with no runoff band has nowhere to decay
          * through, so its confidence steps from 1 to 0 at the track edge. */
-        loc.confidence = clampf((barrierM - absLateralM) / (barrierM - halfWidthM), 0.0f, 1.0f);
+        loc.confidence = clampf((barrierM - offRouteM) / (barrierM - halfWidthM), 0.0f, 1.0f);
     } else {
         loc.confidence = 0.0f;
     }
@@ -208,19 +223,30 @@ RouteLocation route_localize_near(const TrackDefinition *track, const RouteLocat
     RouteCandidate best = { -1, 0.0f, { 0.0f, 0.0f }, INFINITY };
     consider_segment(track, hintSegment, posM, &best);
 
-    /* Walk outwards from the previous segment, one step forward then one step back, until each
+    /*
+     * Walk outwards from the previous segment, one step forward then one step back, until each
      * direction has spent ROUTE_LOCALIZE_WINDOW_M of arc or run out of route. Visiting in that
      * order is what makes an exact tie fall to the candidate nearest where the car already was,
-     * and forward of it before behind it. */
+     * and forward of it before behind it.
+     *
+     * The budgets are measured from the previous POINT to the nearest end of the candidate, not
+     * from the start of the previous segment. Spending the whole of the previous segment before
+     * looking at its neighbour would mean that on any layout whose nodes are further apart than
+     * the window — the parking lot's 400 m and 300 m edges, most obviously — a car could never
+     * see the segment it is about to turn onto. It would stay clamped to the corner it had just
+     * reached until it drifted outside the acceptance corridor, freezing its longitudinal
+     * progress and then jumping it several metres when the global fallback finally fired.
+     */
+    const float hintLengthM = segment_length_m(track, hintSegment);
+    const float hintT = clampf(previous->segmentT, 0.0f, 1.0f);
     int forwardIndex = hintSegment;
     int backwardIndex = hintSegment;
-    float forwardArcM = 0.0f;
-    float backwardArcM = 0.0f;
+    float forwardArcM = (1.0f - hintT) * hintLengthM;
+    float backwardArcM = hintT * hintLengthM;
     bool forwardOpen = true;
     bool backwardOpen = true;
     for (int step = 1; step < segments && (forwardOpen || backwardOpen); step++) {
         if (forwardOpen) {
-            forwardArcM += segment_length_m(track, forwardIndex);
             int next = forwardIndex + 1;
             if (next >= segments) next = track->routeClosed ? 0 : -1;
             if (next < 0 || next == hintSegment || forwardArcM > ROUTE_LOCALIZE_WINDOW_M) {
@@ -228,21 +254,18 @@ RouteLocation route_localize_near(const TrackDefinition *track, const RouteLocat
             } else {
                 forwardIndex = next;
                 consider_segment(track, forwardIndex, posM, &best);
+                forwardArcM += segment_length_m(track, forwardIndex);
             }
         }
         if (backwardOpen) {
             int next = backwardIndex - 1;
             if (next < 0) next = track->routeClosed ? segments - 1 : -1;
-            if (next < 0 || next == hintSegment) {
+            if (next < 0 || next == hintSegment || backwardArcM > ROUTE_LOCALIZE_WINDOW_M) {
                 backwardOpen = false;
             } else {
-                backwardArcM += segment_length_m(track, next);
-                if (backwardArcM > ROUTE_LOCALIZE_WINDOW_M) {
-                    backwardOpen = false;
-                } else {
-                    backwardIndex = next;
-                    consider_segment(track, backwardIndex, posM, &best);
-                }
+                backwardIndex = next;
+                consider_segment(track, backwardIndex, posM, &best);
+                backwardArcM += segment_length_m(track, backwardIndex);
             }
         }
     }

@@ -1876,6 +1876,99 @@ static void scenario_route_localization(void)
         track_free(&open);
     }
 
+    /* --- segments far longer than the search window ---------------------------------------- */
+    {
+        /* The committed parking lot is a 400 m x 300 m rectangle: every one of its four
+         * segments dwarfs ROUTE_LOCALIZE_WINDOW_M. A search that spent the whole of the
+         * previous segment before looking at its neighbour could never see the edge a car is
+         * about to turn onto, so it would clamp to the corner, freeze longitudinal progress,
+         * and then jump it when the acceptance corridor finally rejected the stale answer. */
+        TrackDefinition big;
+        memset(&big, 0, sizeof(big));
+        big.count = 4;
+        big.nodes = (TrackNode *)calloc((size_t)big.count, sizeof(TrackNode));
+        check(big.nodes != NULL, "long-segment fixture allocated");
+        if (big.nodes != NULL) {
+            const Vector2 corners[4] = {
+                { 0.0f, 0.0f }, { 100.0f, 0.0f }, { 100.0f, 100.0f }, { 0.0f, 100.0f }
+            };
+            for (int i = 0; i < 4; i++) {
+                big.nodes[i] = (TrackNode){ corners[i], 4.0f, SURFACE_ASPHALT, 0.0f };
+            }
+            big.routeClosed = true;
+            big.offTrackSurfaceId = SURFACE_GRASS;
+            big.runoffSurfaceId = SURFACE_GRASS;
+            check(100.0f > ROUTE_LOCALIZE_WINDOW_M,
+                  "the fixture's segments really are longer than the search window");
+
+            RacerProgress prog;
+            memset(&prog, 0, sizeof(prog));
+            track_reset_progress_at(&prog, &big, 0);
+            Vector2 prevM = { 90.0f, 0.0f };
+            prog.location = route_localize_global(&big, prevM, 0.0f);
+            check(prog.location.segmentIndex == 0, "long-segment drive starts on segment 0");
+
+            int segmentAfterCorner = -1;
+            float minDeltaM = INFINITY;
+            float maxDeltaM = 0.0f;
+            float previousDistanceM = prog.raceDistanceM;
+            for (int i = 0; i < 30; i++) {
+                /* Ten metres east to the corner, then twenty north up the next edge. */
+                const Vector2 currM = (i < 10) ? (Vector2){ prevM.x + 1.0f, 0.0f }
+                                               : (Vector2){ 100.0f, prevM.y + 1.0f };
+                const float headingRad = (i < 10) ? 0.0f : (CIRCUIT_PI * 0.5f);
+                loc_step(&big, &prog, prevM, currM, headingRad);
+                if (i == 10) segmentAfterCorner = prog.location.segmentIndex;
+                const float deltaM = prog.raceDistanceM - previousDistanceM;
+                if (deltaM < minDeltaM) minDeltaM = deltaM;
+                if (deltaM > maxDeltaM) maxDeltaM = deltaM;
+                previousDistanceM = prog.raceDistanceM;
+                prevM = currM;
+            }
+            check(segmentAfterCorner == 1,
+                  "the first tick past the corner is already on the next segment (got %d)",
+                  segmentAfterCorner);
+            check(minDeltaM > 0.5f,
+                  "longitudinal progress never froze at the corner (smallest step %.4f m)",
+                  (double)minDeltaM);
+            check(maxDeltaM < 1.5f,
+                  "and never jumped to catch up afterwards (largest step %.4f m)",
+                  (double)maxDeltaM);
+            check_near((double)prog.raceDistanceM, 30.0, 0.01,
+                       "race distance equals the ground covered around the corner");
+        }
+        track_free(&big);
+    }
+
+    /* --- containment is the real distance, not the lateral component ----------------------- */
+    {
+        TrackDefinition open;
+        loc_build_track(&open, false);
+        if (open.count == LOC_TRACK_NODES) {
+            /* Straight on past the last node, along that segment's own direction. The
+             * displacement is then almost entirely LONGITUDINAL, so the lateral component is
+             * ~0 and a containment test built on it would call this pose on-track with full
+             * confidence while the car is fifty metres into the scenery. */
+            const Vector2 lastM = open.nodes[LOC_TRACK_NODES - 1].centerM;
+            const Vector2 prevNodeM = open.nodes[LOC_TRACK_NODES - 2].centerM;
+            const float dx = lastM.x - prevNodeM.x;
+            const float dy = lastM.y - prevNodeM.y;
+            const float len = sqrtf(dx * dx + dy * dy);
+            const Vector2 farM = { lastM.x + 50.0f * dx / len, lastM.y + 50.0f * dy / len };
+            const RouteLocation past = route_localize_global(&open, farM, 0.0f);
+            check(past.valid, "a pose past the end of an open route still localizes");
+            check(fabsf(past.lateralM) < 0.01f,
+                  "and its LATERAL offset really is ~zero, which is the trap (%.4f m)",
+                  (double)past.lateralM);
+            check(!past.onRoute,
+                  "yet it is not reported as on the racing surface (%.1f m past the end)",
+                  50.0);
+            check(past.confidence <= 0.0f, "and its route confidence is zero (%.3f)",
+                  (double)past.confidence);
+        }
+        track_free(&open);
+    }
+
     /* --- a route with nothing to localize against ------------------------------------------ */
     {
         TrackDefinition empty;
