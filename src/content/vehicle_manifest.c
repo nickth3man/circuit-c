@@ -24,6 +24,7 @@ typedef enum {
     VM_KEY_DESCRIPTION,
     VM_KEY_CONTENT_VERSION,
     VM_KEY_APPEARANCE_ID,
+    VM_KEY_CONTENT_KIND,
     VM_KEY_CLASS_TAGS,
     VM_KEY_CONTROLLER_ELIGIBILITY,
     VM_KEY_PROVENANCE,
@@ -40,6 +41,7 @@ static const char *const kTopKeyNames[VM_KEY_COUNT] = {
     [VM_KEY_DESCRIPTION] = "description",
     [VM_KEY_CONTENT_VERSION] = "contentVersion",
     [VM_KEY_APPEARANCE_ID] = "appearanceId",
+    [VM_KEY_CONTENT_KIND] = "contentKind",
     [VM_KEY_CLASS_TAGS] = "classTags",
     [VM_KEY_CONTROLLER_ELIGIBILITY] = "controllerEligibility",
     [VM_KEY_PROVENANCE] = "provenance",
@@ -66,6 +68,35 @@ bool vehicle_manifest_id_is_valid(const char *id)
               c == '-'))
             return false;
         if (i > 62) return false; /* total length cap from the ownership contract */
+    }
+    return true;
+}
+
+const char *vehicle_content_kind_name(VehicleContentKind kind)
+{
+    switch (kind) {
+        case VEHICLE_CONTENT_VISUAL_SAMPLE: return "visual-sample";
+        case VEHICLE_CONTENT_PROTOTYPE: return "prototype";
+        case VEHICLE_CONTENT_VALIDATED: return "validated";
+        case VEHICLE_CONTENT_PLAYER_SELECTABLE: return "player-selectable";
+    }
+    /* Unknown enum values only reach here through a stale binary hot-reloading into new data. */
+    return "player-selectable";
+}
+
+bool vehicle_content_kind_parse(const char *text, VehicleContentKind *out)
+{
+    if (out == NULL || text == NULL) return false;
+    if (strcmp(text, "visual-sample") == 0) {
+        *out = VEHICLE_CONTENT_VISUAL_SAMPLE;
+    } else if (strcmp(text, "prototype") == 0) {
+        *out = VEHICLE_CONTENT_PROTOTYPE;
+    } else if (strcmp(text, "validated") == 0) {
+        *out = VEHICLE_CONTENT_VALIDATED;
+    } else if (strcmp(text, "player-selectable") == 0) {
+        *out = VEHICLE_CONTENT_PLAYER_SELECTABLE;
+    } else {
+        return false;
     }
     return true;
 }
@@ -194,6 +225,34 @@ static bool apply_section(VehicleSpec *spec, const JsonValue *section, DevParamO
         if (!apply_float_key(spec, key, json_as_number(val), owner, error, errorCap)) {
             return false;
         }
+    }
+    return true;
+}
+
+/* contentKind is optional for back-compat: an absent field means player-selectable, which is the
+ * only kind the roster knew before issue #31 split the appearance corpus from race content. A
+ * present value must name one of the four kinds; anything else is a loud error so a typo cannot
+ * quietly downgrade a car's status. */
+static bool parse_content_kind(VehicleManifest *out, const JsonValue *value, char *error,
+                               size_t errorCap)
+{
+    if (value == NULL) {
+        out->contentKind = VEHICLE_CONTENT_PLAYER_SELECTABLE;
+        return true;
+    }
+    const char *kindText = json_as_string(value);
+    if (kindText == NULL || !vehicle_content_kind_parse(kindText, &out->contentKind)) {
+        static char reason[192];
+        if (kindText == NULL) {
+            snprintf(reason, sizeof(reason), "expected a string");
+        } else {
+            snprintf(reason, sizeof(reason),
+                     "unknown content kind '%s' (expected \"visual-sample\", \"prototype\", "
+                     "\"validated\", or \"player-selectable\")",
+                     kindText);
+        }
+        set_error(error, errorCap, "contentKind", reason);
+        return false;
     }
     return true;
 }
@@ -392,7 +451,9 @@ bool vehicle_manifest_parse(const char *text, size_t length, VehicleManifest *ou
         return false;
     }
 
-    if (!parse_class_tags(out, json_object_get(root, kTopKeyNames[VM_KEY_CLASS_TAGS]), error,
+    if (!parse_content_kind(out, json_object_get(root, kTopKeyNames[VM_KEY_CONTENT_KIND]),
+                            error, errorCap) ||
+        !parse_class_tags(out, json_object_get(root, kTopKeyNames[VM_KEY_CLASS_TAGS]), error,
                           errorCap) ||
         !parse_eligibility(out,
                            json_object_get(root, kTopKeyNames[VM_KEY_CONTROLLER_ELIGIBILITY]),
@@ -693,6 +754,10 @@ bool vehicle_manifest_write(const VehicleSpec *spec, const char *id, const char 
     fprintf(out, "  \"contentVersion\": %u,\n", contentVersion);
     fprintf(out, "  \"appearanceId\": ");
     write_json_string(out, appearanceId);
+    /* The roster export only ever writes player-facing cars, so the kind is fixed; a manifest
+     * with any other kind is not produced by this exporter. */
+    fprintf(out, ",\n  \"contentKind\": ");
+    write_json_string(out, vehicle_content_kind_name(VEHICLE_CONTENT_PLAYER_SELECTABLE));
     fprintf(out, ",\n  \"classTags\": [],\n");
     fprintf(out, "  \"controllerEligibility\": [\"human\", \"ai\"],\n");
     fprintf(out, "  \"provenance\": { \"source\": ");

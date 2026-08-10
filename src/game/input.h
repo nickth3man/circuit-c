@@ -40,6 +40,14 @@ typedef struct {
     bool shiftUpPressed;
     bool shiftDownPressed;
     bool toggleAutoPressed;
+    /* Menu navigation: previous / next selectable car (LEFT/RIGHT, or gamepad d-pad). */
+    bool leftPressed;
+    bool rightPressed;
+    /* Setup editor (menu only): toggle the setup screen, move cursor, adjust, reset. */
+    bool upPressed;
+    bool downPressed;
+    bool setupTogglePressed;
+    bool resetSetupPressed;
 } Input;
 
 /* Zero every field. */

@@ -6,14 +6,15 @@
 #if !defined(CIRCUIT_HEADLESS)
 
 #include "render/render_internal.h"
-
 #include <math.h>
-
+#include "content/vehicle_manifest.h"
+#include "game/car_roster.h"
+#include "game/car_selection.h"
+#include "game/setup_editor.h"
+#include "physics/vehicle.h"
 #include "core/math_utils.h"
 #include "physics/tire.h"
-#include "physics/vehicle.h"
 #include "core/units.h"
-
 /* ---- presentation palette, type scale, and screen-space helpers -----------------------
  *
  * Racing HUD palette (documented for the design review):
@@ -79,18 +80,85 @@ static const char *gear_label(int selectedGear);
  */
 static void draw_overlay_menu(const Game *game)
 {
-    (void)game;
     DrawRectangle(0, 0, SCREEN_W, SCREEN_H, COL_DIM_SCREEN);
+    draw_text_centered_shadow("CIRCUIT", 92, 56, COL_ACCENT);
+    draw_text_centered("a deterministic top-down racing simulator", 158, 18, COL_TEXT_DIM);
 
-    draw_text_centered_shadow("CIRCUIT", 226, 64, COL_ACCENT);
-    draw_text_centered("a deterministic top-down racing simulator", 306, 20, COL_TEXT_DIM);
-
+    const int selectable = car_selection_count();
+    if (selectable == 0 || game->selectedCarIndex < 0) {
+        draw_text_centered_shadow("NO SELECTABLE CARS", 280, 32, COL_ACCENT_WARM);
+        draw_text_centered(
+            "content error — no valid player-selectable vehicle manifest was found", 326, 16,
+            COL_TEXT_DIM);
+        draw_text_centered("check data/vehicles/*.vehicle.json", 348, 16, COL_TEXT_DIM);
+        return;
+    }
+    CarSelectionEntry entry;
+    if (!car_selection_entry(game->selectedCarIndex, &entry)) return;
+    const VehicleManifest *m = entry.manifest;
+    const VehicleSpec *s = &m->definition.spec;
+    draw_text_centered_shadow(m->displayName, 188, 36, COL_TEXT);
+    const char *layout = car_roster_layout_name(entry.rosterIndex);
+    const char *cls = (m->classTagCount > 0) ? m->classTags[0] : "unclassified";
     draw_text_centered(
-        "PRESS P TO START", 414, 24,
+        TextFormat("%s   %s   %d / %d", layout, cls, game->selectedCarIndex + 1, selectable),
+        232, 18, COL_COOL);
+    float peakTorqueNm = 0.0f;
+    for (int i = 0; i < ENGINE_CURVE_POINTS; i++) {
+        if (s->engineTorqueCurveNm[i] > peakTorqueNm) peakTorqueNm = s->engineTorqueCurveNm[i];
+    }
+    const int x = (SCREEN_W - 460) / 2;
+    int y = 286;
+    const int row = 22;
+    DrawText(TextFormat("mass            %.0f kg", (double)s->massKg), x, y, 18, COL_TEXT);
+    DrawText(TextFormat("peak torque     %.0f N*m", (double)peakTorqueNm), x, y += row, 18,
+             COL_TEXT);
+    DrawText(TextFormat("gears            %d   final %.2f", s->gearCount,
+                        (double)s->finalDriveRatio),
+             x, y += row, 18, COL_TEXT);
+    DrawText(TextFormat("redline          %.0f rpm", (double)s->engineRedlineRpm), x, y += row,
+             18, COL_TEXT);
+    DrawText(TextFormat("brake bias       %.2f front", (double)s->brakeBiasFront), x, y += row,
+             18, COL_TEXT);
+    DrawText(TextFormat("tire grip        F %.2f  R %.2f", (double)s->tireMuLatFront,
+                        (double)s->tireMuLatRear),
+             x, y += row, 18, COL_TEXT);
+    DrawText(
+        TextFormat("drag             Cd %.2f", (double)vehicle_effective_drag_coefficient(s)),
+        x, y += row, 18, COL_TEXT);
+    DrawText(TextFormat("tires            %d/%dR%d", (int)s->tireSectionWidthFrontMm,
+                        (int)s->tireAspectFrontPct, (int)s->tireRimDiameterFrontIn),
+             x, y += row, 18, COL_TEXT_DIM);
+    if (m->description[0] != '\0') {
+        draw_text_centered(m->description, y + row + 16, 15, COL_TEXT_DIM);
+    }
+    if (game->setupEditing) {
+        draw_text_centered_shadow("SETUP", 470, 28, COL_ACCENT);
+        const SetupEditor *ed = &game->setupEditor;
+        int sy = 506;
+        for (int i = 0; i < ed->itemCount && i < 8; i++) {
+            const SetupEditorItem *it = &ed->items[i];
+            const float val = setup_editor_value(ed, i);
+            const Color c = (i == game->setupCursor) ? COL_ACCENT : COL_TEXT;
+            DrawText(TextFormat("%s%s  %g %s", (i == game->setupCursor) ? "> " : "  ", it->key,
+                                (double)val, it->unit),
+                     (SCREEN_W - 360) / 2, sy, 16, c);
+            sy += 20;
+        }
+        draw_text_centered("LEFT/RIGHT item    UP/DOWN adjust    D reset    S back", sy + 8, 14,
+                           COL_TEXT_DIM);
+        if (!setup_editor_is_valid(ed)) {
+            draw_text_centered("setup out of bounds — adjust to continue", sy + 28, 14,
+                               COL_ACCENT_WARM);
+        }
+        return;
+    }
+    draw_text_centered(
+        "< / > select car      S setup      P start", 760, 18,
         (Color){ COL_TEXT.r, COL_TEXT.g, COL_TEXT.b, pulse_alpha(0.6f, 90, 255) });
-    draw_text_centered("W/S throttle & brake    A/D steer    SPACE handbrake    "
-                       "Q/E shift    P pause    R reset",
-                       466, 16, COL_TEXT_DIM);
+    draw_text_centered("W/S throttle & brake    A/D steer    SPACE handbrake    Q/E shift    P "
+                       "pause    R reset",
+                       790, 14, COL_TEXT_DIM);
 }
 
 static void draw_overlay_paused(const Game *game)

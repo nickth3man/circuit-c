@@ -19,13 +19,21 @@ void input_clear_oneshots(Input *in)
     in->shiftUpPressed = false;
     in->shiftDownPressed = false;
     in->toggleAutoPressed = false;
+    in->leftPressed = false;
+    in->rightPressed = false;
+    in->upPressed = false;
+    in->downPressed = false;
+    in->setupTogglePressed = false;
+    in->resetSetupPressed = false;
 }
 
 bool input_has_oneshot(const Input *in)
 {
     if (in == NULL) return false;
     return in->pausePressed || in->resetPressed || in->debugPressed || in->shiftUpPressed ||
-           in->shiftDownPressed || in->toggleAutoPressed;
+           in->shiftDownPressed || in->toggleAutoPressed || in->leftPressed ||
+           in->rightPressed || in->upPressed || in->downPressed || in->setupTogglePressed ||
+           in->resetSetupPressed;
 }
 
 #if !defined(CIRCUIT_HEADLESS)
@@ -141,6 +149,12 @@ void input_sample(Input *in)
     if (IsKeyPressed(KEY_E)) in->shiftUpPressed = true;
     if (IsKeyPressed(KEY_Q)) in->shiftDownPressed = true;
     if (IsKeyPressed(KEY_T)) in->toggleAutoPressed = true;
+    if (IsKeyPressed(KEY_LEFT)) in->leftPressed = true;     /* menu: previous car */
+    if (IsKeyPressed(KEY_RIGHT)) in->rightPressed = true;   /* menu: next car */
+    if (IsKeyPressed(KEY_UP)) in->upPressed = true;         /* setup editor: increase */
+    if (IsKeyPressed(KEY_DOWN)) in->downPressed = true;     /* setup editor: decrease */
+    if (IsKeyPressed(KEY_S)) in->setupTogglePressed = true; /* toggle setup screen */
+    if (IsKeyPressed(KEY_D)) in->resetSetupPressed = true;  /* reset setup to default */
 
     if (IsGamepadAvailable(0)) {
         if (IsGamepadButtonPressed(0, GAMEPAD_BUTTON_MIDDLE_RIGHT))
@@ -153,6 +167,14 @@ void input_sample(Input *in)
             in->shiftDownPressed = true; /* Square/X */
         if (IsGamepadButtonPressed(0, GAMEPAD_BUTTON_LEFT_THUMB))
             in->toggleAutoPressed = true; /* L3 */
+        if (IsGamepadButtonPressed(0, GAMEPAD_BUTTON_LEFT_FACE_LEFT))
+            in->leftPressed = true; /* D-pad left: previous car */
+        if (IsGamepadButtonPressed(0, GAMEPAD_BUTTON_LEFT_FACE_RIGHT))
+            in->rightPressed = true; /* D-pad right: next car */
+        if (IsGamepadButtonPressed(0, GAMEPAD_BUTTON_LEFT_FACE_UP))
+            in->upPressed = true; /* D-pad up: setup increase */
+        if (IsGamepadButtonPressed(0, GAMEPAD_BUTTON_LEFT_FACE_DOWN))
+            in->downPressed = true; /* D-pad down: setup decrease */
     }
 }
 

@@ -16,9 +16,22 @@ static bool ensure_roster_loaded(void)
 {
     if (g_rosterLoaded) return (g_rosterCatalog.count > 0);
     char error[256];
-    if (!vehicle_manifest_load_dir("data/vehicles", &g_rosterCatalog, error, sizeof(error))) {
+    VehicleCatalog full;
+    if (!vehicle_manifest_load_dir("data/vehicles", &full, error, sizeof(error))) {
         return false;
     }
+    /* data/vehicles/ also holds appearance-corpus samples and in-review prototypes that parse
+     * fine but must never surface as race cars (issue #31). Compact the loaded catalog down to a
+     * player-selectable-only view: plain structs, so the kept entries are copied in place and the
+     * surviving allocation is freed by vehicle_catalog_free like before. */
+    int kept = 0;
+    for (int i = 0; i < full.count; i++) {
+        if (full.items[i].contentKind != VEHICLE_CONTENT_PLAYER_SELECTABLE) continue;
+        if (kept != i) full.items[kept] = full.items[i];
+        kept++;
+    }
+    full.count = kept;
+    g_rosterCatalog = full;
     g_rosterLoaded = true;
     return (g_rosterCatalog.count > 0);
 }
@@ -43,6 +56,13 @@ bool car_roster_spec(int index, VehicleSpec *out)
     if (index < 0 || index >= g_rosterCatalog.count) return false;
     *out = g_rosterCatalog.items[index].definition.spec;
     return true;
+}
+
+const VehicleManifest *car_roster_manifest(int index)
+{
+    if (!ensure_roster_loaded()) return NULL;
+    if (index < 0 || index >= g_rosterCatalog.count) return NULL;
+    return &g_rosterCatalog.items[index];
 }
 
 void car_roster_id(int index, char *buf, size_t cap)

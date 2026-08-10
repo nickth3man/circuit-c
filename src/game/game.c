@@ -16,6 +16,7 @@
 #include "dev/dev_state.h"
 #include "game/audio.h"
 #include "game/car_roster.h"
+#include "game/car_selection.h"
 #include "game/controller.h"
 #include "physics/auto_transmission.h"
 #include "world/collision.h"
@@ -327,6 +328,32 @@ GAME_API bool game_spawn_on_track_at(Game *game, int checkpointIndex)
 }
 
 /*
+ * Point the player entrant at the menu's selected car: the manifest's immutable definition and
+ * its authored default setup, applied through the same derive path a spawn uses. Interactive
+ * menu use only — the headless scenarios never pass through the menu, so their default-car
+ * determinism is untouched. With an empty catalog there is nothing to apply and the current
+ * (builtin default) car stays.
+ */
+static void apply_selected_car(Game *game)
+{
+    if (game->selectedCarIndex < 0) return;
+    CarSelectionEntry entry;
+    if (!car_selection_entry(game->selectedCarIndex, &entry)) return;
+    RaceEntrant *entrant = race_roster_local(&game->session.roster);
+    if (entrant == NULL) return;
+    entrant->definition = entry.manifest->definition;
+    entrant->setup = entry.manifest->defaultSetup;
+    (void)vehicle_instance_init(&entrant->instance, &entrant->definition, &entrant->setup);
+    controller_reset(&entrant->controller);
+    /* A new car resets the setup editor to that car's authored default and drops any edits made
+     * to the previous car: a setup belongs to one definition, so carrying it across would
+     * silently re-tune a different vehicle. */
+    setup_editor_init(&game->setupEditor, &entrant->definition, &entrant->setup);
+    game->setupCustomized = false;
+    game->setupCursor = 0;
+}
+
+/*
  * Put the cars back on the grid and start the race again from tick zero.
  *
  * `game_reset_sim()` is the vehicle half of this; the session half is what makes a restart a
@@ -364,6 +391,66 @@ static void restart_session(Game *game)
  */
 static void apply_oneshots(Game *game, const Input *input, const ControllerOutput *output)
 {
+    /* Menu navigation only: cycle the selectable roster (id-sorted) with wraparound, persist the
+     * last valid choice by stable id, and point the player entrant at the new car so the world
+     * behind the menu previews it. Interactive menu use only — headless never enters STATE_MENU,
+     * so this cannot perturb scenario determinism. */
+    if (game->state == STATE_MENU && !game->setupEditing &&
+        (input->leftPressed || input->rightPressed)) {
+        const int count = car_selection_count();
+        if (count > 0) {
+            int index = game->selectedCarIndex + (input->rightPressed ? 1 : -1);
+            if (index < 0) index = count - 1;
+            if (index >= count) index = 0;
+            game->selectedCarIndex = index;
+            CarSelectionEntry entry;
+            if (car_selection_entry(index, &entry)) {
+                snprintf(game->selectedCarId, sizeof(game->selectedCarId), "%s", entry.id);
+                (void)car_selection_save_recall(entry.id);
+                apply_selected_car(game);
+            }
+        }
+    }
+    /* Setup editor (issue #33), menu only. S toggles the setup screen; with it open, LEFT/RIGHT
+     * move the editable-item cursor, UP/DOWN adjust by the registry step, and D resets the whole
+     * setup to the car's authored default. A pending setup only reaches the race when the player
+     * starts: it is applied to the local entrant live so a restart carries it, and the base
+     * definition is never mutated. */
+    if (game->state == STATE_MENU && game->selectedCarIndex >= 0 &&
+        game->setupEditor.itemCount > 0) {
+        if (input->setupTogglePressed) {
+            game->setupEditing = !game->setupEditing;
+        } else if (game->setupEditing) {
+            if (input->leftPressed || input->rightPressed) {
+                int cursor = game->setupCursor + (input->rightPressed ? 1 : -1);
+                if (cursor < 0) cursor = game->setupEditor.itemCount - 1;
+                if (cursor >= game->setupEditor.itemCount) cursor = 0;
+                game->setupCursor = cursor;
+            }
+            if (input->upPressed || input->downPressed) {
+                const int dir = input->upPressed ? 1 : -1;
+                if (setup_editor_adjust(&game->setupEditor, game->setupCursor, dir)) {
+                    game->setupCustomized = true;
+                    RaceEntrant *entrant = race_roster_local(&game->session.roster);
+                    if (entrant != NULL) {
+                        entrant->setup = game->setupEditor.working;
+                        (void)vehicle_instance_derive(&entrant->instance, &entrant->definition,
+                                                      &entrant->setup);
+                    }
+                }
+            }
+            if (input->resetSetupPressed) {
+                setup_editor_reset(&game->setupEditor);
+                game->setupCustomized = false;
+                RaceEntrant *entrant = race_roster_local(&game->session.roster);
+                if (entrant != NULL) {
+                    entrant->setup = game->setupEditor.working;
+                    (void)vehicle_instance_derive(&entrant->instance, &entrant->definition,
+                                                  &entrant->setup);
+                }
+            }
+        }
+    }
     if (input->pausePressed) {
         switch (game->state) {
             case STATE_MENU:
@@ -450,6 +537,31 @@ GAME_API void game_init(Game *game)
      * different distance or a multi-entrant race calls game_configure_run() (or drives the
      * session directly), and the default keeps every existing caller on the timeline it had. */
     race_session_start(&game->session, NULL);
+#if !defined(CIRCUIT_HEADLESS)
+    /* Resolve the persisted car selection so the menu opens on the player's last car and the
+     * entrant previews it. The recall names a stable content id; an unknown or missing id
+     * deterministically falls back to the first selectable car (id-sorted catalog order). An
+     * empty catalog leaves the builtin default car and an empty selection. Headless never
+     * reaches this, so scenario determinism is unaffected. */
+    game->selectedCarIndex = 0;
+    game->selectedCarId[0] = '\0';
+    {
+        char recalledId[CAR_SELECTION_ID_CHARS];
+        const char *wantedId =
+            car_selection_load_recall(recalledId, sizeof(recalledId)) ? recalledId : NULL;
+        const int count = car_selection_count();
+        if (count > 0) {
+            game->selectedCarIndex = car_selection_index_or_default(wantedId);
+            CarSelectionEntry entry;
+            if (car_selection_entry(game->selectedCarIndex, &entry)) {
+                snprintf(game->selectedCarId, sizeof(game->selectedCarId), "%s", entry.id);
+            }
+        } else {
+            game->selectedCarIndex = -1;
+        }
+        apply_selected_car(game);
+    }
+#endif
 #if defined(CIRCUIT_HEADLESS)
     game->state = STATE_PLAYING; /* headless: no menus, simulate immediately */
 #else

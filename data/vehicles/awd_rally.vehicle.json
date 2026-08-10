@@ -6,9 +6,16 @@
   "description": "",
   "contentVersion": 1,
   "appearanceId": "awd_rally",
-  "classTags": [],
-  "controllerEligibility": ["human", "ai"],
-  "provenance": { "source": "roster", "author": "circuit-c" },
+  "contentKind": "player-selectable",
+  "classTags": ["race"],
+  "controllerEligibility": [
+    "human",
+    "ai"
+  ],
+  "provenance": {
+    "source": "roster",
+    "author": "circuit-c"
+  },
   "physics": {
     "body.wheelbase": 2.4000001,
     "body.track_front": 1.5,

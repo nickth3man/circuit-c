@@ -38,7 +38,9 @@
 #include "core/config.h"
 #include "dev/dev_state.h"
 #include "platform/hotreload.h"
+#include "game/car_selection.h"
 #include "game/controller.h"
+#include "game/setup_editor.h"
 #include "game/input.h"
 #include "game/particle.h"
 #include "game/race_session.h"
@@ -91,6 +93,29 @@ typedef struct {
 
 struct Game {
     GameStateId state;
+    /*
+     * The menu's car selection: an index into the car_selection_* enumeration (id-sorted
+     * roster order — see car_selection.h) plus the stable id of that entry. -1 with an
+     * empty id when the catalog holds nothing selectable. game_init() resolves the
+     * persisted choice, the menu HUD renders and cycles it (LEFT/RIGHT), and
+     * restart_session() spawns entrants[0] from it. Deliberately excluded from the state
+     * checksum: a menu choice must not perturb the determinism of a running session — the
+     * entrant's definition and setup are already hashed.
+     */
+    int selectedCarIndex;
+    char selectedCarId[CAR_SELECTION_ID_CHARS];
+    /*
+     * The setup editor for the selected car (issue #33). `setupEditor` holds a working copy
+     * of the selected car's default setup; the menu HUD shows it while `setupEditing` is on.
+     * On start, when `setupCustomized` is true, that working setup is applied to the player
+     * entrant instead of the manifest default, so a tuned setup reaches the race without ever
+     * mutating the shared definition. Excluded from the state checksum for the same reason as
+     * the selection above. Interactive menu only; headless never enters STATE_MENU.
+     */
+    bool setupEditing;
+    bool setupCustomized;
+    int setupCursor;
+    SetupEditor setupEditor;
     /* The platform's frame-latched device sample and the session's application commands. It is
      * an input SOURCE, not a vehicle control: the controller stage below converts it into one
      * entrant's ControllerOutput once per fixed tick. See src/game/controller.h. */

@@ -19,6 +19,8 @@
 #include "dev/car_corpus.h"
 #include "game/ai_driver.h"
 #include "game/car_roster.h"
+#include "game/car_selection.h"
+#include "game/setup_editor.h"
 #include "render/car_visual.h"
 #include "render/car_visual_raster.h"
 #include "core/config.h"
@@ -2441,6 +2443,158 @@ static void scenario_lap_average(void)
     free(frames);
 }
 
+/* ------------------------------------------------------------------------------------- */
+/* Scenario: car-selection — issue #32 model: the player-selectable roster as a           */
+/* deterministic, id-sorted selection view, with stable resolve and recall persistence    */
+/* ------------------------------------------------------------------------------------- */
+static void scenario_car_selection(void)
+{
+    /* The selection view is exactly the six roster cars, in stable id-sorted order. */
+    check(car_selection_count() == 6, "car selection offers exactly the 6 roster cars (got %d)",
+          car_selection_count());
+
+    static const char *const kExpectedOrder[6] = { "awd_gt",    "awd_rally", "fwd_hot",
+                                                   "fwd_light", "rwd_grip",  "rwd_power" };
+    for (int i = 0; i < car_selection_count(); i++) {
+        CarSelectionEntry entry;
+        memset(&entry, 0, sizeof(entry));
+        check(car_selection_entry(i, &entry), "selection entry %d is addressable", i);
+        check(strcmp(entry.id, kExpectedOrder[i]) == 0,
+              "selection entry %d id is '%s' (got '%s')", i, kExpectedOrder[i], entry.id);
+        check(entry.manifest != NULL, "selection entry %d carries its manifest", i);
+        if (entry.manifest != NULL) {
+            check(strcmp(entry.manifest->definition.id, entry.id) == 0,
+                  "selection entry %d manifest id matches its entry id", i);
+        }
+    }
+
+    /* Resolution is by stable id, never by raw selection slot. */
+    check(car_selection_resolve("rwd_grip") == 4,
+          "rwd_grip resolves to its id-sorted selection index 4 (got %d)",
+          car_selection_resolve("rwd_grip"));
+    check(car_selection_resolve("gone") == -1, "an unknown id resolves to -1 (got %d)",
+          car_selection_resolve("gone"));
+    check(car_selection_index_or_default("gone") == 0,
+          "an unknown id falls back to selection index 0");
+    check(car_selection_index_or_default(NULL) == 0, "NULL falls back to selection index 0");
+
+    /* Round-trip persistence: save a valid id, read the same id back. */
+    check(car_selection_save_recall("awd_gt"), "recall saved 'awd_gt'");
+    char recalled[CAR_SELECTION_ID_CHARS];
+    memset(recalled, 0, sizeof(recalled));
+    check(car_selection_load_recall(recalled, sizeof(recalled)), "recall loads the saved file");
+    check(strcmp(recalled, "awd_gt") == 0, "recall round-trips 'awd_gt' (got '%s')", recalled);
+
+    /* A missing recall file is a clean 'no stored choice', not an error. */
+    check(remove(CAR_SELECTION_RECALL_PATH) == 0, "recall file removed for the absent case");
+    memset(recalled, 0, sizeof(recalled));
+    check(!car_selection_load_recall(recalled, sizeof(recalled)),
+          "loading with no recall file returns false");
+}
+
+/* ------------------------------------------------------------------------------------- */
+/* Scenario: setup-editor — issue #33 model: bounded, validated setup edits on a private  */
+/* working copy, with reset and independent-editor isolation                              */
+/* ------------------------------------------------------------------------------------- */
+static void scenario_setup_editor(void)
+{
+    const VehicleManifest *manifest = car_roster_manifest(0);
+    check(manifest != NULL, "roster index 0 has a manifest");
+    if (manifest == NULL) return;
+
+    SetupEditor ed;
+    setup_editor_init(&ed, &manifest->definition, &manifest->defaultSetup);
+
+    /* Every setup-owned physics-input registry key (drive.gear1..gear5, drive.reverse,
+     * drive.final, drive.diff_mode, drive.diff_bias_ratio, drive.diff_preload,
+     * brake.bias_front) plus the typed int drive.gear_count. */
+    check(ed.itemCount == 12,
+          "editor exposes 11 registry setup-physics keys + gear_count (got %d)", ed.itemCount);
+    check(setup_editor_is_valid(&ed), "baseline setup is valid");
+    const uint32_t h0 = setup_editor_hash(&ed);
+    const float baseValue0 = setup_editor_value(&ed, 0);
+
+    /* A step edit lands inside the item's registry bounds and moves the hash. */
+    check(setup_editor_adjust(&ed, 0, 1), "item 0 accepts a +1 step");
+    const float stepped0 = setup_editor_value(&ed, 0);
+    check(stepped0 != baseValue0, "item 0 value changed by the step (%.4f -> %.4f)",
+          (double)baseValue0, (double)stepped0);
+    check(stepped0 >= ed.items[0].min && stepped0 <= ed.items[0].max,
+          "item 0 value stays inside [%.4f, %.4f] (got %.4f)", (double)ed.items[0].min,
+          (double)ed.items[0].max, (double)stepped0);
+    check(setup_editor_is_valid(&ed), "the edited setup is still valid");
+    check(setup_editor_hash(&ed) != h0, "the edit changed the setup hash");
+
+    /* Reset restores the exact baseline. */
+    setup_editor_reset(&ed);
+    check(setup_editor_hash(&ed) == h0, "reset restores the baseline hash");
+    check(setup_editor_value(&ed, 0) == baseValue0, "reset restores item 0's baseline value");
+
+    /* Two editors over the same definition share no mutable state. */
+    SetupEditor ed1, ed2;
+    setup_editor_init(&ed1, &manifest->definition, &manifest->defaultSetup);
+    setup_editor_init(&ed2, &manifest->definition, &manifest->defaultSetup);
+    check(setup_editor_hash(&ed2) == h0, "a second editor starts at the same baseline");
+    check(setup_editor_adjust(&ed1, 0, 1), "the first editor accepts a step");
+    check(setup_editor_hash(&ed1) != h0, "the first editor moved");
+    check(setup_editor_hash(&ed2) == h0,
+          "the second editor is untouched: no shared-state mutation");
+
+    /* Repeated upward steps clamp at the item maximum. */
+    int guard = 0;
+    float value = setup_editor_value(&ed, 0);
+    while (guard < 1000) {
+        setup_editor_adjust(&ed, 0, 1);
+        const float next = setup_editor_value(&ed, 0);
+        guard++;
+        if (next == value) break;
+        value = next;
+    }
+    check(guard < 1000, "clamp reached within the iteration cap (%d steps)", guard);
+    check(setup_editor_value(&ed, 0) == ed.items[0].max,
+          "repeated +1 steps clamp item 0 at its max %.4f (got %.4f, %d steps)",
+          (double)ed.items[0].max, (double)setup_editor_value(&ed, 0), guard);
+}
+
+/* ------------------------------------------------------------------------------------- */
+/* Scenario: launch-per-drivetrain — every roster car spawns through the same entrant     */
+/* path and the spawned local entrant carries the selected car's stable id                */
+/* ------------------------------------------------------------------------------------- */
+static void scenario_launch_per_drivetrain(void)
+{
+    const int count = car_roster_count();
+    check(count == 6, "roster has 6 cars to launch (got %d)", count);
+
+    for (int i = 0; i < count; i++) {
+        const VehicleManifest *manifest = car_roster_manifest(i);
+        check(manifest != NULL, "roster car %d has a manifest", i);
+        if (manifest == NULL) continue;
+
+        /* A fresh session per car: race_session_init gives the roster its empty valid
+         * state (game_init would already spawn the default local entrant, which would
+         * refuse a second localPlayer designation). */
+        Game *game = alloc_game();
+        race_session_init(&game->session);
+        const RaceEntrantSpawn spawn = { .definition = &manifest->definition,
+                                         .setup = &manifest->defaultSetup,
+                                         .controllerKind = CONTROLLER_KIND_HUMAN,
+                                         .localPlayer = true,
+                                         .gridSlot = 0 };
+        check(race_roster_spawn(&game->session.roster, &spawn, NULL),
+              "roster car %d ('%s') spawns through the entrant path", i,
+              manifest->definition.id);
+        const RaceEntrant *local = race_roster_local(&game->session.roster);
+        check(local != NULL, "roster car %d ('%s') is the local entrant", i,
+              manifest->definition.id);
+        if (local != NULL) {
+            check(strcmp(local->definition.id, manifest->definition.id) == 0,
+                  "the spawned entrant carries the selected id '%s' (got '%s')",
+                  manifest->definition.id, local->definition.id);
+        }
+        free(game);
+    }
+}
+
 static const TestScenario kGameplayScenarios[] = {
     { "track-surface", "track geometry, init/free life-cycle, and per-point surface query",
       scenario_track_surface },
@@ -2478,6 +2632,17 @@ static const TestScenario kGameplayScenarios[] = {
     { "state-machine", "MENU/PLAYING/PAUSED/RESULTS transitions", scenario_state_machine },
     { "lap-average", "perimeter drive recorded once, replayed 10x: checksum, gates, energy",
       scenario_lap_average },
+    { "car-selection",
+      "issue #32 selection model: id-sorted view of the 6 roster cars, stable resolve, "
+      "recall round-trip",
+      scenario_car_selection },
+    { "setup-editor",
+      "issue #33 setup model: 12 editable items, bounded validated edits, reset, editor "
+      "isolation, clamp at max",
+      scenario_setup_editor },
+    { "launch-per-drivetrain",
+      "every roster car spawns through the same entrant path carrying its stable id",
+      scenario_launch_per_drivetrain },
 };
 
 TestScenarioGroup test_gameplay_scenarios(void)

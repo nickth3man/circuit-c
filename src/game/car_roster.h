@@ -23,6 +23,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "content/vehicle_manifest.h"
 #include "physics/vehicle.h"
 
 /* Total cars in the roster. Stable for a given build. */
@@ -36,6 +37,11 @@ int car_roster_count(void);
  * bad override gets caught loudly instead of producing a subtly broken car.
  */
 bool car_roster_spec(int index, VehicleSpec *out);
+
+/* Roster-cache pointer to the manifest at `index`, or NULL when the roster is unloaded or
+ * `index` is out of range. Points into the internal catalog cache: fine for immediate reads,
+ * never to be stored across car_roster_reload(). */
+const VehicleManifest *car_roster_manifest(int index);
 
 /* Stable, filesystem-safe identifier, e.g. "rwd_grip". Written into the caller's buffer so
  * there is no shared static state to go stale across a reload. */
