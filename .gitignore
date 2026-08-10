@@ -132,3 +132,4 @@ PowerShellEditorServices.json
 debug/
 .claude/*
 docs/archive/
+.prompts/*
