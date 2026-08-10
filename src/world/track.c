@@ -556,6 +556,7 @@ void track_reset_progress_at(RacerProgress *progress, const TrackDefinition *tra
     progress->sectorTimerS = 0.0f;
     progress->lastSectorTimeS = 0.0f;
     progress->lapInvalid = false;
+    progress->lapArmed = false;
     progress->routeFinished = false;
     progress->lastCrossedIndex = -1;
     progress->ticksSinceCross = 1000;
@@ -749,6 +750,17 @@ TrackCheckpointEvent track_update_checkpoints(const TrackDefinition *track,
     progress->ticksSinceCross++;
     if (progress->routeFinished) return event;
 
+    /* The start/finish line is a lap boundary independent of the gate sequence. Latch its
+     * crossing every tick (lapArmed) so a lap can close even when the line and the
+     * lap-close gate are crossed in different ticks; an SF crossing on a tick that crosses
+     * no gate must not be discarded. */
+    if (track->hasStartFinish && track->routeClosed) {
+        if (gate_crossed_generic(track->startFinish.centerM, track->startFinish.forwardUnit,
+                                 track->startFinish.halfWidthM, prevPosM, currPosM)) {
+            progress->lapArmed = true;
+        }
+    }
+
     const int expected = progress->nextCheckpoint;
 
     bool expectedCrossed = false;
@@ -794,12 +806,6 @@ TrackCheckpointEvent track_update_checkpoints(const TrackDefinition *track,
     }
 
     bool lapCompletedViaRoute = false;
-    bool sfCrossed = false;
-    if (track->hasStartFinish) {
-        sfCrossed =
-            gate_crossed_generic(track->startFinish.centerM, track->startFinish.forwardUnit,
-                                 track->startFinish.halfWidthM, prevPosM, currPosM);
-    }
 
     if (track->routeClosed) {
         progress->nextCheckpoint++;
@@ -807,15 +813,21 @@ TrackCheckpointEvent track_update_checkpoints(const TrackDefinition *track,
             progress->nextCheckpoint = 0;
         }
         const int lapCloseNext = (progress->lapStartCheckpoint + 1) % track->checkpointCount;
-        bool shouldCompleteViaRoute =
+        bool lapClosed =
             (progress->nextCheckpoint == lapCloseNext || track->checkpointCount == 1);
         if (track->hasStartFinish) {
-            shouldCompleteViaRoute = false;
+            /* The SF line is the authoritative lap boundary: a wrapped route closes a lap
+             * only when the line was crossed since the last close (lapArmed). Latching
+             * decouples the crossing of the line from the crossing of the lap-close gate,
+             * and the wrapped-route requirement means an SF that overlaps an early gate
+             * cannot award an incomplete lap. The latch is consumed only by the close, so
+             * an intermediate gate crossing does not disarm it. */
+            lapClosed = lapClosed && progress->lapArmed;
+            if (lapClosed) {
+                progress->lapArmed = false;
+            }
         }
-        if (shouldCompleteViaRoute) {
-            lapCompletedViaRoute = true;
-        }
-        if (track->hasStartFinish && sfCrossed) {
+        if (lapClosed) {
             lapCompletedViaRoute = true;
         }
     } else {

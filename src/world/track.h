@@ -173,10 +173,11 @@ typedef struct {
     float sectorTimerS;    /* time since last sector boundary */
     float lastSectorTimeS; /* time of the most recently completed sector */
     bool lapInvalid;       /* true if a required checkpoint was skipped (outOfOrder) */
-    bool lapArmed;         /* true when route has wrapped to lapCloseNext and SF is armed */
-    bool routeFinished;    /* open point-to-point: true once final checkpoint crossed */
-    int lastCrossedIndex;  /* debounce: last checkpoint index crossed, -1 initially */
-    int ticksSinceCross;   /* hysteresis ticks since last crossing */
+    bool
+        lapArmed; /* SF latch: set when the start/finish line is crossed, cleared when a lap closes */
+    bool routeFinished;   /* open point-to-point: true once final checkpoint crossed */
+    int lastCrossedIndex; /* debounce: last checkpoint index crossed, -1 initially */
+    int ticksSinceCross;  /* hysteresis ticks since last crossing */
 } RacerProgress;
 
 /*

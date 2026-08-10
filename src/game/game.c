@@ -174,6 +174,7 @@ static uint32_t hash_entrant(uint32_t h, const RaceEntrant *entrant)
     h = hash_u32(h, (uint32_t)p->nextCheckpoint);
     h = hash_u32(h, (uint32_t)p->lap);
     h = hash_u32(h, (uint32_t)p->lapStartCheckpoint);
+    h = hash_u32(h, p->lapArmed ? 1u : 0u);
     h = hash_f32(h, p->lapTimerS);
     h = hash_f32(h, p->lastLapTimeS);
     return h;
