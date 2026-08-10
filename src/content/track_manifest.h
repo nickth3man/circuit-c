@@ -52,9 +52,42 @@
 
 #define TRACK_MANIFEST_SCHEMA "circuit/track"
 #define TRACK_MANIFEST_VERSION 1
+#define TRACK_CATALOG_DIR "data/tracks"
+#define TRACK_CATALOG_SUFFIX ".track.json"
 
 #define TRACK_MANIFEST_TEXT_CHARS 128 /* id/displayName fit the definition's fixed arrays */
 #define TRACK_MANIFEST_DESC_CHARS 256
+
+/* Stable content id rule: [a-z0-9] then up to 62 of [a-z0-9._-]. Matches the ownership contract. */
+bool track_manifest_id_is_valid(const char *id);
+
+/* A discovered, id-sorted set of track definitions. Owned by the caller; free with
+ * track_catalog_free (which frees each TrackDefinition). */
+typedef struct {
+    TrackDefinition definition;
+    uint32_t manifestHash;
+} TrackCatalogEntry;
+
+typedef struct {
+    TrackCatalogEntry *entries;
+    int count;
+} TrackCatalog;
+
+/* Discover every "*.track.json" under `dir`, parse each, sort the catalog by stable id, and
+ * reject duplicate ids. Returns false on any parse, I/O, or duplicate error. *out is zeroed and
+ * nothing is allocated on failure. `dir` may be NULL to mean TRACK_CATALOG_DIR. */
+bool track_catalog_load(const char *dir, TrackCatalog *out, char *error, size_t errorCap);
+
+void track_catalog_free(TrackCatalog *catalog);
+
+/* Index of the entry with `id`, or -1. */
+int track_catalog_find(const TrackCatalog *catalog, const char *id);
+
+/* Load one track by stable id via the catalog directory. Equivalent to
+ * track_manifest_load("data/tracks/<id>.track.json") but validates `id` first and reports
+ * `id: reason` on failure. */
+bool track_load_by_id(const char *id, TrackDefinition *out, uint32_t *manifestHashOut,
+                      char *error, size_t errorCap);
 
 /* Parse a track file from memory into a heap-allocated TrackDefinition owned by the caller
  * (free with track_free). On success writes the manifest hash to *manifestHashOut when non-NULL.

@@ -24,7 +24,7 @@
 #include "game/profile.h"
 #include "render/render.h"
 #include "world/track.h"
-
+#include "content/track_manifest.h"
 #if !defined(CIRCUIT_HEADLESS)
 #include "raylib.h"
 #endif
@@ -222,9 +222,8 @@ GAME_API uint32_t game_state_checksum(const Game *game)
     h = hash_u32(h, (uint32_t)session->rules.mode);
     h = hash_u32(h, (uint32_t)session->rules.targetLaps);
     h = hash_f32(h, session->rules.countdownS);
-    h = hash_u32(h, (uint32_t)session->trackId);
+    h = hash_bytes(h, session->trackId, sizeof(session->trackId));
     h = hash_u64(h, session->tick);
-    h = hash_f32(h, session->clockS);
     h = hash_u32(h, (uint32_t)session->countdownTicksRemaining);
     h = hash_u32(h, (uint32_t)session->classifiedCount);
     h = hash_u32(h, session->events.totalAppended);
@@ -261,16 +260,25 @@ GAME_API bool game_configure_run(Game *game, const GameRunConfig *config)
 {
     if (game == NULL || config == NULL) return false;
 
-    switch (config->track) {
-        case GAME_TRACK_PARKING_LOT: track_init(&game->trackDef); break;
-        case GAME_TRACK_CHICANE: track_load_chicane(&game->trackDef); break;
-        case GAME_TRACK_SPRINT: track_load_sprint(&game->trackDef); break;
-        case GAME_TRACK_TECHNICAL: track_load_technical(&game->trackDef); break;
-        case GAME_TRACK_KEEP: break;
-        default: return false;
-    }
-    if (config->track != GAME_TRACK_KEEP)
+    const bool keepTrack = (config->trackId[0] == '\0');
+    if (!keepTrack) {
+        if (!track_manifest_id_is_valid(config->trackId)) return false;
+        TrackCatalog catalog;
+        memset(&catalog, 0, sizeof(catalog));
+        char error[256] = "";
+        if (!track_catalog_load(NULL, &catalog, error, sizeof(error))) return false;
+        const int idx = track_catalog_find(&catalog, config->trackId);
+        if (idx < 0) {
+            track_catalog_free(&catalog);
+            return false;
+        }
+        TrackDefinition loaded = catalog.entries[idx].definition;
+        memset(&catalog.entries[idx].definition, 0, sizeof(TrackDefinition));
+        track_catalog_free(&catalog);
+        track_free(&game->trackDef);
+        game->trackDef = loaded;
         track_runtime_bind(&game->trackRuntime, &game->trackDef);
+    }
 
     game->dev.cameraZoomOverride = config->cameraZoomOverride;
 
@@ -280,13 +288,12 @@ GAME_API bool game_configure_run(Game *game, const GameRunConfig *config)
     RaceRules rules;
     race_rules_set_default(&rules);
     rules.targetLaps = (config->targetLaps > 0) ? config->targetLaps : RESULTS_TARGET_LAPS;
-    /* GAME_TRACK_KEEP means "leave the loaded track alone", so it must leave the session's
-     * idea of which track is loaded alone too — writing the sentinel would report and checksum
-     * a kept chicane as track 0. */
-    if (config->track != GAME_TRACK_KEEP) game->session.trackId = (int)config->track;
+    if (!keepTrack) {
+        snprintf(game->session.trackId, sizeof(game->session.trackId), "%s", config->trackId);
+    }
     race_session_start(&game->session, &rules);
 
-    if (config->track != GAME_TRACK_KEEP) return game_spawn_on_track(game);
+    if (!keepTrack) return game_spawn_on_track(game);
     return true;
 }
 
@@ -688,8 +695,19 @@ GAME_API void game_init(Game *game)
         SetGamepadMappings(gamepadMappings);
         UnloadFileText(gamepadMappings);
     }
-    track_init(&game->trackDef);
-    track_runtime_bind(&game->trackRuntime, &game->trackDef);
+    {
+        TrackDefinition loaded;
+        memset(&loaded, 0, sizeof(loaded));
+        if (track_load_by_id("parking_lot", &loaded, NULL, NULL, 0)) {
+            track_free(&game->trackDef);
+            game->trackDef = loaded;
+            snprintf(game->session.trackId, sizeof(game->session.trackId), "%s", "parking_lot");
+        } else {
+            track_init(&game->trackDef);
+            snprintf(game->session.trackId, sizeof(game->session.trackId), "%s", "parking_lot");
+        }
+        track_runtime_bind(&game->trackRuntime, &game->trackDef);
+    }
     audio_init();
 #endif
     game->stateChecksum = game_state_checksum(game);

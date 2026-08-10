@@ -155,6 +155,31 @@ reproduces the compiled geometry hash, and that the committed `data/tracks/*.tra
 still parse and match. A hand edit to a committed file is therefore caught rather than silently
 shipping a wrong track.
 
+## Discovery and runtime selection (issue #36)
+
+Tracks are discovered by stable content id, not by a compiled enum. `track_catalog_load()` scans
+`data/tracks/*.track.json`, parses each file, sorts the catalog by stable id, and rejects
+duplicate ids. `track_load_by_id()` loads one track by building the canonical path
+`data/tracks/<id>.track.json` and validating the id before touching the filesystem.
+
+`GameRunConfig` carries a `trackId` string: empty means "keep the current track", otherwise it
+must be a valid id and the corresponding file must parse. `RaceSession` records the same id
+string, which is hashed into the rolling checksum as bytes rather than as an integer enum.
+Command-line `--track` values are normalized (`lot` → `parking_lot`) and then resolved through
+the catalog; unknown, missing, or uppercase ids are rejected with a diagnostic instead of being
+silently ignored.
+
+The four built-in tracks (`parking_lot`, `chicane`, `sprint`, `technical`) all load from
+external files in headless and interactive builds. `sprint` and `technical` are explicit,
+reviewable JSON files rather than runtime transforms of the chicane: the `track-migration`
+scenario asserts that each catalog entry's geometry hash is bit-identical to the legacy
+`track_load_*` output, and that node arrays match exactly.
+
+The legacy loaders (`track_init`, `track_load_chicane`, `track_load_sprint`,
+`track_load_technical`) remain in the codebase only for the temporary legacy-vs-loaded
+comparisons and for `--generate-tracks`. No session code depends on them: `game_configure_run()`
+and `game_init()` both go through the catalog.
+
 ## Forward compatibility
 
 v2 will add: open routes (`route.closed: false`), grid/pit placement, and environment/presentation

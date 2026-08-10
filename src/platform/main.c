@@ -166,27 +166,26 @@ static bool apply_run_options(Game *game, const Options *options)
     GameRunConfig config;
     memset(&config, 0, sizeof(config));
     config.cameraZoomOverride = options->cameraZoom;
-    config.track = GAME_TRACK_KEEP;
 
     if (options->track != NULL) {
-        if (strcmp(options->track, "chicane") == 0) {
-            config.track = GAME_TRACK_CHICANE;
-        } else if (strcmp(options->track, "sprint") == 0) {
-            config.track = GAME_TRACK_SPRINT;
-        } else if (strcmp(options->track, "technical") == 0) {
-            config.track = GAME_TRACK_TECHNICAL;
-        } else if (strcmp(options->track, "lot") == 0 ||
-                   strcmp(options->track, "parking_lot") == 0) {
-            config.track = GAME_TRACK_PARKING_LOT;
-        } else {
+        const char *requested = options->track;
+        if (strcmp(requested, "lot") == 0) requested = "parking_lot";
+        if (snprintf(config.trackId, sizeof(config.trackId), "%s", requested) >=
+            (int)sizeof(config.trackId)) {
+            fprintf(stderr, "error: track id '%s' is too long\n", requested);
+            return false;
+        }
+    }
+    if (!game_configure_run(game, &config)) {
+        if (options->track != NULL) {
             fprintf(
                 stderr,
                 "error: unknown track '%s' (try 'chicane', 'sprint', 'technical', or 'lot')\n",
                 options->track);
-            return false;
         }
+        return false;
     }
-    return game_configure_run(game, &config);
+    return true;
 }
 
 static void print_usage(const char *argv0)
@@ -566,14 +565,14 @@ static int run_validate_lap(Game *game, const Options *options)
 
     GameRunConfig runConfig;
     memset(&runConfig, 0, sizeof(runConfig));
-    runConfig.track = GAME_TRACK_CHICANE;
+    snprintf(runConfig.trackId, sizeof(runConfig.trackId), "%s", "chicane");
     runConfig.targetLaps = VALIDATION_RUN_LAPS;
     if (options->track != NULL) {
-        if (strcmp(options->track, "sprint") == 0) {
-            runConfig.track = GAME_TRACK_SPRINT;
-        } else if (strcmp(options->track, "technical") == 0) {
-            runConfig.track = GAME_TRACK_TECHNICAL;
-        } else if (strcmp(options->track, "chicane") != 0) {
+        const char *requested = options->track;
+        if (strcmp(requested, "sprint") == 0 || strcmp(requested, "technical") == 0 ||
+            strcmp(requested, "chicane") == 0) {
+            snprintf(runConfig.trackId, sizeof(runConfig.trackId), "%s", requested);
+        } else {
             fprintf(stderr, "error: unknown validation track '%s'\n", options->track);
             return 2;
         }
