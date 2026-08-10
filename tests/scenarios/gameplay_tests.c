@@ -2693,6 +2693,41 @@ static void scenario_setup_editor(void)
             check(setup_editor_hash(&wideBack) == wideHash,
                   "the %d-gear round-trip reproduces its hash", MAX_GEARS);
         }
+        /*
+         * Malformed input is rejected rather than tolerated. A `setup.hash` line that does not
+         * parse used to leave verification silently disabled, which meant the one line whose
+         * job is to detect corruption was switched off by exactly the corruption it guards
+         * against. An out-of-range gear count is rejected without first narrowing the value —
+         * lrint() of 1e300 and the int conversion that followed were undefined behaviour on
+         * the way to the rejection.
+         */
+        static const struct {
+            const char *body;
+            const char *what;
+        } kMalformed[] = {
+            { "setup.hash=notahash\n", "non-hex setup.hash" },
+            { "setup.hash=1234\n", "short setup.hash" },
+            { "setup.hash=0123456789\n", "over-long setup.hash" },
+            { "drive.gear_count=1e300\n", "gear_count far outside int range" },
+            { "drive.gear_count=-1e300\n", "negative gear_count outside int range" },
+            { "drive.gear_count=2.5\n", "non-integral gear_count" },
+            { "drive.gear_count=0\n", "gear_count below 1" },
+        };
+        for (size_t k = 0; k < sizeof(kMalformed) / sizeof(kMalformed[0]); k++) {
+            FILE *bad = fopen(path, "wb");
+            if (bad != NULL) {
+                fputs(kMalformed[k].body, bad);
+                fclose(bad);
+            }
+            SetupEditor victim;
+            setup_editor_init(&victim, &manifest->definition, &manifest->defaultSetup);
+            const uint32_t before = setup_editor_hash(&victim);
+            error[0] = '\0';
+            check(!setup_editor_load(&victim, path, error, sizeof(error)),
+                  "%s is rejected (error: %s)", kMalformed[k].what, error);
+            check(setup_editor_hash(&victim) == before, "%s leaves the working setup untouched",
+                  kMalformed[k].what);
+        }
         remove(path);
     }
 }
