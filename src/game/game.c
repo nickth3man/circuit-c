@@ -328,11 +328,12 @@ GAME_API bool game_spawn_on_track_at(Game *game, int checkpointIndex)
 }
 
 /*
- * Point the player entrant at the menu's selected car: the manifest's immutable definition and
- * its authored default setup, applied through the same derive path a spawn uses. Interactive
- * menu use only — the headless scenarios never pass through the menu, so their default-car
- * determinism is untouched. With an empty catalog there is nothing to apply and the current
- * (builtin default) car stays.
+ * Answer whether the menu's current selection may start a race, and say why not when it may not.
+ *
+ * This is the start-time half of the promotion contract: `car_roster` already refuses to admit
+ * content that fails the checklist, so what is left to re-check here is the part the player can
+ * change from the menu — which car is selected and what the setup editor has done to its setup.
+ * The reason string is player-facing, so every rejection names the car and the specific gate.
  */
 bool game_can_start_race(const Game *game, char *reason, size_t reasonCap)
 {
@@ -400,6 +401,12 @@ static void apply_selected_car(Game *game)
 
 /*
  * Put the cars back on the grid and start the race again from tick zero.
+ *
+ * `game_reset_sim()` is the vehicle half of this; the session half is what makes a restart a
+ * restart rather than a teleport — clock, countdown, classification, events and results all go
+ * back to their starting values, so nothing from the previous run can be read afterwards.
+ */
+static void restart_session(Game *game)
 {
     game_reset_sim(game);
     /* Route progress goes back with the cars. Without it a restart taken on or after the final
@@ -412,8 +419,51 @@ static void apply_selected_car(Game *game)
      * begin at gate zero, so a replay that forced one would measure the timeline against the
      * wrong gate. Restoring a recording's starting progress needs it captured with the
      * recording, which is the replay snapshot work in issue 44. */
-track_reset_progress_at(&game->progress, &game->trackDef, 0);
-race_session_start(&game->session, NULL);
+    track_reset_progress_at(&game->progress, &game->trackDef, 0);
+    race_session_start(&game->session, NULL);
+}
+
+/*
+ * Start the race the menu is showing — but only if it may be started.
+ *
+ * Two things happen here that cannot happen while the menu is merely being cycled. First the
+ * selection is re-resolved by stable id: the catalog is re-read on every simulation reset
+ * (game_reset_sim -> car_roster_reload), so content edited or removed while the menu was open
+ * can move the car sitting at `selectedCarIndex`. The id is the durable half of the selection
+ * (see car_selection.h), so resolving it again guarantees the car that gets validated is the
+ * car that races. Re-applying is deliberately skipped when the index is unchanged, so the
+ * common case does not discard the player's setup edits.
+ *
+ * Second, game_can_start_race() is consulted. That is the difference between a gate and a
+ * decoration: an ineligible selection or an out-of-bounds setup leaves the player on the menu
+ * with a reason on screen rather than dropping them into a race with a car the content rules
+ * reject. Returns false when the race did not start.
+ */
+static bool start_from_menu(Game *game)
+{
+    car_roster_reload();
+    if (car_selection_count() <= 0) {
+        game->selectedCarIndex = -1;
+    } else {
+        const int resolved = car_selection_index_or_default(
+            game->selectedCarId[0] != '\0' ? game->selectedCarId : NULL);
+        if (resolved != game->selectedCarIndex) {
+            game->selectedCarIndex = resolved;
+            apply_selected_car(game);
+        }
+        CarSelectionEntry entry;
+        if (car_selection_entry(game->selectedCarIndex, &entry)) {
+            snprintf(game->selectedCarId, sizeof(game->selectedCarId), "%s", entry.id);
+        }
+    }
+
+    if (!game_can_start_race(game, game->startBlockedReason,
+                             sizeof(game->startBlockedReason))) {
+        return false;
+    }
+    game->startBlockedReason[0] = '\0';
+    restart_session(game);
+    return true;
 }
 
 /*
@@ -493,8 +543,8 @@ static void apply_oneshots(Game *game, const Input *input, const ControllerOutpu
     if (input->pausePressed) {
         switch (game->state) {
             case STATE_MENU:
-                restart_session(game);
-                game->state = STATE_PLAYING;
+                /* Refused starts stay on the menu; start_from_menu() has written the reason. */
+                if (start_from_menu(game)) game->state = STATE_PLAYING;
                 break;
             case STATE_PLAYING:
                 race_session_pause(&game->session);

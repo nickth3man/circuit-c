@@ -6,6 +6,7 @@
 #include "core/json.h"
 
 #include <dirent.h>
+#include <float.h>
 #include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -92,6 +93,20 @@ static bool copy_text_field(char *dst, size_t cap, const char *src, const char *
     return true;
 }
 
+/*
+ * Narrow a JSON double to the float a VehicleClass rule is stored in, refusing anything the
+ * float cannot hold. `1e100` is a perfectly finite JSON number, but narrowing it would store an
+ * infinity (and the narrowing itself is undefined behaviour), which silently turns an authored
+ * bound into "unconstrained" — the opposite of what the file says. The range test therefore
+ * happens in double precision, before the cast.
+ */
+static bool to_float_bound(double n, float *out)
+{
+    if (!isfinite(n) || n > (double)FLT_MAX || n < -(double)FLT_MAX) return false;
+    *out = (float)n;
+    return true;
+}
+
 /* A number whose fractional part is zero and which fits in an int. Used for version. */
 static bool integer_value(const JsonValue *value, int min, int max, int *out)
 {
@@ -127,9 +142,15 @@ static bool parse_range_rule(const JsonValue *rules, const char *key, bool *hasO
         set_error(error, errorCap, key, "bounds must be finite with min <= max");
         return false;
     }
+    float minF = 0.0f;
+    float maxF = 0.0f;
+    if (!to_float_bound(loN, &minF) || !to_float_bound(hiN, &maxF)) {
+        set_error(error, errorCap, key, "bounds must be representable as 32-bit floats");
+        return false;
+    }
     *hasOut = true;
-    *minOut = (float)loN;
-    *maxOut = (float)hiN;
+    *minOut = minF;
+    *maxOut = maxF;
     return true;
 }
 
@@ -148,8 +169,14 @@ static bool parse_max_tire_mu(VehicleClass *out, const JsonValue *rules, char *e
         set_error(error, errorCap, kRuleKeyNames[VC_RULE_MAX_TIRE_MU], "must be finite");
         return false;
     }
+    float muF = 0.0f;
+    if (!to_float_bound(mu, &muF)) {
+        set_error(error, errorCap, kRuleKeyNames[VC_RULE_MAX_TIRE_MU],
+                  "must be representable as a 32-bit float");
+        return false;
+    }
     out->hasMaxTireMu = true;
-    out->maxTireMu = (float)mu;
+    out->maxTireMu = muF;
     return true;
 }
 
@@ -323,54 +350,9 @@ bool vehicle_class_parse(const char *text, size_t length, VehicleClass *out, cha
     return true;
 }
 
-bool vehicle_class_load(const char *path, VehicleClass *out, char *error, size_t errorCap)
-{
-    if (out == NULL) return false;
-    memset(out, 0, sizeof(*out));
-    if (error != NULL && errorCap > 0) error[0] = '\0';
-    if (path == NULL) {
-        set_error(error, errorCap, NULL, "no class path given");
-        return false;
-    }
-    FILE *file = fopen(path, "rb");
-    if (file == NULL) {
-        set_error(error, errorCap, path, "could not open file");
-        return false;
-    }
-    if (fseek(file, 0, SEEK_END) != 0) {
-        fclose(file);
-        set_error(error, errorCap, path, "could not seek file");
-        return false;
-    }
-    const long size = ftell(file);
-    rewind(file);
-    if (size < 0) {
-        fclose(file);
-        set_error(error, errorCap, path, "could not tell file size");
-        return false;
-    }
-    char *buffer = (char *)malloc((size_t)size + 1u);
-    if (buffer == NULL) {
-        fclose(file);
-        set_error(error, errorCap, NULL, "out of memory");
-        return false;
-    }
-    const size_t read = fread(buffer, 1u, (size_t)size, file);
-    fclose(file);
-    buffer[read] = '\0';
-    const bool ok = vehicle_class_parse(buffer, read, out, error, errorCap);
-    free(buffer);
-    return ok;
-}
-
-static int compare_class_by_id(const void *a, const void *b)
-{
-    const VehicleClass *ca = (const VehicleClass *)a;
-    const VehicleClass *cb = (const VehicleClass *)b;
-    return strcmp(ca->id, cb->id);
-}
-
-/* Read a whole file into a malloc'd buffer. Returns NULL (and sets the error) on failure. */
+/* Read a whole file into a malloc'd buffer. Returns NULL (and sets the error) on failure.
+ * The single reader for this module: both the one-file loader and the directory loader go
+ * through it, so an I/O fix cannot land in one path and be forgotten in the other. */
 static char *read_file_bytes(const char *path, size_t *bytesReadOut, char *error,
                              size_t errorCap)
 {
@@ -403,6 +385,30 @@ static char *read_file_bytes(const char *path, size_t *bytesReadOut, char *error
     buffer[read] = '\0';
     if (bytesReadOut != NULL) *bytesReadOut = read;
     return buffer;
+}
+
+bool vehicle_class_load(const char *path, VehicleClass *out, char *error, size_t errorCap)
+{
+    if (out == NULL) return false;
+    memset(out, 0, sizeof(*out));
+    if (error != NULL && errorCap > 0) error[0] = '\0';
+    if (path == NULL) {
+        set_error(error, errorCap, NULL, "no class path given");
+        return false;
+    }
+    size_t read = 0;
+    char *buffer = read_file_bytes(path, &read, error, errorCap);
+    if (buffer == NULL) return false;
+    const bool ok = vehicle_class_parse(buffer, read, out, error, errorCap);
+    free(buffer);
+    return ok;
+}
+
+static int compare_class_by_id(const void *a, const void *b)
+{
+    const VehicleClass *ca = (const VehicleClass *)a;
+    const VehicleClass *cb = (const VehicleClass *)b;
+    return strcmp(ca->id, cb->id);
 }
 
 bool vehicle_class_load_dir(const char *dir, VehicleClassCatalog *out, char *error,

@@ -55,7 +55,13 @@
 #define VEHICLE_CLASS_SCHEMA "circuit/vehicle-class"
 #define VEHICLE_CLASS_VERSION 1
 
-#define VEHICLE_CLASS_ID_CHARS 64    /* stable class id (63 chars + NUL) */
+/*
+ * A class id is only useful if a manifest can name it, and a manifest names it through a
+ * classTags entry. Deriving the capacity from that array keeps the two in lockstep: a class id
+ * that parses here is always short enough to be written as a tag, so an over-long id cannot
+ * become a class no car can ever join. Widening VEHICLE_MANIFEST_CLASS_TAG_CHARS widens both.
+ */
+#define VEHICLE_CLASS_ID_CHARS VEHICLE_MANIFEST_CLASS_TAG_CHARS
 #define VEHICLE_CLASS_TEXT_CHARS 129 /* displayName (128 chars + NUL) */
 #define VEHICLE_CLASS_DESC_CHARS 385 /* description (384 chars + NUL) */
 #define VEHICLE_CLASS_MAX_LAYOUTS 3  /* "rwd", "fwd", "awd" — all three at most */

@@ -26,6 +26,32 @@
 #include "content/vehicle_manifest.h"
 #include "physics/vehicle.h"
 
+/* Where the reviewed class-rule files live. Every class tag naming a file here is binding. */
+#define CAR_ROSTER_CLASS_DIR "data/vehicles/classes"
+
+#define CAR_ROSTER_MAX_REJECTIONS 32
+/* Wide enough for the longest reason either gate can produce: a promotion check name
+ * (PROMOTION_CHECK_NAME_CHARS) plus its evidence (PROMOTION_CHECK_DETAIL_CHARS) plus framing. */
+#define CAR_ROSTER_REJECT_REASON_CHARS 256
+
+/*
+ * One manifest the roster refused, and why. A car that declares itself player-selectable but
+ * fails the issue #31 promotion checklist or an issue #33 class rule is kept out of gameplay —
+ * this is how an author finds out, rather than noticing an absence. Rejections are recorded in
+ * catalog (stable-id) order, so the log is as deterministic as the roster itself.
+ */
+typedef struct {
+    char id[VEHICLE_CONTENT_ID_CAPACITY];
+    char reason[CAR_ROSTER_REJECT_REASON_CHARS];
+} CarRosterRejection;
+
+/* Number of manifests the current roster load refused. Loads the roster if needed. */
+int car_roster_rejection_count(void);
+
+/* Rejection `index`, or NULL when out of range. Points into module state: fine for immediate
+ * reads, never to be stored across car_roster_reload(). */
+const CarRosterRejection *car_roster_rejection(int index);
+
 /* Total cars in the roster. Stable for a given build. */
 int car_roster_count(void);
 

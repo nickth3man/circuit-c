@@ -116,6 +116,10 @@ struct Game {
     bool setupCustomized;
     int setupCursor;
     SetupEditor setupEditor;
+    /* Why the last start attempt was refused, or empty when nothing has been refused. Written
+     * by the menu's start path from game_can_start_race() and shown by the menu HUD, so a
+     * blocked start explains itself instead of looking like an unresponsive key. */
+    char startBlockedReason[96];
     /* The platform's frame-latched device sample and the session's application commands. It is
      * an input SOURCE, not a vehicle control: the controller stage below converts it into one
      * entrant's ControllerOutput once per fixed tick. See src/game/controller.h. */
@@ -260,6 +264,8 @@ _Static_assert(offsetof(Game, vehicleSetup) ==
 /* FNV-1a over the deterministic simulation fields only. Explicitly excludes the
  * accumulator, the substep and backlog counters, the render scale, and every presentation
  * field, so the checksum depends on the input timeline and nothing else. */
+GAME_API uint32_t game_state_checksum(const Game *game);
+
 /* Returns false with a human reason when the current menu selection/setup cannot start a
  * session (no car, setup outside vehicle bounds, missing class tag, or non-player-selectable
  * kind). Headless tests call this directly to prove invalid setups are rejected before a

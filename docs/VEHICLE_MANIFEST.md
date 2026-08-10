@@ -192,7 +192,10 @@ is id-sorted with duplicate ids rejected. Class files live in `data/vehicles/cla
 | `layouts`         | string[]    | Whitelist of `"rwd"`/`"fwd"`/`"awd"` (up to 3, no duplicates). Absent or empty ⇒ any layout. |
 
 Each bound pair must be two finite numbers with `min <= max`; unknown rule keys, unknown layout
-names, and out-of-range rule values are load errors, not silent no-ops.
+names, and out-of-range rule values are load errors, not silent no-ops. Bounds are stored as
+32-bit floats, so a number that is finite as JSON but too large to narrow (e.g. `1e100`) is also
+a load error — narrowing it would record an infinity and quietly turn an authored bound into
+"unconstrained".
 
 ### Eligibility
 
@@ -209,3 +212,24 @@ Eligibility never consults display strings: `displayName` and `description` are 
 text and play no part in membership. The one-line evidence detail names the failed rule with
 the observed value and bound (e.g. `mass 1400 kg outside [700, 1300] kg`), or quotes the checked
 values on success (`tag=road mass=760kg torque=65Nm mu=0.95 layout=fwd eligible`).
+
+### Where the rules are enforced
+
+Class rules and the issue #31 promotion checklist are both applied where it matters — when
+`car_roster` builds the live gameplay roster (`src/game/car_roster.c`). A manifest reaches the
+roster only if it is `player-selectable`, passes every promotion check, and satisfies the numeric
+rules of every class tag that names a class file actually present in `data/vehicles/classes/`.
+Anything refused is kept out of gameplay and recorded, with its id and the failing rule, in the
+rejection log read through `car_roster_rejection_count()` / `car_roster_rejection()`.
+
+A class tag with no matching class file constrains nothing — it stays a grouping label. That is
+deliberate: rejecting every car whose tag has no reviewed rule file would empty the roster the
+moment a packaged build shipped without `classes/`. When a class file does exist, its rules are
+binding, which is what turns the tag from a display string into a contract. The shipped roster is
+held to both gates by the `roster-gate` scenario; the class-rule logic itself is covered
+independently by `vehicle-class` using authored fixtures rather than roster cars, so a routine
+physics content bump cannot flip a rule-logic test.
+
+The menu applies a second, narrower gate at start (`game_can_start_race`) covering only what the
+player can change from the menu: which car is selected and what the setup editor did to its
+setup. A refused start keeps the player on the menu with the reason on screen.

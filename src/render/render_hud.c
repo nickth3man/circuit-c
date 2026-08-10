@@ -129,36 +129,60 @@ static void draw_overlay_menu(const Game *game)
     DrawText(TextFormat("tires            %d/%dR%d", (int)s->tireSectionWidthFrontMm,
                         (int)s->tireAspectFrontPct, (int)s->tireRimDiameterFrontIn),
              x, y += row, 18, COL_TEXT_DIM);
-    if (m->description[0] != '\0') {
-        draw_text_centered(m->description, y + row + 16, 15, COL_TEXT_DIM);
-    }
+    /*
+     * Everything below is laid out against SCREEN_H (720) with the bottom prompt as the last
+     * row. The window is a fixed size, so a y past 720 is not "further down the page" — it is
+     * simply not drawn, which is how the control hints and the tail of the setup list went
+     * missing. Both blocks are budgeted to end above 700.
+     */
     if (game->setupEditing) {
-        draw_text_centered_shadow("SETUP", 470, 28, COL_ACCENT);
+        /* The description is dropped here rather than reflowed: the setup list needs the room,
+         * and the car it belongs to is still named at the top of the screen. */
         const SetupEditor *ed = &game->setupEditor;
-        int sy = 506;
-        for (int i = 0; i < ed->itemCount && i < 8; i++) {
+        draw_text_centered_shadow("SETUP", 462, 24, COL_ACCENT);
+        /*
+         * Two columns, so every item the cursor can reach is on screen. A single column of the
+         * editor's full item count would run off the bottom, and the cursor wraps across all of
+         * them — landing the highlight on an invisible row while UP/DOWN edited a value the
+         * player could not see.
+         */
+        const int rowsPerColumn = (ed->itemCount + 1) / 2;
+        const int colX[2] = { (SCREEN_W / 2) - 380, (SCREEN_W / 2) + 20 };
+        const int setupTop = 498;
+        const int setupRow = 22;
+        for (int i = 0; i < ed->itemCount; i++) {
             const SetupEditorItem *it = &ed->items[i];
             const float val = setup_editor_value(ed, i);
-            const Color c = (i == game->setupCursor) ? COL_ACCENT : COL_TEXT;
-            DrawText(TextFormat("%s%s  %g %s", (i == game->setupCursor) ? "> " : "  ", it->key,
-                                (double)val, it->unit),
-                     (SCREEN_W - 360) / 2, sy, 16, c);
-            sy += 20;
+            const bool onCursor = (i == game->setupCursor);
+            const Color c = onCursor ? COL_ACCENT : COL_TEXT;
+            const int column = (rowsPerColumn > 0) ? (i / rowsPerColumn) : 0;
+            const int rowInColumn = (rowsPerColumn > 0) ? (i % rowsPerColumn) : i;
+            DrawText(TextFormat("%s%s  %g %s", onCursor ? "> " : "  ", it->key, (double)val,
+                                it->unit),
+                     colX[column < 2 ? column : 1], setupTop + rowInColumn * setupRow, 16, c);
         }
-        draw_text_centered("LEFT/RIGHT item    UP/DOWN adjust    D reset    S back", sy + 8, 14,
-                           COL_TEXT_DIM);
+        const int setupBottom = setupTop + rowsPerColumn * setupRow;
+        draw_text_centered("LEFT/RIGHT item    UP/DOWN adjust    D reset    S back",
+                           setupBottom + 12, 14, COL_TEXT_DIM);
         if (!setup_editor_is_valid(ed)) {
-            draw_text_centered("setup out of bounds — adjust to continue", sy + 28, 14,
+            draw_text_centered("setup out of bounds — adjust to continue", setupBottom + 34, 14,
                                COL_ACCENT_WARM);
         }
         return;
     }
+    if (m->description[0] != '\0') {
+        draw_text_centered(m->description, y + row + 16, 15, COL_TEXT_DIM);
+    }
+    if (game->startBlockedReason[0] != '\0') {
+        draw_text_centered(TextFormat("cannot start: %s", game->startBlockedReason), 612, 16,
+                           COL_ACCENT_WARM);
+    }
     draw_text_centered(
-        "< / > select car      S setup      P start", 760, 18,
+        "< / > select car      S setup      P start", 640, 18,
         (Color){ COL_TEXT.r, COL_TEXT.g, COL_TEXT.b, pulse_alpha(0.6f, 90, 255) });
     draw_text_centered("W/S throttle & brake    A/D steer    SPACE handbrake    Q/E shift    P "
                        "pause    R reset",
-                       790, 14, COL_TEXT_DIM);
+                       672, 14, COL_TEXT_DIM);
 }
 
 static void draw_overlay_paused(const Game *game)

@@ -5,8 +5,15 @@
  * WHAT IS EDITABLE. The editable items are exactly the registry entries that are both
  * setup-owned (DEV_OWNER_SETUP) and read by a dynamics path (DEV_CLASS_PHYSICS_INPUT):
  * drive.gear1..gear5, drive.reverse, drive.final, drive.diff_mode, drive.diff_bias_ratio,
- * drive.diff_preload, brake.bias_front — plus the typed int drive.gear_count (1..MAX_GEARS),
- * which lives outside the float registry but is a genuine physics input.
+ * drive.diff_preload, brake.bias_front — plus the typed int drive.gear_count, which lives
+ * outside the float registry but is a genuine physics input.
+ *
+ * GEAR COUNT IS CAPPED AT THE EDITABLE RATIOS, NOT AT MAX_GEARS. The registry publishes five
+ * forward ratios, so the count tops out at five. Letting it reach MAX_GEARS would let a player
+ * commit to a sixth gear whose ratio is whatever the manifest happened to leave in the slot —
+ * usually 0, which vehicle_setup_is_valid rejects — with no control in the menu to repair it,
+ * i.e. a setup the editor can break and cannot fix. A setup authored with more gears than the
+ * editor exposes keeps them and may be lowered; it simply cannot be raised further.
  *
  * WHAT IS NOT EDITABLE, AND WHY. The remaining setup-owned keys — tire pressures
  * (DEV_CLASS_INACTIVE) and camber/toe/caster (DEV_CLASS_APPEARANCE or INACTIVE) — are
@@ -44,6 +51,10 @@ typedef struct {
     const VehicleDefinition *base; /* borrowed; validation context */
     SetupEditorItem items[SETUP_EDITOR_MAX_ITEMS];
     int itemCount;
+    /* Setup-owned physics-input registry keys the editor's field table does not bind, and so
+     * did not turn into items. Always 0 in a consistent build; the `setup-editor` scenario
+     * asserts it, which is what stops the registry and the mapping drifting apart. */
+    int unboundKeyCount;
 } SetupEditor;
 
 void setup_editor_init(SetupEditor *ed, const VehicleDefinition *def,
@@ -51,6 +62,7 @@ void setup_editor_init(SetupEditor *ed, const VehicleDefinition *def,
 /* ±step clamped to the item's registry bounds; gear_count moves by ±1 within [1, MAX_GEARS].
  * Returns false on a bad index or direction == 0. */
 bool setup_editor_adjust(SetupEditor *ed, int itemIndex, int direction);
+void setup_editor_reset(SetupEditor *ed);          /* working = baseline */
 bool setup_editor_is_valid(const SetupEditor *ed); /* vehicle_setup_is_valid(base, &working) */
 uint32_t setup_editor_hash(const SetupEditor *ed); /* vehicle_setup_hash(&working) */
 float setup_editor_value(const SetupEditor *ed, int itemIndex); /* current value for display */

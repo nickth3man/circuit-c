@@ -3,19 +3,77 @@
  * for which setup knobs exist, their bounds, units, and explanations; this file adds only the
  * key -> VehicleSetup field mapping, which mirrors the writes in static vehicle_setup_apply().
  *
- * OFFSETS ARE DELIBERATELY UNUSED. DevParameter::offset indexes VehicleSpec, and VehicleSetup
- * is a different struct with different layout; using it here would write the wrong memory.
- * The explicit if/else on the key string is the same mapping vehicle_setup_apply() performs,
- * so the editor and the physics can never disagree about what a key means.
+ * ONE BINDING TABLE, NOT TWO LISTS. The registry says which keys are editable; kSetupFields
+ * says where each key lives inside VehicleSetup. Those two must agree, so the table is the only
+ * place the mapping is written and init() admits a registry key *only* if the table binds it.
+ * Adding a setup-owned physics input to dev_params.c without a binding here therefore produces
+ * no item at all — a visible omission the `setup-editor` scenario asserts against — instead of
+ * a knob that displays 0.0 and does nothing when turned.
+ *
+ * DEV REGISTRY OFFSETS ARE DELIBERATELY UNUSED. DevParameter::offset indexes VehicleSpec, and
+ * VehicleSetup is a different struct with a different layout; using it here would write the
+ * wrong memory. The offsets below are this module's own, taken against VehicleSetup.
  */
 #include "game/setup_editor.h"
 
 #include <math.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "dev/dev_params.h"
+
+/*
+ * key -> VehicleSetup float field, mirroring vehicle_setup_apply() field by field. Every entry
+ * is a float, so one byte offset is enough to read and write it.
+ *
+ * Only gear1..gear5 are bound even though VehicleSetup carries MAX_GEARS ratios: the registry
+ * publishes five, and the editor must never offer a gear count it has no ratio control for
+ * (see kEditableGearRatios below).
+ */
+typedef struct {
+    const char *key;
+    size_t offset;
+    bool isGearRatio;
+} SetupFieldBinding;
+
+static const SetupFieldBinding kSetupFields[] = {
+    { "drive.gear1", offsetof(VehicleSetup, gearRatios[0]), true },
+    { "drive.gear2", offsetof(VehicleSetup, gearRatios[1]), true },
+    { "drive.gear3", offsetof(VehicleSetup, gearRatios[2]), true },
+    { "drive.gear4", offsetof(VehicleSetup, gearRatios[3]), true },
+    { "drive.gear5", offsetof(VehicleSetup, gearRatios[4]), true },
+    { "drive.reverse", offsetof(VehicleSetup, reverseGearRatio), false },
+    { "drive.final", offsetof(VehicleSetup, finalDriveRatio), false },
+    { "drive.diff_mode", offsetof(VehicleSetup, differentialMode), false },
+    { "drive.diff_bias_ratio", offsetof(VehicleSetup, differentialBiasRatio), false },
+    { "drive.diff_preload", offsetof(VehicleSetup, differentialPreloadNm), false },
+    { "brake.bias_front", offsetof(VehicleSetup, brakeBiasFront), false },
+};
+
+static const int kSetupFieldCount = (int)(sizeof(kSetupFields) / sizeof(kSetupFields[0]));
+
+static const SetupFieldBinding *setup_field_binding(const char *key)
+{
+    for (int i = 0; i < kSetupFieldCount; i++) {
+        if (strcmp(kSetupFields[i].key, key) == 0) return &kSetupFields[i];
+    }
+    return NULL;
+}
+
+/* How many forward gear ratios the editor can actually reach. This — not MAX_GEARS — is the
+ * ceiling on drive.gear_count: raising the count past the last editable ratio would commit the
+ * player to a gear whose ratio is whatever the manifest left there (often 0, which
+ * vehicle_setup_is_valid rejects) with no control in the menu to repair it. */
+static int editable_gear_ratio_count(void)
+{
+    int count = 0;
+    for (int i = 0; i < kSetupFieldCount; i++) {
+        if (kSetupFields[i].isGearRatio) count++;
+    }
+    return count < MAX_GEARS ? count : MAX_GEARS;
+}
 
 /* Copy a bounded string with a fallback for NULL or empty sources ("-" for unitless). */
 static void copy_text(char *dst, size_t cap, const char *src, const char *fallback)
@@ -24,50 +82,22 @@ static void copy_text(char *dst, size_t cap, const char *src, const char *fallba
     (void)snprintf(dst, cap, "%.*s", (int)(cap - 1), src);
 }
 
-/* key -> VehicleSetup read/write, mirroring vehicle_setup_apply() field by field. Unknown
- * keys read 0.0f and are ignored on write: setup_editor_init only admits registry keys, so
- * this is defensive, not a supported path. */
+/* Unknown keys read 0.0f and are ignored on write: setup_editor_init only admits bound keys,
+ * so this is defensive, not a supported path. */
 static float setup_field_value(const VehicleSetup *setup, const char *key)
 {
-    if (strcmp(key, "drive.gear1") == 0) return setup->gearRatios[0];
-    if (strcmp(key, "drive.gear2") == 0) return setup->gearRatios[1];
-    if (strcmp(key, "drive.gear3") == 0) return setup->gearRatios[2];
-    if (strcmp(key, "drive.gear4") == 0) return setup->gearRatios[3];
-    if (strcmp(key, "drive.gear5") == 0) return setup->gearRatios[4];
-    if (strcmp(key, "drive.reverse") == 0) return setup->reverseGearRatio;
-    if (strcmp(key, "drive.final") == 0) return setup->finalDriveRatio;
-    if (strcmp(key, "drive.diff_mode") == 0) return setup->differentialMode;
-    if (strcmp(key, "drive.diff_bias_ratio") == 0) return setup->differentialBiasRatio;
-    if (strcmp(key, "drive.diff_preload") == 0) return setup->differentialPreloadNm;
-    if (strcmp(key, "brake.bias_front") == 0) return setup->brakeBiasFront;
-    return 0.0f;
+    const SetupFieldBinding *binding = setup_field_binding(key);
+    if (binding == NULL) return 0.0f;
+    float value = 0.0f;
+    memcpy(&value, (const char *)setup + binding->offset, sizeof(value));
+    return value;
 }
 
 static void setup_field_set(VehicleSetup *setup, const char *key, float value)
 {
-    if (strcmp(key, "drive.gear1") == 0)
-        setup->gearRatios[0] = value;
-    else if (strcmp(key, "drive.gear2") == 0)
-        setup->gearRatios[1] = value;
-    else if (strcmp(key, "drive.gear3") == 0)
-        setup->gearRatios[2] = value;
-    else if (strcmp(key, "drive.gear4") == 0)
-        setup->gearRatios[3] = value;
-    else if (strcmp(key, "drive.gear5") == 0)
-        setup->gearRatios[4] = value;
-    else if (strcmp(key, "drive.reverse") == 0)
-        setup->reverseGearRatio = value;
-    else if (strcmp(key, "drive.final") == 0)
-        setup->finalDriveRatio = value;
-    else if (strcmp(key, "drive.diff_mode") == 0)
-        setup->differentialMode = value;
-    else if (strcmp(key, "drive.diff_bias_ratio") == 0)
-        setup->differentialBiasRatio = value;
-    else if (strcmp(key, "drive.diff_preload") == 0)
-        setup->differentialPreloadNm = value;
-    else if (strcmp(key, "brake.bias_front") == 0)
-        setup->brakeBiasFront = value;
-    /* Unknown key: no field to write; the caller's index could only come from init(). */
+    const SetupFieldBinding *binding = setup_field_binding(key);
+    if (binding == NULL) return;
+    memcpy((char *)setup + binding->offset, &value, sizeof(value));
 }
 
 void setup_editor_init(SetupEditor *ed, const VehicleDefinition *def,
@@ -86,6 +116,12 @@ void setup_editor_init(SetupEditor *ed, const VehicleDefinition *def,
         const DevParameter *param = dev_param_at(i);
         if (param->owner != DEV_OWNER_SETUP) continue;
         if (param->classification != DEV_CLASS_PHYSICS_INPUT) continue;
+        /* No binding, no item: an editable-looking knob that writes nothing is worse than an
+         * absent one, and `unboundKeyCount` makes the omission assertable. */
+        if (setup_field_binding(param->name) == NULL) {
+            ed->unboundKeyCount++;
+            continue;
+        }
 
         SetupEditorItem *item = &ed->items[ed->itemCount++];
         copy_text(item->key, sizeof(item->key), param->name, "");
@@ -98,7 +134,7 @@ void setup_editor_init(SetupEditor *ed, const VehicleDefinition *def,
     }
 
     /* The typed int gear count is not a float registry entry (DevSpecFieldAudit holds it),
-     * so it is appended as the model's own item with the same bounds the physics enforces. */
+     * so it is appended as the model's own item, capped at the ratios the editor exposes. */
     if (ed->itemCount < SETUP_EDITOR_MAX_ITEMS) {
         SetupEditorItem *item = &ed->items[ed->itemCount++];
         copy_text(item->key, sizeof(item->key), "drive.gear_count", "");
@@ -107,7 +143,7 @@ void setup_editor_init(SetupEditor *ed, const VehicleDefinition *def,
                   "Active forward gear count; the ratios themselves are the drive.gearN items.",
                   "");
         item->min = 1.0f;
-        item->max = (float)MAX_GEARS;
+        item->max = (float)editable_gear_ratio_count();
         item->step = 1.0f;
         item->isGearCount = true;
     }
@@ -118,11 +154,17 @@ bool setup_editor_adjust(SetupEditor *ed, int itemIndex, int direction)
     if (ed == NULL || itemIndex < 0 || itemIndex >= ed->itemCount || direction == 0)
         return false;
 
-    SetupEditorItem *item = &ed->items[itemIndex];
+    const SetupEditorItem *item = &ed->items[itemIndex];
     if (item->isGearCount) {
-        int next = ed->working.gearCount + (direction > 0 ? 1 : -1);
+        /* Clamped to the item's own maximum, which is the editable-ratio count rather than
+         * MAX_GEARS — so every count the menu can reach has an editable ratio behind it. */
+        const int ceiling = (int)item->max;
+        const int current = ed->working.gearCount;
+        int next = current + (direction > 0 ? 1 : -1);
         if (next < 1) next = 1;
-        if (next > MAX_GEARS) next = MAX_GEARS;
+        /* A setup authored with more gears than the editor exposes keeps them: the count can
+         * be lowered from there, just never raised past the last ratio the player can edit. */
+        if (next > ceiling && next > current) next = current;
         ed->working.gearCount = next;
         return true;
     }
@@ -265,7 +307,9 @@ bool setup_editor_load(SetupEditor *ed, const char *path, char *error, size_t er
         }
         if (ed->items[idx].isGearCount) {
             int iv = (int)lrint(d);
-            if (iv < 1 || iv > MAX_GEARS || (double)iv != d) {
+            /* Same ceiling the menu enforces, so a saved file cannot reintroduce a gear count
+             * the editor has no ratio control for. */
+            if (iv < 1 || iv > (int)ed->items[idx].max || (double)iv != d) {
                 if (error != NULL && errorCap > 0)
                     snprintf(error, errorCap, "line %d: gear_count %s out of range", lineNo,
                              valStr);

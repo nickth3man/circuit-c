@@ -78,11 +78,24 @@ static void check_class_assignment(const VehicleManifest *manifest, PromotionChe
     char detail[PROMOTION_CHECK_DETAIL_CHARS] = "";
     const bool assigned = manifest->classTagCount >= 1;
     if (assigned) {
-        size_t used = 0;
-        used += (size_t)snprintf(detail, sizeof(detail), "classTags: ");
-        for (int i = 0; i < manifest->classTagCount && used < sizeof(detail); i++) {
-            used += (size_t)snprintf(detail + used, sizeof(detail) - used, "%s%s",
-                                     i > 0 ? ", " : "", manifest->classTags[i]);
+        /* Evidence is meant to be read, so it must never look complete when it is not. snprintf
+         * reports the length it *would* have written, which runs past the buffer as soon as the
+         * tag list is long enough; advancing by that number silently drops the tail. Track the
+         * bytes actually written instead, and say so with a "..." when the list is cut short. */
+        snprintf(detail, sizeof(detail), "classTags: ");
+        size_t used = strlen(detail);
+        int listed = 0;
+        for (int i = 0; i < manifest->classTagCount; i++) {
+            char piece[VEHICLE_MANIFEST_CLASS_TAG_CHARS + 2];
+            snprintf(piece, sizeof(piece), "%s%s", i > 0 ? ", " : "", manifest->classTags[i]);
+            /* Reserve room for the truncation marker so it can always be appended. */
+            if (used + strlen(piece) + 4 > sizeof(detail)) break;
+            snprintf(detail + used, sizeof(detail) - used, "%s", piece);
+            used = strlen(detail);
+            listed++;
+        }
+        if (listed < manifest->classTagCount) {
+            snprintf(detail + used, sizeof(detail) - used, "%s...", listed > 0 ? ", " : "");
         }
     } else {
         snprintf(detail, sizeof(detail), "classTagCount=%d (at least 1 required)",

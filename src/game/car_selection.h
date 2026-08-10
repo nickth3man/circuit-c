@@ -23,7 +23,12 @@
 
 #include "content/vehicle_manifest.h"
 
-#define CAR_SELECTION_ID_CHARS 64
+/*
+ * The ids this model carries are content ids copied straight out of VehicleDefinition.id, so
+ * the capacity is taken from there rather than restated. A future widening of the content-id
+ * capacity would otherwise silently truncate menu and recall ids against a stale 64.
+ */
+#define CAR_SELECTION_ID_CHARS VEHICLE_CONTENT_ID_CAPACITY
 #define CAR_SELECTION_RECALL_PATH "data/input/last_car.txt"
 
 typedef struct {

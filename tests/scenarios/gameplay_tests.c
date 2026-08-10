@@ -16,6 +16,7 @@
 #include "test_scenarios.h"
 #include "scenario_shared.h"
 
+#include "content/roster_promotion.h"
 #include "dev/car_corpus.h"
 #include "game/ai_driver.h"
 #include "game/car_roster.h"
@@ -2478,6 +2479,18 @@ static void scenario_car_selection(void)
           "an unknown id falls back to selection index 0");
     check(car_selection_index_or_default(NULL) == 0, "NULL falls back to selection index 0");
 
+    /*
+     * The recall path is real player state: the menu opens on whatever car it names, and the
+     * game rewrites it on every selection. Exercising the round-trip therefore has to borrow
+     * the file rather than own it — the developer's own last car is read out first and put back
+     * at the end, including the case where there was no file to begin with. Without that, a
+     * test run silently changes which car the game starts on, and an interrupted run leaves a
+     * stale 'awd_gt' behind.
+     */
+    char preserved[CAR_SELECTION_ID_CHARS];
+    memset(preserved, 0, sizeof(preserved));
+    const bool hadRecall = car_selection_load_recall(preserved, sizeof(preserved));
+
     /* Round-trip persistence: save a valid id, read the same id back. */
     check(car_selection_save_recall("awd_gt"), "recall saved 'awd_gt'");
     char recalled[CAR_SELECTION_ID_CHARS];
@@ -2490,6 +2503,12 @@ static void scenario_car_selection(void)
     memset(recalled, 0, sizeof(recalled));
     check(!car_selection_load_recall(recalled, sizeof(recalled)),
           "loading with no recall file returns false");
+
+    /* Hand the developer's selection back exactly as it was found. */
+    if (hadRecall) {
+        check(car_selection_save_recall(preserved), "pre-existing recall '%s' restored",
+              preserved);
+    }
 }
 
 /* ------------------------------------------------------------------------------------- */
@@ -2554,6 +2573,83 @@ static void scenario_setup_editor(void)
     check(setup_editor_value(&ed, 0) == ed.items[0].max,
           "repeated +1 steps clamp item 0 at its max %.4f (got %.4f, %d steps)",
           (double)ed.items[0].max, (double)setup_editor_value(&ed, 0), guard);
+
+    /*
+     * The registry sweep and the key -> VehicleSetup binding table must agree. A registry key
+     * with no binding would render as an item, display 0.0, and do nothing when adjusted; the
+     * editor refuses to create such an item and counts it here instead, so this assertion is
+     * what catches the two lists drifting apart.
+     */
+    check(ed.unboundKeyCount == 0,
+          "every setup-owned physics-input registry key has a field binding (got %d unbound)",
+          ed.unboundKeyCount);
+
+    /*
+     * gear_count may never exceed the forward ratios the editor exposes. Raising it past the
+     * last editable ratio would commit the setup to a gear whose ratio the menu cannot reach —
+     * usually 0, which vehicle_setup_is_valid rejects — leaving a setup the editor broke and
+     * cannot repair. Drive the count all the way up and require the result to still be valid.
+     */
+    int gearItem = -1;
+    for (int i = 0; i < ed.itemCount; i++) {
+        if (ed.items[i].isGearCount) gearItem = i;
+    }
+    check(gearItem >= 0, "the editor exposes a gear_count item");
+    if (gearItem >= 0) {
+        setup_editor_reset(&ed);
+        int editableRatios = 0;
+        for (int i = 0; i < ed.itemCount; i++) {
+            if (strncmp(ed.items[i].key, "drive.gear", 10) == 0 && !ed.items[i].isGearCount)
+                editableRatios++;
+        }
+        check((int)ed.items[gearItem].max == editableRatios,
+              "gear_count tops out at the %d editable ratios, not MAX_GEARS=%d (max %d)",
+              editableRatios, MAX_GEARS, (int)ed.items[gearItem].max);
+        for (int step = 0; step < MAX_GEARS + 4; step++) setup_editor_adjust(&ed, gearItem, 1);
+        check(setup_editor_value(&ed, gearItem) <= (float)editableRatios,
+              "repeated +1 steps cannot raise gear_count past %d (got %.0f)", editableRatios,
+              (double)setup_editor_value(&ed, gearItem));
+        check(setup_editor_is_valid(&ed),
+              "a fully raised gear_count still produces a launchable setup");
+    }
+}
+
+/* ------------------------------------------------------------------------------------- */
+/* Scenario: roster-gate — the promotion checklist and class rules are enforced when the  */
+/* live roster is built, not only in tests (issues #31, #33)                              */
+/* ------------------------------------------------------------------------------------- */
+static void scenario_roster_gate(void)
+{
+    /*
+     * The shipped content must pass the gates it declares. This is the regression guard that
+     * makes the gate meaningful in both directions: if a manifest is ever committed that calls
+     * itself player-selectable but fails a promotion check or its own class's numeric rules,
+     * the roster silently shrinks — and this scenario names the car and the reason instead of
+     * leaving a mystery missing entry.
+     */
+    const int rejected = car_roster_rejection_count();
+    for (int i = 0; i < rejected; i++) {
+        const CarRosterRejection *r = car_roster_rejection(i);
+        check(false, "shipped manifest '%s' was refused by the roster gate: %s",
+              r != NULL ? r->id : "?", r != NULL ? r->reason : "?");
+    }
+    check(rejected == 0, "no shipped player-selectable manifest fails the roster gate (got %d)",
+          rejected);
+    check(car_roster_count() == 6, "all 6 shipped cars survive both gates (got %d)",
+          car_roster_count());
+
+    /* Every surviving car satisfies the checklist directly — the roster's filter and the
+     * checklist agree rather than the roster merely claiming they do. */
+    for (int i = 0; i < car_roster_count(); i++) {
+        const VehicleManifest *m = car_roster_manifest(i);
+        check(m != NULL, "roster car %d has a manifest", i);
+        if (m == NULL) continue;
+        VehiclePromotionReport report;
+        check(vehicle_promotion_evaluate(m, &report),
+              "roster car '%s' passes the promotion checklist", m->definition.id);
+        check(m->contentKind == VEHICLE_CONTENT_PLAYER_SELECTABLE,
+              "roster car '%s' is player-selectable", m->definition.id);
+    }
 }
 
 /* ------------------------------------------------------------------------------------- */
@@ -2643,6 +2739,9 @@ static const TestScenario kGameplayScenarios[] = {
     { "launch-per-drivetrain",
       "every roster car spawns through the same entrant path carrying its stable id",
       scenario_launch_per_drivetrain },
+    { "roster-gate",
+      "issues #31/#33: the live roster enforces the promotion checklist and class rules",
+      scenario_roster_gate },
 };
 
 TestScenarioGroup test_gameplay_scenarios(void)
