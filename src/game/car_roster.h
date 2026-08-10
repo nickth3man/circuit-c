@@ -10,16 +10,11 @@
  * MANIFEST-DRIVEN. The roster is data-driven, loaded dynamically from data/vehicles/ manifest files
  * via vehicle_manifest_load_dir() (Issue #30). Editing a manifest updates vehicle behavior, and
  * calling car_roster_reload() refreshes the catalog cache.
- * SEEDED, NOT INVENTED. Each entry starts from one of the hand-tuned presets in dev_presets.c
- * and then overrides only what the roster's job requires — the drivetrain layout, and whatever
- * a car of that layout must have to be a fair example of it (a front-drive car carries its
- * mass over the driven axle and brakes forward, or it is not a front-drive car). Reusing the
- * presets keeps one set of researched numbers rather than a second, quietly diverging copy.
  *
  * These specs are NOT normalised to make any driver's job easier. A car that cannot be got
  * round the circuit is a result, not a bug in the roster.
  *
- * Raylib-free and I/O-free, like car_corpus.h.
+ * Raylib-free; headless-compatible.
  */
 #ifndef CIRCUIT_CAR_ROSTER_H
 #define CIRCUIT_CAR_ROSTER_H
