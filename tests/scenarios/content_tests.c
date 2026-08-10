@@ -1156,10 +1156,8 @@ static void scenario_track_markers(void)
             check(!e3.crossed, "no crossing after open finished");
             check(track_has_required_markers_for_mode(&track, "sprint", error, sizeof(error)),
                   "open route satisfies sprint mode");
-            check(!track_has_required_markers_for_mode(&track, "race", error, sizeof(error)) ||
-                      track_has_required_markers_for_mode(&track, "race", NULL, 0) == false ||
-                      true,
-                  "race mode check on open without grid may fail as expected");
+            check(!track_has_required_markers_for_mode(&track, "race", error, sizeof(error)),
+                  "open without grid fails race check");
             track_free(&track);
         }
     }
@@ -1241,17 +1239,14 @@ static void scenario_track_markers(void)
             track_reset_progress_at(&prog, &track, 0);
             /* Sector at x=5 facing 1,0: motion 1,0 through x=5, y=0 */
             Vector2 prev = { 0, 0 };
-            Vector2 curr = { 10, 0 };
+            Vector2 curr = { 10.1f, 0 };
             /* This will cross both checkpoint 1 and sector; test isolation. */
             TrackCheckpointEvent cev = track_update_checkpoints(&track, &prog, prev, curr);
             TrackSectorEvent sev = track_update_sectors(&track, &prog, prev, curr);
+            check(cev.crossed, "checkpoint crossed");
             check(sev.crossed, "sector crossed");
             check(sev.index == 0, "sector index 0");
-            /* Lap should not have completed from sector alone; checkpoint logic separate. */
-            if (cev.crossed) {
-                check(prog.nextCheckpoint == 2 || prog.nextCheckpoint == 0 || true,
-                      "checkpoint advanced independently");
-            }
+            check(prog.nextCheckpoint == 0, "checkpoint advanced to 0");
             track_free(&track);
         }
     }

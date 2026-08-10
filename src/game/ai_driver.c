@@ -232,6 +232,12 @@ static float plan_offset_at(const AiDriverState *state, const TrackDefinition *t
 {
     if (state->planLayerCount <= 0) return 0.0f;
     const int count = track->count;
+    if (!track->routeClosed) {
+        if (nodeIndex < 0 || nodeIndex >= count) return 0.0f;
+        const int rel = nodeIndex - state->planBaseNode;
+        if (rel < 0 || rel >= state->planLayerCount) return 0.0f;
+        return state->planOffsetM[rel];
+    }
     const int rel = ((nodeIndex - state->planBaseNode) % count + count) % count;
     return (rel < state->planLayerCount) ? state->planOffsetM[rel] : 0.0f;
 }
@@ -243,7 +249,13 @@ Vector2 ai_driver_plan_point(const AiDriverState *state, const TrackDefinition *
         return (Vector2){ 0.0f, 0.0f };
 
     const int count = track->count;
-    const int node = ((nodeIndex % count) + count) % count;
+    int node = nodeIndex;
+    if (track->routeClosed) {
+        node = ((nodeIndex % count) + count) % count;
+    } else {
+        if (node < 0) node = 0;
+        if (node >= count) node = count - 1;
+    }
     const Vector2 centre = track->nodes[node].centerM;
     const float offsetM = plan_offset_at(state, track, node);
     if (offsetM == 0.0f) return centre;
