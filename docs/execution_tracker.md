@@ -410,7 +410,7 @@ This work closes the multiplayer gap but does not block the stated AI-racing tar
 
 - [x] Phase 0 — Identity and Core Architecture
 - [x] Phase 1 — Physics Foundations
-- [ ] Phase 2 — Data-Driven Cars and Track Foundations
+- [x] Phase 2 — Data-Driven Cars and Track Foundations
 - [ ] Phase 3 — Physics Implementation
 - [ ] Phase 4 — Complete Track System
 - [ ] Phase 5 — Cross-Cutting Quality and Player Foundations
