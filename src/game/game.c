@@ -560,20 +560,27 @@ static void stage_acquire_inputs(Game *game, TickContext *ctx)
     ctx->fromPlayback = false;
     if (game->replay.mode == REPLAY_MODE_PLAYBACK) {
         if (game->replay.playbackCursor == 0) {
-            /* Rewind the session alongside the vehicle. The phase is sticky in a way the
-             * screen state never was: leaving it at whatever the live run reached means
-             * replaying into a race that is already classified, and a classified race does not
-             * simulate — so the playback would silently do nothing at all.
+            /* Validate before destroying anything. A recording whose snapshot does not fit this
+             * car is rejected, and a rejected playback must leave the live race exactly as it
+             * found it — restarting the session first would wipe the player's clock, results
+             * and events on the way to refusing to play.
+             *
+             * When it does fit, the session is rewound alongside the vehicle. The phase is
+             * sticky in a way the screen state never was: leaving it at whatever the live run
+             * reached means replaying into a race that is already classified, and a classified
+             * race does not simulate — so the playback would silently do nothing at all.
              *
              * Route progress is deliberately left alone. It is not ours to guess: a recording
              * need not have started at gate zero, and restoring the real starting cursor means
              * capturing it with the recording, alongside the vehicle snapshot (issue 44). */
-            race_session_start(&game->session, NULL);
-            if (game->replay.initialVehicle.valid &&
-                !replay_restore_initial_vehicle(&game->replay, &game->vehicleDefinition,
-                                                &game->vehicleSetup, &game->vehicleInstance)) {
+            const bool restored =
+                !game->replay.initialVehicle.valid ||
+                replay_restore_initial_vehicle(&game->replay, &game->vehicleDefinition,
+                                               &game->vehicleSetup, &game->vehicleInstance);
+            if (restored)
+                race_session_start(&game->session, NULL);
+            else
                 replay_stop(&game->replay);
-            }
         }
         if (replay_next(&game->replay, &ctx->sample))
             ctx->fromPlayback = true;

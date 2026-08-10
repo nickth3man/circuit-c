@@ -210,13 +210,18 @@ void race_session_begin_tick(RaceSession *session, float dt)
 
     if (session->phase == RACE_PHASE_COUNTDOWN) {
         /* Counted in fixed steps, never in seconds and never in frames: the grid releases on
-         * the same tick every run, and `dt` is deliberately not consulted here at all. */
-        if (session->countdownTicksRemaining > 0) session->countdownTicksRemaining--;
-        if (session->countdownTicksRemaining <= 0) {
-            session->countdownTicksRemaining = 0;
-            set_phase(session, RACE_PHASE_RUNNING);
+         * the same tick every run, and `dt` is deliberately not consulted here at all.
+         *
+         * Checked before it is decremented, not after. Releasing on the tick that reaches zero
+         * would hand that tick's controls straight to the driver, because the gating in the
+         * pre-physics stage reads the phase this function just changed — so an N-tick countdown
+         * would hold the grid for N-1 ticks and a one-tick countdown would hold it for none.
+         * A countdown of N ticks now holds the car for N ticks and goes green on the next. */
+        if (session->countdownTicksRemaining > 0) {
+            session->countdownTicksRemaining--;
+            return; /* still held, and the race clock does not run before green */
         }
-        return; /* the race clock does not run before green */
+        set_phase(session, RACE_PHASE_RUNNING);
     }
 
     session->clockS += dt;

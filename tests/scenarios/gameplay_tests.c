@@ -1630,13 +1630,44 @@ static void scenario_race_session(void)
     check(race_session_is_simulating(session),
           "a countdown still simulates: the cars settle on the grid");
 
-    for (int i = 0; i < 3; i++) race_session_tick(session, FIXED_DT_S);
-    check(session->phase == RACE_PHASE_RUNNING,
-          "the countdown releases after exactly its three ticks (got %d)", (int)session->phase);
+    /* A countdown of N ticks holds the car for N ticks — all of them. Releasing on the tick
+     * that reaches zero would hand that tick's controls to the driver, because the pre-physics
+     * gating reads the phase after the session has already advanced it. */
+    for (int i = 0; i < 3; i++) {
+        race_session_tick(session, FIXED_DT_S);
+        check(session->phase == RACE_PHASE_COUNTDOWN,
+              "countdown tick %d of 3 still holds the grid (got %d)", i + 1,
+              (int)session->phase);
+    }
     check(session->clockS == 0.0f, "and the race clock has not started yet (got %.6f)",
           (double)session->clockS);
-    check(session->tick == 3u, "the session ticked through the countdown (got %llu)",
+
+    race_session_tick(session, FIXED_DT_S);
+    check(session->phase == RACE_PHASE_RUNNING,
+          "the next tick goes green, so all three held ticks were held (got %d)",
+          (int)session->phase);
+    check(session->tick == 4u, "the session ticked through the countdown (got %llu)",
           (unsigned long long)session->tick);
+
+    /* The degenerate case the off-by-one hid: one tick of countdown must hold one tick. */
+    {
+        RaceRules oneTick;
+        race_rules_set_default(&oneTick);
+        oneTick.countdownS = FIXED_DT_S;
+        race_session_start(session, &oneTick);
+        check(session->phase == RACE_PHASE_COUNTDOWN, "a one-tick countdown starts held");
+        race_session_tick(session, FIXED_DT_S);
+        check(session->phase == RACE_PHASE_COUNTDOWN,
+              "and is still held through its single tick rather than released before it "
+              "(got %d)",
+              (int)session->phase);
+        race_session_tick(session, FIXED_DT_S);
+        check(session->phase == RACE_PHASE_RUNNING, "then goes green");
+    }
+
+    /* Back to a session that is green from its first tick, for the clock checks below. */
+    rules.countdownS = 0.0f;
+    race_session_start(session, &rules);
 
     /* ---- 4. The race clock counts green-flag time only ---- */
     for (int i = 0; i < 10; i++) race_session_tick(session, FIXED_DT_S);
@@ -1918,6 +1949,34 @@ static void scenario_race_session(void)
             "while the application tick keeps counting, because it times the app not the race");
         check(race_session_is_simulating(&game->session),
               "so a replay always begins in a phase that actually simulates");
+
+        free(game);
+    }
+
+    /* ---- 11. A rejected replay leaves the live race untouched ---- */
+    {
+        Game *game = alloc_game();
+        game_init(game);
+        replay_begin_recording(&game->replay, game->sim.tick);
+        for (int i = 0; i < 15; i++) game_fixed_update(game, FIXED_DT_S);
+
+        /* Make the snapshot fail its own compatibility check — the recording no longer matches
+         * the car in this Game. Rejecting the playback has to be non-destructive: the session
+         * the player is in is not ours to clear on the way to refusing. */
+        game->replay.initialVehicle.definitionHash ^= 0xFFFFFFFFu;
+
+        const uint64_t sessionTickBefore = game->session.tick;
+        check(replay_begin_playback(&game->replay),
+              "playback begins on an incompatible replay");
+        game_fixed_update(game, FIXED_DT_S);
+
+        check(game->replay.mode != REPLAY_MODE_PLAYBACK,
+              "the incompatible recording is rejected (mode %d)", (int)game->replay.mode);
+        check(game->session.tick == sessionTickBefore + 1u,
+              "and the live session carried on rather than being rewound on the way to "
+              "refusing (tick %llu, expected %llu)",
+              (unsigned long long)game->session.tick,
+              (unsigned long long)(sessionTickBefore + 1u));
 
         free(game);
     }
