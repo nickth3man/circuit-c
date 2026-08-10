@@ -42,6 +42,19 @@ void physics_static_axle_loads(const VehicleSpec *spec, float *frontLoadN, float
     }
 }
 
+/* Static toe as a per-wheel heading offset, in the body frame where +angle is a left (counter-
+ * clockwise) rotation and +y is the left of the car.
+ *
+ * Positive toe is toe-IN: both wheels of the axle point at the centreline, so the LEFT wheel is
+ * rotated clockwise (negative) and the RIGHT wheel counter-clockwise (positive). The offset is
+ * a property of the suspension, not of the rack, so it is ADDED to whatever the steering and
+ * Ackermann geometry produced rather than mixed into that calculation. */
+float physics_wheel_toe_offset_rad(float toeRad, float wheelLateralPositionM)
+{
+    if (!(isfinite(toeRad) && isfinite(wheelLateralPositionM))) return 0.0f;
+    return (wheelLateralPositionM > 0.0f) ? -toeRad : toeRad;
+}
+
 void physics_update_steering(const VehicleSpec *spec, VehicleState *state, float steerInput,
                              float dt)
 {
@@ -82,10 +95,22 @@ void physics_update_steering(const VehicleSpec *spec, VehicleState *state, float
         steerFL = deltaC + spec->ackermannPercent * (deltaL - deltaC);
         steerFR = deltaC + spec->ackermannPercent * (deltaR - deltaC);
     }
-    state->wheels[WHEEL_FRONT_LEFT].steerAngleRad = steerFL;
-    state->wheels[WHEEL_FRONT_RIGHT].steerAngleRad = steerFR;
-    state->wheels[WHEEL_REAR_LEFT].steerAngleRad = 0.0f;
-    state->wheels[WHEEL_REAR_RIGHT].steerAngleRad = 0.0f;
+    /* Static alignment closes the chain: steerAngleRad is now each wheel's EFFECTIVE heading in
+     * the body frame — rack angle, plus Ackermann, plus static toe — which is exactly what the
+     * slip-angle and force-rotation stages read. The rear wheels have no rack, so their heading
+     * is their toe alone. */
+    const float toeFrontRad = spec->suspToeFrontRad;
+    const float toeRearRad = spec->suspToeRearRad;
+    state->wheels[WHEEL_FRONT_LEFT].steerAngleRad =
+        steerFL + physics_wheel_toe_offset_rad(
+                      toeFrontRad, state->wheels[WHEEL_FRONT_LEFT].localPositionM.y);
+    state->wheels[WHEEL_FRONT_RIGHT].steerAngleRad =
+        steerFR + physics_wheel_toe_offset_rad(
+                      toeFrontRad, state->wheels[WHEEL_FRONT_RIGHT].localPositionM.y);
+    state->wheels[WHEEL_REAR_LEFT].steerAngleRad = physics_wheel_toe_offset_rad(
+        toeRearRad, state->wheels[WHEEL_REAR_LEFT].localPositionM.y);
+    state->wheels[WHEEL_REAR_RIGHT].steerAngleRad = physics_wheel_toe_offset_rad(
+        toeRearRad, state->wheels[WHEEL_REAR_RIGHT].localPositionM.y);
 }
 
 void physics_axle_slip_angles(const VehicleSpec *spec, const VehicleState *state,
@@ -982,13 +1007,14 @@ static void stage_accumulate(PhysicsStep *step)
         else
             derived->rearLateralForceN += state->wheels[i].forceLateralN;
 
-        /* Rotate to body frame. Each front wheel uses its own steer angle. */
-        const Vector2 bodyForceN = front ? physics_rotate_wheel_force_to_body(
-                                               (Vector2){ state->wheels[i].forceLongitudinalN,
-                                                          state->wheels[i].forceLateralN },
-                                               state->wheels[i].steerAngleRad)
-                                         : (Vector2){ state->wheels[i].forceLongitudinalN,
-                                                      state->wheels[i].forceLateralN };
+        /* Rotate to body frame by each wheel's own effective heading. The rear pair used to be
+         * copied through unrotated on the grounds that it never steers; with static toe active
+         * it has a heading of its own, and skipping the rotation would silently discard the
+         * drag component that rear toe exists to produce. At zero rear toe the rotation is the
+         * identity, so this is not a change for a car with no rear alignment. */
+        const Vector2 bodyForceN = physics_rotate_wheel_force_to_body(
+            (Vector2){ state->wheels[i].forceLongitudinalN, state->wheels[i].forceLateralN },
+            state->wheels[i].steerAngleRad);
 
         if (front) {
             derived->frontBodyForceN.x += bodyForceN.x;

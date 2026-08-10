@@ -387,6 +387,15 @@ bool vehicle_spec_is_valid(const VehicleSpec *spec)
           spec->rollStiffnessFrontFraction >= 0.0f && spec->rollStiffnessFrontFraction <= 1.0f))
         return false;
 
+    /* Static toe reaches the contact patch (issue #14), so an unbounded or non-finite value is
+     * now a force error rather than a cosmetic one. Rejected here, at the same boundary every
+     * other active alignment input is checked, so a malformed manifest fails to load instead of
+     * quietly steering the car. */
+    if (!(isfinite(spec->suspToeFrontRad) &&
+          fabsf(spec->suspToeFrontRad) <= SUSP_TOE_LIMIT_RAD &&
+          isfinite(spec->suspToeRearRad) && fabsf(spec->suspToeRearRad) <= SUSP_TOE_LIMIT_RAD))
+        return false;
+
     return true;
 }
 

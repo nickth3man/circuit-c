@@ -1419,8 +1419,12 @@ static void scenario_ackermann_geometry(void)
     check(steerFL2 < -0.01f && steerFR2 < -0.01f,
           "both front wheels steer right when input is negative");
 
-    /* Disable Ackermann: both angles must be equal. */
+    /* Disable Ackermann AND static toe: the rack angle is then the only thing left, so both
+     * front wheels must be exactly parallel. Toe is zeroed rather than tolerated because it is
+     * a separate authored offset (issue #14) and leaving it in would turn this Ackermann
+     * assertion into a test of the toe magnitude. */
     game->spec.ackermannPercent = 0.0f;
+    game->spec.suspToeFrontRad = 0.0f;
     game->input.steer = 0.50f;
     for (int i = 0; i < 20; i++) game_fixed_update(game, FIXED_DT_S);
 
@@ -1435,7 +1439,128 @@ static void scenario_ackermann_geometry(void)
         check_near((double)steerFL3, (double)steerFR3, 1e-4, msg);
     }
 
+    /* Restoring toe on the same parallel rack separates the pair by exactly twice the authored
+     * value: toe composes with the steering geometry rather than replacing it. */
+    game->spec.suspToeFrontRad = 0.004f;
+    for (int i = 0; i < 20; i++) game_fixed_update(game, FIXED_DT_S);
+    const float steerFL4 = game->vehicle.wheels[WHEEL_FRONT_LEFT].steerAngleRad;
+    const float steerFR4 = game->vehicle.wheels[WHEEL_FRONT_RIGHT].steerAngleRad;
+    check_near((double)(steerFR4 - steerFL4), 2.0 * 0.004, 1e-5,
+               "toe-in opens a parallel front pair by twice the authored toe");
+
     free(game);
+}
+
+/*
+ * static-toe: authored alignment reaches the contact patch (issue #14).
+ *
+ * Four claims, each of which fails for a different implementation mistake:
+ *
+ *   1. SCRUB. Toe of either sign costs speed in a straight line, and more toe costs more. A
+ *      sign error in physics_wheel_toe_offset_rad turns the scrub into thrust and the coast
+ *      run ends FASTER than the aligned one.
+ *   2. SIGN INDEPENDENCE. Toe-in and toe-out of equal magnitude cost the same, because the
+ *      lateral force is odd in slip angle and its longitudinal projection is therefore even in
+ *      toe. Applying toe to only one side of the axle breaks this.
+ *   3. NO NET ASYMMETRY. A symmetric car with symmetric toe develops no lateral velocity and
+ *      no yaw travelling straight, however large the toe. This is the check that catches toe
+ *      being added with the same sign to both wheels of an axle.
+ *   4. TURN-IN. Alignment measurably changes the yaw response to a step steer — an
+ *      implementation that stores toe without letting it reach the slip calculation passes 1-3
+ *      trivially and fails here.
+ */
+static float toe_coast_end_speed_mps(float toeFrontRad, float toeRearRad, float *peakAbsYawOut,
+                                     float *peakAbsLateralOut)
+{
+    Game *game = alloc_game();
+    game_init(game);
+    game->spec.suspToeFrontRad = toeFrontRad;
+    game->spec.suspToeRearRad = toeRearRad;
+    set_vehicle_rolling_speed(game, 30.0f);
+    game->input.steer = 0.0f;
+    game->input.throttle = 0.0f;
+
+    float peakYaw = 0.0f, peakLateral = 0.0f;
+    for (int i = 0; i < 240; i++) {
+        game_fixed_update(game, FIXED_DT_S);
+        peakYaw = maxf(peakYaw, fabsf(game->vehicle.yawRateRadS));
+        peakLateral = maxf(peakLateral, fabsf(game->vehicle.velocityLateralMps));
+    }
+    const float endSpeed = game->vehicle.velocityLongitudinalMps;
+    if (peakAbsYawOut != NULL) *peakAbsYawOut = peakYaw;
+    if (peakAbsLateralOut != NULL) *peakAbsLateralOut = peakLateral;
+    free(game);
+    return endSpeed;
+}
+
+/* Peak yaw rate over a step-steer response, for one authored front toe. */
+static float toe_step_steer_peak_yaw(float toeFrontRad)
+{
+    Game *game = alloc_game();
+    game_init(game);
+    game->spec.suspToeFrontRad = toeFrontRad;
+    set_vehicle_rolling_speed(game, 22.0f);
+    game->input.steer = 0.35f;
+
+    float peakYaw = 0.0f;
+    for (int i = 0; i < 180; i++) {
+        game_fixed_update(game, FIXED_DT_S);
+        peakYaw = maxf(peakYaw, fabsf(game->vehicle.yawRateRadS));
+    }
+    free(game);
+    return peakYaw;
+}
+
+static void scenario_static_toe(void)
+{
+    float yawAligned = 0.0f, lateralAligned = 0.0f;
+    float yawIn = 0.0f, lateralIn = 0.0f;
+    float yawOut = 0.0f, lateralOut = 0.0f;
+    float yawHeavy = 0.0f, lateralHeavy = 0.0f;
+
+    const float aligned = toe_coast_end_speed_mps(0.0f, 0.0f, &yawAligned, &lateralAligned);
+    const float toeIn = toe_coast_end_speed_mps(0.010f, 0.010f, &yawIn, &lateralIn);
+    const float toeOut = toe_coast_end_speed_mps(-0.010f, -0.010f, &yawOut, &lateralOut);
+    const float toeHeavy = toe_coast_end_speed_mps(0.020f, 0.020f, &yawHeavy, &lateralHeavy);
+
+    /* 1. Scrub, and more of it with more toe. */
+    check(toeIn < aligned - 0.01f,
+          "toe-in coasts down further than a perfectly aligned car (%.4f < %.4f m/s)",
+          (double)toeIn, (double)aligned);
+    check(toeOut < aligned - 0.01f,
+          "toe-out also costs speed rather than making it (%.4f < %.4f m/s)", (double)toeOut,
+          (double)aligned);
+    check(toeHeavy < toeIn, "twice the toe scrubs off more speed (%.4f < %.4f m/s)",
+          (double)toeHeavy, (double)toeIn);
+
+    /* 2. The cost depends on the magnitude, not the direction. */
+    check(fabsf(toeIn - toeOut) < 1e-3f,
+          "toe-in and toe-out of equal magnitude cost the same speed (|%.5f| m/s apart)",
+          (double)(toeIn - toeOut));
+
+    /* 3. A symmetric car with symmetric toe drives straight. */
+    check(lateralIn < 1e-4f && lateralOut < 1e-4f && lateralHeavy < 1e-4f,
+          "symmetric toe develops no lateral velocity (peaks %.2e / %.2e / %.2e m/s)",
+          (double)lateralIn, (double)lateralOut, (double)lateralHeavy);
+    check(yawIn < 1e-5f && yawOut < 1e-5f && yawHeavy < 1e-5f,
+          "symmetric toe develops no yaw (peaks %.2e / %.2e / %.2e rad/s)", (double)yawIn,
+          (double)yawOut, (double)yawHeavy);
+    check(yawAligned < 1e-5f && lateralAligned < 1e-4f,
+          "the aligned reference run is straight too, so the bounds above mean something");
+
+    /* 4. Alignment reaches the cornering response, not only the straight line. */
+    const float yawPeakAligned = toe_step_steer_peak_yaw(0.0f);
+    const float yawPeakToeIn = toe_step_steer_peak_yaw(0.020f);
+    const float yawPeakToeOut = toe_step_steer_peak_yaw(-0.020f);
+    check(fabsf(yawPeakToeIn - yawPeakAligned) > 1e-3f,
+          "front toe-in changes the step-steer yaw response (%.4f vs %.4f rad/s)",
+          (double)yawPeakToeIn, (double)yawPeakAligned);
+    check(fabsf(yawPeakToeOut - yawPeakAligned) > 1e-3f,
+          "front toe-out changes it in its own right (%.4f vs %.4f rad/s)",
+          (double)yawPeakToeOut, (double)yawPeakAligned);
+    check((yawPeakToeIn - yawPeakAligned) * (yawPeakToeOut - yawPeakAligned) < 0.0f,
+          "the two toe directions move turn-in opposite ways (%.4f / %.4f / %.4f rad/s)",
+          (double)yawPeakToeOut, (double)yawPeakAligned, (double)yawPeakToeIn);
 }
 
 /*
@@ -2776,6 +2901,8 @@ static const TestScenario kHandlingScenarios[] = {
       scenario_locked_diff },
     { "ackermann", "Ackermann geometry: inner wheel steers more than outer",
       scenario_ackermann_geometry },
+    { "static-toe", "issue #14: static toe scrubs, stays symmetric, and reaches turn-in",
+      scenario_static_toe },
     { "load-sensitivity", "tire load sensitivity: heavier wheel has lower mu scale",
       scenario_tire_load_sensitivity },
     { "tire-relaxation", "tire relaxation: lateral force lag and convergence",

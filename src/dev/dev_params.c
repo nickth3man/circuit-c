@@ -327,13 +327,16 @@ static const DevParameter g_params[] = {
       "Rear static camber. Appearance only: narrows the drawn contact patch. It does not "
       "change tire force." },
     { "susp.toe_front", "Suspension", "rad", SPEC_OFFSET(suspToeFrontRad), SUSP_TOE_FRONT_RAD,
-      -0.05f, 0.05f, 0.001f, false, false, 2, DEV_CLASS_APPEARANCE, DEV_OWNER_SETUP,
-      "Front static toe. Appearance only: toes the drawn front wheels. It does not change "
-      "steering or tire force." },
+      -SUSP_TOE_LIMIT_RAD, SUSP_TOE_LIMIT_RAD, 0.001f, false, false, 2, DEV_CLASS_PHYSICS_INPUT,
+      DEV_OWNER_SETUP,
+      "Front static toe, positive = toe-in. Offsets each front wheel's effective heading, so "
+      "it "
+      "changes slip angle, straight-line drag and turn-in." },
     { "susp.toe_rear", "Suspension", "rad", SPEC_OFFSET(suspToeRearRad), SUSP_TOE_REAR_RAD,
-      -0.05f, 0.05f, 0.001f, false, false, 2, DEV_CLASS_INACTIVE, DEV_OWNER_SETUP,
-      "Rear static toe. Inactive: only the front value reaches the appearance grammar. Kept as "
-      "the rear half of a symmetric setup pair." },
+      -SUSP_TOE_LIMIT_RAD, SUSP_TOE_LIMIT_RAD, 0.001f, false, false, 2, DEV_CLASS_PHYSICS_INPUT,
+      DEV_OWNER_SETUP,
+      "Rear static toe, positive = toe-in. Offsets each rear wheel's effective heading; rear "
+      "toe-in adds straight-line stability and drag." },
     { "susp.caster_front", "Suspension", "rad", SPEC_OFFSET(suspCasterFrontRad),
       SUSP_CASTER_FRONT_RAD, 0.0f, 0.25f, 0.001f, false, false, 2, DEV_CLASS_INACTIVE,
       DEV_OWNER_SETUP,

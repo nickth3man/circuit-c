@@ -157,8 +157,10 @@ static void draw_car_part(Texture2D tex, Vector2 originPx, Vector2 centrePx, flo
 }
 
 /* The one place a car is composited, used by the running game and by the gallery alike.
- * `steerRad` is per wheel and is added to the derived static alignment; pass NULL for a
- * straight-ahead pose. `scale` is destination pixels per texel. */
+ * `steerRad` is per wheel and is the simulation's EFFECTIVE wheel heading, which since issue #14
+ * already contains static toe; the grammar's own exaggerated toe therefore only poses the
+ * wheels when no simulation angle is supplied. Pass NULL for a straight-ahead-at-rest pose.
+ * `scale` is destination pixels per texel. */
 static void car_sprites_draw(const CarSprites *s, const CarVisual *visual, Vector2 centrePx,
                              float headingRad, const float *steerRad, float scale)
 {
@@ -180,9 +182,10 @@ static void car_sprites_draw(const CarSprites *s, const CarVisual *visual, Vecto
         const float wy = hubM.x * sn + hubM.y * c;
         const Vector2 hubPx = { centrePx.x + wx * destPxPerM, centrePx.y - wy * destPxPerM };
 
-        const float steer = (steerRad != NULL) ? steerRad[i] : 0.0f;
-        draw_car_part(s->wheel[i], s->wheelOriginPx[i], hubPx,
-                      headingRad + steer + visual->wheels[i].staticAngleRad, scale);
+        const float wheelHeadingRad =
+            (steerRad != NULL) ? steerRad[i] : visual->wheels[i].staticAngleRad;
+        draw_car_part(s->wheel[i], s->wheelOriginPx[i], hubPx, headingRad + wheelHeadingRad,
+                      scale);
     }
 }
 

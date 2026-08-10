@@ -186,8 +186,13 @@
 /* Suspension / stance (visual + roll-share inputs). */
 #define SUSP_CAMBER_FRONT_RAD (-0.0175f)
 #define SUSP_CAMBER_REAR_RAD (-0.0175f)
+/* Static toe, radians, positive = toe-IN (each wheel's leading edge points at the vehicle
+ * centreline). The limit bounds what an authored car may claim: past a few degrees the
+ * small-angle assumption behind a static heading offset stops describing a road car, and the
+ * value would be scrubbing the tires rather than aligning them. */
 #define SUSP_TOE_FRONT_RAD 0.0035f
 #define SUSP_TOE_REAR_RAD 0.0017f
+#define SUSP_TOE_LIMIT_RAD 0.05f
 #define SUSP_CASTER_FRONT_RAD 0.087f
 #define SUSP_CASTER_REAR_RAD 0.052f
 #define SUSP_WHEEL_RATE_FRONT_NPM 28000.0f

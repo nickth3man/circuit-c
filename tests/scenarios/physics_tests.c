@@ -505,13 +505,21 @@ static void scenario_vehicle_units(void)
     physics_update_steering(&spec, &state, 1.0f, 0.05f);
     check_near(state.frontRoadWheelAngleRad, spec.maxSteerRateRadS * 0.05f, 1e-7,
                "left steering maps positive and obeys the steering rate");
-    check_near(state.wheels[WHEEL_FRONT_LEFT].steerAngleRad,
-               state.wheels[WHEEL_FRONT_RIGHT].steerAngleRad, 0.0,
-               "both front wheels receive the same Phase 1 angle");
-    check_near(state.wheels[WHEEL_REAR_LEFT].steerAngleRad, 0.0, 0.0,
-               "the rear-left wheel never steers");
-    check_near(state.wheels[WHEEL_REAR_RIGHT].steerAngleRad, 0.0, 0.0,
-               "the rear-right wheel never steers");
+    /* With Ackermann off, the rack angle reaches both front wheels identically; the only thing
+     * separating them is static toe, mirrored across the axle (issue #14). */
+    check_near(state.wheels[WHEEL_FRONT_LEFT].steerAngleRad +
+                   state.wheels[WHEEL_FRONT_RIGHT].steerAngleRad,
+               2.0 * (double)state.frontRoadWheelAngleRad, 1e-7,
+               "parallel steering: the front pair still averages the rack angle");
+    check_near(state.wheels[WHEEL_FRONT_RIGHT].steerAngleRad -
+                   state.wheels[WHEEL_FRONT_LEFT].steerAngleRad,
+               2.0 * (double)spec.suspToeFrontRad, 1e-7,
+               "front toe-in opens the pair by twice the authored toe, right minus left");
+    /* The rear axle has no rack, so its heading is its static toe and nothing else. */
+    check_near(state.wheels[WHEEL_REAR_LEFT].steerAngleRad, -(double)spec.suspToeRearRad, 1e-7,
+               "the rear-left wheel carries only its static toe");
+    check_near(state.wheels[WHEEL_REAR_RIGHT].steerAngleRad, (double)spec.suspToeRearRad, 1e-7,
+               "the rear-right wheel carries only its static toe, mirrored");
     const float beforeReturn = state.frontRoadWheelAngleRad;
     physics_update_steering(&spec, &state, 0.0f, 0.01f);
     check_near(beforeReturn - state.frontRoadWheelAngleRad, spec.steerReturnRateRadS * 0.01f,
@@ -1723,11 +1731,30 @@ static void scenario_rest(void)
     check_near(game->vehicle.positionM.y, 0.0, 1e-7, "rest position Y remains fixed");
     check_near(game->derived.speedMps, 0.0, 1e-7, "rest speed remains zero");
     check_near(game->vehicle.yawRateRadS, 0.0, 1e-7, "rest yaw rate remains zero");
-    check_near(game->derived.totalBodyForceN.x, 0.0, 1e-7,
-               "rest longitudinal force remains zero");
+    /* Static toe scrubs even at rest (issue #14): the two mirrored contact patches cancel
+     * laterally — asserted immediately below — while their longitudinal projections add, so the
+     * solver reports a small drag. Alignment can only ever retard the car; a positive value here
+     * would mean toe was propelling it, and the pose checks above already prove it moves
+     * nothing at all. */
+    check(game->derived.totalBodyForceN.x < 0.0f && game->derived.totalBodyForceN.x > -20.0f,
+          "rest longitudinal force is a bounded toe-scrub drag, never a thrust (%.4f N)",
+          (double)game->derived.totalBodyForceN.x);
     check_near(game->derived.totalBodyForceN.y, 0.0, 1e-7, "rest lateral force remains zero");
     check(physics_state_is_valid(&game->spec, &game->vehicle, &game->derived),
           "rest state remains finite and inside safety bounds");
+
+    /* And alignment is the ONLY source of it: zero the toe and the residual vanishes exactly. */
+    {
+        Game *unaligned = alloc_game();
+        game_init(unaligned);
+        input_zero(&unaligned->input);
+        unaligned->spec.suspToeFrontRad = 0.0f;
+        unaligned->spec.suspToeRearRad = 0.0f;
+        for (int i = 0; i < 1200; i++) game_fixed_update(unaligned, FIXED_DT_S);
+        check_near(unaligned->derived.totalBodyForceN.x, 0.0, 1e-7,
+                   "with zero toe a resting car reports no longitudinal force at all");
+        free(unaligned);
+    }
 
     game->input.steer = 1.0f;
     for (int i = 0; i < 120; i++) game_fixed_update(game, FIXED_DT_S);

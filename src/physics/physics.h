@@ -54,6 +54,11 @@ Vector2 physics_aero_drag_body_n(const VehicleSpec *spec, float velocityLongitud
  * frame force; *magnitudeN receives its length. Zero at rest, with no direction invented. */
 Vector2 physics_rolling_resistance_body_n(float rollingResistanceCoefficient, float normalLoadN,
                                           Vector2 contactVelocityMps, float *magnitudeN);
+/* Static toe as a signed per-wheel heading offset. `toeRad` is positive for toe-IN and
+ * `wheelLateralPositionM` is the wheel's body-frame y (positive on the left of the car), so
+ * the same authored value produces mirrored offsets on the two sides of an axle. */
+float physics_wheel_toe_offset_rad(float toeRad, float wheelLateralPositionM);
+
 void physics_update_steering(const VehicleSpec *spec, VehicleState *state, float steerInput,
                              float dt);
 void physics_axle_slip_angles(const VehicleSpec *spec, const VehicleState *state,
