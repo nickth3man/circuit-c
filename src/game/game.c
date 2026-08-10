@@ -334,6 +334,54 @@ GAME_API bool game_spawn_on_track_at(Game *game, int checkpointIndex)
  * determinism is untouched. With an empty catalog there is nothing to apply and the current
  * (builtin default) car stays.
  */
+bool game_can_start_race(const Game *game, char *reason, size_t reasonCap)
+{
+    if (game == NULL) {
+        if (reason != NULL && reasonCap > 0) snprintf(reason, reasonCap, "no game");
+        return false;
+    }
+    if (game->selectedCarIndex < 0) {
+        if (reason != NULL && reasonCap > 0) snprintf(reason, reasonCap, "no car selected");
+        return false;
+    }
+    CarSelectionEntry entry;
+    if (!car_selection_entry(game->selectedCarIndex, &entry)) {
+        if (reason != NULL && reasonCap > 0)
+            snprintf(reason, reasonCap, "selected car not in roster");
+        return false;
+    }
+    if (entry.manifest->contentKind != VEHICLE_CONTENT_PLAYER_SELECTABLE) {
+        if (reason != NULL && reasonCap > 0)
+            snprintf(reason, reasonCap, "car %s is not player-selectable (%s)", entry.id,
+                     vehicle_content_kind_name(entry.manifest->contentKind));
+        return false;
+    }
+    if (entry.manifest->classTagCount == 0) {
+        if (reason != NULL && reasonCap > 0)
+            snprintf(reason, reasonCap, "car %s has no class tag", entry.id);
+        return false;
+    }
+    /* Vehicle bounds: either the edited working setup or the manifest default must validate. */
+    const VehicleSetup *setup =
+        game->setupCustomized ? &game->setupEditor.working : &entry.manifest->defaultSetup;
+    if (!vehicle_setup_is_valid(&entry.manifest->definition, setup)) {
+        char why[64] = "";
+        if (game->setupCustomized) setup_editor_can_start(&game->setupEditor, why, sizeof(why));
+        if (reason != NULL && reasonCap > 0)
+            snprintf(reason, reasonCap, "setup outside vehicle bounds%s%s", why[0] ? ": " : "",
+                     why);
+        return false;
+    }
+    return true;
+}
+
+/*
+ * Point the player entrant at the menu's selected car: the manifest's immutable definition and
+ * its authored default setup, applied through the same derive path a spawn uses. Interactive
+ * menu use only — the headless scenarios never pass through the menu, so their default-car
+ * determinism is untouched. With an empty catalog there is nothing to apply and the current
+ * (builtin default) car stays.
+ */
 static void apply_selected_car(Game *game)
 {
     if (game->selectedCarIndex < 0) return;
@@ -345,9 +393,6 @@ static void apply_selected_car(Game *game)
     entrant->setup = entry.manifest->defaultSetup;
     (void)vehicle_instance_init(&entrant->instance, &entrant->definition, &entrant->setup);
     controller_reset(&entrant->controller);
-    /* A new car resets the setup editor to that car's authored default and drops any edits made
-     * to the previous car: a setup belongs to one definition, so carrying it across would
-     * silently re-tune a different vehicle. */
     setup_editor_init(&game->setupEditor, &entrant->definition, &entrant->setup);
     game->setupCustomized = false;
     game->setupCursor = 0;
@@ -355,12 +400,6 @@ static void apply_selected_car(Game *game)
 
 /*
  * Put the cars back on the grid and start the race again from tick zero.
- *
- * `game_reset_sim()` is the vehicle half of this; the session half is what makes a restart a
- * restart rather than a teleport — clock, countdown, classification, events and results all go
- * back to their starting values, so nothing from the previous run can be read afterwards.
- */
-static void restart_session(Game *game)
 {
     game_reset_sim(game);
     /* Route progress goes back with the cars. Without it a restart taken on or after the final
@@ -373,8 +412,8 @@ static void restart_session(Game *game)
      * begin at gate zero, so a replay that forced one would measure the timeline against the
      * wrong gate. Restoring a recording's starting progress needs it captured with the
      * recording, which is the replay snapshot work in issue 44. */
-    track_reset_progress_at(&game->progress, &game->trackDef, 0);
-    race_session_start(&game->session, NULL);
+track_reset_progress_at(&game->progress, &game->trackDef, 0);
+race_session_start(&game->session, NULL);
 }
 
 /*

@@ -260,7 +260,11 @@ _Static_assert(offsetof(Game, vehicleSetup) ==
 /* FNV-1a over the deterministic simulation fields only. Explicitly excludes the
  * accumulator, the substep and backlog counters, the render scale, and every presentation
  * field, so the checksum depends on the input timeline and nothing else. */
-GAME_API uint32_t game_state_checksum(const Game *game);
+/* Returns false with a human reason when the current menu selection/setup cannot start a
+ * session (no car, setup outside vehicle bounds, missing class tag, or non-player-selectable
+ * kind). Headless tests call this directly to prove invalid setups are rejected before a
+ * session starts. */
+GAME_API bool game_can_start_race(const Game *game, char *reason, size_t reasonCap);
 
 /* Reset the vehicle and resynchronise render history. Counters and tick are preserved. */
 GAME_API void game_reset_sim(Game *game);

@@ -51,9 +51,18 @@ void setup_editor_init(SetupEditor *ed, const VehicleDefinition *def,
 /* ±step clamped to the item's registry bounds; gear_count moves by ±1 within [1, MAX_GEARS].
  * Returns false on a bad index or direction == 0. */
 bool setup_editor_adjust(SetupEditor *ed, int itemIndex, int direction);
-void setup_editor_reset(SetupEditor *ed);          /* working = baseline */
 bool setup_editor_is_valid(const SetupEditor *ed); /* vehicle_setup_is_valid(base, &working) */
 uint32_t setup_editor_hash(const SetupEditor *ed); /* vehicle_setup_hash(&working) */
 float setup_editor_value(const SetupEditor *ed, int itemIndex); /* current value for display */
-
+/* Persistence: deterministic text serialization of the working setup. One line per editable
+ * item: "key=value" with %.9g for floats, integer for gear_count, sorted by the editor's
+ * item order (which itself follows registry order + gear_count). Save writes the file;
+ * load parses it, clamps to registry bounds, and leaves `working` untouched on failure.
+ * Both are headless and use no raylib. */
+bool setup_editor_save(const SetupEditor *ed, const char *path, char *error, size_t errorCap);
+bool setup_editor_load(SetupEditor *ed, const char *path, char *error, size_t errorCap);
+/* Gate before a session starts: every setup value must be inside vehicle bounds and the
+ * derived spec must still validate; optionally also checks class eligibility when a class
+ * is supplied. Returns false with a human reason when the setup cannot start. */
+bool setup_editor_can_start(const SetupEditor *ed, char *reason, size_t reasonCap);
 #endif /* CIRCUIT_SETUP_EDITOR_H */
