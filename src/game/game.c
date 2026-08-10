@@ -224,6 +224,7 @@ GAME_API uint32_t game_state_checksum(const Game *game)
     h = hash_f32(h, session->rules.countdownS);
     h = hash_bytes(h, session->trackId, sizeof(session->trackId));
     h = hash_u64(h, session->tick);
+    h = hash_f32(h, session->clockS);
     h = hash_u32(h, (uint32_t)session->countdownTicksRemaining);
     h = hash_u32(h, (uint32_t)session->classifiedCount);
     h = hash_u32(h, session->events.totalAppended);
@@ -289,6 +290,7 @@ GAME_API bool game_configure_run(Game *game, const GameRunConfig *config)
     race_rules_set_default(&rules);
     rules.targetLaps = (config->targetLaps > 0) ? config->targetLaps : RESULTS_TARGET_LAPS;
     if (!keepTrack) {
+        memset(game->session.trackId, 0, sizeof(game->session.trackId));
         snprintf(game->session.trackId, sizeof(game->session.trackId), "%s", config->trackId);
     }
     race_session_start(&game->session, &rules);
@@ -701,12 +703,16 @@ GAME_API void game_init(Game *game)
         if (track_load_by_id("parking_lot", &loaded, NULL, NULL, 0)) {
             track_free(&game->trackDef);
             game->trackDef = loaded;
+            memset(game->session.trackId, 0, sizeof(game->session.trackId));
             snprintf(game->session.trackId, sizeof(game->session.trackId), "%s", "parking_lot");
+            track_runtime_bind(&game->trackRuntime, &game->trackDef);
         } else {
-            track_init(&game->trackDef);
-            snprintf(game->session.trackId, sizeof(game->session.trackId), "%s", "parking_lot");
+            /* Missing or corrupt default content is not silently replaced with legacy
+             * geometry: the session stays without a track so the broken build is visible
+             * rather than concealed. The legacy loaders remain only for the temporary
+             * legacy-vs-loaded comparisons and --generate-tracks. */
+            track_runtime_bind(&game->trackRuntime, &game->trackDef);
         }
-        track_runtime_bind(&game->trackRuntime, &game->trackDef);
     }
     audio_init();
 #endif
