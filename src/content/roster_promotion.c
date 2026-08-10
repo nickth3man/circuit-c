@@ -88,8 +88,10 @@ static void check_class_assignment(const VehicleManifest *manifest, PromotionChe
         for (int i = 0; i < manifest->classTagCount; i++) {
             char piece[VEHICLE_MANIFEST_CLASS_TAG_CHARS + 2];
             snprintf(piece, sizeof(piece), "%s%s", i > 0 ? ", " : "", manifest->classTags[i]);
-            /* Reserve room for the truncation marker so it can always be appended. */
-            if (used + strlen(piece) + 4 > sizeof(detail)) break;
+            /* Reserve room for the longest marker the tail can need — ", ..." plus its NUL —
+             * so the marker is never itself truncated into something like ", ..", which would
+             * read as evidence rather than as the sign that evidence is missing. */
+            if (used + strlen(piece) + 6 > sizeof(detail)) break;
             snprintf(detail + used, sizeof(detail) - used, "%s", piece);
             used = strlen(detail);
             listed++;

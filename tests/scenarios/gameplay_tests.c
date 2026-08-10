@@ -2612,6 +2612,55 @@ static void scenario_setup_editor(void)
         check(setup_editor_is_valid(&ed),
               "a fully raised gear_count still produces a launchable setup");
     }
+
+    /*
+     * Save/load round-trip. The saved file is the deterministic serialization a replay or a
+     * stored profile would carry, so what saves cleanly must load cleanly — in particular the
+     * gear count, whose editor ceiling exists to stop the *menu* creating an unrepairable
+     * setup and is deliberately not applied on load. Applying it there would make a setup
+     * authored with six to eight gears save and then fail to come back.
+     */
+    {
+        char path[640];
+        telemetry_ensure_dir(TELEMETRY_DIR);
+        snprintf(path, sizeof(path), "%s/_setup_editor_roundtrip.txt", TELEMETRY_DIR);
+
+        SetupEditor saved;
+        setup_editor_init(&saved, &manifest->definition, &manifest->defaultSetup);
+        check(setup_editor_adjust(&saved, 0, 1), "round-trip source takes one step");
+        const uint32_t savedHash = setup_editor_hash(&saved);
+
+        char error[256] = "";
+        check(setup_editor_save(&saved, path, error, sizeof(error)),
+              "setup saves to disk (error: %s)", error);
+
+        SetupEditor loaded;
+        setup_editor_init(&loaded, &manifest->definition, &manifest->defaultSetup);
+        check(setup_editor_load(&loaded, path, error, sizeof(error)),
+              "setup loads back (error: %s)", error);
+        check(setup_editor_hash(&loaded) == savedHash,
+              "the loaded setup reproduces the saved hash (%08x vs %08x)",
+              setup_editor_hash(&loaded), savedHash);
+
+        /* A gear count beyond the editor's ceiling but within MAX_GEARS still loads: the
+         * ceiling is a menu-authoring rule, not a validity rule. */
+        if (gearItem >= 0 && MAX_GEARS > (int)ed.items[gearItem].max) {
+            FILE *f = fopen(path, "wb");
+            if (f != NULL) {
+                fprintf(f, "drive.gear_count=%d\n", MAX_GEARS);
+                fclose(f);
+            }
+            SetupEditor wide;
+            setup_editor_init(&wide, &manifest->definition, &manifest->defaultSetup);
+            const bool ok = setup_editor_load(&wide, path, error, sizeof(error));
+            /* Either it loads, or vehicle_setup_is_valid refused it for a real reason — never
+             * for the editor's own UI ceiling. */
+            check(ok || strstr(error, "out of range") == NULL,
+                  "a MAX_GEARS count is not refused by the editor's UI ceiling (error: %s)",
+                  error);
+        }
+        remove(path);
+    }
 }
 
 /* ------------------------------------------------------------------------------------- */
@@ -2633,8 +2682,15 @@ static void scenario_roster_gate(void)
         check(false, "shipped manifest '%s' was refused by the roster gate: %s",
               r != NULL ? r->id : "?", r != NULL ? r->reason : "?");
     }
-    check(rejected == 0, "no shipped player-selectable manifest fails the roster gate (got %d)",
-          rejected);
+    /* The total is the honest count; the stored-diagnostic count is capped. Asserting the
+     * total is what makes "nothing was refused" trustworthy even past the detail cap. */
+    check(car_roster_refused_count() == 0,
+          "no shipped player-selectable manifest fails the roster gate (got %d)",
+          car_roster_refused_count());
+    check(rejected <= car_roster_refused_count() ||
+              car_roster_refused_count() >= CAR_ROSTER_MAX_REJECTIONS,
+          "stored diagnostics never exceed the refusal total (%d stored, %d refused)", rejected,
+          car_roster_refused_count());
     check(car_roster_count() == 6, "all 6 shipped cars survive both gates (got %d)",
           car_roster_count());
 

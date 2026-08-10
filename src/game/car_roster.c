@@ -30,11 +30,18 @@ static bool g_rosterLoaded = false;
 
 static CarRosterRejection g_rejections[CAR_ROSTER_MAX_REJECTIONS];
 static int g_rejectionCount = 0;
+static int g_refusedTotal = 0;
 
 /* Record why one manifest was refused. Deterministic: entries are appended in catalog order,
- * which vehicle_manifest_load_dir has already sorted by stable id. */
+ * which vehicle_manifest_load_dir has already sorted by stable id.
+ *
+ * The stored diagnostics are capped, but the *count* of refusals is not: a caller that only
+ * asked "did anything get refused?" must never be told no because the 33rd failure had nowhere
+ * to go. g_refusedTotal is therefore always incremented, and car_roster_refused_count()
+ * reports it, so truncation of the detail list is visible rather than silent. */
 static void record_rejection(const char *id, const char *reason)
 {
+    g_refusedTotal++;
     if (g_rejectionCount >= CAR_ROSTER_MAX_REJECTIONS) return;
     CarRosterRejection *slot = &g_rejections[g_rejectionCount++];
     snprintf(slot->id, sizeof(slot->id), "%s", id != NULL ? id : "(unnamed)");
@@ -108,6 +115,7 @@ static bool ensure_roster_loaded(void)
      * gameplay-eligible view: plain structs, so the kept entries are copied in place and the
      * surviving allocation is freed by vehicle_catalog_free like before. */
     g_rejectionCount = 0;
+    g_refusedTotal = 0;
     int kept = 0;
     for (int i = 0; i < full.count; i++) {
         const VehicleManifest *manifest = &full.items[i];
@@ -131,6 +139,13 @@ void car_roster_reload(void)
         g_rosterLoaded = false;
     }
     g_rejectionCount = 0;
+    g_refusedTotal = 0;
+}
+
+int car_roster_refused_count(void)
+{
+    (void)ensure_roster_loaded();
+    return g_refusedTotal;
 }
 
 int car_roster_rejection_count(void)

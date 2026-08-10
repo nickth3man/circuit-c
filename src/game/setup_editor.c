@@ -307,9 +307,12 @@ bool setup_editor_load(SetupEditor *ed, const char *path, char *error, size_t er
         }
         if (ed->items[idx].isGearCount) {
             int iv = (int)lrint(d);
-            /* Same ceiling the menu enforces, so a saved file cannot reintroduce a gear count
-             * the editor has no ratio control for. */
-            if (iv < 1 || iv > (int)ed->items[idx].max || (double)iv != d) {
+            /* MAX_GEARS, not the editor's five-ratio ceiling. The ceiling exists to stop the
+             * menu creating a gear count it cannot repair; it is not a claim that six- to
+             * eight-gear setups are invalid. Applying it here would make a setup that saved
+             * cleanly fail to load. The vehicle_setup_is_valid() call below is the real gate:
+             * a count whose required ratios are not authored is rejected there. */
+            if (iv < 1 || iv > MAX_GEARS || (double)iv != d) {
                 if (error != NULL && errorCap > 0)
                     snprintf(error, errorCap, "line %d: gear_count %s out of range", lineNo,
                              valStr);

@@ -492,6 +492,9 @@ static void apply_oneshots(Game *game, const Input *input, const ControllerOutpu
             if (index < 0) index = count - 1;
             if (index >= count) index = 0;
             game->selectedCarIndex = index;
+            /* A refusal describes the selection that was refused. Choosing a different car
+             * makes it stale, so it goes now rather than sitting under the new car's name. */
+            game->startBlockedReason[0] = '\0';
             CarSelectionEntry entry;
             if (car_selection_entry(index, &entry)) {
                 snprintf(game->selectedCarId, sizeof(game->selectedCarId), "%s", entry.id);
@@ -520,6 +523,9 @@ static void apply_oneshots(Game *game, const Input *input, const ControllerOutpu
                 const int dir = input->upPressed ? 1 : -1;
                 if (setup_editor_adjust(&game->setupEditor, game->setupCursor, dir)) {
                     game->setupCustomized = true;
+                    /* Any edit invalidates the previous refusal: the setup it described no
+                     * longer exists, and the next start attempt recomputes the verdict. */
+                    game->startBlockedReason[0] = '\0';
                     RaceEntrant *entrant = race_roster_local(&game->session.roster);
                     if (entrant != NULL) {
                         entrant->setup = game->setupEditor.working;
@@ -531,6 +537,7 @@ static void apply_oneshots(Game *game, const Input *input, const ControllerOutpu
             if (input->resetSetupPressed) {
                 setup_editor_reset(&game->setupEditor);
                 game->setupCustomized = false;
+                game->startBlockedReason[0] = '\0';
                 RaceEntrant *entrant = race_roster_local(&game->session.roster);
                 if (entrant != NULL) {
                     entrant->setup = game->setupEditor.working;

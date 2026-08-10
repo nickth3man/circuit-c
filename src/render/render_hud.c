@@ -141,15 +141,36 @@ static void draw_overlay_menu(const Game *game)
         const SetupEditor *ed = &game->setupEditor;
         draw_text_centered_shadow("SETUP", 462, 24, COL_ACCENT);
         /*
-         * Two columns, so every item the cursor can reach is on screen. A single column of the
-         * editor's full item count would run off the bottom, and the cursor wraps across all of
-         * them — landing the highlight on an invisible row while UP/DOWN edited a value the
-         * player could not see.
+         * Every item the cursor can reach is on screen, whatever the editor holds. The cursor
+         * wraps across all itemCount entries, so a fixed row budget would land the highlight on
+         * an invisible row while UP/DOWN edited a value the player could not see.
+         *
+         * The vertical budget is the fixed quantity — rows must end above the hint and
+         * validity lines, which must themselves end above SCREEN_H. So rows are capped first
+         * and the column count is whatever that requires, up to SETUP_EDITOR_MAX_ITEMS. Today
+         * that is 12 items in 2 columns; a full 24 would lay out in 4 without clipping.
          */
-        const int rowsPerColumn = (ed->itemCount + 1) / 2;
-        const int colX[2] = { (SCREEN_W / 2) - 380, (SCREEN_W / 2) + 20 };
-        const int setupTop = 498;
-        const int setupRow = 22;
+        enum {
+            kSetupTop = 498,
+            kSetupRow = 22,
+            kSetupRowLimit = 648, /* last row's baseline; hints and warning go below */
+            kSetupMaxRows = (kSetupRowLimit - kSetupTop) / kSetupRow,
+            kSetupMarginX = 60,
+        };
+        /* Asserted rather than clamped at draw time: these are fixed layout constants, so a
+         * budget too small for a row — or an editor capacity needing more columns than the
+         * width can carry — is a build-time mistake, not something to paper over per frame. */
+        _Static_assert(kSetupMaxRows >= 1, "the setup row budget must fit at least one row");
+        _Static_assert(SETUP_EDITOR_MAX_ITEMS <= kSetupMaxRows * 4,
+                       "the setup overlay lays out at most four columns");
+        const int setupTop = kSetupTop;
+        const int setupRow = kSetupRow;
+        const int columns =
+            (ed->itemCount > 0) ? ((ed->itemCount + kSetupMaxRows - 1) / kSetupMaxRows) : 1;
+        const int rowsPerColumn =
+            (ed->itemCount > 0) ? ((ed->itemCount + columns - 1) / columns) : 0;
+        const int marginX = kSetupMarginX;
+        const int columnWidth = (SCREEN_W - 2 * marginX) / columns;
         for (int i = 0; i < ed->itemCount; i++) {
             const SetupEditorItem *it = &ed->items[i];
             const float val = setup_editor_value(ed, i);
@@ -159,7 +180,7 @@ static void draw_overlay_menu(const Game *game)
             const int rowInColumn = (rowsPerColumn > 0) ? (i % rowsPerColumn) : i;
             DrawText(TextFormat("%s%s  %g %s", onCursor ? "> " : "  ", it->key, (double)val,
                                 it->unit),
-                     colX[column < 2 ? column : 1], setupTop + rowInColumn * setupRow, 16, c);
+                     marginX + column * columnWidth, setupTop + rowInColumn * setupRow, 16, c);
         }
         const int setupBottom = setupTop + rowsPerColumn * setupRow;
         draw_text_centered("LEFT/RIGHT item    UP/DOWN adjust    D reset    S back",

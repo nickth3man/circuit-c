@@ -45,7 +45,14 @@ typedef struct {
     char reason[CAR_ROSTER_REJECT_REASON_CHARS];
 } CarRosterRejection;
 
-/* Number of manifests the current roster load refused. Loads the roster if needed. */
+/* How many manifests the current roster load refused, in total. This is the honest answer to
+ * "did anything get kept out?" — it counts every refusal, including any beyond the
+ * CAR_ROSTER_MAX_REJECTIONS the detail list below can store. Loads the roster if needed. */
+int car_roster_refused_count(void);
+
+/* How many refusals have stored diagnostics: min(car_roster_refused_count(),
+ * CAR_ROSTER_MAX_REJECTIONS), and the valid index range for car_roster_rejection(). A value
+ * lower than car_roster_refused_count() means the detail list was truncated. */
 int car_roster_rejection_count(void);
 
 /* Rejection `index`, or NULL when out of range. Points into module state: fine for immediate
