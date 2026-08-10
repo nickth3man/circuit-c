@@ -314,6 +314,7 @@ int test_generate_roster_manifests(const char *dir)
         fclose(file);
         if (!wrote) {
             fprintf(stderr, "error: could not write vehicle manifest '%s'\n", path);
+            remove(path);
             return 1;
         }
         written++;

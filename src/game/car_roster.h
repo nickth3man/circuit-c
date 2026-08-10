@@ -7,13 +7,9 @@
  * make the validation suite argue with evidence: a lap time is only interesting next to
  * another lap time from a car that differs in a named way.
  *
- * WHY C AND NOT FILES, the same reason as car_corpus.h: the roster is the source of truth for
- * the suite, so it has to be reachable with no file I/O, no working-directory assumption, and
- * no directory enumeration from inside the hot-reloadable module. `circuit_tests
- * --generate-roster` exports each spec to data/vehicles/roster/ as .txt files in the existing
- * format for humans to read and diff, and the `roster` scenario asserts the export round-trips
- * so the files cannot rot away from the code.
- *
+ * MANIFEST-DRIVEN. The roster is data-driven, loaded dynamically from data/vehicles/ manifest files
+ * via vehicle_manifest_load_dir() (Issue #30). Editing a manifest updates vehicle behavior, and
+ * calling car_roster_reload() refreshes the catalog cache.
  * SEEDED, NOT INVENTED. Each entry starts from one of the hand-tuned presets in dev_presets.c
  * and then overrides only what the roster's job requires — the drivetrain layout, and whatever
  * a car of that layout must have to be a fair example of it (a front-drive car carries its

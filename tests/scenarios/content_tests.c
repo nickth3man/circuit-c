@@ -488,6 +488,12 @@ static void scenario_track_format(void)
                   "track manifest hash for %s is stable across randomized loading order",
                   filenames[i]);
         }
+        /* Clean up scratch files. */
+        for (size_t i = 0; i < 3; i++) {
+            char path[640];
+            snprintf(path, sizeof(path), "%s/%s", enumDir, filenames[i]);
+            remove(path);
+        }
     }
 
     /* Validation rejections: each names a distinct malformed or self-contradictory file. */

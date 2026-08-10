@@ -730,5 +730,6 @@ bool vehicle_manifest_write(const VehicleSpec *spec, const char *id, const char 
         }
     }
     fprintf(out, "\n  }\n}\n");
+    if (ferror(out) != 0) return false;
     return true;
 }
