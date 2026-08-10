@@ -11,6 +11,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <float.h>
 #include <math.h>
 #include <time.h>
 
@@ -1325,6 +1326,32 @@ static void scenario_aero_loads(void)
               (double)airborne.unclampedFrontN);
         check_near((double)airborne.frontN, (double)MIN_NORMAL_LOAD_N, 1e-3,
                    "and the clamp still stops the front load at MIN_NORMAL_LOAD_N");
+    }
+
+    /* 4b. An unrepresentable wing is refused, and a merely enormous one is reported rather than
+     * silently rounded to "no aerodynamics at all". Computing the product in float would
+     * overflow to infinity and the old fallback turned that into zero, which is the one answer
+     * a car with the most downforce in the roster must never get. */
+    {
+        VehicleSpec absurd = spec;
+        absurd.aeroLiftCoefFront = -FLT_MAX;
+        absurd.aeroRefAreaFrontM2 = 2.0f;
+        check(!vehicle_spec_is_valid(&absurd),
+              "a lift coefficient whose load cannot be represented is refused at load time");
+
+        /* Large enough that a float-only product overflows partway through (rho*Cl*A alone is
+         * about 1e35 and the v^2 factor is another 1e4), small enough to remain representable
+         * in the double the model now uses. */
+        VehicleSpec enormous = spec;
+        enormous.aeroLiftCoefFront = -1.0e34f;
+        enormous.aeroRefAreaFrontM2 = 2.0f;
+        check(vehicle_spec_is_valid(&enormous),
+              "an enormous but representable wing is still valid content");
+        float enormousFrontN = 0.0f;
+        physics_aero_vertical_loads(&enormous, 100.0f, &enormousFrontN, NULL);
+        check(isfinite(enormousFrontN) && enormousFrontN > 1.0e30f,
+              "and it reports its downforce instead of collapsing to zero (%.3e N)",
+              (double)enormousFrontN);
     }
 
     /* 5. It reaches the running solver, not only the helper: at speed the reported axle loads

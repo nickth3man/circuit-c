@@ -1,6 +1,7 @@
 #include "physics/physics.h"
 
 #include <assert.h>
+#include <float.h>
 #include <math.h>
 #include <stddef.h>
 #include <string.h>
@@ -164,16 +165,31 @@ float physics_filter_long_accel(float filteredMps2, float previousMps2, float ra
     return isfinite(next) ? next : filteredMps2;
 }
 
-/* One axle's aerodynamic vertical load. Range-tested in double before the multiply so a large
- * authored coefficient at MAX_SAFE_SPEED_MPS cannot produce an infinity that then propagates
- * into the load solution as a NaN. */
+/*
+ * One axle's aerodynamic vertical load.
+ *
+ * The product is accumulated in DOUBLE and only then narrowed. Doing it in float lets a large
+ * authored coefficient overflow to infinity partway through the multiply, and an infinity here
+ * has no honest float answer: returning zero would report "this car has no aerodynamics" for
+ * the car with the most, which is the quiet degradation this model must not do. Double carries
+ * every product a float coefficient and a float area can make, so the narrowing below is the
+ * only place representability is in question, and it saturates — preserving the direction and
+ * the ordering of the load — rather than discarding it.
+ *
+ * vehicle_spec_is_valid() rejects any spec whose load at MAX_SAFE_SPEED_MPS is not
+ * representable, so the saturation is unreachable through the solver. It exists because this
+ * helper is public and must be total for any inputs a caller hands it.
+ */
 static float aero_axle_vertical_n(float liftCoefficient, float refAreaM2, float speedMps)
 {
     if (!(isfinite(liftCoefficient) && isfinite(refAreaM2) && refAreaM2 >= 0.0f)) return 0.0f;
     if (!(isfinite(speedMps) && speedMps > RESISTANCE_EPSILON_MPS)) return 0.0f;
-    const float loadN =
-        -0.5f * AIR_DENSITY_KGM3 * liftCoefficient * refAreaM2 * speedMps * speedMps;
-    return isfinite(loadN) ? loadN : 0.0f;
+
+    const double loadN = -0.5 * (double)AIR_DENSITY_KGM3 * (double)liftCoefficient *
+                         (double)refAreaM2 * (double)speedMps * (double)speedMps;
+    if (!(loadN > -(double)FLT_MAX)) return -FLT_MAX;
+    if (!(loadN < (double)FLT_MAX)) return FLT_MAX;
+    return (float)loadN;
 }
 
 void physics_aero_vertical_loads(const VehicleSpec *spec, float speedMps, float *frontN,
