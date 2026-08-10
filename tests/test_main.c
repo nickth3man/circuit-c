@@ -50,6 +50,9 @@ static void print_usage(const char *argv0)
     printf("       %s --list-cars               list validation roster car ids\n", argv0);
     printf("       %s --generate-roster [DIR]   export roster cars as tuning profiles\n",
            argv0);
+    printf(
+        "       %s --generate-tracks [DIR]   export built-in tracks as versioned track files\n",
+        argv0);
 }
 
 /* Write one XML-safe character; returns the number of bytes written. */
@@ -109,7 +112,7 @@ int main(int argc, char **argv)
     /* The declaration order here IS the run order, and it is the only thing that decides it. */
     const TestScenarioGroup groups[] = {
         test_core_scenarios(),     test_appearance_scenarios(), test_physics_scenarios(),
-        test_handling_scenarios(), test_gameplay_scenarios(),
+        test_handling_scenarios(), test_gameplay_scenarios(),   test_content_scenarios(),
     };
     const size_t groupCount = sizeof(groups) / sizeof(groups[0]);
 
@@ -147,6 +150,10 @@ int main(int argc, char **argv)
         }
         if (strcmp(argv[i], "--generate-roster") == 0) {
             return test_generate_roster((i + 1 < argc && argv[i + 1][0] != '-') ? argv[i + 1]
+                                                                                : NULL);
+        }
+        if (strcmp(argv[i], "--generate-tracks") == 0) {
+            return test_generate_tracks((i + 1 < argc && argv[i + 1][0] != '-') ? argv[i + 1]
                                                                                 : NULL);
         }
         if (strcmp(argv[i], "--dump-corpus-index") == 0) {

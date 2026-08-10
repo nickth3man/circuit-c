@@ -30,6 +30,7 @@
 #include "support/test_harness.h"
 
 #include "dev/car_corpus.h"
+#include "content/track_manifest.h"
 #include "game/car_roster.h"
 #include "render/car_visual.h"
 #include "render/car_visual_raster.h"
@@ -41,6 +42,7 @@
 #include "physics/drivetrain.h"
 #include "dev/failure_bundle.h"
 #include "physics/surface.h"
+#include "world/track.h"
 #include "game/game.h"
 #include "game/input.h"
 #include "core/math_utils.h"
@@ -282,6 +284,59 @@ int test_generate_roster(const char *dir)
     }
 
     printf("wrote %d roster profiles to %s\n", written, dir);
+    return 0;
+}
+
+/* Export every built-in track layout as a versioned track file, the same way --generate-roster
+ * exports the C roster as profiles: the file is the human-readable mirror of the compiled-in
+ * geometry, and the `track-format` scenario asserts each one round-trips back to the same
+ * geometry hash the code produces. The four layouts are the parking lot and the three circuits
+ * every current test loads. */
+int test_generate_tracks(const char *dir)
+{
+    if (dir == NULL) dir = "data/tracks";
+    if (!telemetry_ensure_dir(dir)) return 1;
+
+    static const struct {
+        const char *id;
+        const char *displayName;
+        const char *description;
+        void (*load)(TrackDefinition *);
+    } layouts[] = {
+        { "parking_lot", "Parking Lot", "open practice area", track_init },
+        { "chicane", "Chicane Validation Circuit", "the lap every car is validated against",
+          track_load_chicane },
+        { "sprint", "Sprint Circuit", "scaled stadium layout for AI following",
+          track_load_sprint },
+        { "technical", "Technical Circuit", "tight, narrow layout", track_load_technical },
+    };
+    const int count = (int)(sizeof(layouts) / sizeof(layouts[0]));
+
+    for (int i = 0; i < count; i++) {
+        TrackDefinition track;
+        memset(&track, 0, sizeof(track));
+        track_init(&track);
+        layouts[i].load(&track);
+
+        char path[768];
+        snprintf(path, sizeof(path), "%s/%s.track.json", dir, layouts[i].id);
+        FILE *file = fopen(path, "wb");
+        if (file == NULL) {
+            fprintf(stderr, "error: could not write '%s'\n", path);
+            track_free(&track);
+            return 1;
+        }
+        const bool ok =
+            track_manifest_write(&track, layouts[i].displayName, layouts[i].description, file);
+        fclose(file);
+        track_free(&track);
+        if (!ok) {
+            fprintf(stderr, "error: could not serialize '%s'\n", path);
+            return 1;
+        }
+    }
+
+    printf("wrote %d track files to %s\n", count, dir);
     return 0;
 }
 

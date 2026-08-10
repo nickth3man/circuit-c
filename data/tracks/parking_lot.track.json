@@ -1,0 +1,27 @@
+{
+  "schema": "circuit/track",
+  "version": 1,
+  "id": "parking_lot",
+  "displayName": "Parking Lot",
+  "description": "open practice area",
+  "contentVersion": "v1",
+  "route": {
+    "closed": true,
+    "nodes": [
+      { "x": -200, "y": -150, "halfWidth": 4, "runoffHalfWidth": 0, "surface": "asphalt" },
+      { "x": 200, "y": -150, "halfWidth": 4, "runoffHalfWidth": 0, "surface": "asphalt" },
+      { "x": 200, "y": 150, "halfWidth": 4, "runoffHalfWidth": 0, "surface": "asphalt" },
+      { "x": -200, "y": 150, "halfWidth": 4, "runoffHalfWidth": 0, "surface": "asphalt" },
+      { "x": -200, "y": -150, "halfWidth": 4, "runoffHalfWidth": 0, "surface": "asphalt" }
+    ]
+  },
+  "surfaces": { "offTrack": "grass", "runoff": "grass" },
+  "parkingLot": { "minX": -200, "maxX": 200, "minY": -150, "maxY": 150 },
+  "checkpoints": [
+      { "x": -200, "y": -150, "forwardX": 1, "forwardY": 0, "halfWidth": 4, "required": true },
+      { "x": 200, "y": -150, "forwardX": 0, "forwardY": 1, "halfWidth": 4, "required": true },
+      { "x": 200, "y": 150, "forwardX": -1, "forwardY": 0, "halfWidth": 4, "required": true },
+      { "x": -200, "y": 150, "forwardX": 0, "forwardY": -1, "halfWidth": 4, "required": true },
+      { "x": -200, "y": -150, "forwardX": 0, "forwardY": 0, "halfWidth": 4, "required": true }
+  ]
+}

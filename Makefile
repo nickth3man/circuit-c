@@ -181,7 +181,8 @@ SHARED_SRCS := src/game/input.c src/core/math_utils.c src/dev/dev_scenario.c src
                src/game/car_roster.c src/world/track.c src/game/validation_metrics.c src/game/run_report.c \
                src/game/telemetry.c src/game/ai_driver.c src/game/controller.c src/game/race_entrant.c src/game/race_session.c src/game/replay.c src/dev/dev_presets.c src/dev/dev_params.c src/dev/dev_replay.c \
                src/dev/failure_bundle.c \
-               src/physics/surface.c src/physics/vehicle.c
+               src/physics/surface.c src/physics/vehicle.c \
+               src/core/json.c src/content/vehicle_manifest.c src/content/track_manifest.c
 # failure_bundle.c is SHARED, not DEV: --validate-lap writes a bundle from the platform layer,
 # which links SHARED_SRCS but not GAME_SRCS. Its own dependencies (dev_params, dev_replay,
 # replay) are already here, and it holds no static state, so both binaries can carry a copy.
@@ -202,7 +203,7 @@ TEST_RUNNER_SRCS := tests/test_main.c tests/test_commands.c \
                     tests/support/appearance_metrics.c tests/support/car_sheet.c \
                     tests/scenarios/core_tests.c tests/scenarios/appearance_tests.c \
                     tests/scenarios/physics_tests.c tests/scenarios/handling_tests.c \
-                    tests/scenarios/gameplay_tests.c
+                    tests/scenarios/gameplay_tests.c tests/scenarios/content_tests.c
 TEST_SRCS   := $(TEST_RUNNER_SRCS) src/platform/timestep.c $(GAME_SRCS) $(SHARED_SRCS)
 HOTRELOAD_HARNESS_SRCS := tests/hotreload/hotreload_harness.c src/platform/timestep.c $(HOTRELOAD_SRC) $(SHARED_SRCS)
 
