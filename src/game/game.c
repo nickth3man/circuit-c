@@ -15,6 +15,7 @@
 #include "dev/dev_scenario.h"
 #include "dev/dev_state.h"
 #include "game/audio.h"
+#include "game/car_roster.h"
 #include "game/controller.h"
 #include "physics/auto_transmission.h"
 #include "world/collision.h"
@@ -232,6 +233,7 @@ GAME_API uint32_t game_state_checksum(const Game *game)
 GAME_API void game_reset_sim(Game *game)
 {
     if (game == NULL) return;
+    car_roster_reload();
     /* Every entrant, in roster order. A car put back on the grid must not steer to a plan
      * computed for where it used to be, so each entrant's private controller memory goes with
      * its vehicle state; kind and frozen configuration survive, because the reset changes the

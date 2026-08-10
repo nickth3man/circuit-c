@@ -410,6 +410,91 @@ static void scenario_track_format(void)
     }
     if (oka) track_free(&a);
     if (okb) track_free(&b);
+    /* Schema version migration & version bounds: unsupported versions (e.g. 0, 2) fail with
+     * version-specific error diagnostics before a session can start. */
+    {
+        static const char *kVer0 =
+            "{\"schema\":\"circuit/"
+            "track\",\"version\":0,\"id\":\"t\",\"contentVersion\":\"v1\","
+            "\"route\":{\"closed\":true,\"nodes\":[{\"x\":0,\"y\":0,\"halfWidth\":8},"
+            "{\"x\":10,\"y\":0,\"halfWidth\":8}]}}";
+        static const char *kVer2 =
+            "{\"schema\":\"circuit/"
+            "track\",\"version\":2,\"id\":\"t\",\"contentVersion\":\"v1\","
+            "\"route\":{\"closed\":true,\"nodes\":[{\"x\":0,\"y\":0,\"halfWidth\":8},"
+            "{\"x\":10,\"y\":0,\"halfWidth\":8}]}}";
+        TrackDefinition v0Track, v2Track;
+        memset(&v0Track, 0, sizeof(v0Track));
+        memset(&v2Track, 0, sizeof(v2Track));
+        const bool ok0 =
+            track_manifest_parse(kVer0, strlen(kVer0), &v0Track, NULL, error, sizeof(error));
+        check(!ok0 && strstr(error, "version") != NULL,
+              "schema version 0 rejected with version diagnostic (%s)", ok0 ? "(none)" : error);
+        const bool ok2 =
+            track_manifest_parse(kVer2, strlen(kVer2), &v2Track, NULL, error, sizeof(error));
+        check(!ok2 && strstr(error, "version") != NULL,
+              "schema version 2 rejected with version diagnostic (%s)", ok2 ? "(none)" : error);
+    }
+
+    /* Randomized file enumeration & hash stability across file enumeration order. */
+    {
+        char enumDir[512];
+        snprintf(enumDir, sizeof(enumDir), "%s/_track_enum", TELEMETRY_DIR);
+        check(telemetry_ensure_dir(enumDir),
+              "scratch directory created for track file enumeration");
+        static const char *filenames[] = {
+            "z_first.track.json",
+            "a_second.track.json",
+            "m_third.track.json",
+        };
+        for (size_t i = 0; i < 3; i++) {
+            char path[640];
+            snprintf(path, sizeof(path), "%s/%s", enumDir, filenames[i]);
+            FILE *f = fopen(path, "wb");
+            if (f != NULL) {
+                fprintf(f,
+                        "{\"schema\":\"circuit/track\",\"version\":1,\"id\":\"track_%d\","
+                        "\"contentVersion\":\"v1\",\"route\":{\"closed\":true,\"nodes\":["
+                        "{\"x\":%d,\"y\":0,\"halfWidth\":8},{\"x\":%d,\"y\":0,\"halfWidth\":8}]"
+                        "}}\n",
+                        (int)i, (int)i * 10, (int)i * 10 + 5);
+                fclose(f);
+            }
+        }
+        uint32_t hashesFirst[3], hashesSecond[3];
+        for (size_t i = 0; i < 3; i++) {
+            char path[640];
+            snprintf(path, sizeof(path), "%s/%s", enumDir, filenames[i]);
+            TrackDefinition td;
+            memset(&td, 0, sizeof(td));
+            const bool ok =
+                track_manifest_load(path, &td, &hashesFirst[i], error, sizeof(error));
+            check(ok, "randomized enumeration fixture %s loads", filenames[i]);
+            track_free(&td);
+        }
+        for (int i = 2; i >= 0; i--) {
+            char path[640];
+            snprintf(path, sizeof(path), "%s/%s", enumDir, filenames[(size_t)i]);
+            TrackDefinition td;
+            memset(&td, 0, sizeof(td));
+            const bool ok =
+                track_manifest_load(path, &td, &hashesSecond[(size_t)i], error, sizeof(error));
+            check(ok, "randomized enumeration fixture %s loads on pass 2",
+                  filenames[(size_t)i]);
+            track_free(&td);
+        }
+        for (size_t i = 0; i < 3; i++) {
+            check(hashesFirst[i] == hashesSecond[i],
+                  "track manifest hash for %s is stable across randomized loading order",
+                  filenames[i]);
+        }
+        /* Clean up scratch files. */
+        for (size_t i = 0; i < 3; i++) {
+            char path[640];
+            snprintf(path, sizeof(path), "%s/%s", enumDir, filenames[i]);
+            remove(path);
+        }
+    }
 
     /* Validation rejections: each names a distinct malformed or self-contradictory file. */
     struct {
@@ -464,6 +549,10 @@ static void scenario_track_format(void)
           "\"route\":{\"closed\":true,\"nodes\":[{\"x\":0,\"y\":0,\"halfWidth\":8},"
           "{\"x\":1e100,\"y\":0,\"halfWidth\":8}]}}",
           "coordinate out of float range" },
+        { "{\"schema\":\"circuit/track\",\"version\":1,\"id\":\"t\",\"contentVersion\":\"v1\","
+          "\"route\":{\"closed\":true,\"nodes\":[{\"x\":0,\"y\":0,\"halfWidth\":8},"
+          "{\"x\":0,\"y\":0,\"halfWidth\":8}]}}",
+          "consecutive nodes coincide" },
     };
     for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
         TrackDefinition rejected;

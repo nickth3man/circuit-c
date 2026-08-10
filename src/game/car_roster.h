@@ -7,23 +7,14 @@
  * make the validation suite argue with evidence: a lap time is only interesting next to
  * another lap time from a car that differs in a named way.
  *
- * WHY C AND NOT FILES, the same reason as car_corpus.h: the roster is the source of truth for
- * the suite, so it has to be reachable with no file I/O, no working-directory assumption, and
- * no directory enumeration from inside the hot-reloadable module. `circuit_tests
- * --generate-roster` exports each spec to data/vehicles/roster/ as .txt files in the existing
- * format for humans to read and diff, and the `roster` scenario asserts the export round-trips
- * so the files cannot rot away from the code.
- *
- * SEEDED, NOT INVENTED. Each entry starts from one of the hand-tuned presets in dev_presets.c
- * and then overrides only what the roster's job requires — the drivetrain layout, and whatever
- * a car of that layout must have to be a fair example of it (a front-drive car carries its
- * mass over the driven axle and brakes forward, or it is not a front-drive car). Reusing the
- * presets keeps one set of researched numbers rather than a second, quietly diverging copy.
+ * MANIFEST-DRIVEN. The roster is data-driven, loaded dynamically from data/vehicles/ manifest files
+ * via vehicle_manifest_load_dir() (Issue #30). Editing a manifest updates vehicle behavior, and
+ * calling car_roster_reload() refreshes the catalog cache.
  *
  * These specs are NOT normalised to make any driver's job easier. A car that cannot be got
  * round the circuit is a result, not a bug in the roster.
  *
- * Raylib-free and I/O-free, like car_corpus.h.
+ * Raylib-free; headless-compatible.
  */
 #ifndef CIRCUIT_CAR_ROSTER_H
 #define CIRCUIT_CAR_ROSTER_H
@@ -68,5 +59,7 @@ uint32_t car_roster_spec_hash(int index);
 /* Index of the car with this id, or -1. Lets `--car rwd_grip` resolve without the caller
  * knowing the table order. */
 int car_roster_find(const char *id);
+/* Reload or reset the cached manifest catalog from data/vehicles/. */
+void car_roster_reload(void);
 
 #endif /* CIRCUIT_CAR_ROSTER_H */

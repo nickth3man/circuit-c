@@ -209,6 +209,27 @@ static bool parse_route(const JsonValue *route, TrackDefinition *out, char *erro
             return false;
         }
     }
+    /* Validate route segment continuity: consecutive nodes must not coincide.
+     * Closed routes validate the wrap-around closing segment (node[count-1] -> node[0]) unless
+     * the route explicitly closes by repeating node 0 at position count - 1 (e.g. parking_lot). */
+    const bool closesByDuplicateNode =
+        (count > 1 && nodeArr[0].centerM.x == nodeArr[count - 1].centerM.x &&
+         nodeArr[0].centerM.y == nodeArr[count - 1].centerM.y);
+    const int segmentsToCheck = (!closesByDuplicateNode) ? count : (count - 1);
+
+    for (int i = 0; i < segmentsToCheck; i++) {
+        const int nextIdx = (i + 1) % count;
+        const float dx = nodeArr[nextIdx].centerM.x - nodeArr[i].centerM.x;
+        const float dy = nodeArr[nextIdx].centerM.y - nodeArr[i].centerM.y;
+        if (dx * dx + dy * dy < 1.0e-8f) {
+            char field[48];
+            snprintf(field, sizeof(field), "route.nodes[%d]", nextIdx);
+            set_error(error, errorCap, field,
+                      "consecutive nodes coincide (segment length zero)");
+            free(nodeArr);
+            return false;
+        }
+    }
     out->nodes = nodeArr;
     out->count = count;
     return true;

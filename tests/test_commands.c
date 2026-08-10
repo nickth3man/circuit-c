@@ -31,6 +31,7 @@
 
 #include "dev/car_corpus.h"
 #include "content/track_manifest.h"
+#include "content/vehicle_manifest.h"
 #include "game/car_roster.h"
 #include "render/car_visual.h"
 #include "render/car_visual_raster.h"
@@ -284,6 +285,42 @@ int test_generate_roster(const char *dir)
     }
 
     printf("wrote %d roster profiles to %s\n", written, dir);
+    return 0;
+}
+int test_generate_roster_manifests(const char *dir)
+{
+    if (dir == NULL) dir = "data/vehicles";
+    if (!telemetry_ensure_dir(dir)) return 1;
+
+    int written = 0;
+    for (int i = 0; i < car_roster_count(); i++) {
+        VehicleSpec spec;
+        char id[128], path[768];
+
+        if (!car_roster_spec(i, &spec)) {
+            fprintf(stderr, "error: roster entry %d could not be built\n", i);
+            return 1;
+        }
+        car_roster_id(i, id, sizeof(id));
+
+        snprintf(path, sizeof(path), "%s/%s.vehicle.json", dir, id);
+        FILE *file = fopen(path, "wb");
+        if (file == NULL) {
+            fprintf(stderr, "error: could not open '%s' for writing\n", path);
+            return 1;
+        }
+        const bool wrote = vehicle_manifest_write(&spec, id, car_roster_display_name(i), id, 1u,
+                                                  "roster", file);
+        fclose(file);
+        if (!wrote) {
+            fprintf(stderr, "error: could not write vehicle manifest '%s'\n", path);
+            remove(path);
+            return 1;
+        }
+        written++;
+    }
+
+    printf("wrote %d vehicle manifests to %s\n", written, dir);
     return 0;
 }
 
