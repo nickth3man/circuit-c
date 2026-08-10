@@ -254,8 +254,15 @@ The contract is recorded here because it is what the `route` section *means* at 
 "where on this route is this pose" as one `RouteLocation`: the centreline segment and parameter,
 the closest point and that segment's forward direction, arc length from node 0, signed lateral
 offset (positive left of travel), heading error, and a confidence that is 1 on the racing
-surface, falls linearly to 0 across the runoff band, and is 0 beyond the barrier. The closest
-point and forward direction are also the rejoin pose for a car being recovered onto the route.
+surface, falls linearly to 0 across the runoff band, and is 0 at and beyond the barrier. The
+closest point and forward direction are also the rejoin pose for a car being recovered onto the
+route.
+
+Containment — `onRoute` and `confidence` — is measured from the distance to the closest point,
+not from the lateral offset. The two agree whenever the projection lands inside a segment, but
+where the closest point is a clamped endpoint the displacement can be almost entirely
+longitudinal, so a pose well past the end of an open route has a lateral offset of nearly zero.
+`lateralM` answers which *side* of the route the car is on; it is not a distance.
 
 Two properties follow from the authored geometry rather than from tuning:
 

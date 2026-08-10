@@ -186,15 +186,21 @@ typedef struct {
     int segmentIndex; /* centreline segment i: nodes[i] -> nodes[i+1] (wrapping when closed) */
     float segmentT;   /* [0, 1] along that segment */
     Vector2 pointM;   /* the closest centreline point, world metres */
-    Vector2 forwardUnit;   /* that segment's travel direction, unit length */
-    float longitudinalM;   /* arc length from node 0 to pointM along the route */
-    float lateralM;        /* signed offset from the centreline, positive LEFT of forwardUnit */
+    Vector2 forwardUnit; /* that segment's travel direction, unit length */
+    float longitudinalM; /* arc length from node 0 to pointM along the route */
+    /* Signed offset from the centreline, positive LEFT of forwardUnit. This says which SIDE of
+     * the route the car is on. It is NOT the distance to the route and must not be used as one:
+     * where the closest point is a clamped segment endpoint the displacement can be almost
+     * entirely longitudinal, leaving this near zero for a pose fifty metres past the end of an
+     * open route. Use the distance from pointM for that, as the two fields below do. */
+    float lateralM;
     float headingErrorRad; /* car heading minus route heading, wrapped to [-PI, PI) */
     /* How much the geometry supports this being the car's route position: 1 on the racing
-     * surface, falling linearly to 0 across the runoff band, 0 beyond the barrier. It is a
-     * containment measure, not a probability. */
+     * surface, falling linearly to 0 across the runoff band, 0 at and beyond the barrier. It is
+     * a containment measure, not a probability. Measured, like onRoute, from |posM - pointM|. */
     float confidence;
-    bool onRoute; /* |lateralM| is within the segment's racing half-width */
+    bool
+        onRoute; /* the distance from posM to pointM is within the segment's racing half-width */
 } RouteLocation;
 
 /* How far along the route, in metres of arc either side of the previous position, a continuity
