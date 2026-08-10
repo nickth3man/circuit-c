@@ -51,7 +51,7 @@ byte-different files load as the same value.
 |------------------|----------|----------|-------|
 | `schema`         | string   | yes      | Must be `"circuit/track"`. |
 | `version`        | number   | yes      | Must be `1`. |
-| `id`             | string   | yes      | Stable content id. Matches the `[a-z0-9]` then `[a-z0-9._-]` rule used by vehicle ids. |
+| `id`             | string   | yes      | Stable content id. Matches `[a-z0-9][a-z0-9._-]{0,30}` (≤31 chars, fits `TRACK_ID_CHARS`). |
 | `displayName`    | string   | yes      | Human label (≤ 128 chars). |
 | `description`    | string   | no       | Free text (≤ 256 chars). Absent ⇒ empty. |
 | `contentVersion` | string   | yes      | Stored verbatim into `TrackDefinition::version`. |

@@ -58,7 +58,8 @@
 #define TRACK_MANIFEST_TEXT_CHARS 128 /* id/displayName fit the definition's fixed arrays */
 #define TRACK_MANIFEST_DESC_CHARS 256
 
-/* Stable content id rule: [a-z0-9] then up to 62 of [a-z0-9._-]. Matches the ownership contract. */
+/* Stable content id rule: [a-z0-9] then up to 30 of [a-z0-9._-] (≤31 chars, fits
+ * TRACK_ID_CHARS). Matches the ownership contract specialized for tracks. */
 bool track_manifest_id_is_valid(const char *id);
 
 /* A discovered, id-sorted set of track definitions. Owned by the caller; free with

@@ -1103,6 +1103,23 @@ static void scenario_track_migration(void)
               ok ? "(none)" : error);
         track_catalog_free(&badCatalog);
     }
+    /* Boundary coverage for fixed TRACK_ID_CHARS storage (31-char max). The public
+     * rule for tracks is 0,30 additional chars, not 0,62, so exercise the limit. */
+    {
+        char id31[32] = { 0 };
+        memset(id31, 'a', 31);
+        id31[31] = '\0';
+        check(track_manifest_id_is_valid(id31), "31-char track id is valid");
+        char id32[33] = { 0 };
+        memset(id32, 'a', 32);
+        id32[32] = '\0';
+        check(!track_manifest_id_is_valid(id32), "32-char track id is rejected (too long)");
+        char id63[64] = { 0 };
+        memset(id63, 'a', 63);
+        id63[63] = '\0';
+        check(!track_manifest_id_is_valid(id63),
+              "63-char track id is rejected for track storage");
+    }
 
     track_catalog_free(&catalog);
 }

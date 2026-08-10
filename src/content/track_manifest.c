@@ -455,7 +455,7 @@ bool track_manifest_parse(const char *text, size_t length, TrackDefinition *out,
 
     const char *id = json_as_string(json_object_get(root, kTopKeyNames[TM_KEY_ID]));
     if (!track_id_is_valid(id)) {
-        set_error(error, errorCap, "id", "must match [a-z0-9][a-z0-9._-]{0,62}");
+        set_error(error, errorCap, "id", "must match [a-z0-9][a-z0-9._-]{0,30} (≤31 chars)");
         json_document_free(doc);
         return false;
     }
