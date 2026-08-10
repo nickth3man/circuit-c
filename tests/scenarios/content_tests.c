@@ -246,6 +246,8 @@ static void scenario_vehicle_manifest(void)
         const bool ok = vehicle_manifest_parse(bad[i].text, strlen(bad[i].text), &rejected,
                                                error, sizeof(error));
         check(!ok, "manifest rejected for %s (error: %s)", bad[i].what, ok ? "(none)" : error);
+        check(rejected.definition.contentVersion == 0 && rejected.definition.id[0] == '\0',
+              "rejected manifest is zeroed for %s", bad[i].what);
     }
 
     /* Catalog discovery: write three manifests with out-of-order ids and confirm the catalog comes

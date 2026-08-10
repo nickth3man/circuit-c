@@ -353,7 +353,6 @@ bool vehicle_manifest_parse(const char *text, size_t length, VehicleManifest *ou
         json_document_free(doc);
         return false;
     }
-    out->definition.contentVersion = contentVersion;
 
     const char *appearanceId =
         json_as_string(json_object_get(root, kTopKeyNames[VM_KEY_APPEARANCE_ID]));
@@ -373,6 +372,7 @@ bool vehicle_manifest_parse(const char *text, size_t length, VehicleManifest *ou
             json_as_string(json_object_get(root, kTopKeyNames[VM_KEY_DISPLAY_NAME])),
             "displayName", error, errorCap)) {
         json_document_free(doc);
+        memset(out, 0, sizeof(*out));
         return false;
     }
     /* description is optional: omitting it leaves an empty string, but a present value must be a
@@ -381,12 +381,14 @@ bool vehicle_manifest_parse(const char *text, size_t length, VehicleManifest *ou
     if (description != NULL && !json_is_string(description)) {
         set_error(error, errorCap, "description", "expected a string");
         json_document_free(doc);
+        memset(out, 0, sizeof(*out));
         return false;
     }
     if (description != NULL &&
         !copy_text_field(out->description, VEHICLE_MANIFEST_DESC_CHARS,
                          json_as_string(description), "description", error, errorCap)) {
         json_document_free(doc);
+        memset(out, 0, sizeof(*out));
         return false;
     }
 
@@ -398,6 +400,7 @@ bool vehicle_manifest_parse(const char *text, size_t length, VehicleManifest *ou
         !parse_provenance(out, json_object_get(root, kTopKeyNames[VM_KEY_PROVENANCE]), error,
                           errorCap)) {
         json_document_free(doc);
+        memset(out, 0, sizeof(*out));
         return false;
     }
 
@@ -411,12 +414,14 @@ bool vehicle_manifest_parse(const char *text, size_t length, VehicleManifest *ou
         !apply_section(&spec, json_object_get(root, kTopKeyNames[VM_KEY_SETUP]),
                        DEV_OWNER_SETUP, error, errorCap)) {
         json_document_free(doc);
+        memset(out, 0, sizeof(*out));
         return false;
     }
     dev_params_refresh_derived(&spec);
     if (!vehicle_spec_is_valid(&spec)) {
         set_error(error, errorCap, NULL, "resulting spec fails vehicle_spec_is_valid()");
         json_document_free(doc);
+        memset(out, 0, sizeof(*out));
         return false;
     }
 
@@ -425,6 +430,7 @@ bool vehicle_manifest_parse(const char *text, size_t length, VehicleManifest *ou
         set_error(error, errorCap, NULL,
                   "could not build a VehicleDefinition from the manifest");
         json_document_free(doc);
+        memset(out, 0, sizeof(*out));
         return false;
     }
     /* The default setup mirrors the authored setup fields straight out of the definition spec,
@@ -434,6 +440,7 @@ bool vehicle_manifest_parse(const char *text, size_t length, VehicleManifest *ou
         set_error(error, errorCap, NULL,
                   "default setup fails validation against its definition");
         json_document_free(doc);
+        memset(out, 0, sizeof(*out));
         return false;
     }
 
