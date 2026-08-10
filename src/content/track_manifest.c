@@ -209,6 +209,19 @@ static bool parse_route(const JsonValue *route, TrackDefinition *out, char *erro
             return false;
         }
     }
+    /* Validate route segment continuity: consecutive nodes must not coincide. */
+    for (int i = 0; i < count - 1; i++) {
+        const float dx = nodeArr[i + 1].centerM.x - nodeArr[i].centerM.x;
+        const float dy = nodeArr[i + 1].centerM.y - nodeArr[i].centerM.y;
+        if (dx * dx + dy * dy < 1.0e-8f) {
+            char field[48];
+            snprintf(field, sizeof(field), "route.nodes[%d]", i + 1);
+            set_error(error, errorCap, field,
+                      "consecutive nodes coincide (segment length zero)");
+            free(nodeArr);
+            return false;
+        }
+    }
     out->nodes = nodeArr;
     out->count = count;
     return true;

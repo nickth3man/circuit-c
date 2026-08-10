@@ -19,6 +19,7 @@ int test_dump_corpus_cards(const char *dir);
 int test_dump_corpus_sheet(const char *dir);
 int test_list_cars(void);
 int test_generate_roster(const char *dir);
+int test_generate_roster_manifests(const char *dir);
 int test_generate_tracks(const char *dir);
 
 #endif /* CIRCUIT_TEST_COMMANDS_H */

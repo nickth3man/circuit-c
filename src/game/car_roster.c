@@ -15,10 +15,10 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "content/vehicle_manifest.h"
 #include "dev/dev_params.h"
 #include "dev/dev_presets.h"
 #include "physics/vehicle.h"
-
 /* -------------------------------------------------------------------------------------------- layout --
  * The parameter keys that turn a preset into a specific layout. Each key is resolved through
  * the registry at apply time, so a typo is caught as an unknown key rather than a silent
@@ -136,13 +136,22 @@ bool car_roster_spec(int index, VehicleSpec *out)
 {
     if (out == NULL || index < 0 || index >= ROSTER_COUNT) return false;
 
+    char id[128], path[256], error[256];
+    car_roster_id(index, id, sizeof(id));
+    snprintf(path, sizeof(path), "data/vehicles/%s.vehicle.json", id);
+
+    VehicleManifest manifest;
+    if (vehicle_manifest_load(path, &manifest, error, sizeof(error))) {
+        *out = manifest.definition.spec;
+        return true;
+    }
+
     const RosterEntry *entry = &kRoster[index];
 
     /* Start from the preset's researched baseline numbers. A bad preset index would leave
      * *out unwritten and the overrides below would land on garbage, so refuse loudly. */
     if (dev_preset_at(entry->presetIndex) == NULL) return false;
     dev_preset_apply(out, entry->presetIndex);
-
     /* Apply layout-specific overrides first, then the drivetrain configuration. The
      * registry resolves keys to offsets, so a typo becomes an unknown key, not a bad write. */
     DevParamAssignment items[16];

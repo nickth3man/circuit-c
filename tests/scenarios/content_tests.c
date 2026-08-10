@@ -464,6 +464,10 @@ static void scenario_track_format(void)
           "\"route\":{\"closed\":true,\"nodes\":[{\"x\":0,\"y\":0,\"halfWidth\":8},"
           "{\"x\":1e100,\"y\":0,\"halfWidth\":8}]}}",
           "coordinate out of float range" },
+        { "{\"schema\":\"circuit/track\",\"version\":1,\"id\":\"t\",\"contentVersion\":\"v1\","
+          "\"route\":{\"closed\":true,\"nodes\":[{\"x\":0,\"y\":0,\"halfWidth\":8},"
+          "{\"x\":0,\"y\":0,\"halfWidth\":8}]}}",
+          "consecutive nodes coincide" },
     };
     for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
         TrackDefinition rejected;

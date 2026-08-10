@@ -152,6 +152,10 @@ int main(int argc, char **argv)
             return test_generate_roster((i + 1 < argc && argv[i + 1][0] != '-') ? argv[i + 1]
                                                                                 : NULL);
         }
+        if (strcmp(argv[i], "--generate-roster-manifests") == 0) {
+            return test_generate_roster_manifests(
+                (i + 1 < argc && argv[i + 1][0] != '-') ? argv[i + 1] : NULL);
+        }
         if (strcmp(argv[i], "--generate-tracks") == 0) {
             return test_generate_tracks((i + 1 < argc && argv[i + 1][0] != '-') ? argv[i + 1]
                                                                                 : NULL);
