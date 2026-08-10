@@ -178,11 +178,11 @@ BUILD_DEFINES = -DCIRCUIT_BUILD_COMMIT=\"$(BUILD_COMMIT)\" \
 # consumed by both Make and POSIX shell.
 
 SHARED_SRCS := src/game/input.c src/core/math_utils.c src/dev/dev_scenario.c src/game/profile.c src/render/car_visual.c src/render/car_visual_raster.c src/render/vehicle_effects.c \
-               src/game/car_roster.c src/world/track.c src/game/validation_metrics.c src/game/run_report.c \
+               src/game/car_roster.c src/game/car_selection.c src/game/setup_editor.c src/world/track.c src/game/validation_metrics.c src/game/run_report.c \
                src/game/telemetry.c src/game/ai_driver.c src/game/controller.c src/game/race_entrant.c src/game/race_session.c src/game/replay.c src/dev/dev_presets.c src/dev/dev_params.c src/dev/dev_replay.c \
                src/dev/failure_bundle.c \
                src/physics/surface.c src/physics/vehicle.c \
-               src/core/json.c src/content/vehicle_manifest.c src/content/track_manifest.c
+               src/core/json.c src/content/vehicle_manifest.c src/content/track_manifest.c src/content/roster_promotion.c src/content/vehicle_class.c
 # failure_bundle.c is SHARED, not DEV: --validate-lap writes a bundle from the platform layer,
 # which links SHARED_SRCS but not GAME_SRCS. Its own dependencies (dev_params, dev_replay,
 # replay) are already here, and it holds no static state, so both binaries can carry a copy.

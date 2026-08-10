@@ -40,6 +40,25 @@ typedef struct {
     bool shiftUpPressed;
     bool shiftDownPressed;
     bool toggleAutoPressed;
+    /*
+     * Menu-only commands, and deliberately not part of the replay frame.
+     *
+     * A recording reproduces a race, not the menu session that configured it: the car identity
+     * (id, content version, content hash) and the setup are captured as a snapshot alongside
+     * frame zero (see replay_capture_initial_vehicle) rather than reconstructed by re-running
+     * keystrokes. That is the stronger guarantee — playback restores the recorded setup exactly,
+     * and a recording whose snapshot does not match the live car is refused outright instead of
+     * being replayed against the wrong vehicle. Serialising these bits would add a second,
+     * weaker path to the same state and let the two disagree.
+     */
+    /* Menu navigation: previous / next selectable car (LEFT/RIGHT, or gamepad d-pad). */
+    bool leftPressed;
+    bool rightPressed;
+    /* Setup editor (menu only): toggle the setup screen, move cursor, adjust, reset. */
+    bool upPressed;
+    bool downPressed;
+    bool setupTogglePressed;
+    bool resetSetupPressed;
 } Input;
 
 /* Zero every field. */

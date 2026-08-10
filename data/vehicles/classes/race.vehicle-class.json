@@ -1,0 +1,21 @@
+{
+  "schema": "circuit/vehicle-class",
+  "version": 1,
+  "id": "race",
+  "displayName": "Race",
+  "description": "Competition-oriented cars: heavier, high torque, rear- or all-wheel drive.",
+  "rules": {
+    "mass_kg": [
+      950,
+      1400
+    ],
+    "peak_torque_nm": [
+      250,
+      600
+    ],
+    "layouts": [
+      "rwd",
+      "awd"
+    ]
+  }
+}

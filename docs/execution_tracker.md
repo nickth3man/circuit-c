@@ -111,18 +111,18 @@ The Cars and Tracks lanes can run primarily in parallel.
 - [x] [#29 — Define a versioned vehicle manifest and loader](https://github.com/nickth3man/circuit-c/issues/29)
   - Depends on: #8, #12
 
-- [ ] [#30 — Migrate the six-car validated roster out of hard-coded C](https://github.com/nickth3man/circuit-c/issues/30)
+- [x] [#30 — Migrate the six-car validated roster out of hard-coded C](https://github.com/nickth3man/circuit-c/issues/30)
   - Depends on: #29
 
 After #30, #31 and #32 may run in parallel.
 
-- [ ] [#31 — Separate the appearance corpus from gameplay roster promotion](https://github.com/nickth3man/circuit-c/issues/31)
+- [x] [#31 — Separate the appearance corpus from gameplay roster promotion](https://github.com/nickth3man/circuit-c/issues/31)
   - Depends on: #29, #30
 
-- [ ] [#32 — Add player-facing car selection, inspection, and compatibility status](https://github.com/nickth3man/circuit-c/issues/32)
+- [x] [#32 — Add player-facing car selection, inspection, and compatibility status](https://github.com/nickth3man/circuit-c/issues/32)
   - Depends on: #30, #11
 
-- [ ] [#33 — Implement validated setups, classes, and class-aware performance checks](https://github.com/nickth3man/circuit-c/issues/33)
+- [x] [#33 — Implement validated setups, classes, and class-aware performance checks](https://github.com/nickth3man/circuit-c/issues/33)
   - Depends on: #8, #12, #29
 
 ## Tracks lane
@@ -130,7 +130,7 @@ After #30, #31 and #32 may run in parallel.
 - [x] [#34 — Define a versioned external track format](https://github.com/nickth3man/circuit-c/issues/34)
   - Depends on: #7
 
-- [ ] [#35 — Implement headless track loading, validation, version migration, and hashes](https://github.com/nickth3man/circuit-c/issues/35)
+- [x] [#35 — Implement headless track loading, validation, version migration, and hashes](https://github.com/nickth3man/circuit-c/issues/35)
   - Depends on: #34
 
 After #35, track migration can proceed while race semantics are developed.
@@ -146,11 +146,11 @@ After #35, track migration can proceed while race semantics are developed.
 
 ## Phase 2 gate
 
-- [ ] Cars load from versioned external manifests.
-- [ ] All six validated vehicles retain approved physical behavior.
-- [ ] Visual-only corpus entries cannot silently enter the gameplay roster.
-- [ ] Cars are selectable by stable content ID.
-- [ ] Setups cannot mutate shared base definitions.
+- [x] Cars load from versioned external manifests.
+- [x] All six validated vehicles retain approved physical behavior.
+- [x] Visual-only corpus entries cannot silently enter the gameplay roster.
+- [x] Cars are selectable by stable content ID.
+- [x] Setups cannot mutate shared base definitions.
 - [ ] Tracks load from versioned external files.
 - [ ] All original tracks pass loader, collision, timing, and replay tests.
 - [ ] Checkpoints, sectors, start/finish, grid, and pit metadata are distinct.

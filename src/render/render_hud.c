@@ -6,14 +6,15 @@
 #if !defined(CIRCUIT_HEADLESS)
 
 #include "render/render_internal.h"
-
 #include <math.h>
-
+#include "content/vehicle_manifest.h"
+#include "game/car_roster.h"
+#include "game/car_selection.h"
+#include "game/setup_editor.h"
+#include "physics/vehicle.h"
 #include "core/math_utils.h"
 #include "physics/tire.h"
-#include "physics/vehicle.h"
 #include "core/units.h"
-
 /* ---- presentation palette, type scale, and screen-space helpers -----------------------
  *
  * Racing HUD palette (documented for the design review):
@@ -79,18 +80,130 @@ static const char *gear_label(int selectedGear);
  */
 static void draw_overlay_menu(const Game *game)
 {
-    (void)game;
     DrawRectangle(0, 0, SCREEN_W, SCREEN_H, COL_DIM_SCREEN);
+    draw_text_centered_shadow("CIRCUIT", 92, 56, COL_ACCENT);
+    draw_text_centered("a deterministic top-down racing simulator", 158, 18, COL_TEXT_DIM);
 
-    draw_text_centered_shadow("CIRCUIT", 226, 64, COL_ACCENT);
-    draw_text_centered("a deterministic top-down racing simulator", 306, 20, COL_TEXT_DIM);
-
+    const int selectable = car_selection_count();
+    if (selectable == 0 || game->selectedCarIndex < 0) {
+        draw_text_centered_shadow("NO SELECTABLE CARS", 280, 32, COL_ACCENT_WARM);
+        draw_text_centered(
+            "content error — no valid player-selectable vehicle manifest was found", 326, 16,
+            COL_TEXT_DIM);
+        draw_text_centered("check data/vehicles/*.vehicle.json", 348, 16, COL_TEXT_DIM);
+        return;
+    }
+    CarSelectionEntry entry;
+    if (!car_selection_entry(game->selectedCarIndex, &entry)) return;
+    const VehicleManifest *m = entry.manifest;
+    const VehicleSpec *s = &m->definition.spec;
+    draw_text_centered_shadow(m->displayName, 188, 36, COL_TEXT);
+    const char *layout = car_roster_layout_name(entry.rosterIndex);
+    const char *cls = (m->classTagCount > 0) ? m->classTags[0] : "unclassified";
     draw_text_centered(
-        "PRESS P TO START", 414, 24,
+        TextFormat("%s   %s   %d / %d", layout, cls, game->selectedCarIndex + 1, selectable),
+        232, 18, COL_COOL);
+    float peakTorqueNm = 0.0f;
+    for (int i = 0; i < ENGINE_CURVE_POINTS; i++) {
+        if (s->engineTorqueCurveNm[i] > peakTorqueNm) peakTorqueNm = s->engineTorqueCurveNm[i];
+    }
+    const int x = (SCREEN_W - 460) / 2;
+    int y = 286;
+    const int row = 22;
+    DrawText(TextFormat("mass            %.0f kg", (double)s->massKg), x, y, 18, COL_TEXT);
+    DrawText(TextFormat("peak torque     %.0f N*m", (double)peakTorqueNm), x, y += row, 18,
+             COL_TEXT);
+    DrawText(TextFormat("gears            %d   final %.2f", s->gearCount,
+                        (double)s->finalDriveRatio),
+             x, y += row, 18, COL_TEXT);
+    DrawText(TextFormat("redline          %.0f rpm", (double)s->engineRedlineRpm), x, y += row,
+             18, COL_TEXT);
+    DrawText(TextFormat("brake bias       %.2f front", (double)s->brakeBiasFront), x, y += row,
+             18, COL_TEXT);
+    DrawText(TextFormat("tire grip        F %.2f  R %.2f", (double)s->tireMuLatFront,
+                        (double)s->tireMuLatRear),
+             x, y += row, 18, COL_TEXT);
+    DrawText(
+        TextFormat("drag             Cd %.2f", (double)vehicle_effective_drag_coefficient(s)),
+        x, y += row, 18, COL_TEXT);
+    DrawText(TextFormat("tires            %d/%dR%d", (int)s->tireSectionWidthFrontMm,
+                        (int)s->tireAspectFrontPct, (int)s->tireRimDiameterFrontIn),
+             x, y += row, 18, COL_TEXT_DIM);
+    /*
+     * Everything below is laid out against SCREEN_H (720) with the bottom prompt as the last
+     * row. The window is a fixed size, so a y past 720 is not "further down the page" — it is
+     * simply not drawn, which is how the control hints and the tail of the setup list went
+     * missing. Both blocks are budgeted to end above 700.
+     */
+    if (game->setupEditing) {
+        /* The description is dropped here rather than reflowed: the setup list needs the room,
+         * and the car it belongs to is still named at the top of the screen. */
+        const SetupEditor *ed = &game->setupEditor;
+        draw_text_centered_shadow("SETUP", 462, 24, COL_ACCENT);
+        /*
+         * Every item the cursor can reach is on screen, whatever the editor holds. The cursor
+         * wraps across all itemCount entries, so a fixed row budget would land the highlight on
+         * an invisible row while UP/DOWN edited a value the player could not see.
+         *
+         * The vertical budget is the fixed quantity — rows must end above the hint and
+         * validity lines, which must themselves end above SCREEN_H. So rows are capped first
+         * and the column count is whatever that requires, up to SETUP_EDITOR_MAX_ITEMS. Today
+         * that is 12 items in 2 columns; a full 24 would lay out in 4 without clipping.
+         */
+        enum {
+            kSetupTop = 498,
+            kSetupRow = 22,
+            kSetupRowLimit = 648, /* last row's baseline; hints and warning go below */
+            kSetupMaxRows = (kSetupRowLimit - kSetupTop) / kSetupRow,
+            kSetupMarginX = 60,
+        };
+        /* Asserted rather than clamped at draw time: these are fixed layout constants, so a
+         * budget too small for a row — or an editor capacity needing more columns than the
+         * width can carry — is a build-time mistake, not something to paper over per frame. */
+        _Static_assert(kSetupMaxRows >= 1, "the setup row budget must fit at least one row");
+        _Static_assert(SETUP_EDITOR_MAX_ITEMS <= kSetupMaxRows * 4,
+                       "the setup overlay lays out at most four columns");
+        const int setupTop = kSetupTop;
+        const int setupRow = kSetupRow;
+        const int columns =
+            (ed->itemCount > 0) ? ((ed->itemCount + kSetupMaxRows - 1) / kSetupMaxRows) : 1;
+        const int rowsPerColumn =
+            (ed->itemCount > 0) ? ((ed->itemCount + columns - 1) / columns) : 0;
+        const int marginX = kSetupMarginX;
+        const int columnWidth = (SCREEN_W - 2 * marginX) / columns;
+        for (int i = 0; i < ed->itemCount; i++) {
+            const SetupEditorItem *it = &ed->items[i];
+            const float val = setup_editor_value(ed, i);
+            const bool onCursor = (i == game->setupCursor);
+            const Color c = onCursor ? COL_ACCENT : COL_TEXT;
+            const int column = (rowsPerColumn > 0) ? (i / rowsPerColumn) : 0;
+            const int rowInColumn = (rowsPerColumn > 0) ? (i % rowsPerColumn) : i;
+            DrawText(TextFormat("%s%s  %g %s", onCursor ? "> " : "  ", it->key, (double)val,
+                                it->unit),
+                     marginX + column * columnWidth, setupTop + rowInColumn * setupRow, 16, c);
+        }
+        const int setupBottom = setupTop + rowsPerColumn * setupRow;
+        draw_text_centered("LEFT/RIGHT item    UP/DOWN adjust    D reset    S back",
+                           setupBottom + 12, 14, COL_TEXT_DIM);
+        if (!setup_editor_is_valid(ed)) {
+            draw_text_centered("setup out of bounds — adjust to continue", setupBottom + 34, 14,
+                               COL_ACCENT_WARM);
+        }
+        return;
+    }
+    if (m->description[0] != '\0') {
+        draw_text_centered(m->description, y + row + 16, 15, COL_TEXT_DIM);
+    }
+    if (game->startBlockedReason[0] != '\0') {
+        draw_text_centered(TextFormat("cannot start: %s", game->startBlockedReason), 612, 16,
+                           COL_ACCENT_WARM);
+    }
+    draw_text_centered(
+        "< / > select car      S setup      P start", 640, 18,
         (Color){ COL_TEXT.r, COL_TEXT.g, COL_TEXT.b, pulse_alpha(0.6f, 90, 255) });
-    draw_text_centered("W/S throttle & brake    A/D steer    SPACE handbrake    "
-                       "Q/E shift    P pause    R reset",
-                       466, 16, COL_TEXT_DIM);
+    draw_text_centered("W/S throttle & brake    A/D steer    SPACE handbrake    Q/E shift    P "
+                       "pause    R reset",
+                       672, 14, COL_TEXT_DIM);
 }
 
 static void draw_overlay_paused(const Game *game)

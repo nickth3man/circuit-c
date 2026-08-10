@@ -1,0 +1,21 @@
+{
+  "schema": "circuit/vehicle-class",
+  "version": 1,
+  "id": "road",
+  "displayName": "Road",
+  "description": "Street-oriented cars: modest mass, moderate torque, road tires, front- or rear-wheel drive.",
+  "rules": {
+    "mass_kg": [
+      700,
+      1300
+    ],
+    "peak_torque_nm": [
+      50,
+      350
+    ],
+    "layouts": [
+      "rwd",
+      "fwd"
+    ]
+  }
+}

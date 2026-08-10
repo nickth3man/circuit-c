@@ -636,6 +636,38 @@ void vehicle_setup_set_default(const VehicleDefinition *definition, VehicleSetup
     setup->differentialPreloadNm = spec->differentialPreloadNm;
 }
 
+uint32_t vehicle_setup_hash(const VehicleSetup *setup)
+{
+    /* Deterministic serialization anchor for saved/replayed setups (issue #33): the field
+     * order below mirrors the entrant-setup block of game_state_checksum (game.c), so an
+     * untouched setup round-trips to identical bytes and hashes on every platform. A NULL
+     * setup hashes as a fully zeroed one: the empty setup is a legal, stable value. */
+    VehicleSetup zeroed;
+    if (setup == NULL) {
+        memset(&zeroed, 0, sizeof(zeroed));
+        setup = &zeroed;
+    }
+
+    uint32_t hash = 0x811c9dc5u;
+    hash = vehicle_hash_f32(hash, setup->tirePressureFrontKpa);
+    hash = vehicle_hash_f32(hash, setup->tirePressureRearKpa);
+    hash = vehicle_hash_f32(hash, setup->suspCamberFrontRad);
+    hash = vehicle_hash_f32(hash, setup->suspCamberRearRad);
+    hash = vehicle_hash_f32(hash, setup->suspToeFrontRad);
+    hash = vehicle_hash_f32(hash, setup->suspToeRearRad);
+    hash = vehicle_hash_f32(hash, setup->suspCasterFrontRad);
+    hash = vehicle_hash_f32(hash, setup->suspCasterRearRad);
+    hash = vehicle_hash_u32(hash, (uint32_t)setup->gearCount);
+    for (int i = 0; i < MAX_GEARS; i++) hash = vehicle_hash_f32(hash, setup->gearRatios[i]);
+    hash = vehicle_hash_f32(hash, setup->reverseGearRatio);
+    hash = vehicle_hash_f32(hash, setup->finalDriveRatio);
+    hash = vehicle_hash_f32(hash, setup->brakeBiasFront);
+    hash = vehicle_hash_f32(hash, setup->differentialMode);
+    hash = vehicle_hash_f32(hash, setup->differentialBiasRatio);
+    hash = vehicle_hash_f32(hash, setup->differentialPreloadNm);
+    return hash;
+}
+
 static void vehicle_setup_apply(VehicleSpec *spec, const VehicleSetup *setup)
 {
     spec->tirePressureFrontKpa = setup->tirePressureFrontKpa;

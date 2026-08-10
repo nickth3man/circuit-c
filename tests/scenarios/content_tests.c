@@ -1,12 +1,15 @@
 /*
  * content_tests.c — scenarios for the versioned vehicle and track content formats.
  *
- * Three groups of assertions, kept out of the existing scenario files so the registry stays one
+ * Six groups of assertions, kept out of the existing scenario files so the registry stays one
  * concern per file:
  *
- *   json-parser        the strict reader and its canonical content hash
- *   vehicle-manifest   issue #29: manifest load, validation, round-trip, and catalog discovery
- *   track-format       issue #34: external track load, faithful round-trip, and hash stability
+ *   json-parser          the strict reader and its canonical content hash
+ *   vehicle-manifest     issue #29: manifest load, validation, round-trip, and catalog discovery
+ *   roster-promotion     issue #31: the promotion checklist gates player-selectable content
+ *   roster-content-kind  issue #31: content-kind separation keeps corpus samples out of the roster
+ *   vehicle-class        issue #33: class rules and eligibility for the roster cars
+ *   track-format         issue #34: external track load, faithful round-trip, and hash stability
  *
  * Every scenario is headless and deterministic: no window, no audio, no working-directory
  * assumption beyond the shared artifacts/telemetry scratch directory.
@@ -21,10 +24,13 @@
 
 #include "core/config.h"
 #include "core/json.h"
+#include "content/roster_promotion.h"
 #include "content/track_manifest.h"
+#include "content/vehicle_class.h"
 #include "content/vehicle_manifest.h"
 #include "dev/dev_params.h"
 #include "game/car_roster.h"
+#include "game/car_selection.h"
 #include "game/telemetry.h"
 #include "physics/vehicle.h"
 #include "world/track.h"
@@ -38,6 +44,23 @@ static const char kSampleManifest[] =
     "  \"contentVersion\": 1, \"appearanceId\": \"sample_rwd\",\n"
     "  \"physics\": { \"body.wheelbase\": 2.60, \"tire.lat_front.mu\": 1.40 },\n"
     "  \"setup\": { \"brake.bias_front\": 0.58, \"drive.gear_count\": 5 }\n"
+    "}\n";
+
+/* A complete, reviewable manifest: every promotion-checklist row has its evidence — a stable
+ * identity with provenance, authored physics, a class tag, a valid baseline setup, an explicit
+ * player-facing content kind, and human+ai eligibility. The roster_promotion scenario starts
+ * from this and breaks one row at a time. */
+static const char kPromotableManifest[] =
+    "{\n"
+    "  \"schema\": \"circuit/vehicle\", \"version\": 1,\n"
+    "  \"id\": \"promo_rwd\", \"displayName\": \"Promo RWD\",\n"
+    "  \"contentVersion\": 1, \"appearanceId\": \"promo_rwd\",\n"
+    "  \"contentKind\": \"player-selectable\",\n"
+    "  \"classTags\": [\"road\"],\n"
+    "  \"controllerEligibility\": [\"human\", \"ai\"],\n"
+    "  \"provenance\": { \"source\": \"tests\", \"author\": \"content_tests\" },\n"
+    "  \"physics\": { \"body.wheelbase\": 2.60 },\n"
+    "  \"setup\": { \"brake.bias_front\": 0.58 }\n"
     "}\n";
 
 /* ---------------------------------------------------------------------------------------------- json */
@@ -299,6 +322,414 @@ static void scenario_vehicle_manifest(void)
               ok ? "(none)" : error);
         vehicle_catalog_free(&dup);
         remove(dupPath);
+    }
+}
+
+/* ---------------------------------------------------------------------------------- roster promotion */
+
+static void scenario_roster_promotion(void)
+{
+    char error[256];
+    VehicleManifest good;
+    check(vehicle_manifest_parse(kPromotableManifest, strlen(kPromotableManifest), &good, error,
+                                 sizeof(error)),
+          "promotable manifest parses (error: %s)", error);
+    VehiclePromotionReport report;
+    check(vehicle_promotion_evaluate(&good, &report),
+          "promotable manifest passes the full checklist");
+    check(report.count == PROMOTION_CHECK_COUNT, "promotion report has %d rows (got %d)",
+          PROMOTION_CHECK_COUNT, report.count);
+    for (int i = 0; i < report.count; i++) {
+        check(report.checks[i].pass, "promotion check '%s' passes: %s", report.checks[i].name,
+              report.checks[i].detail);
+    }
+    struct {
+        const char *breakKind;
+        const char *manifestText;
+        const char *expectedCheck;
+    } breaks[] = {
+        { "identity-provenance (empty displayName)",
+          "{\"schema\":\"circuit/"
+          "vehicle\",\"version\":1,\"id\":\"promo_rwd\",\"displayName\":\"\","
+          "\"contentVersion\":1,\"appearanceId\":\"promo_rwd\",\"contentKind\":\"player-"
+          "selectable\",\"classTags\":[\"road\"],\"controllerEligibility\":[\"human\",\"ai\"],"
+          "\"provenance\":{\"source\":\"tests\",\"author\":\"content_tests\"},\"physics\":{"
+          "\"body.wheelbase\":2.60},\"setup\":{\"brake.bias_front\":0.58}}",
+          "identity-provenance" },
+        { "class-assignment (no tags)",
+          "{\"schema\":\"circuit/"
+          "vehicle\",\"version\":1,\"id\":\"promo_rwd\",\"displayName\":\"Promo "
+          "RWD\",\"contentVersion\":1,\"appearanceId\":\"promo_rwd\",\"contentKind\":\"player-"
+          "selectable\",\"controllerEligibility\":[\"human\",\"ai\"],\"provenance\":{"
+          "\"source\":\"tests\",\"author\":\"content_tests\"},\"physics\":{\"body.wheelbase\":"
+          "2.60},\"setup\":{\"brake.bias_front\":0.58}}",
+          "class-assignment" },
+        { "review-status (visual-sample)",
+          "{\"schema\":\"circuit/"
+          "vehicle\",\"version\":1,\"id\":\"promo_rwd\",\"displayName\":\"Promo "
+          "RWD\",\"contentVersion\":1,\"appearanceId\":\"promo_rwd\",\"contentKind\":\"visual-"
+          "sample\",\"classTags\":[\"road\"],\"controllerEligibility\":[\"human\",\"ai\"],"
+          "\"provenance\":{\"source\":\"tests\",\"author\":\"content_tests\"},\"physics\":{"
+          "\"body.wheelbase\":2.60},\"setup\":{\"brake.bias_front\":0.58}}",
+          "review-status" },
+        { "ai-compatibility (human only)",
+          "{\"schema\":\"circuit/"
+          "vehicle\",\"version\":1,\"id\":\"promo_rwd\",\"displayName\":\"Promo "
+          "RWD\",\"contentVersion\":1,\"appearanceId\":\"promo_rwd\",\"contentKind\":\"player-"
+          "selectable\",\"classTags\":[\"road\"],\"controllerEligibility\":[\"human\"],"
+          "\"provenance\":{\"source\":\"tests\",\"author\":\"content_tests\"},\"physics\":{"
+          "\"body.wheelbase\":2.60},\"setup\":{\"brake.bias_front\":0.58}}",
+          "ai-compatibility" },
+    };
+    for (size_t b = 0; b < sizeof(breaks) / sizeof(breaks[0]); b++) {
+        VehicleManifest m;
+        bool parsed = vehicle_manifest_parse(
+            breaks[b].manifestText, strlen(breaks[b].manifestText), &m, error, sizeof(error));
+        check(parsed, "break case '%s' still parses (error: %s)", breaks[b].breakKind,
+              parsed ? "(none)" : error);
+        if (!parsed) continue;
+        VehiclePromotionReport r;
+        const bool ok = vehicle_promotion_evaluate(&m, &r);
+        check(!ok, "promotion fails for %s", breaks[b].breakKind);
+        check(r.count == PROMOTION_CHECK_COUNT, "report still has %d rows for %s",
+              PROMOTION_CHECK_COUNT, breaks[b].breakKind);
+        bool found = false;
+        for (int i = 0; i < r.count; i++) {
+            if (strcmp(r.checks[i].name, breaks[b].expectedCheck) == 0) {
+                check(!r.checks[i].pass, "check '%s' fails for %s: %s", r.checks[i].name,
+                      breaks[b].breakKind, r.checks[i].detail);
+                found = true;
+            }
+        }
+        check(found, "expected failing check '%s' present for %s", breaks[b].expectedCheck,
+              breaks[b].breakKind);
+    }
+    {
+        VehicleManifest m = good;
+        m.definition.contentHash = 0;
+        VehiclePromotionReport r;
+        check(!vehicle_promotion_evaluate(&m, &r),
+              "promotion fails for physical-data-complete (zero hash)");
+        bool found = false;
+        for (int i = 0; i < r.count; i++)
+            if (strcmp(r.checks[i].name, "physical-data-complete") == 0) {
+                check(!r.checks[i].pass, "physical-data-complete fails for zero hash: %s",
+                      r.checks[i].detail);
+                found = true;
+            }
+        check(found, "physical-data-complete check present");
+    }
+    {
+        VehicleManifest m = good;
+        m.defaultSetup.brakeBiasFront = 10.0f;
+        VehiclePromotionReport r;
+        check(!vehicle_promotion_evaluate(&m, &r),
+              "promotion fails for default-setup-valid (bad brake bias)");
+        bool found = false;
+        for (int i = 0; i < r.count; i++)
+            if (strcmp(r.checks[i].name, "default-setup-valid") == 0) {
+                check(!r.checks[i].pass, "default-setup-valid fails for bad setup: %s",
+                      r.checks[i].detail);
+                found = true;
+            }
+        check(found, "default-setup-valid check present");
+    }
+    {
+        VehicleManifest m = good;
+        m.definition.spec.bodyHalfWidthM = 2.0f;
+        m.definition.spec.lengthOverallM = 20.0f;
+        VehiclePromotionReport r;
+        check(!vehicle_promotion_evaluate(&m, &r),
+              "promotion fails for collision-dimensions (excessive envelope)");
+        bool found = false;
+        for (int i = 0; i < r.count; i++)
+            if (strcmp(r.checks[i].name, "collision-dimensions") == 0) {
+                check(!r.checks[i].pass,
+                      "collision-dimensions fails for excessive envelope: %s",
+                      r.checks[i].detail);
+                found = true;
+            }
+        check(found, "collision-dimensions check present");
+    }
+    {
+        /*
+         * Evidence must never look complete when it is not. A car carrying more class tags
+         * than the detail buffer can hold gets an explicit "..." rather than a list that
+         * silently stops, so a reviewer reading a report can tell it was cut short.
+         */
+        VehicleManifest m;
+        check(vehicle_manifest_parse(kPromotableManifest, strlen(kPromotableManifest), &m,
+                                     error, sizeof(error)),
+              "promotable manifest parses for the tag-truncation case (error: %s)", error);
+        m.classTagCount = 0;
+        for (int i = 0; i < VEHICLE_MANIFEST_MAX_CLASS_TAGS; i++) {
+            snprintf(m.classTags[m.classTagCount++], VEHICLE_MANIFEST_CLASS_TAG_CHARS,
+                     "class_tag_number_%02d_padded_out", i);
+        }
+        VehiclePromotionReport r;
+        (void)vehicle_promotion_evaluate(&m, &r);
+        const PromotionCheck *classCheck = NULL;
+        for (int i = 0; i < r.count; i++) {
+            if (strcmp(r.checks[i].name, "class-assignment") == 0) classCheck = &r.checks[i];
+        }
+        check(classCheck != NULL, "class-assignment check present for the truncation case");
+        if (classCheck != NULL) {
+            check(classCheck->pass, "many tags still satisfy class-assignment");
+            check(strlen(classCheck->detail) < PROMOTION_CHECK_DETAIL_CHARS,
+                  "class-assignment evidence stays inside its buffer (%zu bytes)",
+                  strlen(classCheck->detail));
+            check(strstr(classCheck->detail, "...") != NULL,
+                  "truncated tag evidence is marked with '...' (got '%s')", classCheck->detail);
+        }
+    }
+    VehiclePromotionReport empty;
+    check(!vehicle_promotion_evaluate(NULL, &empty), "NULL manifest fails promotion");
+    check(empty.count == 0, "NULL manifest yields empty report");
+}
+
+static void scenario_roster_content_kind(void)
+{
+    char error[256];
+    const char *kinds[] = { "visual-sample", "prototype", "validated", "player-selectable" };
+    for (size_t i = 0; i < sizeof(kinds) / sizeof(kinds[0]); i++) {
+        char text[512];
+        snprintf(text, sizeof(text),
+                 "{\"schema\":\"circuit/"
+                 "vehicle\",\"version\":1,\"id\":\"kind_%zu\",\"displayName\":\"Kind\","
+                 "\"contentVersion\":1,\"appearanceId\":\"kind_%zu\",\"contentKind\":\"%s\"}",
+                 i, i, kinds[i]);
+        VehicleManifest m;
+        check(vehicle_manifest_parse(text, strlen(text), &m, error, sizeof(error)),
+              "contentKind '%s' parses", kinds[i]);
+        if (m.contentKind < VEHICLE_CONTENT_VISUAL_SAMPLE ||
+            m.contentKind > VEHICLE_CONTENT_PLAYER_SELECTABLE) {
+            check(false, "contentKind '%s' yielded out-of-range enum %d", kinds[i],
+                  (int)m.contentKind);
+        } else {
+            check(strcmp(vehicle_content_kind_name(m.contentKind), kinds[i]) == 0,
+                  "contentKind '%s' round-trips through name table", kinds[i]);
+        }
+    }
+    {
+        const char *bad =
+            "{\"schema\":\"circuit/"
+            "vehicle\",\"version\":1,\"id\":\"bad\",\"displayName\":\"Bad\",\"contentVersion\":"
+            "1,\"appearanceId\":\"bad\",\"contentKind\":\"unknown-kind\"}";
+        VehicleManifest m;
+        check(!vehicle_manifest_parse(bad, strlen(bad), &m, error, sizeof(error)),
+              "unknown contentKind is rejected (error: %s)", error);
+    }
+    char dir[512];
+    snprintf(dir, sizeof(dir), "%s/_content_kind", TELEMETRY_DIR);
+    telemetry_ensure_dir(dir);
+    const char *mixIds[] = { "mix_a", "mix_b", "mix_c", "mix_d" };
+    const char *mixKinds[] = { "visual-sample", "prototype", "validated", "player-selectable" };
+    for (size_t i = 0; i < 4; i++) {
+        char path[640], text[512];
+        snprintf(path, sizeof(path), "%s/%s.vehicle.json", dir, mixIds[i]);
+        snprintf(text, sizeof(text),
+                 "{\"schema\":\"circuit/"
+                 "vehicle\",\"version\":1,\"id\":\"%s\",\"displayName\":\"%s\","
+                 "\"contentVersion\":1,\"appearanceId\":\"%s\",\"contentKind\":\"%s\"}",
+                 mixIds[i], mixIds[i], mixIds[i], mixKinds[i]);
+        FILE *f = fopen(path, "wb");
+        if (f != NULL) {
+            fputs(text, f);
+            fclose(f);
+        }
+    }
+    VehicleCatalog cat;
+    check(vehicle_manifest_load_dir(dir, &cat, error, sizeof(error)),
+          "mixed-kind catalog loads (error: %s)", error);
+    /* The count is asserted rather than assumed: guarding the assertion with the same condition
+     * made the check unreachable when it mattered, so a short catalog would have passed silently. */
+    check(cat.count == 4, "catalog holds all 4 kinds (got %d)", cat.count);
+    int playable = 0;
+    for (int i = 0; i < cat.count; i++)
+        if (cat.items[i].contentKind == VEHICLE_CONTENT_PLAYER_SELECTABLE) playable++;
+    check(playable == 1, "only 1 of 4 is player-selectable (got %d)", playable);
+    vehicle_catalog_free(&cat);
+    for (size_t i = 0; i < 4; i++) {
+        char p[640];
+        snprintf(p, sizeof(p), "%s/%s.vehicle.json", dir, mixIds[i]);
+        remove(p);
+    }
+    check(car_roster_count() == 6, "live roster still has 6 player-selectable cars (got %d)",
+          car_roster_count());
+}
+
+static void scenario_vehicle_class(void)
+{
+    char error[256];
+    const char *kRoadClass =
+        "{\"schema\":\"circuit/"
+        "vehicle-class\",\"version\":1,\"id\":\"road\",\"displayName\":\"Road\"}";
+    VehicleClass road;
+    check(vehicle_class_parse(kRoadClass, strlen(kRoadClass), &road, error, sizeof(error)),
+          "road class with no rules parses (error: %s)", error);
+    VehicleManifest tagged, untagged;
+    const char *kTagged =
+        "{\"schema\":\"circuit/"
+        "vehicle\",\"version\":1,\"id\":\"tagged\",\"displayName\":\"Tagged\","
+        "\"contentVersion\":1,\"appearanceId\":\"tagged\",\"classTags\":[\"road\"]}";
+    const char *kUntagged = "{\"schema\":\"circuit/"
+                            "vehicle\",\"version\":1,\"id\":\"untagged\",\"displayName\":"
+                            "\"Untagged\",\"contentVersion\":1,\"appearanceId\":\"untagged\"}";
+    check(vehicle_manifest_parse(kTagged, strlen(kTagged), &tagged, error, sizeof(error)),
+          "tagged manifest parses");
+    check(vehicle_manifest_parse(kUntagged, strlen(kUntagged), &untagged, error, sizeof(error)),
+          "untagged manifest parses");
+    char detail[256];
+    check(vehicle_class_check_eligibility(&road, &tagged, detail, sizeof(detail)),
+          "tagged car is eligible for tag-only class: %s", detail);
+    check(!vehicle_class_check_eligibility(&road, &untagged, detail, sizeof(detail)),
+          "untagged car is ineligible for tag-only class: %s", detail);
+    const char *kBounded =
+        "{\"schema\":\"circuit/"
+        "vehicle-class\",\"version\":1,\"id\":\"light\",\"displayName\":\"Light\","
+        "\"description\":\"ignored\",\"rules\":{\"mass_kg\":[600,900],\"peak_torque_nm\":[10,"
+        "200],\"max_tire_mu\":1.5,\"layouts\":[\"fwd\"]}}";
+    VehicleClass light;
+    check(vehicle_class_parse(kBounded, strlen(kBounded), &light, error, sizeof(error)),
+          "bounded class parses (error: %s)", error);
+    /*
+     * Eligibility is asserted against manifests authored right here, not against roster cars.
+     * A roster-based assertion silently depends on two specific cars staying inside the class
+     * bounds, so an ordinary physics content bump would fail this scenario even though the
+     * class-rule logic it is meant to cover never changed. Authored fixtures pin every value a
+     * rule reads — mass, peak torque, tire mu, layout — so the only thing that can move the
+     * verdict is the rule evaluation itself. (The shipped roster is separately checked against
+     * the shipped classes by the `roster-gate` gameplay scenario.)
+     */
+    const char *kFixture =
+        "{\"schema\":\"circuit/"
+        "vehicle\",\"version\":1,\"id\":\"fixture\",\"displayName\":\"Fixture\","
+        "\"contentVersion\":1,\"appearanceId\":\"fixture\",\"classTags\":[\"light\"]}";
+    VehicleManifest inside;
+    check(vehicle_manifest_parse(kFixture, strlen(kFixture), &inside, error, sizeof(error)),
+          "class fixture manifest parses (error: %s)", error);
+    /* Comfortably inside every bound of the "light" class above. */
+    inside.definition.spec.massKg = 750.0f;
+    inside.definition.spec.drivetrainLayout = (float)DRIVE_LAYOUT_FWD;
+    inside.definition.spec.tireMuLatFront = 1.2f;
+    inside.definition.spec.tireMuLatRear = 1.2f;
+    for (int i = 0; i < ENGINE_CURVE_POINTS; i++)
+        inside.definition.spec.engineTorqueCurveNm[i] = 0.0f;
+    inside.definition.spec.engineTorqueCurveNm[0] = 150.0f;
+    check(vehicle_class_check_eligibility(&light, &inside, detail, sizeof(detail)),
+          "a car inside every 'light' bound is eligible: %s", detail);
+
+    /* One rule at a time, so each failure names the rule that produced it. */
+    {
+        VehicleManifest heavy = inside;
+        heavy.definition.spec.massKg = 1500.0f; /* above mass_kg max 900 */
+        check(!vehicle_class_check_eligibility(&light, &heavy, detail, sizeof(detail)),
+              "mass above the class maximum is ineligible: %s", detail);
+    }
+    {
+        VehicleManifest torquey = inside;
+        torquey.definition.spec.engineTorqueCurveNm[0] =
+            400.0f; /* above peak_torque_nm max 200 */
+        check(!vehicle_class_check_eligibility(&light, &torquey, detail, sizeof(detail)),
+              "peak torque above the class maximum is ineligible: %s", detail);
+    }
+    {
+        VehicleManifest sticky = inside;
+        sticky.definition.spec.tireMuLatRear = 1.9f; /* above max_tire_mu 1.5 */
+        check(!vehicle_class_check_eligibility(&light, &sticky, detail, sizeof(detail)),
+              "tire grip above the class maximum is ineligible: %s", detail);
+    }
+    {
+        VehicleManifest rwd = inside;
+        rwd.definition.spec.drivetrainLayout = (float)DRIVE_LAYOUT_RWD; /* layouts = ["fwd"] */
+        check(!vehicle_class_check_eligibility(&light, &rwd, detail, sizeof(detail)),
+              "a layout outside the class whitelist is ineligible: %s", detail);
+    }
+    {
+        /* The tag is required as well as the numbers: satisfying every rule without carrying
+         * the class id must not grant membership. */
+        VehicleManifest untaggedButInside = inside;
+        untaggedButInside.classTagCount = 0;
+        check(!vehicle_class_check_eligibility(&light, &untaggedButInside, detail,
+                                               sizeof(detail)),
+              "rules alone do not grant membership without the tag: %s", detail);
+    }
+    const char *badRules[] = {
+        "{\"schema\":\"circuit/"
+        "vehicle-class\",\"version\":1,\"id\":\"bad\",\"displayName\":\"Bad\",\"rules\":{"
+        "\"unknown_rule\":1}}",
+        "{\"schema\":\"circuit/"
+        "vehicle-class\",\"version\":1,\"id\":\"bad\",\"displayName\":\"Bad\",\"rules\":{"
+        "\"layouts\":[\"hover\"]}}",
+        "{\"schema\":\"circuit/"
+        "vehicle-class\",\"version\":1,\"id\":\"bad\",\"displayName\":\"Bad\",\"rules\":{"
+        "\"mass_kg\":[900,600]}}",
+        /* Finite as a JSON double, but not representable as the float the rule is stored in.
+         * Narrowing it would record an infinity and quietly turn an authored upper bound into
+         * "unconstrained" — the file must be rejected instead. */
+        "{\"schema\":\"circuit/"
+        "vehicle-class\",\"version\":1,\"id\":\"bad\",\"displayName\":\"Bad\",\"rules\":{"
+        "\"mass_kg\":[0,1e100]}}",
+        "{\"schema\":\"circuit/"
+        "vehicle-class\",\"version\":1,\"id\":\"bad\",\"displayName\":\"Bad\",\"rules\":{"
+        "\"peak_torque_nm\":[-1e300,200]}}",
+        "{\"schema\":\"circuit/"
+        "vehicle-class\",\"version\":1,\"id\":\"bad\",\"displayName\":\"Bad\",\"rules\":{"
+        "\"max_tire_mu\":1e100}}",
+    };
+    for (size_t i = 0; i < sizeof(badRules) / sizeof(badRules[0]); i++) {
+        VehicleClass bad;
+        check(
+            !vehicle_class_parse(badRules[i], strlen(badRules[i]), &bad, error, sizeof(error)),
+            "bad class %zu rejected (error: %s)", i, error);
+    }
+    char dir2[512];
+    snprintf(dir2, sizeof(dir2), "%s/_vehicle_class", TELEMETRY_DIR);
+    telemetry_ensure_dir(dir2);
+    const char *ids[] = { "zeta", "alpha", "middle" };
+    for (size_t i = 0; i < 3; i++) {
+        char path[640], text[512];
+        snprintf(path, sizeof(path), "%s/%s.vehicle-class.json", dir2, ids[i]);
+        snprintf(text, sizeof(text),
+                 "{\"schema\":\"circuit/"
+                 "vehicle-class\",\"version\":1,\"id\":\"%s\",\"displayName\":\"%s\"}",
+                 ids[i], ids[i]);
+        FILE *f = fopen(path, "wb");
+        if (f != NULL) {
+            fputs(text, f);
+            fclose(f);
+        }
+    }
+    VehicleClassCatalog cat2;
+    check(vehicle_class_load_dir(dir2, &cat2, error, sizeof(error)),
+          "class catalog loads (error: %s)", error);
+    if (cat2.count == 3) {
+        check(strcmp(cat2.items[0].id, "alpha") == 0 &&
+                  strcmp(cat2.items[1].id, "middle") == 0 &&
+                  strcmp(cat2.items[2].id, "zeta") == 0,
+              "class catalog sorted by id");
+    }
+    vehicle_class_catalog_free(&cat2);
+    {
+        char dup[640];
+        snprintf(dup, sizeof(dup), "%s/_dup.vehicle-class.json", dir2);
+        FILE *f = fopen(dup, "wb");
+        if (f != NULL) {
+            fputs("{\"schema\":\"circuit/"
+                  "vehicle-class\",\"version\":1,\"id\":\"alpha\",\"displayName\":\"Dup\"}",
+                  f);
+            fclose(f);
+        }
+        VehicleClassCatalog dupCat;
+        check(!vehicle_class_load_dir(dir2, &dupCat, error, sizeof(error)),
+              "duplicate class id rejected (error: %s)", error);
+        vehicle_class_catalog_free(&dupCat);
+        remove(dup);
+    }
+    for (size_t i = 0; i < 3; i++) {
+        char p[640];
+        snprintf(p, sizeof(p), "%s/%s.vehicle-class.json", dir2, ids[i]);
+        remove(p);
     }
 }
 
@@ -571,6 +1002,13 @@ static const TestScenario kScenarios[] = {
     { "vehicle-manifest",
       "issue #29: manifest load, validation, roster round-trip, catalog discovery",
       scenario_vehicle_manifest },
+    { "roster-promotion", "issue #31: the promotion checklist gates player-selectable content",
+      scenario_roster_promotion },
+    { "roster-content-kind",
+      "issue #31: content-kind separation keeps corpus samples out of the roster",
+      scenario_roster_content_kind },
+    { "vehicle-class", "issue #33: class rules and eligibility for the roster cars",
+      scenario_vehicle_class },
     { "track-format",
       "issue #34: external track load, faithful round-trip, hash stability, validation",
       scenario_track_format },

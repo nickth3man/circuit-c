@@ -16,6 +16,7 @@
 #include "dev/dev_state.h"
 #include "game/audio.h"
 #include "game/car_roster.h"
+#include "game/car_selection.h"
 #include "game/controller.h"
 #include "physics/auto_transmission.h"
 #include "world/collision.h"
@@ -327,6 +328,78 @@ GAME_API bool game_spawn_on_track_at(Game *game, int checkpointIndex)
 }
 
 /*
+ * Answer whether the menu's current selection may start a race, and say why not when it may not.
+ *
+ * This is the start-time half of the promotion contract: `car_roster` already refuses to admit
+ * content that fails the checklist, so what is left to re-check here is the part the player can
+ * change from the menu — which car is selected and what the setup editor has done to its setup.
+ * The reason string is player-facing, so every rejection names the car and the specific gate.
+ */
+bool game_can_start_race(const Game *game, char *reason, size_t reasonCap)
+{
+    if (game == NULL) {
+        if (reason != NULL && reasonCap > 0) snprintf(reason, reasonCap, "no game");
+        return false;
+    }
+    if (game->selectedCarIndex < 0) {
+        if (reason != NULL && reasonCap > 0) snprintf(reason, reasonCap, "no car selected");
+        return false;
+    }
+    CarSelectionEntry entry;
+    if (!car_selection_entry(game->selectedCarIndex, &entry)) {
+        if (reason != NULL && reasonCap > 0)
+            snprintf(reason, reasonCap, "selected car not in roster");
+        return false;
+    }
+    if (entry.manifest->contentKind != VEHICLE_CONTENT_PLAYER_SELECTABLE) {
+        if (reason != NULL && reasonCap > 0)
+            snprintf(reason, reasonCap, "car %s is not player-selectable (%s)", entry.id,
+                     vehicle_content_kind_name(entry.manifest->contentKind));
+        return false;
+    }
+    if (entry.manifest->classTagCount == 0) {
+        if (reason != NULL && reasonCap > 0)
+            snprintf(reason, reasonCap, "car %s has no class tag", entry.id);
+        return false;
+    }
+    /* Vehicle bounds: either the edited working setup or the manifest default must validate. */
+    const VehicleSetup *setup =
+        game->setupCustomized ? &game->setupEditor.working : &entry.manifest->defaultSetup;
+    if (!vehicle_setup_is_valid(&entry.manifest->definition, setup)) {
+        char why[64] = "";
+        if (game->setupCustomized) setup_editor_can_start(&game->setupEditor, why, sizeof(why));
+        if (reason != NULL && reasonCap > 0)
+            snprintf(reason, reasonCap, "setup outside vehicle bounds%s%s", why[0] ? ": " : "",
+                     why);
+        return false;
+    }
+    return true;
+}
+
+/*
+ * Point the player entrant at the menu's selected car: the manifest's immutable definition and
+ * its authored default setup, applied through the same derive path a spawn uses. Interactive
+ * menu use only — the headless scenarios never pass through the menu, so their default-car
+ * determinism is untouched. With an empty catalog there is nothing to apply and the current
+ * (builtin default) car stays.
+ */
+static void apply_selected_car(Game *game)
+{
+    if (game->selectedCarIndex < 0) return;
+    CarSelectionEntry entry;
+    if (!car_selection_entry(game->selectedCarIndex, &entry)) return;
+    RaceEntrant *entrant = race_roster_local(&game->session.roster);
+    if (entrant == NULL) return;
+    entrant->definition = entry.manifest->definition;
+    entrant->setup = entry.manifest->defaultSetup;
+    (void)vehicle_instance_init(&entrant->instance, &entrant->definition, &entrant->setup);
+    controller_reset(&entrant->controller);
+    setup_editor_init(&game->setupEditor, &entrant->definition, &entrant->setup);
+    game->setupCustomized = false;
+    game->setupCursor = 0;
+}
+
+/*
  * Put the cars back on the grid and start the race again from tick zero.
  *
  * `game_reset_sim()` is the vehicle half of this; the session half is what makes a restart a
@@ -351,6 +424,49 @@ static void restart_session(Game *game)
 }
 
 /*
+ * Start the race the menu is showing — but only if it may be started.
+ *
+ * Two things happen here that cannot happen while the menu is merely being cycled. First the
+ * selection is re-resolved by stable id: the catalog is re-read on every simulation reset
+ * (game_reset_sim -> car_roster_reload), so content edited or removed while the menu was open
+ * can move the car sitting at `selectedCarIndex`. The id is the durable half of the selection
+ * (see car_selection.h), so resolving it again guarantees the car that gets validated is the
+ * car that races. Re-applying is deliberately skipped when the index is unchanged, so the
+ * common case does not discard the player's setup edits.
+ *
+ * Second, game_can_start_race() is consulted. That is the difference between a gate and a
+ * decoration: an ineligible selection or an out-of-bounds setup leaves the player on the menu
+ * with a reason on screen rather than dropping them into a race with a car the content rules
+ * reject. Returns false when the race did not start.
+ */
+static bool start_from_menu(Game *game)
+{
+    car_roster_reload();
+    if (car_selection_count() <= 0) {
+        game->selectedCarIndex = -1;
+    } else {
+        const int resolved = car_selection_index_or_default(
+            game->selectedCarId[0] != '\0' ? game->selectedCarId : NULL);
+        if (resolved != game->selectedCarIndex) {
+            game->selectedCarIndex = resolved;
+            apply_selected_car(game);
+        }
+        CarSelectionEntry entry;
+        if (car_selection_entry(game->selectedCarIndex, &entry)) {
+            snprintf(game->selectedCarId, sizeof(game->selectedCarId), "%s", entry.id);
+        }
+    }
+
+    if (!game_can_start_race(game, game->startBlockedReason,
+                             sizeof(game->startBlockedReason))) {
+        return false;
+    }
+    game->startBlockedReason[0] = '\0';
+    restart_session(game);
+    return true;
+}
+
+/*
  * Application/session commands from `input`, gear requests from `output`.
  *
  * The split is the point: pause, reset, the debug overlay and the automatic-transmission
@@ -364,11 +480,78 @@ static void restart_session(Game *game)
  */
 static void apply_oneshots(Game *game, const Input *input, const ControllerOutput *output)
 {
+    /* Menu navigation only: cycle the selectable roster (id-sorted) with wraparound, persist the
+     * last valid choice by stable id, and point the player entrant at the new car so the world
+     * behind the menu previews it. Interactive menu use only — headless never enters STATE_MENU,
+     * so this cannot perturb scenario determinism. */
+    if (game->state == STATE_MENU && !game->setupEditing &&
+        (input->leftPressed || input->rightPressed)) {
+        const int count = car_selection_count();
+        if (count > 0) {
+            int index = game->selectedCarIndex + (input->rightPressed ? 1 : -1);
+            if (index < 0) index = count - 1;
+            if (index >= count) index = 0;
+            game->selectedCarIndex = index;
+            /* A refusal describes the selection that was refused. Choosing a different car
+             * makes it stale, so it goes now rather than sitting under the new car's name. */
+            game->startBlockedReason[0] = '\0';
+            CarSelectionEntry entry;
+            if (car_selection_entry(index, &entry)) {
+                snprintf(game->selectedCarId, sizeof(game->selectedCarId), "%s", entry.id);
+                (void)car_selection_save_recall(entry.id);
+                apply_selected_car(game);
+            }
+        }
+    }
+    /* Setup editor (issue #33), menu only. S toggles the setup screen; with it open, LEFT/RIGHT
+     * move the editable-item cursor, UP/DOWN adjust by the registry step, and D resets the whole
+     * setup to the car's authored default. A pending setup only reaches the race when the player
+     * starts: it is applied to the local entrant live so a restart carries it, and the base
+     * definition is never mutated. */
+    if (game->state == STATE_MENU && game->selectedCarIndex >= 0 &&
+        game->setupEditor.itemCount > 0) {
+        if (input->setupTogglePressed) {
+            game->setupEditing = !game->setupEditing;
+        } else if (game->setupEditing) {
+            if (input->leftPressed || input->rightPressed) {
+                int cursor = game->setupCursor + (input->rightPressed ? 1 : -1);
+                if (cursor < 0) cursor = game->setupEditor.itemCount - 1;
+                if (cursor >= game->setupEditor.itemCount) cursor = 0;
+                game->setupCursor = cursor;
+            }
+            if (input->upPressed || input->downPressed) {
+                const int dir = input->upPressed ? 1 : -1;
+                if (setup_editor_adjust(&game->setupEditor, game->setupCursor, dir)) {
+                    game->setupCustomized = true;
+                    /* Any edit invalidates the previous refusal: the setup it described no
+                     * longer exists, and the next start attempt recomputes the verdict. */
+                    game->startBlockedReason[0] = '\0';
+                    RaceEntrant *entrant = race_roster_local(&game->session.roster);
+                    if (entrant != NULL) {
+                        entrant->setup = game->setupEditor.working;
+                        (void)vehicle_instance_derive(&entrant->instance, &entrant->definition,
+                                                      &entrant->setup);
+                    }
+                }
+            }
+            if (input->resetSetupPressed) {
+                setup_editor_reset(&game->setupEditor);
+                game->setupCustomized = false;
+                game->startBlockedReason[0] = '\0';
+                RaceEntrant *entrant = race_roster_local(&game->session.roster);
+                if (entrant != NULL) {
+                    entrant->setup = game->setupEditor.working;
+                    (void)vehicle_instance_derive(&entrant->instance, &entrant->definition,
+                                                  &entrant->setup);
+                }
+            }
+        }
+    }
     if (input->pausePressed) {
         switch (game->state) {
             case STATE_MENU:
-                restart_session(game);
-                game->state = STATE_PLAYING;
+                /* Refused starts stay on the menu; start_from_menu() has written the reason. */
+                if (start_from_menu(game)) game->state = STATE_PLAYING;
                 break;
             case STATE_PLAYING:
                 race_session_pause(&game->session);
@@ -450,6 +633,31 @@ GAME_API void game_init(Game *game)
      * different distance or a multi-entrant race calls game_configure_run() (or drives the
      * session directly), and the default keeps every existing caller on the timeline it had. */
     race_session_start(&game->session, NULL);
+#if !defined(CIRCUIT_HEADLESS)
+    /* Resolve the persisted car selection so the menu opens on the player's last car and the
+     * entrant previews it. The recall names a stable content id; an unknown or missing id
+     * deterministically falls back to the first selectable car (id-sorted catalog order). An
+     * empty catalog leaves the builtin default car and an empty selection. Headless never
+     * reaches this, so scenario determinism is unaffected. */
+    game->selectedCarIndex = 0;
+    game->selectedCarId[0] = '\0';
+    {
+        char recalledId[CAR_SELECTION_ID_CHARS];
+        const char *wantedId =
+            car_selection_load_recall(recalledId, sizeof(recalledId)) ? recalledId : NULL;
+        const int count = car_selection_count();
+        if (count > 0) {
+            game->selectedCarIndex = car_selection_index_or_default(wantedId);
+            CarSelectionEntry entry;
+            if (car_selection_entry(game->selectedCarIndex, &entry)) {
+                snprintf(game->selectedCarId, sizeof(game->selectedCarId), "%s", entry.id);
+            }
+        } else {
+            game->selectedCarIndex = -1;
+        }
+        apply_selected_car(game);
+    }
+#endif
 #if defined(CIRCUIT_HEADLESS)
     game->state = STATE_PLAYING; /* headless: no menus, simulate immediately */
 #else

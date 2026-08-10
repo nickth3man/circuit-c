@@ -34,6 +34,7 @@ A single strict JSON reader serves both this format and the track format (#34).
   "description": "balanced rear-wheel-drive road car",
   "contentVersion": 1,
   "appearanceId": "rwd_grip",
+  "contentKind": "player-selectable",
   "classTags": ["rwd", "road"],
   "controllerEligibility": ["human", "ai"],
   "provenance": { "source": "roster", "author": "circuit-c" },
@@ -53,6 +54,7 @@ A single strict JSON reader serves both this format and the track format (#34).
 | `description`    | string   | no       | Free text (≤ 384 chars). Absent ⇒ empty. |
 | `contentVersion` | number   | yes      | Integer; stored into `VehicleDefinition::contentVersion`. |
 | `appearanceId`   | string   | yes      | Links to the appearance sheet (≤ 128 chars). |
+| `contentKind`    | string   | no       | One of the four kinds below. Absent ⇒ `player-selectable`. |
 | `classTags`      | string[] | no       | Up to 8 tags, 32 chars each. |
 | `controllerEligibility` | string[] | no | Subset of `["human", "ai"]`. Absent ⇒ both eligible. |
 | `provenance`     | object   | no       | `source` and `author` strings (≤ 128 chars each). |
@@ -60,6 +62,23 @@ A single strict JSON reader serves both this format and the track format (#34).
 | `setup`          | object   | no       | Setup-owned registry keys. |
 
 Unknown top-level keys are rejected.
+
+### `contentKind`
+
+What a manifest is allowed to be used for. One of:
+
+| Kind                 | Meaning |
+|----------------------|---------|
+| `"visual-sample"`    | Appearance-corpus sample; never race content. |
+| `"prototype"`        | In review; not validated. |
+| `"validated"`        | Passed validation; not yet player-facing. |
+| `"player-selectable"`| Validated and listed for players. |
+
+The field is optional for back-compat — a manifest without it is `"player-selectable"`, the only
+kind the roster knew before the appearance corpus was split from race content. An unknown value is
+rejected. Only `"player-selectable"` manifests are visible to car selection (`car_roster_*`); the
+other kinds load into the catalog (so appearance and review tooling can read them) but never
+surface as race cars.
 
 ### `physics` and `setup`
 
@@ -123,3 +142,94 @@ unknown-key rejection, wrong-section key rejection (setup key in physics and vic
 key rejection, out-of-range values, invalid ids, wrong schema/version, and duplicate-id detection
 in a catalog. Discovery-order independence is checked by writing fixtures with out-of-order ids and
 asserting the catalog comes back sorted.
+
+## Classes (`circuit/vehicle-class` v1)
+
+A class tag on a manifest (`"road"`, `"race"`) is a display string, not a contract: nothing stops
+a typo from tagging a 1600 kg race car as "road". A class file is the reviewed, versioned
+statement of what a class means numerically. The loader lives in
+`src/content/vehicle_class.{h,c}` and uses the same strict JSON reader and conventions as the
+vehicle manifest: unknown top-level keys are rejected, errors are `field: reason`, and a catalog
+is id-sorted with duplicate ids rejected. Class files live in `data/vehicles/classes/`
+(`*.vehicle-class.json`).
+
+### Schema
+
+```json
+{
+  "schema": "circuit/vehicle-class",
+  "version": 1,
+  "id": "road",
+  "displayName": "Road",
+  "description": "Street-oriented cars: modest mass, moderate torque, road tires, front- or rear-wheel drive.",
+  "rules": {
+    "mass_kg": [700, 1300],
+    "peak_torque_nm": [50, 350],
+    "max_tire_mu": 1.6,
+    "layouts": ["rwd", "fwd"]
+  }
+}
+```
+
+### Fields
+
+| Field         | Type     | Required | Notes |
+|---------------|----------|----------|-------|
+| `schema`      | string   | yes      | Must be `"circuit/vehicle-class"`. |
+| `version`     | number   | yes      | Must be `1`. |
+| `id`          | string   | yes      | Stable class id, same `[a-z0-9][a-z0-9._-]{0,62}` rule as a vehicle id. This id is what a manifest's `classTags` entry must match. |
+| `displayName` | string   | yes      | Human label (≤ 128 chars). Display only — never part of eligibility. |
+| `description` | string   | no       | Free text (≤ 384 chars). Display only — never part of eligibility. |
+| `rules`       | object   | no       | Optional numeric bounds; see below. Absent ⇒ all rules unconstrained. |
+
+### Rules (all optional — absent = unconstrained)
+
+| Rule              | Shape      | Meaning |
+|-------------------|------------|---------|
+| `mass_kg`         | `[min, max]` | Inclusive bound on the manifest's total mass (`spec.massKg`, the sum of the authored mass particles). |
+| `peak_torque_nm`  | `[min, max]` | Inclusive bound on the max of the engine torque curve (`engine.torque_p0..p6`). |
+| `max_tire_mu`     | number      | Inclusive upper bound on `max(tire.lat_front.mu, tire.lat_rear.mu)`. |
+| `layouts`         | string[]    | Whitelist of `"rwd"`/`"fwd"`/`"awd"` (up to 3, no duplicates). Absent or empty ⇒ any layout. |
+
+Each bound pair must be two finite numbers with `min <= max`; unknown rule keys, unknown layout
+names, and out-of-range rule values are load errors, not silent no-ops. Bounds are stored as
+32-bit floats, so a number that is finite as JSON but too large to narrow (e.g. `1e100`) is also
+a load error — narrowing it would record an infinity and quietly turn an authored bound into
+"unconstrained".
+
+### Eligibility
+
+`vehicle_class_check_eligibility(class, manifest)` returns membership as a two-part check:
+
+1. **Tag rule** — the manifest must carry the class `id` in its `classTags`. This is the primary
+   membership signal a roster UI groups by.
+2. **Numeric rules** — every rule the class constrains must be satisfied by the manifest's
+   derived spec. A class with no `rules` object is a pure tag filter; a tag with no rules is
+   still required for membership, so an untagged car can never be absorbed by overlapping
+   numeric bounds.
+
+Eligibility never consults display strings: `displayName` and `description` are human review
+text and play no part in membership. The one-line evidence detail names the failed rule with
+the observed value and bound (e.g. `mass 1400 kg outside [700, 1300] kg`), or quotes the checked
+values on success (`tag=road mass=760kg torque=65Nm mu=0.95 layout=fwd eligible`).
+
+### Where the rules are enforced
+
+Class rules and the issue #31 promotion checklist are both applied where it matters — when
+`car_roster` builds the live gameplay roster (`src/game/car_roster.c`). A manifest reaches the
+roster only if it is `player-selectable`, passes every promotion check, and satisfies the numeric
+rules of every class tag that names a class file actually present in `data/vehicles/classes/`.
+Anything refused is kept out of gameplay and recorded, with its id and the failing rule, in the
+rejection log read through `car_roster_rejection_count()` / `car_roster_rejection()`.
+
+A class tag with no matching class file constrains nothing — it stays a grouping label. That is
+deliberate: rejecting every car whose tag has no reviewed rule file would empty the roster the
+moment a packaged build shipped without `classes/`. When a class file does exist, its rules are
+binding, which is what turns the tag from a display string into a contract. The shipped roster is
+held to both gates by the `roster-gate` scenario; the class-rule logic itself is covered
+independently by `vehicle-class` using authored fixtures rather than roster cars, so a routine
+physics content bump cannot flip a rule-logic test.
+
+The menu applies a second, narrower gate at start (`game_can_start_race`) covering only what the
+player can change from the menu: which car is selected and what the setup editor did to its
+setup. A refused start keeps the player on the menu with the reason on screen.

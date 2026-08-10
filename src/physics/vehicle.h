@@ -394,6 +394,10 @@ bool vehicle_definition_init(VehicleDefinition *definition, const char *id,
 void vehicle_definition_set_default(VehicleDefinition *definition);
 void vehicle_setup_set_default(const VehicleDefinition *definition, VehicleSetup *setup);
 bool vehicle_setup_is_valid(const VehicleDefinition *definition, const VehicleSetup *setup);
+/* Deterministic serialization anchor for saved/replayed setups (issue #33): FNV-1a over the
+ * setup fields in the same order game_state_checksum hashes them, so the same bytes yield the
+ * same hash on every platform. NULL hashes as a zeroed setup. */
+uint32_t vehicle_setup_hash(const VehicleSetup *setup);
 /* The sole definition/setup -> compiled-runtime recomputation boundary. It changes no mutable
  * simulation state, so callers may choose whether a setup change also resets the entrant. */
 bool vehicle_instance_derive(VehicleInstance *instance, const VehicleDefinition *definition,

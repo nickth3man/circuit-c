@@ -15,6 +15,7 @@
  *     "schema": "circuit/vehicle", "version": 1,
  *     "id": "rwd_grip", "displayName": "RWD Grip",
  *     "contentVersion": 1, "appearanceId": "rwd_grip",
+ *     "contentKind": "player-selectable",
  *     "classTags": ["rwd", "road"], "controllerEligibility": ["human", "ai"],
  *     "provenance": { "source": "roster", "author": "circuit-c" },
  *     "physics": { "body.wheelbase": 2.55, ... },   // definition-owned keys
@@ -48,12 +49,23 @@
 #define VEHICLE_MANIFEST_MAX_CLASS_TAGS 8
 #define VEHICLE_MANIFEST_CLASS_TAG_CHARS 33 /* class tag (32 chars + NUL) */
 
+/* What a manifest is allowed to be used for. The appearance corpus grew samples that must never
+ * appear as race cars, so a manifest now declares its own kind instead of every file in
+ * data/vehicles/ implicitly being roster content (issue #31). */
+typedef enum {
+    VEHICLE_CONTENT_VISUAL_SAMPLE = 0, /* appearance corpus sample; never race content */
+    VEHICLE_CONTENT_PROTOTYPE,         /* in review; not validated */
+    VEHICLE_CONTENT_VALIDATED,         /* passed validation; not player-facing */
+    VEHICLE_CONTENT_PLAYER_SELECTABLE  /* validated + listed for players */
+} VehicleContentKind;
+
 /* One loaded manifest. Plain data with fixed arrays, so it survives a hot reload and needs no
  * destructor beyond its own callers' lifetime. */
 typedef struct {
-    VehicleDefinition definition; /* id/contentVersion/contentHash/appearanceId/spec */
-    VehicleSetup defaultSetup;    /* the authored baseline setup */
-    uint32_t manifestHash;        /* canonical hash of the whole document */
+    VehicleDefinition definition;   /* id/contentVersion/contentHash/appearanceId/spec */
+    VehicleSetup defaultSetup;      /* the authored baseline setup */
+    uint32_t manifestHash;          /* canonical hash of the whole document */
+    VehicleContentKind contentKind; /* what this manifest may be used for */
     char displayName[VEHICLE_MANIFEST_TEXT_CHARS];
     char description[VEHICLE_MANIFEST_DESC_CHARS];
     char classTags[VEHICLE_MANIFEST_MAX_CLASS_TAGS][VEHICLE_MANIFEST_CLASS_TAG_CHARS];
@@ -72,6 +84,13 @@ typedef struct {
 
 /* Stable content id rule: [a-z0-9] then up to 62 of [a-z0-9._-]. Matches the ownership contract. */
 bool vehicle_manifest_id_is_valid(const char *id);
+
+/* Canonical JSON name for a content kind ("visual-sample", "prototype", "validated",
+ * "player-selectable"). Never returns NULL. */
+const char *vehicle_content_kind_name(VehicleContentKind kind);
+
+/* Parse a content kind name into the enum. Returns false for an unknown string. */
+bool vehicle_content_kind_parse(const char *text, VehicleContentKind *out);
 
 /* Parse a manifest from memory. On failure returns false and writes a `field: reason` (or a JSON
  * `line N, column M: reason`) message. *out is left zeroed on failure. */

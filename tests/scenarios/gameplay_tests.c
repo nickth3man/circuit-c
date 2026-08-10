@@ -16,9 +16,12 @@
 #include "test_scenarios.h"
 #include "scenario_shared.h"
 
+#include "content/roster_promotion.h"
 #include "dev/car_corpus.h"
 #include "game/ai_driver.h"
 #include "game/car_roster.h"
+#include "game/car_selection.h"
+#include "game/setup_editor.h"
 #include "render/car_visual.h"
 #include "render/car_visual_raster.h"
 #include "core/config.h"
@@ -2441,6 +2444,339 @@ static void scenario_lap_average(void)
     free(frames);
 }
 
+/* ------------------------------------------------------------------------------------- */
+/* Scenario: car-selection — issue #32 model: the player-selectable roster as a           */
+/* deterministic, id-sorted selection view, with stable resolve and recall persistence    */
+/* ------------------------------------------------------------------------------------- */
+static void scenario_car_selection(void)
+{
+    /* The selection view is exactly the six roster cars, in stable id-sorted order. */
+    check(car_selection_count() == 6, "car selection offers exactly the 6 roster cars (got %d)",
+          car_selection_count());
+
+    static const char *const kExpectedOrder[6] = { "awd_gt",    "awd_rally", "fwd_hot",
+                                                   "fwd_light", "rwd_grip",  "rwd_power" };
+    for (int i = 0; i < car_selection_count(); i++) {
+        CarSelectionEntry entry;
+        memset(&entry, 0, sizeof(entry));
+        check(car_selection_entry(i, &entry), "selection entry %d is addressable", i);
+        check(strcmp(entry.id, kExpectedOrder[i]) == 0,
+              "selection entry %d id is '%s' (got '%s')", i, kExpectedOrder[i], entry.id);
+        check(entry.manifest != NULL, "selection entry %d carries its manifest", i);
+        if (entry.manifest != NULL) {
+            check(strcmp(entry.manifest->definition.id, entry.id) == 0,
+                  "selection entry %d manifest id matches its entry id", i);
+        }
+    }
+
+    /* Resolution is by stable id, never by raw selection slot. */
+    check(car_selection_resolve("rwd_grip") == 4,
+          "rwd_grip resolves to its id-sorted selection index 4 (got %d)",
+          car_selection_resolve("rwd_grip"));
+    check(car_selection_resolve("gone") == -1, "an unknown id resolves to -1 (got %d)",
+          car_selection_resolve("gone"));
+    check(car_selection_index_or_default("gone") == 0,
+          "an unknown id falls back to selection index 0");
+    check(car_selection_index_or_default(NULL) == 0, "NULL falls back to selection index 0");
+
+    /*
+     * The recall path is real player state: the menu opens on whatever car it names, and the
+     * game rewrites it on every selection. Exercising the round-trip therefore has to borrow
+     * the file rather than own it — the developer's own last car is read out first and put back
+     * at the end, including the case where there was no file to begin with. Without that, a
+     * test run silently changes which car the game starts on, and an interrupted run leaves a
+     * stale 'awd_gt' behind.
+     */
+    char preserved[CAR_SELECTION_ID_CHARS];
+    memset(preserved, 0, sizeof(preserved));
+    const bool hadRecall = car_selection_load_recall(preserved, sizeof(preserved));
+
+    /* Round-trip persistence: save a valid id, read the same id back. */
+    check(car_selection_save_recall("awd_gt"), "recall saved 'awd_gt'");
+    char recalled[CAR_SELECTION_ID_CHARS];
+    memset(recalled, 0, sizeof(recalled));
+    check(car_selection_load_recall(recalled, sizeof(recalled)), "recall loads the saved file");
+    check(strcmp(recalled, "awd_gt") == 0, "recall round-trips 'awd_gt' (got '%s')", recalled);
+
+    /* A missing recall file is a clean 'no stored choice', not an error. */
+    check(remove(CAR_SELECTION_RECALL_PATH) == 0, "recall file removed for the absent case");
+    memset(recalled, 0, sizeof(recalled));
+    check(!car_selection_load_recall(recalled, sizeof(recalled)),
+          "loading with no recall file returns false");
+
+    /* Hand the developer's selection back exactly as it was found. */
+    if (hadRecall) {
+        check(car_selection_save_recall(preserved), "pre-existing recall '%s' restored",
+              preserved);
+    }
+}
+
+/* ------------------------------------------------------------------------------------- */
+/* Scenario: setup-editor — issue #33 model: bounded, validated setup edits on a private  */
+/* working copy, with reset and independent-editor isolation                              */
+/* ------------------------------------------------------------------------------------- */
+static void scenario_setup_editor(void)
+{
+    const VehicleManifest *manifest = car_roster_manifest(0);
+    check(manifest != NULL, "roster index 0 has a manifest");
+    if (manifest == NULL) return;
+
+    SetupEditor ed;
+    setup_editor_init(&ed, &manifest->definition, &manifest->defaultSetup);
+
+    /* Every setup-owned physics-input registry key (drive.gear1..gear5, drive.reverse,
+     * drive.final, drive.diff_mode, drive.diff_bias_ratio, drive.diff_preload,
+     * brake.bias_front) plus the typed int drive.gear_count. */
+    check(ed.itemCount == 12,
+          "editor exposes 11 registry setup-physics keys + gear_count (got %d)", ed.itemCount);
+    check(setup_editor_is_valid(&ed), "baseline setup is valid");
+    const uint32_t h0 = setup_editor_hash(&ed);
+    const float baseValue0 = setup_editor_value(&ed, 0);
+
+    /* A step edit lands inside the item's registry bounds and moves the hash. */
+    check(setup_editor_adjust(&ed, 0, 1), "item 0 accepts a +1 step");
+    const float stepped0 = setup_editor_value(&ed, 0);
+    check(stepped0 != baseValue0, "item 0 value changed by the step (%.4f -> %.4f)",
+          (double)baseValue0, (double)stepped0);
+    check(stepped0 >= ed.items[0].min && stepped0 <= ed.items[0].max,
+          "item 0 value stays inside [%.4f, %.4f] (got %.4f)", (double)ed.items[0].min,
+          (double)ed.items[0].max, (double)stepped0);
+    check(setup_editor_is_valid(&ed), "the edited setup is still valid");
+    check(setup_editor_hash(&ed) != h0, "the edit changed the setup hash");
+
+    /* Reset restores the exact baseline. */
+    setup_editor_reset(&ed);
+    check(setup_editor_hash(&ed) == h0, "reset restores the baseline hash");
+    check(setup_editor_value(&ed, 0) == baseValue0, "reset restores item 0's baseline value");
+
+    /* Two editors over the same definition share no mutable state. */
+    SetupEditor ed1, ed2;
+    setup_editor_init(&ed1, &manifest->definition, &manifest->defaultSetup);
+    setup_editor_init(&ed2, &manifest->definition, &manifest->defaultSetup);
+    check(setup_editor_hash(&ed2) == h0, "a second editor starts at the same baseline");
+    check(setup_editor_adjust(&ed1, 0, 1), "the first editor accepts a step");
+    check(setup_editor_hash(&ed1) != h0, "the first editor moved");
+    check(setup_editor_hash(&ed2) == h0,
+          "the second editor is untouched: no shared-state mutation");
+
+    /* Repeated upward steps clamp at the item maximum. */
+    int guard = 0;
+    float value = setup_editor_value(&ed, 0);
+    while (guard < 1000) {
+        setup_editor_adjust(&ed, 0, 1);
+        const float next = setup_editor_value(&ed, 0);
+        guard++;
+        if (next == value) break;
+        value = next;
+    }
+    check(guard < 1000, "clamp reached within the iteration cap (%d steps)", guard);
+    check(setup_editor_value(&ed, 0) == ed.items[0].max,
+          "repeated +1 steps clamp item 0 at its max %.4f (got %.4f, %d steps)",
+          (double)ed.items[0].max, (double)setup_editor_value(&ed, 0), guard);
+
+    /*
+     * The registry sweep and the key -> VehicleSetup binding table must agree. A registry key
+     * with no binding would render as an item, display 0.0, and do nothing when adjusted; the
+     * editor refuses to create such an item and counts it here instead, so this assertion is
+     * what catches the two lists drifting apart.
+     */
+    check(ed.unboundKeyCount == 0,
+          "every setup-owned physics-input registry key has a field binding (got %d unbound)",
+          ed.unboundKeyCount);
+
+    /*
+     * gear_count may never exceed the forward ratios the editor exposes. Raising it past the
+     * last editable ratio would commit the setup to a gear whose ratio the menu cannot reach —
+     * usually 0, which vehicle_setup_is_valid rejects — leaving a setup the editor broke and
+     * cannot repair. Drive the count all the way up and require the result to still be valid.
+     */
+    int gearItem = -1;
+    for (int i = 0; i < ed.itemCount; i++) {
+        if (ed.items[i].isGearCount) gearItem = i;
+    }
+    check(gearItem >= 0, "the editor exposes a gear_count item");
+    if (gearItem >= 0) {
+        setup_editor_reset(&ed);
+        int editableRatios = 0;
+        for (int i = 0; i < ed.itemCount; i++) {
+            if (strncmp(ed.items[i].key, "drive.gear", 10) == 0 && !ed.items[i].isGearCount)
+                editableRatios++;
+        }
+        check((int)ed.items[gearItem].max == editableRatios,
+              "gear_count tops out at the %d editable ratios, not MAX_GEARS=%d (max %d)",
+              editableRatios, MAX_GEARS, (int)ed.items[gearItem].max);
+        for (int step = 0; step < MAX_GEARS + 4; step++) setup_editor_adjust(&ed, gearItem, 1);
+        check(setup_editor_value(&ed, gearItem) <= (float)editableRatios,
+              "repeated +1 steps cannot raise gear_count past %d (got %.0f)", editableRatios,
+              (double)setup_editor_value(&ed, gearItem));
+        check(setup_editor_is_valid(&ed),
+              "a fully raised gear_count still produces a launchable setup");
+    }
+
+    /*
+     * Save/load round-trip. The saved file is the deterministic serialization a replay or a
+     * stored profile would carry, so what saves cleanly must load cleanly — in particular the
+     * gear count, whose editor ceiling exists to stop the *menu* creating an unrepairable
+     * setup and is deliberately not applied on load. Applying it there would make a setup
+     * authored with six to eight gears save and then fail to come back.
+     */
+    {
+        char path[640];
+        telemetry_ensure_dir(TELEMETRY_DIR);
+        snprintf(path, sizeof(path), "%s/_setup_editor_roundtrip.txt", TELEMETRY_DIR);
+
+        SetupEditor saved;
+        setup_editor_init(&saved, &manifest->definition, &manifest->defaultSetup);
+        check(setup_editor_adjust(&saved, 0, 1), "round-trip source takes one step");
+        const uint32_t savedHash = setup_editor_hash(&saved);
+
+        char error[256] = "";
+        check(setup_editor_save(&saved, path, error, sizeof(error)),
+              "setup saves to disk (error: %s)", error);
+
+        SetupEditor loaded;
+        setup_editor_init(&loaded, &manifest->definition, &manifest->defaultSetup);
+        check(setup_editor_load(&loaded, path, error, sizeof(error)),
+              "setup loads back (error: %s)", error);
+        check(setup_editor_hash(&loaded) == savedHash,
+              "the loaded setup reproduces the saved hash (%08x vs %08x)",
+              setup_editor_hash(&loaded), savedHash);
+
+        /*
+         * A setup authored with more forward gears than the editor exposes must survive the
+         * round-trip. The five-ratio ceiling is a menu-authoring rule — it stops the player
+         * creating a count with no ratio control to repair it — and not a claim that six- to
+         * eight-gear cars are invalid. Applying it on load would make such a setup save
+         * cleanly and then fail to come back.
+         *
+         * The baseline is authored here with real ratios for every gear, so the setup is
+         * genuinely valid (vehicle_spec_is_valid requires ratios[0..gearCount-1] finite and
+         * positive) and the assertions below turn on the ceiling rather than on the setup
+         * being rejected for an unrelated reason.
+         */
+        if (gearItem >= 0 && MAX_GEARS > (int)ed.items[gearItem].max) {
+            VehicleSetup wideSetup = manifest->defaultSetup;
+            wideSetup.gearCount = MAX_GEARS;
+            for (int g = 0; g < MAX_GEARS; g++) {
+                wideSetup.gearRatios[g] = 3.4f - 0.3f * (float)g; /* descending, all positive */
+            }
+            check(vehicle_setup_is_valid(&manifest->definition, &wideSetup),
+                  "an authored %d-gear setup is valid", MAX_GEARS);
+
+            SetupEditor wide;
+            setup_editor_init(&wide, &manifest->definition, &wideSetup);
+            check(setup_editor_is_valid(&wide), "the editor accepts a %d-gear baseline",
+                  MAX_GEARS);
+            check(wide.working.gearCount == MAX_GEARS,
+                  "the %d-gear count survives editor init (got %d)", MAX_GEARS,
+                  wide.working.gearCount);
+
+            /* Raising must not silently lower an authored count to the editor's ceiling. */
+            check(setup_editor_adjust(&wide, gearItem, 1),
+                  "the gear-count item accepts a step");
+            check(wide.working.gearCount == MAX_GEARS,
+                  "a +1 step leaves an already-high authored count alone (got %d)",
+                  wide.working.gearCount);
+
+            const uint32_t wideHash = setup_editor_hash(&wide);
+            check(setup_editor_save(&wide, path, error, sizeof(error)),
+                  "the %d-gear setup saves (error: %s)", MAX_GEARS, error);
+            SetupEditor wideBack;
+            setup_editor_init(&wideBack, &manifest->definition, &wideSetup);
+            check(setup_editor_load(&wideBack, path, error, sizeof(error)),
+                  "the %d-gear setup loads back — the UI ceiling is not applied on load "
+                  "(error: %s)",
+                  MAX_GEARS, error);
+            check(wideBack.working.gearCount == MAX_GEARS,
+                  "the loaded gear count is still %d (got %d)", MAX_GEARS,
+                  wideBack.working.gearCount);
+            check(setup_editor_hash(&wideBack) == wideHash,
+                  "the %d-gear round-trip reproduces its hash", MAX_GEARS);
+        }
+        remove(path);
+    }
+}
+
+/* ------------------------------------------------------------------------------------- */
+/* Scenario: roster-gate — the promotion checklist and class rules are enforced when the  */
+/* live roster is built, not only in tests (issues #31, #33)                              */
+/* ------------------------------------------------------------------------------------- */
+static void scenario_roster_gate(void)
+{
+    /*
+     * The shipped content must pass the gates it declares. This is the regression guard that
+     * makes the gate meaningful in both directions: if a manifest is ever committed that calls
+     * itself player-selectable but fails a promotion check or its own class's numeric rules,
+     * the roster silently shrinks — and this scenario names the car and the reason instead of
+     * leaving a mystery missing entry.
+     */
+    const int rejected = car_roster_rejection_count();
+    for (int i = 0; i < rejected; i++) {
+        const CarRosterRejection *r = car_roster_rejection(i);
+        check(false, "shipped manifest '%s' was refused by the roster gate: %s",
+              r != NULL ? r->id : "?", r != NULL ? r->reason : "?");
+    }
+    /* The total is the honest count; the stored-diagnostic list above is capped. Asserting the
+     * total is what makes "nothing was refused" trustworthy even past the detail cap. */
+    check(car_roster_refused_count() == 0,
+          "no shipped player-selectable manifest fails the roster gate (got %d)",
+          car_roster_refused_count());
+    check(car_roster_count() == 6, "all 6 shipped cars survive both gates (got %d)",
+          car_roster_count());
+
+    /* Every surviving car satisfies the checklist directly — the roster's filter and the
+     * checklist agree rather than the roster merely claiming they do. */
+    for (int i = 0; i < car_roster_count(); i++) {
+        const VehicleManifest *m = car_roster_manifest(i);
+        check(m != NULL, "roster car %d has a manifest", i);
+        if (m == NULL) continue;
+        VehiclePromotionReport report;
+        check(vehicle_promotion_evaluate(m, &report),
+              "roster car '%s' passes the promotion checklist", m->definition.id);
+        check(m->contentKind == VEHICLE_CONTENT_PLAYER_SELECTABLE,
+              "roster car '%s' is player-selectable", m->definition.id);
+    }
+}
+
+/* ------------------------------------------------------------------------------------- */
+/* Scenario: launch-per-drivetrain — every roster car spawns through the same entrant     */
+/* path and the spawned local entrant carries the selected car's stable id                */
+/* ------------------------------------------------------------------------------------- */
+static void scenario_launch_per_drivetrain(void)
+{
+    const int count = car_roster_count();
+    check(count == 6, "roster has 6 cars to launch (got %d)", count);
+
+    for (int i = 0; i < count; i++) {
+        const VehicleManifest *manifest = car_roster_manifest(i);
+        check(manifest != NULL, "roster car %d has a manifest", i);
+        if (manifest == NULL) continue;
+
+        /* A fresh session per car: race_session_init gives the roster its empty valid
+         * state (game_init would already spawn the default local entrant, which would
+         * refuse a second localPlayer designation). */
+        Game *game = alloc_game();
+        race_session_init(&game->session);
+        const RaceEntrantSpawn spawn = { .definition = &manifest->definition,
+                                         .setup = &manifest->defaultSetup,
+                                         .controllerKind = CONTROLLER_KIND_HUMAN,
+                                         .localPlayer = true,
+                                         .gridSlot = 0 };
+        check(race_roster_spawn(&game->session.roster, &spawn, NULL),
+              "roster car %d ('%s') spawns through the entrant path", i,
+              manifest->definition.id);
+        const RaceEntrant *local = race_roster_local(&game->session.roster);
+        check(local != NULL, "roster car %d ('%s') is the local entrant", i,
+              manifest->definition.id);
+        if (local != NULL) {
+            check(strcmp(local->definition.id, manifest->definition.id) == 0,
+                  "the spawned entrant carries the selected id '%s' (got '%s')",
+                  manifest->definition.id, local->definition.id);
+        }
+        free(game);
+    }
+}
+
 static const TestScenario kGameplayScenarios[] = {
     { "track-surface", "track geometry, init/free life-cycle, and per-point surface query",
       scenario_track_surface },
@@ -2478,6 +2814,20 @@ static const TestScenario kGameplayScenarios[] = {
     { "state-machine", "MENU/PLAYING/PAUSED/RESULTS transitions", scenario_state_machine },
     { "lap-average", "perimeter drive recorded once, replayed 10x: checksum, gates, energy",
       scenario_lap_average },
+    { "car-selection",
+      "issue #32 selection model: id-sorted view of the 6 roster cars, stable resolve, "
+      "recall round-trip",
+      scenario_car_selection },
+    { "setup-editor",
+      "issue #33 setup model: 12 editable items, bounded validated edits, reset, editor "
+      "isolation, clamp at max",
+      scenario_setup_editor },
+    { "launch-per-drivetrain",
+      "every roster car spawns through the same entrant path carrying its stable id",
+      scenario_launch_per_drivetrain },
+    { "roster-gate",
+      "issues #31/#33: the live roster enforces the promotion checklist and class rules",
+      scenario_roster_gate },
 };
 
 TestScenarioGroup test_gameplay_scenarios(void)

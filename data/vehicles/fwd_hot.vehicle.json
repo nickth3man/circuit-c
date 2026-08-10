@@ -6,9 +6,16 @@
   "description": "",
   "contentVersion": 1,
   "appearanceId": "fwd_hot",
-  "classTags": [],
-  "controllerEligibility": ["human", "ai"],
-  "provenance": { "source": "roster", "author": "circuit-c" },
+  "contentKind": "player-selectable",
+  "classTags": ["road"],
+  "controllerEligibility": [
+    "human",
+    "ai"
+  ],
+  "provenance": {
+    "source": "roster",
+    "author": "circuit-c"
+  },
   "physics": {
     "body.wheelbase": 2.55000019,
     "body.track_front": 1.35000002,

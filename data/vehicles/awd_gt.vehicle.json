@@ -6,9 +6,16 @@
   "description": "",
   "contentVersion": 1,
   "appearanceId": "awd_gt",
-  "classTags": [],
-  "controllerEligibility": ["human", "ai"],
-  "provenance": { "source": "roster", "author": "circuit-c" },
+  "contentKind": "player-selectable",
+  "classTags": ["race"],
+  "controllerEligibility": [
+    "human",
+    "ai"
+  ],
+  "provenance": {
+    "source": "roster",
+    "author": "circuit-c"
+  },
   "physics": {
     "body.wheelbase": 2.55000019,
     "body.track_front": 1.54999995,
