@@ -51,6 +51,12 @@ static const SetupFieldBinding kSetupFields[] = {
     { "drive.diff_bias_ratio", offsetof(VehicleSetup, differentialBiasRatio), false },
     { "drive.diff_preload", offsetof(VehicleSetup, differentialPreloadNm), false },
     { "brake.bias_front", offsetof(VehicleSetup, brakeBiasFront), false },
+    /* Static alignment became an active dynamics input in issue #14, so it is offered here:
+     * the audit rule is that a setup-owned physics input the player cannot reach is a knob the
+     * car has and the menu hides. Camber and caster stay out until their own issues activate
+     * them. */
+    { "susp.toe_front", offsetof(VehicleSetup, suspToeFrontRad), false },
+    { "susp.toe_rear", offsetof(VehicleSetup, suspToeRearRad), false },
 };
 
 static const int kSetupFieldCount = (int)(sizeof(kSetupFields) / sizeof(kSetupFields[0]));

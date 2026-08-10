@@ -29,7 +29,7 @@ audited here so no struct field is silently exempt from classification or owners
 
 | Field | C type | Class | Owner | Default | Unit | Valid range | Consumer | Determinism role | Decision |
 |---|---|---|---|---|---|---|---|---|---|
-| `drive.gear_count` | `int` | `physics` | `setup` | 5 | — | 1 .. MAX_GEARS | Transmission bounds and selected gear-ratio lookup. | Frozen setup value; covered by definition and setup compatibility hashes. | Active setup input; not exposed as a free-standing slider because ratios must change with it. |
+| `drive.gear_count` | `int` | `physics` | `setup` | 5 | — | 1 .. 8 | Transmission bounds and selected gear-ratio lookup. | Frozen setup value; covered by definition and setup compatibility hashes. | Active setup input; not exposed as a free-standing slider because ratios must change with it. |
 | `physics.lateral_load_transfer_enabled` | `bool` | `physics` | `session-rules` | true | — | false or true | Gates quasi-static lateral load transfer in physics_fixed_update(). | Currently covered by the definition hash; moves to frozen session rules. | Active validation switch, not vehicle content; retained until session rules own it. |
 
 ## Inactive parameters
@@ -45,7 +45,6 @@ validation.
 | `wheel.offset_et_rear` | `definition` | Rear wheel ET offset. Inactive: wheel poke is drawn from track width and tire width, never from ET. Kept as authored hardware. |
 | `tire.pressure_front` | `setup` | Front cold pressure. Inactive: carried by VehicleSetup and hashed, but no dynamics or appearance path reads it. Kept as the authored setup value. |
 | `tire.pressure_rear` | `setup` | Rear cold pressure. Inactive: carried by VehicleSetup and hashed, but no dynamics or appearance path reads it. Kept as the authored setup value. |
-| `susp.toe_rear` | `setup` | Rear static toe. Inactive: only the front value reaches the appearance grammar. Kept as the rear half of a symmetric setup pair. |
 | `susp.caster_front` | `setup` | Front caster. Inactive: no steering or tire path reads it. Kept as the authored setup value. |
 | `susp.caster_rear` | `setup` | Rear caster. Inactive: no steering or tire path reads it. Kept as the authored setup value. |
 | `susp.wheel_rate_front` | `definition` | Front wheel rate. Inactive: no suspension is simulated; load transfer is quasi-static. Kept as authored hardware for a later ride-model change. |
@@ -55,9 +54,9 @@ validation.
 | `susp.roll_centre_front` | `definition` | Front roll-centre height. Inactive: lateral load transfer uses the CG height and the roll-stiffness fraction. Kept as authored hardware. |
 | `susp.roll_centre_rear` | `definition` | Rear roll-centre height. Inactive: lateral load transfer uses the CG height and the roll-stiffness fraction. Kept as authored hardware. |
 | `brake.pad_friction` | `definition` | Pad friction coefficient. Inactive: brake torque is authored directly as brake.max_torque. Kept as authored hardware. |
-| `aero.cop_x` | `definition` | Centre of pressure X. Inactive: drag acts at the CG and no aerodynamic vertical load exists, so there is no pressure centre to place. |
+| `aero.cop_x` | `definition` | Centre of pressure X. Inactive: vertical load is authored per axle, which fixes where the pressure centre is — it is an outcome of the four aero values, not a fifth input. Drag still acts at the CG. |
 
-15 of 140 parameters are inactive.
+14 of 140 parameters are inactive.
 
 ## Body
 
@@ -177,8 +176,8 @@ validation.
 |---|---|---|---:|---|---|---:|---|:-:|---|
 | `susp.camber_front` | `appearance` | `setup` | -0.0175 | rad | -0.12 .. 0.05 | 0.001 | expert | — | Front static camber. Appearance only: narrows the drawn contact patch. It does not change tire force. |
 | `susp.camber_rear` | `appearance` | `setup` | -0.0175 | rad | -0.12 .. 0.05 | 0.001 | expert | — | Rear static camber. Appearance only: narrows the drawn contact patch. It does not change tire force. |
-| `susp.toe_front` | `appearance` | `setup` | 0.0035 | rad | -0.05 .. 0.05 | 0.001 | expert | — | Front static toe. Appearance only: toes the drawn front wheels. It does not change steering or tire force. |
-| `susp.toe_rear` | `inactive` | `setup` | 0.0017 | rad | -0.05 .. 0.05 | 0.001 | expert | — | Rear static toe. Inactive: only the front value reaches the appearance grammar. Kept as the rear half of a symmetric setup pair. |
+| `susp.toe_front` | `physics` | `setup` | 0.0035 | rad | -0.05 .. 0.05 | 0.001 | expert | — | Front static toe, positive = toe-in. Offsets each front wheel's effective heading, so it changes slip angle, straight-line drag and turn-in. |
+| `susp.toe_rear` | `physics` | `setup` | 0.0017 | rad | -0.05 .. 0.05 | 0.001 | expert | — | Rear static toe, positive = toe-in. Offsets each rear wheel's effective heading; rear toe-in adds straight-line stability and drag. |
 | `susp.caster_front` | `inactive` | `setup` | 0.087 | rad | 0 .. 0.25 | 0.001 | expert | — | Front caster. Inactive: no steering or tire path reads it. Kept as the authored setup value. |
 | `susp.caster_rear` | `inactive` | `setup` | 0.052 | rad | 0 .. 0.25 | 0.001 | expert | — | Rear caster. Inactive: no steering or tire path reads it. Kept as the authored setup value. |
 | `susp.wheel_rate_front` | `inactive` | `definition` | 28000 | N/m | 5000 .. 80000 | 100 | expert | — | Front wheel rate. Inactive: no suspension is simulated; load transfer is quasi-static. Kept as authored hardware for a later ride-model change. |
@@ -235,11 +234,11 @@ validation.
 
 | Parameter | Class | Owner | Default | Unit | Range | Step | Tier | Reset | Meaning |
 |---|---|---|---:|---|---|---:|---|:-:|---|
-| `aero.lift_front` | `appearance` | `definition` | 0.05 | — | -2 .. 1 | 0.01 | advanced | — | Front lift coefficient. Appearance only: sizes the splitter and dive planes. No aerodynamic vertical load is computed anywhere. |
-| `aero.lift_rear` | `appearance` | `definition` | 0.1 | — | -3 .. 1 | 0.01 | advanced | — | Rear lift coefficient. Appearance only: sizes the rear wing. No aerodynamic vertical load is computed anywhere. |
-| `aero.ref_area_front` | `appearance` | `definition` | 0.4 | m^2 | 0.05 .. 2 | 0.01 | expert | — | Front aero reference area. Appearance only: scales the front aero device with aero.lift_front. |
-| `aero.ref_area_rear` | `appearance` | `definition` | 0.55 | m^2 | 0.05 .. 2 | 0.01 | expert | — | Rear aero reference area. Appearance only: scales the rear wing with aero.lift_rear. |
-| `aero.cop_x` | `inactive` | `definition` | -0.2 | m | -2 .. 2 | 0.01 | expert | — | Centre of pressure X. Inactive: drag acts at the CG and no aerodynamic vertical load exists, so there is no pressure centre to place. |
+| `aero.lift_front` | `physics` | `definition` | 0 | — | -2 .. 1 | 0.01 | advanced | — | Front lift coefficient in -0.5*rho*Cl*A*v^2. Positive lifts the front axle, negative is downforce; it also sizes the splitter and dive planes. |
+| `aero.lift_rear` | `physics` | `definition` | 0 | — | -3 .. 1 | 0.01 | advanced | — | Rear lift coefficient, same convention as aero.lift_front. The two coefficients and their reference areas are what set the aerodynamic balance. |
+| `aero.ref_area_front` | `physics` | `definition` | 0.4 | m^2 | 0.05 .. 2 | 0.01 | expert | — | Front aero reference area: the A in the front axle's vertical load, and the scale of the drawn front aero device. Inert while aero.lift_front is zero. |
+| `aero.ref_area_rear` | `physics` | `definition` | 0.55 | m^2 | 0.05 .. 2 | 0.01 | expert | — | Rear aero reference area: the A in the rear axle's vertical load, and the scale of the drawn rear wing. Inert while aero.lift_rear is zero. |
+| `aero.cop_x` | `inactive` | `definition` | -0.2 | m | -2 .. 2 | 0.01 | expert | — | Centre of pressure X. Inactive: vertical load is authored per axle, which fixes where the pressure centre is — it is an outcome of the four aero values, not a fifth input. Drag still acts at the CG. |
 
 ## Collision
 

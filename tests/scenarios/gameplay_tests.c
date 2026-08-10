@@ -2667,9 +2667,10 @@ static void scenario_setup_editor(void)
 
     /* Every setup-owned physics-input registry key (drive.gear1..gear5, drive.reverse,
      * drive.final, drive.diff_mode, drive.diff_bias_ratio, drive.diff_preload,
-     * brake.bias_front) plus the typed int drive.gear_count. */
-    check(ed.itemCount == 12,
-          "editor exposes 11 registry setup-physics keys + gear_count (got %d)", ed.itemCount);
+     * brake.bias_front, and — since issue #14 activated static alignment — susp.toe_front and
+     * susp.toe_rear) plus the typed int drive.gear_count. */
+    check(ed.itemCount == 14,
+          "editor exposes 13 registry setup-physics keys + gear_count (got %d)", ed.itemCount);
     check(setup_editor_is_valid(&ed), "baseline setup is valid");
     const uint32_t h0 = setup_editor_hash(&ed);
     const float baseValue0 = setup_editor_value(&ed, 0);
@@ -2998,7 +2999,7 @@ static const TestScenario kGameplayScenarios[] = {
       "recall round-trip",
       scenario_car_selection },
     { "setup-editor",
-      "issue #33 setup model: 12 editable items, bounded validated edits, reset, editor "
+      "issue #33 setup model: 14 editable items, bounded validated edits, reset, editor "
       "isolation, clamp at max",
       scenario_setup_editor },
     { "launch-per-drivetrain",

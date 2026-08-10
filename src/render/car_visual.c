@@ -603,8 +603,9 @@ void car_visual_derive(const VehicleSpec *spec, CarVisual *out)
     const float discDiaF = 2.0f * maxf(spec->brakeDiscRadiusFrontM, 0.0f) * torqueAugment;
     const float discDiaR = 2.0f * maxf(spec->brakeDiscRadiusRearM, 0.0f) * torqueAugment;
 
-    /* [rule] static toe angle at rest × CV_TOE_VISUAL_GAIN. Reads suspToeFrontRad only;
-     * suspToeRearRad is authored but read by nothing (see docs/VEHICLE_PARAMETERS.md).
+    /* [rule] static toe angle at rest × CV_TOE_VISUAL_GAIN. The grammar poses the front wheels
+     * only; suspToeRearRad is a physics input the solver reads (issue #14) but the rear wheels
+     * are drawn straight because a gained rear toe would misreport the sprite's geometry.
      * This is presentation-gained: raw toe is ~0.15°, far below one pixel. */
     const float toeFrontRad = spec->suspToeFrontRad * CV_TOE_VISUAL_GAIN;
     /* [rule] camber visual cos for footprint narrowing × CV_CAMBER_VISUAL_GAIN.
@@ -644,9 +645,11 @@ void car_visual_derive(const VehicleSpec *spec, CarVisual *out)
         w->rimWidthM = isFront ? rimWidF : rimWidR;
         w->sidewallHeightM = isFront ? sidewallF : sidewallR;
         w->discDiameterM = isFront ? discDiaF : discDiaR;
-        /* Static toe angle: front-left toes outward, front-right outward (mirrored).
-         * Negative toe is toe-out. Left side: +left → outward. */
-        w->staticAngleRad = isFront ? ((isLeft ? 1.0f : -1.0f) * toeFrontRad) : 0.0f;
+        /* Static toe angle, mirrored across the axle and in the SAME sense the solver now uses
+         * (physics_wheel_toe_offset_rad): positive toe is toe-in, so the left wheel rotates
+         * clockwise and the right wheel counter-clockwise. The two paths have to agree — the
+         * gallery pose and the driven pose read the same authored number. */
+        w->staticAngleRad = isFront ? ((isLeft ? -1.0f : 1.0f) * toeFrontRad) : 0.0f;
         w->camberVisualCos = isFront ? camberCosF : camberCosR;
         w->pokeM = isFront ? pokeValF : pokeValR;
         w->archGapM = isFront ? archGapF : archGapR;

@@ -327,13 +327,16 @@ static const DevParameter g_params[] = {
       "Rear static camber. Appearance only: narrows the drawn contact patch. It does not "
       "change tire force." },
     { "susp.toe_front", "Suspension", "rad", SPEC_OFFSET(suspToeFrontRad), SUSP_TOE_FRONT_RAD,
-      -0.05f, 0.05f, 0.001f, false, false, 2, DEV_CLASS_APPEARANCE, DEV_OWNER_SETUP,
-      "Front static toe. Appearance only: toes the drawn front wheels. It does not change "
-      "steering or tire force." },
+      -SUSP_TOE_LIMIT_RAD, SUSP_TOE_LIMIT_RAD, 0.001f, false, false, 2, DEV_CLASS_PHYSICS_INPUT,
+      DEV_OWNER_SETUP,
+      "Front static toe, positive = toe-in. Offsets each front wheel's effective heading, so "
+      "it "
+      "changes slip angle, straight-line drag and turn-in." },
     { "susp.toe_rear", "Suspension", "rad", SPEC_OFFSET(suspToeRearRad), SUSP_TOE_REAR_RAD,
-      -0.05f, 0.05f, 0.001f, false, false, 2, DEV_CLASS_INACTIVE, DEV_OWNER_SETUP,
-      "Rear static toe. Inactive: only the front value reaches the appearance grammar. Kept as "
-      "the rear half of a symmetric setup pair." },
+      -SUSP_TOE_LIMIT_RAD, SUSP_TOE_LIMIT_RAD, 0.001f, false, false, 2, DEV_CLASS_PHYSICS_INPUT,
+      DEV_OWNER_SETUP,
+      "Rear static toe, positive = toe-in. Offsets each rear wheel's effective heading; rear "
+      "toe-in adds straight-line stability and drag." },
     { "susp.caster_front", "Suspension", "rad", SPEC_OFFSET(suspCasterFrontRad),
       SUSP_CASTER_FRONT_RAD, 0.0f, 0.25f, 0.001f, false, false, 2, DEV_CLASS_INACTIVE,
       DEV_OWNER_SETUP,
@@ -478,26 +481,29 @@ static const DevParameter g_params[] = {
       "Pad friction coefficient. Inactive: brake torque is authored directly as "
       "brake.max_torque. Kept as authored hardware." },
     { "aero.lift_front", "Aero", "", SPEC_OFFSET(aeroLiftCoefFront), AERO_LIFT_COEF_FRONT,
-      -2.0f, 1.0f, 0.01f, false, false, 1, DEV_CLASS_APPEARANCE, DEV_OWNER_DEFINITION,
-      "Front lift coefficient. Appearance only: sizes the splitter and dive planes. No "
-      "aerodynamic vertical load is computed anywhere." },
+      -2.0f, 1.0f, 0.01f, false, false, 1, DEV_CLASS_PHYSICS_INPUT, DEV_OWNER_DEFINITION,
+      "Front lift coefficient in -0.5*rho*Cl*A*v^2. Positive lifts the front axle, negative is "
+      "downforce; it also sizes the splitter and dive planes." },
     { "aero.lift_rear", "Aero", "", SPEC_OFFSET(aeroLiftCoefRear), AERO_LIFT_COEF_REAR, -3.0f,
-      1.0f, 0.01f, false, false, 1, DEV_CLASS_APPEARANCE, DEV_OWNER_DEFINITION,
-      "Rear lift coefficient. Appearance only: sizes the rear wing. No aerodynamic vertical "
-      "load is computed anywhere." },
+      1.0f, 0.01f, false, false, 1, DEV_CLASS_PHYSICS_INPUT, DEV_OWNER_DEFINITION,
+      "Rear lift coefficient, same convention as aero.lift_front. The two coefficients and "
+      "their reference areas are what set the aerodynamic balance." },
     { "aero.ref_area_front", "Aero", "m^2", SPEC_OFFSET(aeroRefAreaFrontM2),
-      AERO_REF_AREA_FRONT_M2, 0.05f, 2.0f, 0.01f, false, false, 2, DEV_CLASS_APPEARANCE,
+      AERO_REF_AREA_FRONT_M2, 0.05f, 2.0f, 0.01f, false, false, 2, DEV_CLASS_PHYSICS_INPUT,
       DEV_OWNER_DEFINITION,
-      "Front aero reference area. Appearance only: scales the front aero device with "
-      "aero.lift_front." },
+      "Front aero reference area: the A in the front axle's vertical load, and the scale of "
+      "the "
+      "drawn front aero device. Inert while aero.lift_front is zero." },
     { "aero.ref_area_rear", "Aero", "m^2", SPEC_OFFSET(aeroRefAreaRearM2),
-      AERO_REF_AREA_REAR_M2, 0.05f, 2.0f, 0.01f, false, false, 2, DEV_CLASS_APPEARANCE,
+      AERO_REF_AREA_REAR_M2, 0.05f, 2.0f, 0.01f, false, false, 2, DEV_CLASS_PHYSICS_INPUT,
       DEV_OWNER_DEFINITION,
-      "Rear aero reference area. Appearance only: scales the rear wing with aero.lift_rear." },
+      "Rear aero reference area: the A in the rear axle's vertical load, and the scale of the "
+      "drawn rear wing. Inert while aero.lift_rear is zero." },
     { "aero.cop_x", "Aero", "m", SPEC_OFFSET(aeroCentreOfPressureXM), AERO_COP_X_M, -2.0f, 2.0f,
       0.01f, false, false, 2, DEV_CLASS_INACTIVE, DEV_OWNER_DEFINITION,
-      "Centre of pressure X. Inactive: drag acts at the CG and no aerodynamic vertical load "
-      "exists, so there is no pressure centre to place." },
+      "Centre of pressure X. Inactive: vertical load is authored per axle, which fixes where "
+      "the pressure centre is — it is an outcome of the four aero values, not a fifth input. "
+      "Drag still acts at the CG." },
     { "collision.half_width", "Collision", "m", SPEC_OFFSET(bodyHalfWidthM),
       VEHICLE_BODY_HALF_WIDTH_M, 0.4f, 1.5f, 0.01f, true, true, 1, DEV_CLASS_DERIVED,
       DEV_OWNER_DERIVED, "Collision capsule half-width = width/2 (derived)." },

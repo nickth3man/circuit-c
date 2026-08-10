@@ -164,7 +164,7 @@ Multiple lanes may operate in parallel after #13, but dependencies within each l
 
 ## Alignment lane
 
-- [ ] [#14 — Apply per-wheel toe/alignment to contact-patch kinematics](https://github.com/nickth3man/circuit-c/issues/14)
+- [x] [#14 — Apply per-wheel toe/alignment to contact-patch kinematics](https://github.com/nickth3man/circuit-c/issues/14)
   - Depends on: #13
 
 - [ ] [#15 — Model bounded camber and caster effects in the planar tire model](https://github.com/nickth3man/circuit-c/issues/15)
@@ -186,13 +186,19 @@ Multiple lanes may operate in parallel after #13, but dependencies within each l
 
 ## Aerodynamics lane
 
-- [ ] [#17 — Implement speed-squared aerodynamic loads and balance](https://github.com/nickth3man/circuit-c/issues/17)
+- [x] [#17 — Implement speed-squared aerodynamic loads and balance](https://github.com/nickth3man/circuit-c/issues/17)
   - Depends on: #12, #13
 
 ## Suspension lane
 
 - [ ] [#18 — Derive quasi-static load transfer from suspension and chassis parameters](https://github.com/nickth3man/circuit-c/issues/18)
   - Depends on: #12, #13
+  - BLOCKED on validation-AI robustness, not on its own dependencies. The work is complete on
+    the `wip/issue-18-suspension-load-transfer` branch and passes its own physics checks, but
+    `ai-roster-laps` fails for awd_rally and rwd_power. That gate is chaotic on those two cars:
+    moving one anti-roll bar by 0.016% swings awd_rally between one and three completed laps,
+    and both cars end the run stopped off-track, which is the stuck recovery #28 defers. Land
+    it after the AI can recover, or after the maintainers decide what that gate should assert.
 
 - [ ] [#19 — Add suspension travel, bump-stop, and wheel-unloading limits](https://github.com/nickth3man/circuit-c/issues/19)
   - Depends on: #18
@@ -224,7 +230,8 @@ Multiple lanes may operate in parallel after #13, but dependencies within each l
 ## Phase 3 gate
 
 - [ ] Toe, camber, caster, dimensions, and pressure have truthful bounded behavior.
-- [ ] Aero affects high-speed load and balance correctly.
+  - Toe is active and bounded (#14). Camber and caster are #15; dimensions and pressure are #16.
+- [x] Aero affects high-speed load and balance correctly.
 - [ ] Suspension parameters determine load transfer and finite travel.
 - [ ] Tire transient, thermal, pressure, and wear state replay deterministically.
 - [ ] Engine, clutch, shifts, fuel, and changing mass are active and validated.

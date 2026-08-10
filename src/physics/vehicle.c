@@ -1,5 +1,6 @@
 #include "physics/vehicle.h"
 
+#include <float.h>
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -385,6 +386,38 @@ bool vehicle_spec_is_valid(const VehicleSpec *spec)
         return false;
     if (!(isfinite(spec->rollStiffnessFrontFraction) &&
           spec->rollStiffnessFrontFraction >= 0.0f && spec->rollStiffnessFrontFraction <= 1.0f))
+        return false;
+
+    /* Aerodynamic vertical load is an active force since issue #17. A negative reference area
+     * has no physical reading and a non-finite coefficient would put a NaN straight into the
+     * axle loads, so both are rejected at load time rather than clamped silently at use. */
+    if (!(isfinite(spec->aeroLiftCoefFront) && isfinite(spec->aeroLiftCoefRear))) return false;
+    if (!(isfinite(spec->aeroRefAreaFrontM2) && spec->aeroRefAreaFrontM2 >= 0.0f &&
+          isfinite(spec->aeroRefAreaRearM2) && spec->aeroRefAreaRearM2 >= 0.0f))
+        return false;
+    /* No arbitrary ceiling on the coefficient — an extreme wing is legal content, and the
+     * MIN_NORMAL_LOAD_N floor is what keeps the solver honest about one. The one thing that is
+     * NOT legal is a spec the model cannot represent: if 0.5*rho*Cl*A*v^2 overflows a float at
+     * the model's own speed limit, the load can only be reported as a saturated lie, so the
+     * spec is refused here instead. This is a representability test in double, not a physical
+     * judgement about how much downforce a car may have. */
+    {
+        const double maxPressurePa = 0.5 * (double)AIR_DENSITY_KGM3 *
+                                     (double)MAX_SAFE_SPEED_MPS * (double)MAX_SAFE_SPEED_MPS;
+        const double frontN = maxPressurePa * fabs((double)spec->aeroLiftCoefFront) *
+                              (double)spec->aeroRefAreaFrontM2;
+        const double rearN = maxPressurePa * fabs((double)spec->aeroLiftCoefRear) *
+                             (double)spec->aeroRefAreaRearM2;
+        if (!(frontN <= (double)FLT_MAX) || !(rearN <= (double)FLT_MAX)) return false;
+    }
+
+    /* Static toe reaches the contact patch (issue #14), so an unbounded or non-finite value is
+     * now a force error rather than a cosmetic one. Rejected here, at the same boundary every
+     * other active alignment input is checked, so a malformed manifest fails to load instead of
+     * quietly steering the car. */
+    if (!(isfinite(spec->suspToeFrontRad) &&
+          fabsf(spec->suspToeFrontRad) <= SUSP_TOE_LIMIT_RAD &&
+          isfinite(spec->suspToeRearRad) && fabsf(spec->suspToeRearRad) <= SUSP_TOE_LIMIT_RAD))
         return false;
 
     return true;

@@ -1,6 +1,7 @@
 #include "physics/physics.h"
 
 #include <assert.h>
+#include <float.h>
 #include <math.h>
 #include <stddef.h>
 #include <string.h>
@@ -40,6 +41,19 @@ void physics_static_axle_loads(const VehicleSpec *spec, float *frontLoadN, float
     if (rearLoadN != NULL) {
         *rearLoadN = spec->massKg * GRAVITY_MPS2 * spec->cgToFrontM / spec->wheelbaseM;
     }
+}
+
+/* Static toe as a per-wheel heading offset, in the body frame where +angle is a left (counter-
+ * clockwise) rotation and +y is the left of the car.
+ *
+ * Positive toe is toe-IN: both wheels of the axle point at the centreline, so the LEFT wheel is
+ * rotated clockwise (negative) and the RIGHT wheel counter-clockwise (positive). The offset is
+ * a property of the suspension, not of the rack, so it is ADDED to whatever the steering and
+ * Ackermann geometry produced rather than mixed into that calculation. */
+float physics_wheel_toe_offset_rad(float toeRad, float wheelLateralPositionM)
+{
+    if (!(isfinite(toeRad) && isfinite(wheelLateralPositionM))) return 0.0f;
+    return (wheelLateralPositionM > 0.0f) ? -toeRad : toeRad;
 }
 
 void physics_update_steering(const VehicleSpec *spec, VehicleState *state, float steerInput,
@@ -82,10 +96,22 @@ void physics_update_steering(const VehicleSpec *spec, VehicleState *state, float
         steerFL = deltaC + spec->ackermannPercent * (deltaL - deltaC);
         steerFR = deltaC + spec->ackermannPercent * (deltaR - deltaC);
     }
-    state->wheels[WHEEL_FRONT_LEFT].steerAngleRad = steerFL;
-    state->wheels[WHEEL_FRONT_RIGHT].steerAngleRad = steerFR;
-    state->wheels[WHEEL_REAR_LEFT].steerAngleRad = 0.0f;
-    state->wheels[WHEEL_REAR_RIGHT].steerAngleRad = 0.0f;
+    /* Static alignment closes the chain: steerAngleRad is now each wheel's EFFECTIVE heading in
+     * the body frame — rack angle, plus Ackermann, plus static toe — which is exactly what the
+     * slip-angle and force-rotation stages read. The rear wheels have no rack, so their heading
+     * is their toe alone. */
+    const float toeFrontRad = spec->suspToeFrontRad;
+    const float toeRearRad = spec->suspToeRearRad;
+    state->wheels[WHEEL_FRONT_LEFT].steerAngleRad =
+        steerFL + physics_wheel_toe_offset_rad(
+                      toeFrontRad, state->wheels[WHEEL_FRONT_LEFT].localPositionM.y);
+    state->wheels[WHEEL_FRONT_RIGHT].steerAngleRad =
+        steerFR + physics_wheel_toe_offset_rad(
+                      toeFrontRad, state->wheels[WHEEL_FRONT_RIGHT].localPositionM.y);
+    state->wheels[WHEEL_REAR_LEFT].steerAngleRad = physics_wheel_toe_offset_rad(
+        toeRearRad, state->wheels[WHEEL_REAR_LEFT].localPositionM.y);
+    state->wheels[WHEEL_REAR_RIGHT].steerAngleRad = physics_wheel_toe_offset_rad(
+        toeRearRad, state->wheels[WHEEL_REAR_RIGHT].localPositionM.y);
 }
 
 void physics_axle_slip_angles(const VehicleSpec *spec, const VehicleState *state,
@@ -117,6 +143,15 @@ float physics_low_speed_blend(float velocityLongitudinalMps)
     return smoothstep(LOW_SPEED_BEGIN_MPS, LOW_SPEED_END_MPS, fabsf(velocityLongitudinalMps));
 }
 
+/* The body's speed through the air, before this step integrates anything. Both the drag model
+ * and the aerodynamic vertical loads are functions of it, and they must not disagree about
+ * which velocity the car is flying at. */
+static float body_speed_mps(const VehicleState *state)
+{
+    return sqrtf(state->velocityLongitudinalMps * state->velocityLongitudinalMps +
+                 state->velocityLateralMps * state->velocityLateralMps);
+}
+
 /* --------------------------------------------------------------------- Phase 3: loads -- */
 
 float physics_filter_long_accel(float filteredMps2, float previousMps2, float rateHz, float dt)
@@ -130,21 +165,68 @@ float physics_filter_long_accel(float filteredMps2, float previousMps2, float ra
     return isfinite(next) ? next : filteredMps2;
 }
 
-AxleLoads physics_axle_loads(const VehicleSpec *spec, float filteredLongAccelMps2)
+/*
+ * One axle's aerodynamic vertical load.
+ *
+ * The product is accumulated in DOUBLE and only then narrowed. Doing it in float lets a large
+ * authored coefficient overflow to infinity partway through the multiply, and an infinity here
+ * has no honest float answer: returning zero would report "this car has no aerodynamics" for
+ * the car with the most, which is the quiet degradation this model must not do. Double carries
+ * every product a float coefficient and a float area can make, so the narrowing below is the
+ * only place representability is in question, and it saturates — preserving the direction and
+ * the ordering of the load — rather than discarding it.
+ *
+ * vehicle_spec_is_valid() rejects any spec whose load at MAX_SAFE_SPEED_MPS is not
+ * representable, so the saturation is unreachable through the solver. It exists because this
+ * helper is public and must be total for any inputs a caller hands it.
+ */
+static float aero_axle_vertical_n(float liftCoefficient, float refAreaM2, float speedMps)
+{
+    if (!(isfinite(liftCoefficient) && isfinite(refAreaM2) && refAreaM2 >= 0.0f)) return 0.0f;
+    if (!(isfinite(speedMps) && speedMps > RESISTANCE_EPSILON_MPS)) return 0.0f;
+
+    const double loadN = -0.5 * (double)AIR_DENSITY_KGM3 * (double)liftCoefficient *
+                         (double)refAreaM2 * (double)speedMps * (double)speedMps;
+    if (!(loadN > -(double)FLT_MAX)) return -FLT_MAX;
+    if (!(loadN < (double)FLT_MAX)) return FLT_MAX;
+    return (float)loadN;
+}
+
+void physics_aero_vertical_loads(const VehicleSpec *spec, float speedMps, float *frontN,
+                                 float *rearN)
+{
+    if (frontN != NULL) *frontN = 0.0f;
+    if (rearN != NULL) *rearN = 0.0f;
+    if (spec == NULL) return;
+    if (frontN != NULL) {
+        *frontN =
+            aero_axle_vertical_n(spec->aeroLiftCoefFront, spec->aeroRefAreaFrontM2, speedMps);
+    }
+    if (rearN != NULL) {
+        *rearN =
+            aero_axle_vertical_n(spec->aeroLiftCoefRear, spec->aeroRefAreaRearM2, speedMps);
+    }
+}
+
+AxleLoads physics_axle_loads(const VehicleSpec *spec, float filteredLongAccelMps2,
+                             float speedMps)
 {
     AxleLoads out;
     memset(&out, 0, sizeof(out));
     if (!vehicle_spec_is_valid(spec)) return out;
 
     physics_static_axle_loads(spec, &out.staticFrontN, &out.staticRearN);
+    physics_aero_vertical_loads(spec, speedMps, &out.aeroFrontN, &out.aeroRearN);
 
     const float ax = isfinite(filteredLongAccelMps2) ? filteredLongAccelMps2 : 0.0f;
     out.transferN = spec->massKg * ax * spec->cgHeightM / spec->wheelbaseM;
 
     /* Accelerating forward (positive ax) unloads the front and loads the rear; the two
-     * halves are equal and opposite, so the unclamped pair still sums to mass * g. */
-    out.unclampedFrontN = out.staticFrontN - out.transferN;
-    out.unclampedRearN = out.staticRearN + out.transferN;
+     * halves are equal and opposite, so the transfer moves load without creating any. The
+     * aerodynamic terms DO create load — they are an external force on the body, not a
+     * couple — so the unclamped pair sums to mass * g plus the two of them. */
+    out.unclampedFrontN = out.staticFrontN + out.aeroFrontN - out.transferN;
+    out.unclampedRearN = out.staticRearN + out.aeroRearN + out.transferN;
 
     /* A wheel may be unloaded but never generates negative grip. The floor is applied
      * without renormalising the other axle: pretending the lost load went somewhere would
@@ -351,6 +433,8 @@ bool physics_state_is_valid(const VehicleSpec *spec, const VehicleState *state,
     FINITE_VALUE(derived->drivelineTorqueNm);
     FINITE_VALUE(derived->staticFrontLoadN);
     FINITE_VALUE(derived->staticRearLoadN);
+    FINITE_VALUE(derived->aeroVerticalFrontN);
+    FINITE_VALUE(derived->aeroVerticalRearN);
     FINITE_VALUE(derived->unclampedFrontLoadN);
     FINITE_VALUE(derived->unclampedRearLoadN);
     FINITE_VALUE(derived->loadTransferN);
@@ -388,11 +472,22 @@ bool physics_state_is_valid(const VehicleSpec *spec, const VehicleState *state,
         return false;
     }
     /* Transfer only MOVES load: what leaves one axle arrives at the other, so the unclamped
-     * pair still weighs the car. The clamped pair may legitimately exceed m*g once the floor
-     * has caught an unloaded axle, which is why the sum is asserted here and not there. */
-    if (fabsf((derived->unclampedFrontLoadN + derived->unclampedRearLoadN) - weightN) > 1.0f) {
+     * pair weighs the car plus whatever the air is pressing down with. The clamped pair may
+     * legitimately exceed that once the floor has caught an unloaded axle, which is why the sum
+     * is asserted here and not there.
+     *
+     * The aero pair is NOT recomputed from the state to compare against: the loads were solved
+     * from the speed at the START of the step and the state has since been integrated, so a
+     * fresh recompute would legitimately differ. What is checkable without that velocity is the
+     * direction — a lift coefficient must never load its axle, and a wing must never unload it.
+     */
+    const float verticalN = weightN + derived->aeroVerticalFrontN + derived->aeroVerticalRearN;
+    if (fabsf((derived->unclampedFrontLoadN + derived->unclampedRearLoadN) - verticalN) >
+        1.0f) {
         return false;
     }
+    if (derived->aeroVerticalFrontN * spec->aeroLiftCoefFront > 0.0f) return false;
+    if (derived->aeroVerticalRearN * spec->aeroLiftCoefRear > 0.0f) return false;
     if (fabsf(derived->loadTransferN) > MAX_LOAD_TRANSFER_FRACTION * weightN) return false;
     if (derived->normalLoadFrontN < MIN_NORMAL_LOAD_N - 1e-3f ||
         derived->normalLoadRearN < MIN_NORMAL_LOAD_N - 1e-3f)
@@ -653,7 +748,8 @@ static void stage_powertrain(PhysicsStep *step)
 
     /* Brake torque follows forward load transfer, never moving rearward from the configured
      * static bias. This keeps the rear axle from locking first when hard braking unloads it. */
-    const AxleLoads brakeLoads = physics_axle_loads(spec, state->filteredLongAccelMps2);
+    const AxleLoads brakeLoads =
+        physics_axle_loads(spec, state->filteredLongAccelMps2, body_speed_mps(state));
     const float rearOmegaLeftRadS = state->wheels[WHEEL_REAR_LEFT].angularVelocityRadS;
     const float rearOmegaRightRadS = state->wheels[WHEEL_REAR_RIGHT].angularVelocityRadS;
 
@@ -775,11 +871,13 @@ static void stage_normal_loads(PhysicsStep *step)
                                       spec->loadFilterRateHz, step->dt);
     }
 
-    step->loads = physics_axle_loads(spec, state->filteredLongAccelMps2);
+    step->loads = physics_axle_loads(spec, state->filteredLongAccelMps2, body_speed_mps(state));
     const AxleLoads loads = step->loads;
 
     derived->staticFrontLoadN = loads.staticFrontN;
     derived->staticRearLoadN = loads.staticRearN;
+    derived->aeroVerticalFrontN = loads.aeroFrontN;
+    derived->aeroVerticalRearN = loads.aeroRearN;
     derived->unclampedFrontLoadN = loads.unclampedFrontN;
     derived->unclampedRearLoadN = loads.unclampedRearN;
     derived->loadTransferN = loads.transferN;
@@ -982,13 +1080,14 @@ static void stage_accumulate(PhysicsStep *step)
         else
             derived->rearLateralForceN += state->wheels[i].forceLateralN;
 
-        /* Rotate to body frame. Each front wheel uses its own steer angle. */
-        const Vector2 bodyForceN = front ? physics_rotate_wheel_force_to_body(
-                                               (Vector2){ state->wheels[i].forceLongitudinalN,
-                                                          state->wheels[i].forceLateralN },
-                                               state->wheels[i].steerAngleRad)
-                                         : (Vector2){ state->wheels[i].forceLongitudinalN,
-                                                      state->wheels[i].forceLateralN };
+        /* Rotate to body frame by each wheel's own effective heading. The rear pair used to be
+         * copied through unrotated on the grounds that it never steers; with static toe active
+         * it has a heading of its own, and skipping the rotation would silently discard the
+         * drag component that rear toe exists to produce. At zero rear toe the rotation is the
+         * identity, so this is not a change for a car with no rear alignment. */
+        const Vector2 bodyForceN = physics_rotate_wheel_force_to_body(
+            (Vector2){ state->wheels[i].forceLongitudinalN, state->wheels[i].forceLateralN },
+            state->wheels[i].steerAngleRad);
 
         if (front) {
             derived->frontBodyForceN.x += bodyForceN.x;
