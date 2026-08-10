@@ -1931,17 +1931,24 @@ static void scenario_race_session(void)
         game_init(game);
         GameRunConfig config;
         memset(&config, 0, sizeof(config));
+        snprintf(config.trackId, sizeof(config.trackId), "%s", "chicane");
+        check(game_configure_run(game, &config), "precondition: configuring chicane succeeds");
+        check(strcmp(game->session.trackId, "chicane") == 0,
+              "precondition: session track is chicane (got %s)", game->session.trackId);
+        memset(&config, 0, sizeof(config));
         snprintf(config.trackId, sizeof(config.trackId), "%s", "does_not_exist");
         check(!game_configure_run(game, &config),
               "configuring with a missing track id is rejected");
-        check(game->session.trackId[0] == '\0' ||
-                  strcmp(game->session.trackId, "does_not_exist") != 0,
-              "rejected configure does not claim the missing track (got %s)",
+        check(strcmp(game->session.trackId, "chicane") == 0,
+              "rejected configure leaves session track unchanged (got %s)",
               game->session.trackId);
         memset(&config, 0, sizeof(config));
         snprintf(config.trackId, sizeof(config.trackId), "%s", "Chicane");
         check(!game_configure_run(game, &config),
               "configuring with an uppercase track id is rejected");
+        check(strcmp(game->session.trackId, "chicane") == 0,
+              "uppercase rejection also leaves track unchanged (got %s)",
+              game->session.trackId);
         track_free(&game->trackDef);
         free(game);
     }

@@ -85,12 +85,14 @@ static bool track_id_is_valid(const char *id)
     if (id == NULL || id[0] == '\0') return false;
     const char c0 = id[0];
     if (!((c0 >= 'a' && c0 <= 'z') || (c0 >= '0' && c0 <= '9'))) return false;
+    size_t len = 1;
     for (size_t i = 1; id[i] != '\0'; i++) {
         const char c = id[i];
         if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '.' || c == '_' ||
               c == '-'))
             return false;
-        if (i > 62) return false;
+        len++;
+        if (len >= TRACK_ID_CHARS) return false;
     }
     return true;
 }
@@ -614,6 +616,31 @@ bool track_catalog_load(const char *dir, TrackCatalog *out, char *error, size_t 
             ok = false;
             break;
         }
+        /* Filename must match stable id: a file named foo.track.json that contains
+         * id=bar would be selectable as bar via the catalog but missed by
+         * track_load_by_id("bar") which builds the canonical path. Rejecting here
+         * makes the mismatch visible rather than silently shadowing content. */
+        {
+            char base[TRACK_ID_CHARS + 16];
+            const size_t baseLen = len - suffixLen;
+            if (baseLen >= sizeof(base) ||
+                snprintf(base, sizeof(base), "%.*s", (int)baseLen, name) >= (int)sizeof(base)) {
+                set_error(error, errorCap, name, "filename is too long");
+                track_free(&items[count].definition);
+                ok = false;
+                break;
+            }
+            if (strcmp(base, items[count].definition.id) != 0) {
+                char reason[192];
+                snprintf(reason, sizeof(reason),
+                         "filename '%s' does not match manifest id '%s'", name,
+                         items[count].definition.id);
+                set_error(error, errorCap, name, reason);
+                track_free(&items[count].definition);
+                ok = false;
+                break;
+            }
+        }
         items[count].manifestHash = manifestHash;
         count++;
     }
@@ -679,7 +706,14 @@ bool track_load_by_id(const char *id, TrackDefinition *out, uint32_t *manifestHa
         set_error(error, errorCap, id, "path is too long");
         return false;
     }
-    return track_manifest_load(path, out, manifestHashOut, error, errorCap);
+    if (!track_manifest_load(path, out, manifestHashOut, error, errorCap)) return false;
+    if (strcmp(out->id, id) != 0) {
+        track_free(out);
+        memset(out, 0, sizeof(*out));
+        set_error(error, errorCap, "id", "does not match requested track id");
+        return false;
+    }
+    return true;
 }
 
 /* ----------------------------------------------------------------------------------------------- export */

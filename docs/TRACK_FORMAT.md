@@ -177,8 +177,12 @@ scenario asserts that each catalog entry's geometry hash is bit-identical to the
 
 The legacy loaders (`track_init`, `track_load_chicane`, `track_load_sprint`,
 `track_load_technical`) remain in the codebase only for the temporary legacy-vs-loaded
-comparisons and for `--generate-tracks`. No session code depends on them: `game_configure_run()`
-and `game_init()` both go through the catalog.
+comparisons and for `--generate-tracks`. No session code depends on them:
+`game_configure_run()` resolves tracks through the catalog, and `game_init()` (interactive)
+loads `parking_lot` through the catalog as well — a missing, corrupt, or duplicate catalog
+leaves the session without a track rather than silently falling back to compiled geometry,
+and filename/id mismatches (`foo.track.json` containing `id: bar`) are rejected at catalog
+load and at `track_load_by_id()` time.
 
 ## Forward compatibility
 

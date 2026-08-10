@@ -1004,11 +1004,11 @@ static void scenario_track_migration(void)
     check(track_catalog_load(NULL, &catalog, error, sizeof(error)),
           "track catalog loads from " TRACK_CATALOG_DIR " (error: %s)",
           catalog.count > 0 ? "(none)" : error);
-    if (catalog.count == 0) {
+    check(catalog.count == 4, "catalog holds four tracks (got %d)", catalog.count);
+    if (catalog.count != 4) {
         track_catalog_free(&catalog);
         return;
     }
-    check(catalog.count == 4, "catalog holds four tracks (got %d)", catalog.count);
     /* Id-sorted catalog order is independent of filesystem enumeration. */
     const char *expectedIds[] = { "chicane", "parking_lot", "sprint", "technical" };
     for (int i = 0; i < 4 && i < catalog.count; i++) {

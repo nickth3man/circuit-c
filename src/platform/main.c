@@ -569,16 +569,23 @@ static int run_validate_lap(Game *game, const Options *options)
     runConfig.targetLaps = VALIDATION_RUN_LAPS;
     if (options->track != NULL) {
         const char *requested = options->track;
-        if (strcmp(requested, "sprint") == 0 || strcmp(requested, "technical") == 0 ||
-            strcmp(requested, "chicane") == 0) {
-            snprintf(runConfig.trackId, sizeof(runConfig.trackId), "%s", requested);
-        } else {
-            fprintf(stderr, "error: unknown validation track '%s'\n", options->track);
+        if (strcmp(requested, "lot") == 0) requested = "parking_lot";
+        if (snprintf(runConfig.trackId, sizeof(runConfig.trackId), "%s", requested) >=
+            (int)sizeof(runConfig.trackId)) {
+            fprintf(stderr, "error: unknown validation track '%s' (too long)\n",
+                    options->track);
             return 2;
         }
     }
-    if (!game_configure_run(game, &runConfig) ||
-        !game_spawn_on_track_at(game, options->startCheckpoint)) {
+    if (!game_configure_run(game, &runConfig)) {
+        if (options->track != NULL) {
+            fprintf(stderr, "error: unknown validation track '%s'\n", options->track);
+        } else {
+            fprintf(stderr, "error: invalid validation track\n");
+        }
+        return 2;
+    }
+    if (!game_spawn_on_track_at(game, options->startCheckpoint)) {
         fprintf(stderr, "error: invalid validation start checkpoint %d\n",
                 options->startCheckpoint);
         return 2;

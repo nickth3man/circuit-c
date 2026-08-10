@@ -698,19 +698,26 @@ GAME_API void game_init(Game *game)
         UnloadFileText(gamepadMappings);
     }
     {
-        TrackDefinition loaded;
-        memset(&loaded, 0, sizeof(loaded));
-        if (track_load_by_id("parking_lot", &loaded, NULL, NULL, 0)) {
-            track_free(&game->trackDef);
-            game->trackDef = loaded;
-            memset(game->session.trackId, 0, sizeof(game->session.trackId));
-            snprintf(game->session.trackId, sizeof(game->session.trackId), "%s", "parking_lot");
-            track_runtime_bind(&game->trackRuntime, &game->trackDef);
+        TrackCatalog catalog;
+        memset(&catalog, 0, sizeof(catalog));
+        if (track_catalog_load(NULL, &catalog, NULL, 0)) {
+            const int idx = track_catalog_find(&catalog, "parking_lot");
+            if (idx >= 0) {
+                TrackDefinition loaded = catalog.entries[idx].definition;
+                memset(&catalog.entries[idx].definition, 0, sizeof(TrackDefinition));
+                track_catalog_free(&catalog);
+                track_free(&game->trackDef);
+                game->trackDef = loaded;
+                memset(game->session.trackId, 0, sizeof(game->session.trackId));
+                snprintf(game->session.trackId, sizeof(game->session.trackId), "%s",
+                         "parking_lot");
+                track_runtime_bind(&game->trackRuntime, &game->trackDef);
+            } else {
+                track_catalog_free(&catalog);
+                track_runtime_bind(&game->trackRuntime, &game->trackDef);
+            }
         } else {
-            /* Missing or corrupt default content is not silently replaced with legacy
-             * geometry: the session stays without a track so the broken build is visible
-             * rather than concealed. The legacy loaders remain only for the temporary
-             * legacy-vs-loaded comparisons and --generate-tracks. */
+            track_catalog_free(&catalog);
             track_runtime_bind(&game->trackRuntime, &game->trackDef);
         }
     }
