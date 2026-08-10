@@ -141,7 +141,7 @@ After #35, track migration can proceed while race semantics are developed.
 - [x] [#37 — Separate route checkpoints, timing sectors, start/finish, grid, and pit semantics](https://github.com/nickth3man/circuit-c/issues/37)
   - Depends on: #11, #34
 
-- [ ] [#38 — Implement per-entrant route localization, progress, ordering, and wrong-way detection](https://github.com/nickth3man/circuit-c/issues/38)
+- [ ] [#38 — Implement per-entrant route localization, progress, ordering, and wrong-way detection](https://github.com/nickth3man/circuit-c/issues/38) — IN PROGRESS
   - Depends on: #10, #37
 
 ## Phase 2 gate

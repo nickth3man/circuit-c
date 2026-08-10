@@ -116,6 +116,14 @@ typedef struct {
     float sectorTimeS; /* time since last sector boundary */
 } TrackSectorEvent;
 
+/* Everything one entrant's progress stage produced this tick. See track_update_progress(). */
+typedef struct {
+    TrackCheckpointEvent checkpoint;
+    TrackSectorEvent sector;
+    bool wrongWay;        /* the latched state after this tick */
+    bool wrongWayChanged; /* it differs from what it was before this tick */
+} TrackProgressEvent;
+
 /* ServiceBox crossing not currently gated through a dedicated event; the session can query
  * containment directly via track_point_in_service_box(). */
 
@@ -158,6 +166,67 @@ typedef struct {
     char version[TRACK_VERSION_CHARS];
 } TrackDefinition;
 /*
+ * Where one entrant is on the route, expressed in the route's own frame.
+ *
+ * This is the single localization contract issue #38 exists to define: timing, wrong-way,
+ * race distance, AI and camera all read these fields rather than each re-deriving "which bit
+ * of track am I on" from a private nearest-segment scan that answers slightly differently.
+ *
+ * RECOVERY CANDIDATE. `pointM` and `forwardUnit` are the pose a car rejoining the route should
+ * be put back at, and `lateralM`'s sign says which side it left from. There is no separate
+ * recovery function because there is nothing left to compute: the localization already found
+ * the point.
+ *
+ * `valid` is false when the track has no usable centreline (no nodes, a single node, or an
+ * open route with fewer than two). Every other field is then zero, so a consumer that forgets
+ * to check reads "start of the route" rather than uninitialised memory.
+ */
+typedef struct {
+    bool valid;
+    int segmentIndex; /* centreline segment i: nodes[i] -> nodes[i+1] (wrapping when closed) */
+    float segmentT;   /* [0, 1] along that segment */
+    Vector2 pointM;   /* the closest centreline point, world metres */
+    Vector2 forwardUnit;   /* that segment's travel direction, unit length */
+    float longitudinalM;   /* arc length from node 0 to pointM along the route */
+    float lateralM;        /* signed offset from the centreline, positive LEFT of forwardUnit */
+    float headingErrorRad; /* car heading minus route heading, wrapped to [-PI, PI) */
+    /* How much the geometry supports this being the car's route position: 1 on the racing
+     * surface, falling linearly to 0 across the runoff band, 0 beyond the barrier. It is a
+     * containment measure, not a probability. */
+    float confidence;
+    bool onRoute; /* |lateralM| is within the segment's racing half-width */
+} RouteLocation;
+
+/* How far along the route, in metres of arc either side of the previous position, a continuity
+ * search looks.
+ *
+ * A window in METRES rather than in segments, because a segment is not a unit of anything: the
+ * authored circuits place nodes a few metres apart and a hand-built ribbon can place them
+ * twenty, so a fixed segment count is a different search on every track — and on a short one it
+ * wraps far enough to reach the opposing strand it exists to exclude. At 120 Hz nothing in this
+ * simulation covers 25 m in a tick, while the two sides of a circuit are always most of a lap
+ * apart in arc length. That gap is what makes the window work. */
+#define ROUTE_LOCALIZE_WINDOW_M 25.0f
+
+/* How far outside a segment's barrier corridor the car may be and still keep its cached
+ * segment. Wide enough that running wide onto the grass and rejoining never re-localizes
+ * (which is exactly when a global scan would jump to a parallel section), narrow enough that
+ * a teleport, a spawn, or a reset does. */
+#define ROUTE_LOCALIZE_ACCEPT_MARGIN_M 5.0f
+
+/* Wrong-way hysteresis. The car must be pointing more than ENTER away from the route AND
+ * losing longitudinal ground for HOLD_S continuously before the flag sets, and must spend the
+ * same HOLD_S not doing so before it clears. Between those the previous answer stands, which
+ * is what stops a spin from strobing the flag. EXIT is deliberately narrower than ENTER so the
+ * angular test itself has a deadband too. */
+#define ROUTE_WRONG_WAY_ENTER_RAD 2.0943951f /* 120 degrees */
+#define ROUTE_WRONG_WAY_EXIT_RAD 1.5707963f  /* 90 degrees */
+#define ROUTE_WRONG_WAY_HOLD_S 0.75f
+/* Longitudinal movement per tick below this counts as "not going anywhere" rather than as
+ * backwards progress, so a stationary car cannot arm the flag on float noise. */
+#define ROUTE_WRONG_WAY_BACKWARD_EPS_M 0.001f
+
+/*
  * One racer's position around the route. Exactly one per entrant, never shared, and the only
  * thing a checkpoint crossing writes. A zeroed RacerProgress is a valid "start of an out-lap
  * from gate 0" state, so a caller that calloc's one does not have to initialise it.
@@ -178,6 +247,24 @@ typedef struct {
     bool routeFinished;   /* open point-to-point: true once final checkpoint crossed */
     int lastCrossedIndex; /* debounce: last checkpoint index crossed, -1 initially */
     int ticksSinceCross;  /* hysteresis ticks since last crossing */
+    /*
+     * Route localization (issue #38). Per entrant, never shared: two cars on the same track
+     * localize independently, which is what stops one recovering car from moving another's
+     * route cursor.
+     *
+     * `location` is BOTH this tick's answer and next tick's continuity hint, so it is
+     * authoritative state and not a rebuildable cache: rebuilding it with a global scan can
+     * legitimately produce a different segment where the route runs beside itself, and
+     * docs/SIMULATION_OWNERSHIP.md says a "cache" that changes a result is authoritative.
+     */
+    RouteLocation location;
+    /* Signed route distance accumulated from the per-tick longitudinal delta, so it keeps
+     * rising across the start/finish seam instead of sawtoothing back to zero, and falls again
+     * when a car goes backwards. This is the ordering key: entrants sort by it, descending,
+     * with ascending EntrantId as the tie-break the roster already guarantees. */
+    float raceDistanceM;
+    bool wrongWay;        /* latched by the hysteresis below, not by this tick's angle */
+    float wrongWayTimerS; /* [0, ROUTE_WRONG_WAY_HOLD_S]; the hysteresis integrator */
 } RacerProgress;
 
 /*
@@ -297,6 +384,65 @@ TrackCheckpointEvent track_update_checkpoints(const TrackDefinition *track,
  * lap validity and are ordered independently of route checkpoints. */
 TrackSectorEvent track_update_sectors(const TrackDefinition *track, RacerProgress *progress,
                                       Vector2 prevPosM, Vector2 currPosM);
+
+/* --------------- route localization (issue #38, src/world/route_localization.c) ----------- */
+
+/*
+ * Localize by scanning every segment. This is the reference answer: no history, no hint, and
+ * therefore no way for it to be wrong about which lap the car is on when the route runs beside
+ * itself. Exact ties go to the LOWEST segment index, so two equidistant candidates at a
+ * crossing resolve the same way on every platform and in every run.
+ *
+ * `headingRad` only fills in headingErrorRad; it never influences which segment is chosen.
+ */
+RouteLocation route_localize_global(const TrackDefinition *track, Vector2 posM,
+                                    float headingRad);
+
+/*
+ * Localize preferring continuity with a previous answer.
+ *
+ * A NULL, invalid, or out-of-range `previous` means "no prior" and the call degenerates to
+ * route_localize_global(). Otherwise only the segments within ROUTE_LOCALIZE_WINDOW_M of arc
+ * length either side of `previous` are candidates, and the nearest of THOSE wins. Excluding the
+ * rest of the route is the entire mechanism: a figure-eight crossing, a hairpin, and a pit lane
+ * beside the main straight are all cases where the geometrically nearest segment belongs to a
+ * part of the lap the car demonstrably was not on a tick ago.
+ *
+ * Within the window, distance decides and arc proximity only breaks ties: candidates are
+ * visited as previous, +1, -1, +2, -2, ... under a strict `<`, so an exact tie goes to the
+ * candidate nearest the previous position and, at equal remove, to the one ahead — a car moves
+ * forwards. Distance must stay primary, because a continuity search that preferred the closest
+ * arc position outright would clamp to the end of its old segment and never advance past a node.
+ *
+ * The global scan is the bounded fallback: it runs at most once, and only when the best
+ * windowed candidate is further off than ROUTE_LOCALIZE_ACCEPT_MARGIN_M beyond that segment's
+ * barrier corridor — that is, when continuity has stopped being credible at all, which is a
+ * teleport, a spawn, or a reset rather than anything a driver can do.
+ */
+RouteLocation route_localize_near(const TrackDefinition *track, const RouteLocation *previous,
+                                  Vector2 posM, float headingRad);
+
+/*
+ * THE per-entrant progress stage. Localizes from this racer's cached prior location, advances
+ * its route gates and its sector gates, then updates wrong-way and race distance from the same
+ * localization — one call, one contract, one place where a tick's route facts are decided.
+ *
+ * `currPosM`/`headingRad` are the car's authoritative pose at the END of the tick and
+ * `prevPosM` is where it started, because a gate is crossed by a swept segment rather than by
+ * a point. `dt` is used only by the wrong-way hysteresis; the lap and sector timers stay with
+ * the caller, which advances them after reading the returned times.
+ *
+ * The definition is read-only. Two entrants may call this against one track in the same tick
+ * without touching each other's answer.
+ *
+ * Gate crossing itself is still the exact swept-line test in track_update_checkpoints(): a
+ * localization cannot make an intersection test more correct than it already is. What it adds
+ * is the route frame that wrong-way, race distance and rejoin candidates need, established
+ * before the gates are judged so every consumer of this tick sees one position.
+ */
+TrackProgressEvent track_update_progress(const TrackDefinition *track, RacerProgress *progress,
+                                         Vector2 prevPosM, Vector2 currPosM, float headingRad,
+                                         float dt);
 
 /* Grid validation: deterministic, order-independent. Returns false and writes a reason
  * when slots overlap or lie off the racing surface. */

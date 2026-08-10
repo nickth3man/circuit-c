@@ -560,6 +560,13 @@ void track_reset_progress_at(RacerProgress *progress, const TrackDefinition *tra
     progress->routeFinished = false;
     progress->lastCrossedIndex = -1;
     progress->ticksSinceCross = 1000;
+    /* Route localization starts with no history: a car put back on the grid must not inherit
+     * the segment it was on when it left, or its first tick would measure a lap-sized
+     * longitudinal jump and read as going backwards. */
+    memset(&progress->location, 0, sizeof(progress->location));
+    progress->raceDistanceM = 0.0f;
+    progress->wrongWay = false;
+    progress->wrongWayTimerS = 0.0f;
     if (track == NULL || track->checkpointCount <= 0) {
         progress->nextCheckpoint = 0;
         progress->lapStartCheckpoint = 0;

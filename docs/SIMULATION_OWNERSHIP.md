@@ -50,6 +50,41 @@ clock. Session tick and clock count green-flag time only and rewind on restart, 
 counted in whole fixed steps rather than by subtracting `dt` from a float, so the grid releases
 on the same tick every run.
 
+Issue 38 is implemented by `RouteLocation` and the localization API declared in
+`src/world/track.h` and implemented in `src/world/route_localization.c`. One entrant's route
+position — segment, parameter, closest point, arc-length progress, signed lateral offset,
+heading error and a containment confidence — is computed once per tick by
+`track_update_progress()`, which then advances that racer's route gates, its sector gates, its
+wrong-way latch and its accumulated race distance from the same result. `game_fixed_update()`'s
+progress stage calls that one function instead of the two gate updates it used to call, so
+timing, results, AI and camera read one contract rather than each running its own
+nearest-segment scan.
+
+Localization prefers continuity: only segments within `ROUTE_LOCALIZE_WINDOW_M` of arc length
+either side of the previous position are candidates, and the nearest of those wins. That is what
+keeps a car on its own strand where the route runs beside itself — a crossing, a hairpin, a lane
+parallel to the main straight — because the geometrically nearest segment there can belong to a
+part of the lap the car demonstrably was not on a tick ago. `route_localize_global()` remains
+available as the history-free reference answer and is the bounded fallback, run at most once per
+call and only when the windowed answer is further off than `ROUTE_LOCALIZE_ACCEPT_MARGIN_M`
+beyond that segment's barrier corridor. Equidistant candidates resolve by a documented rule
+rather than by iteration accident: the global scan takes the lowest segment index, the windowed
+scan takes the candidate nearest the previous position and, at equal remove, the one ahead.
+
+The cached location is **authoritative state, not an excluded cache**, and is hashed into the
+rolling checksum along with `raceDistanceM`, `wrongWay` and the wrong-way integrator. It meets
+this document's own test for the distinction: rebuilding it with a global scan can legitimately
+choose a different strand, so its contents change results. Its purely derived companions —
+lateral offset, heading error, confidence and the closest point — are recomputed from the pose
+every tick, are read by nothing later, and stay out. Wrong-way is latched through a hysteresis
+integrator over `ROUTE_WRONG_WAY_HOLD_S` and requires both a heading past
+`ROUTE_WRONG_WAY_ENTER_RAD` and actual loss of longitudinal ground, so a spin — which satisfies
+the angle while still carrying the car forwards — cannot raise it.
+
+Gate crossing itself is unchanged. An exact swept-line intersection is already exact, and
+localization cannot improve on it; what the localization adds is the route frame that wrong-way,
+race distance and rejoin candidates need, established before the gates are judged.
+
 `game_fixed_update()` is now ten named stages — acquire inputs, controllers, record/commands,
 pre-physics gating, physics, progress, collision, rules, finalize, presentation — each
 documenting what it reads and what it may write. Two deliberate departures from the target
@@ -163,6 +198,16 @@ Owns the next expected checkpoint, completed laps, start checkpoint, lap/sector 
 route-localization cache, wrong-way state, finish state, and entrant-local penalties or validity
 flags. Two racers on one `TrackDefinition` therefore cannot advance or reset each other.
 
+The route-localization members are `location` (the `RouteLocation` that is both this tick's
+answer and next tick's continuity hint), `raceDistanceM`, `wrongWay`, and `wrongWayTimerS`.
+`raceDistanceM` accumulates the per-tick longitudinal delta rather than being recomputed from
+`lap * length + progress`, so it keeps rising across the start/finish seam instead of sawtoothing
+and falls again when a car goes backwards. It is the ordering key: entrants sort by it
+descending, with the roster's ascending `EntrantId` as the tie-break, and that ordering is
+therefore well defined across lap boundaries and on open point-to-point routes alike.
+`track_reset_progress_at()` clears all four, because a car put back on the grid must not inherit
+the segment it left from.
+
 ### Controller
 
 The controller boundary consumes a read-only tick-start view and emits one plain value:
@@ -237,7 +282,8 @@ canonical representation, not struct padding.
 
 The rolling checksum excludes immutable definitions/setups already secured by the compatibility
 digest, recomputed `VehicleDerived` diagnostics, broadphase/localization caches whose contents
-cannot change results, input recording storage, telemetry, audio, particles, camera/interpolation
+cannot change results (the per-entrant `RouteLocation` is not one of them — see the issue 38
+note above), input recording storage, telemetry, audio, particles, camera/interpolation
 state, render scale, development tools, platform accumulator/backlog counters, and presentation
 snapshots. If a supposed cache changes a result when rebuilt, it is authoritative state and must
 be reclassified or fixed.

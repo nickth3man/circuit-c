@@ -16,6 +16,7 @@
  */
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "test_commands.h"
@@ -24,6 +25,7 @@
 
 #include "core/config.h"
 #include "core/json.h"
+#include "core/math_utils.h"
 #include "content/roster_promotion.h"
 #include "content/track_manifest.h"
 #include "content/vehicle_class.h"
@@ -1440,6 +1442,456 @@ static void scenario_track_migration(void)
     track_catalog_free(&catalog);
 }
 
+/* ------------------------------------------------------------------ issue #38: localization */
+
+/*
+ * A deliberately hostile closed layout: two straights 6 m apart carrying traffic in OPPOSITE
+ * directions, joined by a turn at each end.
+ *
+ *     y=6   <-------------------------  segments 7..11 (returning, -X)
+ *     y=0   ------------------------->  segments 0..4  (outbound, +X)
+ *
+ * With a 2 m racing half-width and a 3 m barrier, a car at y = 3 is exactly equidistant from
+ * both strands and a car at y = 3.2 is CLOSER to the one going the other way. That is the whole
+ * failure this issue exists to remove: a nearest-segment scan puts such a car on the wrong
+ * strand, which reverses its heading error, reverses its progress, and takes its lap count with
+ * it. Every localization check below is anchored to this geometry.
+ */
+#define LOC_TRACK_NODES 14
+#define LOC_HALF_WIDTH_M 2.0f
+#define LOC_RUNOFF_M 3.0f
+
+static void loc_build_track(TrackDefinition *track, bool closed)
+{
+    memset(track, 0, sizeof(*track));
+    static const Vector2 kCenters[LOC_TRACK_NODES] = {
+        { 0.0f, 0.0f },   { 20.0f, 0.0f },  { 40.0f, 0.0f },  { 60.0f, 0.0f },  { 80.0f, 0.0f },
+        { 100.0f, 0.0f }, { 110.0f, 3.0f }, { 100.0f, 6.0f }, { 80.0f, 6.0f },  { 60.0f, 6.0f },
+        { 40.0f, 6.0f },  { 20.0f, 6.0f },  { 0.0f, 6.0f },   { -10.0f, 3.0f },
+    };
+    track->count = LOC_TRACK_NODES;
+    track->nodes = (TrackNode *)calloc((size_t)track->count, sizeof(TrackNode));
+    if (track->nodes == NULL) {
+        track->count = 0;
+        return;
+    }
+    for (int i = 0; i < LOC_TRACK_NODES; i++) {
+        track->nodes[i] =
+            (TrackNode){ kCenters[i], LOC_HALF_WIDTH_M, SURFACE_ASPHALT, LOC_RUNOFF_M };
+    }
+    track->routeClosed = closed;
+    track->offTrackSurfaceId = SURFACE_GRASS;
+    track->runoffSurfaceId = SURFACE_GRASS;
+    track_build_checkpoints_from_nodes(track);
+    snprintf(track->id, sizeof(track->id), "%s", "loc_test");
+    snprintf(track->version, sizeof(track->version), "%s", "v1");
+}
+
+/* Advance one racer by a single tick from prev to curr at the given heading. */
+static TrackProgressEvent loc_step(const TrackDefinition *track, RacerProgress *progress,
+                                   Vector2 prevM, Vector2 currM, float headingRad)
+{
+    return track_update_progress(track, progress, prevM, currM, headingRad, FIXED_DT_S);
+}
+
+static void scenario_route_localization(void)
+{
+    TrackDefinition track;
+    loc_build_track(&track, true);
+    check(track.count == LOC_TRACK_NODES, "localization fixture built (%d nodes)", track.count);
+    if (track.count != LOC_TRACK_NODES) return;
+
+    const float lengthM = track_length_m(&track);
+    check(lengthM > 200.0f, "fixture route has a usable length (%.2f m)", (double)lengthM);
+
+    /* --- parallel-route ambiguity: the same point, two defensible answers ------------------ */
+    {
+        const Vector2 betweenM = { 50.0f, 3.0f };
+        const RouteLocation global = route_localize_global(&track, betweenM, 0.0f);
+        check(global.valid && global.segmentIndex == 2,
+              "equidistant point resolves to the LOWEST segment index without history (got %d)",
+              global.segmentIndex);
+        /* Two priors, each unambiguously on one strand, then the same ambiguous point. */
+        const RouteLocation onReturning =
+            route_localize_global(&track, (Vector2){ 50.0f, 6.0f }, CIRCUIT_PI);
+        const RouteLocation onOutbound =
+            route_localize_global(&track, (Vector2){ 50.0f, 0.0f }, 0.0f);
+        check(onReturning.segmentIndex == 9 && onOutbound.segmentIndex == 2,
+              "the two anchors sit on the strands the fixture says they do (%d, %d)",
+              onReturning.segmentIndex, onOutbound.segmentIndex);
+        const RouteLocation held = route_localize_near(&track, &onReturning, betweenM, 0.0f);
+        check(held.valid && held.segmentIndex == 9,
+              "continuity holds the returning strand where a global scan would jump to the "
+              "outbound one (got %d)",
+              held.segmentIndex);
+        const RouteLocation outbound = route_localize_near(&track, &onOutbound, betweenM, 0.0f);
+        check(outbound.valid && outbound.segmentIndex == 2,
+              "continuity holds the outbound strand from the other side (got %d)",
+              outbound.segmentIndex);
+        /* Heading error is measured against whichever strand was chosen, so the two answers
+         * disagree by half a turn. That is exactly why the choice cannot be left to chance. */
+        check(fabsf(held.headingErrorRad - outbound.headingErrorRad) > 3.0f,
+              "the two strands report opposite heading errors (%.3f vs %.3f rad)",
+              (double)held.headingErrorRad, (double)outbound.headingErrorRad);
+        /* No hint is the same as a global scan, by contract. */
+        const RouteLocation noHint = route_localize_near(&track, NULL, betweenM, 0.0f);
+        check(noHint.segmentIndex == global.segmentIndex,
+              "a missing prior degenerates to the global scan (%d vs %d)", noHint.segmentIndex,
+              global.segmentIndex);
+    }
+
+    /* --- cached vs brute force over a whole lap ------------------------------------------- */
+    {
+        RouteLocation cached;
+        memset(&cached, 0, sizeof(cached));
+        int disagreements = 0;
+        int samples = 0;
+        /* Sample strictly inside each segment so no point is equidistant from two of them:
+         * where the nearest segment is unique, continuity must reproduce the brute-force
+         * answer exactly, and any disagreement is the local search losing the road. */
+        for (int seg = 0; seg < LOC_TRACK_NODES; seg++) {
+            const Vector2 aM = track.nodes[seg].centerM;
+            const Vector2 bM = track.nodes[(seg + 1) % LOC_TRACK_NODES].centerM;
+            for (int step = 1; step < 10; step++) {
+                const float t = (float)step * 0.1f;
+                const Vector2 pM = { aM.x + t * (bM.x - aM.x), aM.y + t * (bM.y - aM.y) };
+                const RouteLocation global = route_localize_global(&track, pM, 0.0f);
+                cached = route_localize_near(&track, cached.valid ? &cached : NULL, pM, 0.0f);
+                samples++;
+                if (cached.segmentIndex != global.segmentIndex) disagreements++;
+            }
+        }
+        check(samples == LOC_TRACK_NODES * 9, "lap sampled at every segment (%d points)",
+              samples);
+        check(disagreements == 0,
+              "cached localization reproduces brute force on the unambiguous centreline "
+              "(%d disagreements)",
+              disagreements);
+    }
+
+    /* --- race distance across the lap wrap ------------------------------------------------ */
+    {
+        RacerProgress prog;
+        memset(&prog, 0, sizeof(prog));
+        track_reset_progress_at(&prog, &track, 0);
+        /* Start a little way into segment 0 and drive the whole lap in 0.5 m steps. */
+        Vector2 prevM = { 1.0f, 0.0f };
+        prog.location = route_localize_global(&track, prevM, 0.0f);
+        float previousDistanceM = prog.raceDistanceM;
+        bool monotone = true;
+        float maxJumpM = 0.0f;
+        int crossedSeam = 0;
+        const int steps = 900;
+        for (int i = 0; i < steps; i++) {
+            const float alongM = 1.0f + 0.5f * (float)(i + 1);
+            /* Walk the polyline by arc length rather than by node, so the seam at node 0 is
+             * driven through rather than started from. */
+            float remainingM = fmodf(alongM, lengthM);
+            if (alongM >= lengthM && remainingM < 0.5f) crossedSeam++;
+            int seg = 0;
+            while (seg < LOC_TRACK_NODES) {
+                const Vector2 aM = track.nodes[seg].centerM;
+                const Vector2 bM = track.nodes[(seg + 1) % LOC_TRACK_NODES].centerM;
+                const float segLenM =
+                    sqrtf((bM.x - aM.x) * (bM.x - aM.x) + (bM.y - aM.y) * (bM.y - aM.y));
+                if (remainingM <= segLenM) break;
+                remainingM -= segLenM;
+                seg++;
+            }
+            if (seg >= LOC_TRACK_NODES) seg = LOC_TRACK_NODES - 1;
+            const Vector2 aM = track.nodes[seg].centerM;
+            const Vector2 bM = track.nodes[(seg + 1) % LOC_TRACK_NODES].centerM;
+            const float segLenM =
+                sqrtf((bM.x - aM.x) * (bM.x - aM.x) + (bM.y - aM.y) * (bM.y - aM.y));
+            const float t = (segLenM > 0.0f) ? (remainingM / segLenM) : 0.0f;
+            const Vector2 currM = { aM.x + t * (bM.x - aM.x), aM.y + t * (bM.y - aM.y) };
+            const float headingRad = atan2f(bM.y - aM.y, bM.x - aM.x);
+            loc_step(&track, &prog, prevM, currM, headingRad);
+            const float deltaM = prog.raceDistanceM - previousDistanceM;
+            if (deltaM < -0.001f) monotone = false;
+            if (fabsf(deltaM) > maxJumpM) maxJumpM = fabsf(deltaM);
+            previousDistanceM = prog.raceDistanceM;
+            prevM = currM;
+        }
+        check(crossedSeam > 0, "the traversal drove through the start/finish seam");
+        check(monotone, "race distance never goes backwards while driving forwards");
+        check(maxJumpM < 2.0f,
+              "no step produced a lap-sized distance jump at the seam (largest %.3f m)",
+              (double)maxJumpM);
+        check(prog.raceDistanceM > lengthM,
+              "race distance passes one lap length rather than wrapping to zero (%.2f m of "
+              "%.2f m lap)",
+              (double)prog.raceDistanceM, (double)lengthM);
+        check(!prog.wrongWay, "a clean forward lap never raises the wrong-way flag");
+    }
+
+    /* --- a lane running parallel to opposing traffic (the pit-branch case) ----------------- */
+    {
+        /* y = 3.2 is nearer the RETURNING strand than the outbound one, so every tick of this
+         * drive would localize backwards under a global scan. */
+        RacerProgress prog;
+        memset(&prog, 0, sizeof(prog));
+        track_reset_progress_at(&prog, &track, 0);
+        Vector2 prevM = { 10.0f, 3.2f };
+        const RouteLocation enteredFrom =
+            route_localize_global(&track, (Vector2){ 10.0f, 0.0f }, 0.0f);
+        prog.location = route_localize_near(&track, &enteredFrom, prevM, 0.0f);
+        check(prog.location.segmentIndex == 0, "branch drive starts on the outbound strand");
+        bool stayedOutbound = true;
+        bool advanced = true;
+        float lastLongitudinalM = prog.location.longitudinalM;
+        for (int i = 0; i < 80; i++) {
+            const Vector2 currM = { prevM.x + 1.0f, 3.2f };
+            loc_step(&track, &prog, prevM, currM, 0.0f);
+            if (prog.location.segmentIndex > 4) stayedOutbound = false;
+            if (prog.location.longitudinalM < lastLongitudinalM - 0.001f) advanced = false;
+            lastLongitudinalM = prog.location.longitudinalM;
+            prevM = currM;
+        }
+        const RouteLocation naive = route_localize_global(&track, prevM, 0.0f);
+        check(naive.segmentIndex > 4,
+              "a global scan really does put this lane on the opposing strand (segment %d)",
+              naive.segmentIndex);
+        check(stayedOutbound, "the branch drive never swapped onto the opposing strand");
+        check(advanced, "branch longitudinal progress advanced every tick");
+        check(!prog.wrongWay,
+              "driving a parallel branch the right way round does not read as wrong-way");
+        check(prog.location.confidence <= 0.0f && !prog.location.onRoute,
+              "a car outside the barrier corridor reports zero route confidence (%.3f)",
+              (double)prog.location.confidence);
+    }
+
+    /* --- off-track excursion and rejoin ---------------------------------------------------- */
+    {
+        RacerProgress prog;
+        memset(&prog, 0, sizeof(prog));
+        track_reset_progress_at(&prog, &track, 0);
+        Vector2 prevM = { 30.0f, 0.0f };
+        prog.location = route_localize_global(&track, prevM, 0.0f);
+        check(prog.location.onRoute && prog.location.confidence >= 1.0f,
+              "a car on the racing surface reports full route confidence (%.3f)",
+              (double)prog.location.confidence);
+        /* Run wide onto the runoff, then off it, then back. */
+        const float offsets[] = { -2.5f, -4.0f, -7.0f, -4.0f, -1.0f, 0.0f };
+        float runoffConfidence = -1.0f;
+        bool keptStrand = true;
+        for (size_t i = 0; i < sizeof(offsets) / sizeof(offsets[0]); i++) {
+            const Vector2 currM = { prevM.x + 2.0f, offsets[i] };
+            loc_step(&track, &prog, prevM, currM, 0.0f);
+            if (prog.location.segmentIndex > 4) keptStrand = false;
+            if (i == 0) runoffConfidence = prog.location.confidence;
+            prevM = currM;
+        }
+        check(runoffConfidence > 0.0f && runoffConfidence < 1.0f,
+              "confidence decays across the runoff band rather than stepping to zero (%.3f)",
+              (double)runoffConfidence);
+        check(keptStrand, "an off-track excursion and rejoin never re-localized the car");
+        check(prog.location.onRoute,
+              "the rejoined car is back on the racing surface (lateral %.3f m)",
+              (double)prog.location.lateralM);
+        check(!prog.wrongWay, "an excursion at speed is not wrong-way travel");
+    }
+
+    /* --- reverse travel sets wrong-way, but only after the hold ---------------------------- */
+    {
+        RacerProgress prog;
+        memset(&prog, 0, sizeof(prog));
+        track_reset_progress_at(&prog, &track, 0);
+        Vector2 prevM = { 80.0f, 0.0f };
+        prog.location = route_localize_global(&track, prevM, CIRCUIT_PI);
+        const int holdTicks = (int)(ROUTE_WRONG_WAY_HOLD_S / FIXED_DT_S);
+        bool earlyFlag = false;
+        for (int i = 0; i < holdTicks - 2; i++) {
+            const Vector2 currM = { prevM.x - 0.2f, 0.0f };
+            loc_step(&track, &prog, prevM, currM, CIRCUIT_PI);
+            if (prog.wrongWay) earlyFlag = true;
+            prevM = currM;
+        }
+        check(!earlyFlag, "wrong-way does not latch before the hysteresis hold elapses");
+        bool changedEvent = false;
+        for (int i = 0; i < 8; i++) {
+            const Vector2 currM = { prevM.x - 0.2f, 0.0f };
+            const TrackProgressEvent ev = loc_step(&track, &prog, prevM, currM, CIRCUIT_PI);
+            if (ev.wrongWayChanged) changedEvent = true;
+            prevM = currM;
+        }
+        check(prog.wrongWay, "sustained reverse travel latches wrong-way");
+        check(changedEvent, "the tick the flag latched reported wrongWayChanged");
+        /* Turn round: it must take the same sustained evidence to clear. */
+        for (int i = 0; i < 4; i++) {
+            const Vector2 currM = { prevM.x + 0.2f, 0.0f };
+            loc_step(&track, &prog, prevM, currM, 0.0f);
+            prevM = currM;
+        }
+        check(prog.wrongWay, "wrong-way does not clear on the first correct tick");
+        for (int i = 0; i < holdTicks + 4; i++) {
+            const Vector2 currM = { prevM.x + 0.2f, 0.0f };
+            loc_step(&track, &prog, prevM, currM, 0.0f);
+            prevM = currM;
+        }
+        check(!prog.wrongWay, "wrong-way clears once the car is going the right way again");
+    }
+
+    /* --- a spin does not flicker the flag --------------------------------------------------- */
+    {
+        RacerProgress prog;
+        memset(&prog, 0, sizeof(prog));
+        track_reset_progress_at(&prog, &track, 0);
+        Vector2 prevM = { 22.0f, 0.0f };
+        prog.location = route_localize_global(&track, prevM, 0.0f);
+        /* A full rotation over 1.5 s while the car keeps sliding forwards: the heading spends
+         * roughly half a second past 120 degrees, which is less than the hold, and the car
+         * never loses ground. Both guards would have to fail for the flag to raise. */
+        const int spinTicks = (int)(1.5f / FIXED_DT_S);
+        bool flagged = false;
+        float maxHeadingErrorRad = 0.0f;
+        for (int i = 0; i < spinTicks; i++) {
+            const float headingRad =
+                wrap_angle(CIRCUIT_TWO_PI * (float)(i + 1) / (float)spinTicks);
+            const Vector2 currM = { prevM.x + 0.15f, 0.0f };
+            loc_step(&track, &prog, prevM, currM, headingRad);
+            if (prog.wrongWay) flagged = true;
+            if (fabsf(prog.location.headingErrorRad) > maxHeadingErrorRad)
+                maxHeadingErrorRad = fabsf(prog.location.headingErrorRad);
+            prevM = currM;
+        }
+        check(maxHeadingErrorRad > ROUTE_WRONG_WAY_ENTER_RAD,
+              "the spin really did point the car past the wrong-way angle (%.3f rad)",
+              (double)maxHeadingErrorRad);
+        check(!flagged, "a spin that keeps carrying the car forwards never raises wrong-way");
+
+        /* Now a recovery that briefly reverses: still short of the hold, still no flag. */
+        bool recoveryFlagged = false;
+        for (int i = 0; i < (int)(0.4f / FIXED_DT_S); i++) {
+            const Vector2 currM = { prevM.x - 0.1f, 0.0f };
+            loc_step(&track, &prog, prevM, currM, CIRCUIT_PI);
+            if (prog.wrongWay) recoveryFlagged = true;
+            prevM = currM;
+        }
+        check(!recoveryFlagged, "a brief backwards recovery does not raise wrong-way");
+    }
+
+    /* --- several entrants, one track, independent and order-independent -------------------- */
+    {
+        RacerProgress racers[3];
+        Vector2 posM[3] = { { 10.0f, 0.0f }, { 30.0f, 0.0f }, { 50.0f, 0.0f } };
+        /* Every entrant stays on the y = 0 straight, so each one's accumulated distance is
+         * exactly the ground it covered and the ordering below is not an artefact of where the
+         * fixture's corners happen to fall. */
+        const float stepM[3] = { 0.4f, 0.2f, 0.4f };
+        for (int i = 0; i < 3; i++) {
+            memset(&racers[i], 0, sizeof(racers[i]));
+            track_reset_progress_at(&racers[i], &track, 0);
+            racers[i].location = route_localize_global(&track, posM[i], 0.0f);
+        }
+        /* Entrant 0 is a lap up on the other two, so the ordering is tested ACROSS a lap
+         * boundary rather than only within one. */
+        racers[0].raceDistanceM = lengthM;
+
+        /* Update in ascending order, then repeat the identical inputs in descending order into
+         * a second set: an entrant that could disturb another would diverge. */
+        RacerProgress mirrored[3];
+        Vector2 mirroredPosM[3];
+        for (int i = 0; i < 3; i++) {
+            mirrored[i] = racers[i];
+            mirroredPosM[i] = posM[i];
+        }
+        for (int step = 0; step < 40; step++) {
+            for (int i = 0; i < 3; i++) {
+                const Vector2 currM = { posM[i].x + stepM[i], 0.0f };
+                loc_step(&track, &racers[i], posM[i], currM, 0.0f);
+                posM[i] = currM;
+            }
+            for (int i = 2; i >= 0; i--) {
+                const Vector2 currM = { mirroredPosM[i].x + stepM[i], 0.0f };
+                loc_step(&track, &mirrored[i], mirroredPosM[i], currM, 0.0f);
+                mirroredPosM[i] = currM;
+            }
+        }
+        bool identical = true;
+        for (int i = 0; i < 3; i++) {
+            if (racers[i].raceDistanceM != mirrored[i].raceDistanceM ||
+                racers[i].location.segmentIndex != mirrored[i].location.segmentIndex ||
+                racers[i].location.longitudinalM != mirrored[i].location.longitudinalM) {
+                identical = false;
+            }
+        }
+        check(identical, "entrant results do not depend on the order entrants are updated in");
+        check_near((double)racers[2].raceDistanceM, 16.0, 0.01,
+                   "the faster of the two on the lead lap covered its 16 m");
+        check_near((double)racers[1].raceDistanceM, 8.0, 0.01,
+                   "the slower of the two on the lead lap covered its 8 m");
+        check(racers[0].raceDistanceM > racers[2].raceDistanceM &&
+                  racers[2].raceDistanceM > racers[1].raceDistanceM,
+              "race distance orders a lapped field correctly (%.2f > %.2f > %.2f)",
+              (double)racers[0].raceDistanceM, (double)racers[2].raceDistanceM,
+              (double)racers[1].raceDistanceM);
+        check(racers[1].location.segmentIndex != racers[2].location.segmentIndex,
+              "each entrant carries its own route position (%d vs %d)",
+              racers[1].location.segmentIndex, racers[2].location.segmentIndex);
+    }
+
+    track_free(&track);
+
+    /* --- open point-to-point route: no wrap, no phantom segment past the end --------------- */
+    {
+        TrackDefinition open;
+        loc_build_track(&open, false);
+        check(open.count == LOC_TRACK_NODES, "open fixture built");
+        if (open.count == LOC_TRACK_NODES) {
+            /* The closing segment 13 -> 0 does not exist on an open route, so a point beyond
+             * the last node must clamp to the final real segment rather than wrap. */
+            const RouteLocation past =
+                route_localize_global(&open, (Vector2){ -30.0f, 3.0f }, 0.0f);
+            check(past.valid && past.segmentIndex == LOC_TRACK_NODES - 2,
+                  "an open route ends at its last real segment (got %d, expected %d)",
+                  past.segmentIndex, LOC_TRACK_NODES - 2);
+            /* Segment LOC_TRACK_NODES-1 is the closing segment a CLOSED route would have. An
+             * open route has no such segment, so a prior naming it must be rejected rather
+             * than indexed. */
+            RouteLocation stalePrior;
+            memset(&stalePrior, 0, sizeof(stalePrior));
+            stalePrior.valid = true;
+            stalePrior.segmentIndex = LOC_TRACK_NODES - 1;
+            const RouteLocation hinted =
+                route_localize_near(&open, &stalePrior, (Vector2){ -30.0f, 3.0f }, 0.0f);
+            check(hinted.segmentIndex == past.segmentIndex,
+                  "a prior naming a segment the open route does not have falls back cleanly "
+                  "(got %d)",
+                  hinted.segmentIndex);
+
+            RacerProgress prog;
+            memset(&prog, 0, sizeof(prog));
+            track_reset_progress_at(&prog, &open, 0);
+            Vector2 prevM = { 2.0f, 0.0f };
+            prog.location = route_localize_global(&open, prevM, 0.0f);
+            for (int i = 0; i < 40; i++) {
+                const Vector2 currM = { prevM.x + 1.0f, 0.0f };
+                loc_step(&open, &prog, prevM, currM, 0.0f);
+                prevM = currM;
+            }
+            check_near((double)prog.raceDistanceM, 40.0, 0.01,
+                       "open-route race distance is plain arc length with no wrap term");
+        }
+        track_free(&open);
+    }
+
+    /* --- a route with nothing to localize against ------------------------------------------ */
+    {
+        TrackDefinition empty;
+        memset(&empty, 0, sizeof(empty));
+        const RouteLocation none = route_localize_global(&empty, (Vector2){ 0.0f, 0.0f }, 0.0f);
+        check(!none.valid, "an empty definition localizes to an explicitly invalid result");
+        RacerProgress prog;
+        memset(&prog, 0, sizeof(prog));
+        const TrackProgressEvent ev = track_update_progress(
+            NULL, &prog, (Vector2){ 0.0f, 0.0f }, (Vector2){ 1.0f, 0.0f }, 0.0f, FIXED_DT_S);
+        check(!ev.checkpoint.crossed && ev.checkpoint.index == -1 && !ev.wrongWay,
+              "a NULL track produces an empty progress event rather than a crash");
+        check(prog.raceDistanceM == 0.0f, "a NULL track leaves race distance untouched");
+    }
+}
+
 /* --------------------------------------------------------------------------------------------- registry */
 
 static const TestScenario kScenarios[] = {
@@ -1464,6 +1916,10 @@ static const TestScenario kScenarios[] = {
     { "track-migration",
       "issue #36: catalog discovery, legacy vs loaded equivalence, missing handling",
       scenario_track_migration },
+    { "route-localization",
+      "issue #38: continuity localization, wrong-way hysteresis, race distance, per-entrant "
+      "isolation",
+      scenario_route_localization },
 };
 
 TestScenarioGroup test_content_scenarios(void)

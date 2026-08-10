@@ -177,6 +177,20 @@ static uint32_t hash_entrant(uint32_t h, const RaceEntrant *entrant)
     h = hash_u32(h, p->lapArmed ? 1u : 0u);
     h = hash_f32(h, p->lapTimerS);
     h = hash_f32(h, p->lastLapTimeS);
+
+    /* Route localization (issue #38). The cached location is hashed because it is next tick's
+     * continuity hint: rebuilding it with a global scan can legitimately choose a different
+     * strand where the route runs beside itself, so by docs/SIMULATION_OWNERSHIP.md's own test
+     * it is authoritative state and not an excluded cache. Its purely derived companions —
+     * lateral offset, heading error, confidence, the closest point — are recomputed from the
+     * pose every tick and read by nothing later, so they stay out. */
+    h = hash_u32(h, p->location.valid ? 1u : 0u);
+    h = hash_u32(h, (uint32_t)p->location.segmentIndex);
+    h = hash_f32(h, p->location.segmentT);
+    h = hash_f32(h, p->location.longitudinalM);
+    h = hash_f32(h, p->raceDistanceM);
+    h = hash_u32(h, p->wrongWay ? 1u : 0u);
+    h = hash_f32(h, p->wrongWayTimerS);
     return h;
 }
 
@@ -958,8 +972,9 @@ static void stage_physics(Game *game, TickContext *ctx, float dt)
 /*
  * Stage 6 — track localization and progress.
  * Reads: the immutable track and the entrant's swept pose. Writes: that entrant's
- * RacerProgress and the tick's checkpoint event reports. The definition is never written, so
- * two entrants may run this against the same track without interacting.
+ * RacerProgress — route location, gates, wrong-way and race distance — and the tick's event
+ * reports. The definition is never written, so two entrants may run this against the same
+ * track without interacting.
  *
  * ORDER NOTE. This runs before the collision stage, which is where it has always run.
  * docs/SIMULATION_OWNERSHIP.md's target order puts progress after collision, so that a gate is
@@ -977,8 +992,12 @@ static void stage_physics(Game *game, TickContext *ctx, float dt)
 static void stage_progress(Game *game, const TickContext *ctx, float dt)
 {
     if (ctx->trackLoaded) {
-        TrackCheckpointEvent ev = track_update_checkpoints(
-            &game->trackDef, &game->progress, ctx->startPosM, game->renderState.currPositionM);
+        /* One call establishes this racer's route position and then judges its gates against
+         * it, so nothing downstream re-derives "where is this car on the track" for itself. */
+        const TrackProgressEvent pev = track_update_progress(
+            &game->trackDef, &game->progress, ctx->startPosM, game->renderState.currPositionM,
+            game->vehicle.headingRad, dt);
+        const TrackCheckpointEvent ev = pev.checkpoint;
         game->lastCheckpointEvent = ev;
         if (ev.crossed) {
             game->pendingTelemetryCheckpointEvent = ev;
@@ -988,8 +1007,7 @@ static void stage_progress(Game *game, const TickContext *ctx, float dt)
                                        (int32_t)game->progress.lap);
             }
         }
-        TrackSectorEvent sev = track_update_sectors(
-            &game->trackDef, &game->progress, ctx->startPosM, game->renderState.currPositionM);
+        const TrackSectorEvent sev = pev.sector;
         if (sev.crossed && game->session.roster.count > 0) {
             race_session_log_event(&game->session, RACE_EVENT_SECTOR_COMPLETED,
                                    game->session.roster.entrants[0].id, sev.index);
