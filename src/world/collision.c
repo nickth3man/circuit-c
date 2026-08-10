@@ -245,11 +245,11 @@ int collision_resolve_track(const VehicleSpec *spec, VehicleState *state,
         int contacts = 0;
 
         const int n = track->count;
-        for (int i = 0; i < n; i++) {
-            const int j = (i + 1) % n;
+        const int limit = track->routeClosed ? n : n - 1;
+        for (int i = 0; i < limit; i++) {
+            const int j = track->routeClosed ? (i + 1) % n : i + 1;
             const TrackNode *ni = &track->nodes[i];
             const TrackNode *nj = &track->nodes[j];
-
             /* Segment direction and left perpendicular. */
             const float segDx = nj->centerM.x - ni->centerM.x;
             const float segDy = nj->centerM.y - ni->centerM.y;

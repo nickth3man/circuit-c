@@ -92,6 +92,7 @@ typedef struct {
 typedef enum {
     RACE_EVENT_PHASE_CHANGED = 0, /* value is the new RacePhase */
     RACE_EVENT_LAP_COMPLETED,     /* value is the lap number just completed */
+    RACE_EVENT_SECTOR_COMPLETED,  /* value is the sector index just crossed */
     RACE_EVENT_ENTRANT_FINISHED,  /* value is the finishing position awarded */
     RACE_EVENT_KIND_COUNT
 } RaceEventKind;

@@ -138,7 +138,7 @@ After #35, track migration can proceed while race semantics are developed.
 - [x] [#36 — Migrate built-in tracks from C into external content](https://github.com/nickth3man/circuit-c/issues/36)
   - Depends on: #35
 
-- [ ] [#37 — Separate route checkpoints, timing sectors, start/finish, grid, and pit semantics](https://github.com/nickth3man/circuit-c/issues/37)
+- [x] [#37 — Separate route checkpoints, timing sectors, start/finish, grid, and pit semantics](https://github.com/nickth3man/circuit-c/issues/37)
   - Depends on: #11, #34
 
 - [ ] [#38 — Implement per-entrant route localization, progress, ordering, and wrong-way detection](https://github.com/nickth3man/circuit-c/issues/38)
@@ -153,7 +153,7 @@ After #35, track migration can proceed while race semantics are developed.
 - [x] Setups cannot mutate shared base definitions.
 - [x] Tracks load from versioned external files.
 - [x] All original tracks pass loader, collision, timing, and replay tests.
-- [ ] Checkpoints, sectors, start/finish, grid, and pit metadata are distinct.
+- [x] Checkpoints, sectors, start/finish, grid, and pit metadata are distinct.
 - [ ] Every entrant has independent route localization and progress.
 
 ---

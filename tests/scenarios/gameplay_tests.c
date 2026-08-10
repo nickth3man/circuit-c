@@ -538,6 +538,7 @@ static void scenario_checkpoint_lap(void)
     track.count = 4;
     track.offTrackSurfaceId = SURFACE_GRASS;
     track.runoffSurfaceId = SURFACE_GRASS;
+    track.routeClosed = true;
     track.nodes[0] = (TrackNode){ { 0.0f, 0.0f }, 2.0f, SURFACE_ASPHALT, 0.0f };
     track.nodes[1] = (TrackNode){ { 10.0f, 0.0f }, 2.0f, SURFACE_ASPHALT, 0.0f };
     track.nodes[2] = (TrackNode){ { 10.0f, 10.0f }, 2.0f, SURFACE_ASPHALT, 0.0f };
@@ -640,6 +641,116 @@ static void scenario_checkpoint_lap(void)
 }
 
 /* ------------------------------------------------------------------------------------- */
+/* Scenario: checkpoint-lap-sf — the start/finish line closes laps through lapArmed        */
+/* ------------------------------------------------------------------------------------- */
+/* The SF line is the authoritative lap boundary (see the StartFinishLine comment in
+ * track.h), authored independently of the gate sequence. These cases pin the latch rules:
+ * the lap closes only when the route cursor has wrapped (every required gate crossed in
+ * order) AND the line was actually crossed since the last close. */
+static void scenario_checkpoint_lap_start_finish(void)
+{
+    /* Same 10 m x 10 m counterclockwise square as checkpoint-lap, so cross_square_gate()
+     * applies: gate 0 at (0,0) faces +X, gate 1 at (10,0) faces +Y, gate 2 at (10,10)
+     * faces -X, gate 3 at (0,10) faces -Y. */
+    TrackDefinition track;
+    memset(&track, 0, sizeof(track));
+    track.nodes = (TrackNode *)calloc(4, sizeof(TrackNode));
+    track.count = 4;
+    track.offTrackSurfaceId = SURFACE_GRASS;
+    track.runoffSurfaceId = SURFACE_GRASS;
+    track.routeClosed = true;
+    track.nodes[0] = (TrackNode){ { 0.0f, 0.0f }, 2.0f, SURFACE_ASPHALT, 0.0f };
+    track.nodes[1] = (TrackNode){ { 10.0f, 0.0f }, 2.0f, SURFACE_ASPHALT, 0.0f };
+    track.nodes[2] = (TrackNode){ { 10.0f, 10.0f }, 2.0f, SURFACE_ASPHALT, 0.0f };
+    track.nodes[3] = (TrackNode){ { 0.0f, 10.0f }, 2.0f, SURFACE_ASPHALT, 0.0f };
+    check(track_build_checkpoints_from_nodes(&track), "gates derive from the node ribbon");
+    check(track.checkpointCount == 4, "one gate per node (got %d)", track.checkpointCount);
+
+    RacerProgress progress;
+    TrackCheckpointEvent ev;
+
+    /* --- Case 1: an SF overlapping an early gate awards no incomplete lap ---
+     * The line sits on gate 1 (10,0) facing +Y, so taking the FIRST gate of the lap crosses
+     * it. The old same-tick rule completed a lap right there; the latch rule waits for the
+     * wrapped route. */
+    memset(&progress, 0, sizeof(progress));
+    track.hasStartFinish = true;
+    track.startFinish.centerM = (Vector2){ 10.0f, 0.0f };
+    track.startFinish.forwardUnit = (Vector2){ 0.0f, 1.0f };
+    track.startFinish.halfWidthM = 10.0f;
+    progress.lapArmed = true; /* stale state from an earlier run */
+    track_reset_progress_at(&progress, &track, 0);
+    check(!progress.lapArmed, "reset clears a stale SF latch");
+
+    ev = cross_square_gate(&track, &progress, 1);
+    check(ev.crossed && !ev.outOfOrder, "gate 1 is the expected crossing");
+    check(!ev.lapCompleted,
+          "crossing an SF that overlaps gate 1 does not close a lap before the route wraps");
+    check(progress.lap == 0, "lap stays 0 after the first gate (got %d)", progress.lap);
+    check(cross_square_gate(&track, &progress, 2).crossed, "gate 2");
+    check(cross_square_gate(&track, &progress, 3).crossed, "gate 3");
+    ev = cross_square_gate(&track, &progress, 0);
+    check(ev.lapCompleted, "wrapped route with a latched SF crossing closes the lap");
+    check(progress.lap == 1, "lap increments to 1 (got %d)", progress.lap);
+    check(!progress.lapArmed, "the lap close consumes the SF latch");
+
+    /* --- Case 2: an SF crossed on a gate-less tick still closes the lap ---
+     * The line sits between gate 3 and gate 0, facing the direction of travel (-Y), so the
+     * car crosses it on a tick that crosses no gate. The old code discarded that crossing
+     * and no lap ever closed. */
+    memset(&progress, 0, sizeof(progress));
+    track.hasStartFinish = true;
+    track.startFinish.centerM = (Vector2){ 0.0f, 5.0f };
+    track.startFinish.forwardUnit = (Vector2){ 0.0f, -1.0f };
+    track.startFinish.halfWidthM = 10.0f;
+    track_reset_progress_at(&progress, &track, 0);
+    progress.lapTimerS = 5.0f;
+    check(cross_square_gate(&track, &progress, 1).crossed, "gate 1");
+    check(cross_square_gate(&track, &progress, 2).crossed, "gate 2");
+    check(cross_square_gate(&track, &progress, 3).crossed, "gate 3");
+    ev = track_update_checkpoints(&track, &progress, (Vector2){ 0.0f, 6.0f },
+                                  (Vector2){ 0.0f, 4.0f });
+    check(!ev.crossed, "the tick between gates 3 and 0 crosses no gate");
+    check(progress.nextCheckpoint == 0, "a gate-less tick does not advance the cursor (got %d)",
+          progress.nextCheckpoint);
+    ev = cross_square_gate(&track, &progress, 0);
+    check(ev.lapCompleted,
+          "an SF crossing latched on a gate-less tick closes the lap at the wrapped gate");
+    check(progress.lap == 1, "lap increments to 1 (got %d)", progress.lap);
+    check_near((double)ev.lapTimeS, 5.0, 1e-3, "the event reports the completed lap time");
+
+    /* --- Case 3: wrapping without crossing the SF closes no lap ---
+     * The line is narrower than gate 0 (spans y in [-1,+1] vs the gate's [-2,+2]), so the
+     * finish gate can be taken outside the line. */
+    memset(&progress, 0, sizeof(progress));
+    track.hasStartFinish = true;
+    track.startFinish.centerM = (Vector2){ 0.0f, 0.0f };
+    track.startFinish.forwardUnit = (Vector2){ 1.0f, 0.0f };
+    track.startFinish.halfWidthM = 1.0f;
+    track_reset_progress_at(&progress, &track, 0);
+    progress.lapTimerS = 5.0f;
+    check(cross_square_gate(&track, &progress, 1).crossed, "gate 1");
+    check(cross_square_gate(&track, &progress, 2).crossed, "gate 2");
+    check(cross_square_gate(&track, &progress, 3).crossed, "gate 3");
+    ev = track_update_checkpoints(&track, &progress, (Vector2){ -0.1f, 1.5f },
+                                  (Vector2){ 0.1f, 1.5f });
+    check(ev.crossed && !ev.outOfOrder, "gate 0 taken outside the SF span");
+    check(!ev.lapCompleted, "a wrap that never crossed the SF line closes no lap");
+    check(progress.lap == 0, "lap stays 0 (got %d)", progress.lap);
+    check(!progress.lapArmed, "no SF crossing means no latch");
+    /* The next lap crosses the SF at y = 0.5 together with gate 0, so it does close. */
+    check(cross_square_gate(&track, &progress, 1).crossed, "gate 1 (lap 2)");
+    check(cross_square_gate(&track, &progress, 2).crossed, "gate 2 (lap 2)");
+    check(cross_square_gate(&track, &progress, 3).crossed, "gate 3 (lap 2)");
+    ev = track_update_checkpoints(&track, &progress, (Vector2){ -0.1f, 0.5f },
+                                  (Vector2){ 0.1f, 0.5f });
+    check(ev.lapCompleted, "crossing the SF with the finish gate closes the lap");
+    check(progress.lap == 1, "lap increments to 1 (got %d)", progress.lap);
+
+    track_free(&track);
+}
+
+/* ------------------------------------------------------------------------------------- */
 /* Scenario: progress-isolation — two racers, one shared immutable TrackDefinition         */
 /* ------------------------------------------------------------------------------------- */
 
@@ -658,12 +769,12 @@ static void scenario_progress_isolation(void)
     track.count = 4;
     track.offTrackSurfaceId = SURFACE_GRASS;
     track.runoffSurfaceId = SURFACE_GRASS;
+    track.routeClosed = true;
     track.nodes[0] = (TrackNode){ { 0.0f, 0.0f }, 2.0f, SURFACE_ASPHALT, 0.0f };
     track.nodes[1] = (TrackNode){ { 10.0f, 0.0f }, 2.0f, SURFACE_ASPHALT, 0.0f };
     track.nodes[2] = (TrackNode){ { 10.0f, 10.0f }, 2.0f, SURFACE_ASPHALT, 0.0f };
     track.nodes[3] = (TrackNode){ { 0.0f, 10.0f }, 2.0f, SURFACE_ASPHALT, 0.0f };
     check(track_build_checkpoints_from_nodes(&track), "gates derive from the node ribbon");
-
     /* Bind a runtime so the definition can be proved untouched at the end of the session. */
     TrackRuntime runtime;
     memset(&runtime, 0, sizeof(runtime));
@@ -2024,6 +2135,7 @@ static void scenario_lap_target_results(void)
     game->trackDef.nodes = (TrackNode *)calloc(4, sizeof(TrackNode));
     game->trackDef.count = 4;
     game->trackDef.offTrackSurfaceId = SURFACE_GRASS;
+    game->trackDef.routeClosed = true;
     game->trackDef.nodes[0] = (TrackNode){ { 0.0f, 0.0f }, 2.0f, SURFACE_ASPHALT, 0.0f };
     game->trackDef.nodes[1] = (TrackNode){ { 10.0f, 0.0f }, 2.0f, SURFACE_ASPHALT, 0.0f };
     game->trackDef.nodes[2] = (TrackNode){ { 10.0f, 10.0f }, 2.0f, SURFACE_ASPHALT, 0.0f };
@@ -2820,6 +2932,9 @@ static const TestScenario kGameplayScenarios[] = {
       scenario_collision_units },
     { "checkpoint-lap", "ordered gates, out-of-order detection, forward-only, and lap timing",
       scenario_checkpoint_lap },
+    { "checkpoint-lap-sf",
+      "start/finish line lap closing: latch across ticks, no early award, no SF no close",
+      scenario_checkpoint_lap_start_finish },
     { "progress-isolation",
       "two racers advance independent progress through one immutable TrackDefinition",
       scenario_progress_isolation },

@@ -1,11 +1,11 @@
-# Track Format (`circuit/track` v1)
+# Track Format (`circuit/track` v2)
 
 A track file is the external, human-reviewable form of one immutable `TrackDefinition`: the
 authored centreline, surface bands, ordered checkpoints, and identity metadata. It replaces the
 hard-coded C layouts (`track_init`, `track_load_chicane`, `track_load_sprint`,
 `track_load_technical`) with reviewed data, so a new circuit is a file, not a recompile.
 
-This is the format defined by issue #34. The loader lives in `src/content/track_manifest.{h,c}`;
+This is the format defined by issues #34 and #37. The loader lives in `src/content/track_manifest.{h,c}`;
 the strict JSON reader it builds on lives in `src/core/json.{h,c}`.
 
 ## Why a new format
@@ -26,7 +26,7 @@ byte-different files load as the same value.
 ```json
 {
   "schema": "circuit/track",
-  "version": 1,
+  "version": 2,
   "id": "chicane",
   "displayName": "Chicane Validation Circuit",
   "description": "the lap every car is validated against",
@@ -41,7 +41,23 @@ byte-different files load as the same value.
   "parkingLot": { "minX": -200, "maxX": 200, "minY": -150, "maxY": 150 },
   "checkpoints": [
     { "x": -60, "y": 0, "forwardX": 1, "forwardY": 0, "halfWidth": 10, "required": true }
-  ]
+  ],
+  "sectors": [
+    { "x": -60, "y": 0, "forwardX": 1, "forwardY": 0, "halfWidth": 10 }
+  ],
+  "startFinish": { "x": -60, "y": 0, "forwardX": 1, "forwardY": 0, "halfWidth": 10 },
+  "grid": [
+    { "x": -70, "y": -2, "heading": 0 },
+    { "x": -70, "y": 2, "heading": 0 }
+  ],
+  "pit": {
+    "entry": { "x": 50, "y": 90, "forwardX": -1, "forwardY": 0, "halfWidth": 6 },
+    "exit": { "x": -50, "y": 0, "forwardX": 1, "forwardY": 0, "halfWidth": 6 },
+    "speedLine": { "x": 0, "y": 90, "forwardX": -1, "forwardY": 0, "halfWidth": 6 },
+    "serviceBoxes": [
+      { "minX": -10, "minY": 95, "maxX": 10, "maxY": 105 }
+    ]
+  }
 }
 ```
 
@@ -50,7 +66,7 @@ byte-different files load as the same value.
 | Field            | Type     | Required | Notes |
 |------------------|----------|----------|-------|
 | `schema`         | string   | yes      | Must be `"circuit/track"`. |
-| `version`        | number   | yes      | Must be `1`. |
+| `version`        | number   | yes      | `1` or `2`. v1 requires `route.closed: true`; v2 allows `false` for open point-to-point routes. |
 | `id`             | string   | yes      | Stable content id. Matches `[a-z0-9][a-z0-9._-]{0,30}` (≤31 chars, fits `TRACK_ID_CHARS`). |
 | `displayName`    | string   | yes      | Human label (≤ 128 chars). |
 | `description`    | string   | no       | Free text (≤ 256 chars). Absent ⇒ empty. |
@@ -58,19 +74,20 @@ byte-different files load as the same value.
 | `route`          | object   | yes      | The centreline. |
 | `surfaces`       | object   | no       | Off-track and runoff surface names. Absent ⇒ grass. |
 | `parkingLot`     | object   | no       | Open-area bounds. Present iff `isParkingLot`. |
-| `checkpoints`    | array    | no       | Ordered gates. Absent ⇒ none. |
+| `checkpoints`    | array    | no       | Ordered route-validation gates. Absent ⇒ derived from nodes. |
+| `sectors`        | array    | no       | Ordered sector splits, independent of route validation. |
+| `startFinish`    | object   | no       | Explicit start/finish line. Absent ⇒ gate 0 is the lap boundary. |
+| `grid`           | array    | no       | Grid slots, deterministic poses. Validated for overlap and track placement. |
+| `pit`            | object   | no       | Pit geometry: `entry`, `exit`, `speedLine` gates and `serviceBoxes` rectangles. Authoring pit geometry does not automatically enable pit rules. |
 
-Unknown top-level keys are rejected. v1 cannot be loaded two ways depending on a field nothing
-acts on yet, so grid, pit, and environment hooks are reserved for a future version rather than
-silently ignored.
+Unknown top-level keys are rejected. v1 files with new keys load (they are optional), but v1 `route.closed` must be `true`; v2 relaxes that for open sprint routes.
 
 ### `route`
 
 | Field    | Type   | Required | Notes |
 |----------|--------|----------|-------|
-| `closed` | bool   | yes      | Must be `true` in v1. Open routes are reserved for v2. |
-| `nodes`  | array  | yes      | Ordered centreline nodes (≥ 2). A closed lap needs at least two points. |
-
+| `closed` | bool   | yes      | `true` = closed circuit (laps wrap), `false` = open point-to-point (sprint). v1 requires `true`. |
+| `nodes`  | array  | yes      | Ordered centreline nodes (≥ 2). |
 ### node
 
 | Field             | Type   | Notes |
@@ -82,8 +99,7 @@ silently ignored.
 
 ### `checkpoints[]`
 
-Ordered lap gates. A gate scores when the car's motion crosses its line travelling the forward
-half-plane.
+Ordered route-validation gates. A gate scores when the car's motion crosses its line travelling the forward half-plane.
 
 | Field       | Type   | Notes |
 |-------------|--------|-------|
@@ -97,6 +113,46 @@ coincides with the first, so the derived gate faces no direction and
 `track_build_checkpoints_from_nodes()` stores `(0, 0)`. A clearly non-zero, non-unit vector is
 still rejected as a self-contradictory marker.
 
+### `sectors[]`
+
+Independent timing splits. Same geometry as a checkpoint but without `required`: crossing advances the sector counter without affecting lap validity.
+
+| Field       | Type   | Notes |
+|-------------|--------|-------|
+| `x`, `y`    | number | Gate centre. |
+| `forwardX`, `forwardY` | number | Must be unit-length. |
+| `halfWidth` | number | Half-width, (0, 100]. |
+
+### `startFinish`
+
+Single explicit start/finish line. When present it is the authoritative lap boundary; otherwise gate 0 is used. Prevents lap validation and timing from being conflated.
+
+| Field       | Type   | Notes |
+|-------------|--------|-------|
+| `x`, `y`    | number | Line centre. |
+| `forwardX`, `forwardY` | number | Unit-length forward. |
+| `halfWidth` | number | Half-width. |
+
+### `grid[]`
+
+Deterministic starting grid: each slot is a pose. Validated for overlap (≥ 3 m apart) and for being on the racing surface.
+
+| Field     | Type   | Notes |
+|-----------|--------|-------|
+| `x`, `y`  | number | Slot position, world metres. |
+| `heading` | number | Yaw radians CCW from +X. Also accepted as `headingRad`. |
+
+### `pit`
+
+Pit geometry is authored but does not automatically enable pit rules — `RaceSession` decides.
+
+| Field          | Type   | Notes |
+|----------------|--------|-------|
+| `entry`        | object | Pit entry line: `x`, `y`, `forwardX`, `forwardY`, `halfWidth`. |
+| `exit`         | object | Pit exit line, same shape. |
+| `speedLine`    | object | Pit speed-limit line, same shape. Aliases: `speedline`, `speed`. |
+| `serviceBoxes` | array  | Service rectangles: each `{ minX, minY, maxX, maxY }` with `max > min`. |
+
 ### `surfaces`
 
 | Field      | Type   | Notes |
@@ -109,13 +165,12 @@ still rejected as a self-contradictory marker.
 | Field  | Type   | Notes |
 |--------|--------|-------|
 | `minX`, `maxX`, `minY`, `maxY` | number | Open-area bounds, world metres. |
-
-## Coordinate system (fixed for v1)
+## Coordinate system (fixed)
 
 World metres, +X east, +Y north. Headings are radians counter-clockwise from +X (the `atan2`
 convention). Closed routes wind counter-clockwise, so the circuit interior is on the left of the
-travel direction. This is documented here rather than carried as a per-file field: v1 has one
-coordinate system, so a field would be dead data.
+travel direction. This is documented here rather than carried as a per-file field: v1/v2 share one
+coordinate system.
 
 ## Determinism
 
@@ -126,23 +181,28 @@ coordinate system, so a field would be dead data.
   formatting-only changes: object members are hashed in sorted-key order, numbers by their IEEE-754
   double bits (`-0.0` normalized to `+0.0`), strings by decoded UTF-8 bytes.
 - The **geometry hash** (`track_geometry_hash`) is the runtime identity of a track: it covers every
-  node and checkpoint and is stable under any change that does not move a node or gate. A loaded
-  file is asserted to reproduce its compiled geometry hash exactly.
+  node, checkpoint, sector, start/finish, grid, pit and service-box geometry and is stable under any change that does not move that geometry. A loaded file is asserted to reproduce its compiled geometry hash exactly.
 
 ## Field mapping (TrackDefinition)
 
 | `TrackDefinition` field | Manifest source | Derived at load | Runtime only |
 |-------------------------|-----------------|-----------------|--------------|
 | `nodes`, `count`        | `route.nodes`   |                 |              |
-| `checkpoints`, `checkpointCount` | `checkpoints` |        |              |
+| `routeClosed`           | `route.closed`  |                 |              |
+| `checkpoints`, `checkpointCount` | `checkpoints` | `track_build_checkpoints_from_nodes()` when absent | |
+| `sectorMarkers`, `sectorMarkerCount` | `sectors` |            |              |
+| `hasStartFinish`, `startFinish` | `startFinish` |              | |
+| `gridSlots`, `gridSlotCount` | `grid`      |                 |              |
+| `hasPitEntry`, `pitEntry` | `pit.entry`   |                 |              |
+| `hasPitExit`, `pitExit` | `pit.exit`      |                 |              |
+| `hasPitSpeedLine`, `pitSpeedLine` | `pit.speedLine` |       |              |
+| `serviceBoxes`, `serviceBoxCount` | `pit.serviceBoxes` |      |              |
 | `id`                    | `id`            |                 |              |
 | `version`               | `contentVersion`|                 |              |
 | `offTrackSurfaceId`     | `surfaces.offTrack` |            |              |
 | `runoffSurfaceId`       | `surfaces.runoff` |              |              |
 | `isParkingLot`          | `parkingLot` present |           |              |
 | `lotMin/MaxXM`, `lotMin/MaxYM` | `parkingLot` |            |              |
-
-## Authoring and verification
 
 Generate the committed examples from the compiled layouts:
 
@@ -186,6 +246,7 @@ load and at `track_load_by_id()` time.
 
 ## Forward compatibility
 
-v2 will add: open routes (`route.closed: false`), grid/pit placement, and environment/presentation
-hooks. Each will gate on a `version` bump, and the v1 loader will reject a v2 file outright so an
+v2 adds: open routes (`route.closed: false`), sector/start-finish/grid/pit geometry. Each is
+optional and gated on the version field: v1 files must have `route.closed: true`, v2 relaxes that.
+A future v3 will add environment/presentation hooks; the v2 loader will reject a v3 file outright so an
 old binary never silently loads a newer file as something it is not.

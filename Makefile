@@ -54,7 +54,8 @@
 
 ifeq ($(MSYSTEM),UCRT64)
     CIRCUIT_HOST := ucrt64
-else ifeq ($(MSYSTEM),CLANG64)
+else
+ifeq ($(MSYSTEM),CLANG64)
     CIRCUIT_HOST := clang64
 else
     UNAME_S := $(shell uname -s 2>/dev/null)
@@ -64,7 +65,7 @@ else
         CIRCUIT_HOST := unsupported
 endif
 endif
-
+endif
 ifeq ($(CIRCUIT_HOST),unsupported)
 $(error Run make from MSYS2 UCRT64, MSYS2 CLANG64, or Linux. Use build.bat / mk.bat for UCRT64 and sanitize.bat for CLANG64.)
 endif
