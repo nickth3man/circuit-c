@@ -89,7 +89,7 @@ These issues establish truthful parameters and safe solver seams before adding p
 - [x] [#12 — Audit VehicleSpec parameter truthfulness and units](https://github.com/nickth3man/circuit-c/issues/12)
   - Depends on: #8
 
-- [ ] [#13 — Decompose the planar solver into deterministic, testable stages](https://github.com/nickth3man/circuit-c/issues/13)
+- [x] [#13 — Decompose the planar solver into deterministic, testable stages](https://github.com/nickth3man/circuit-c/issues/13)
   - Depends on: #11, #12
 
 ## Phase 1 gate
@@ -97,7 +97,7 @@ These issues establish truthful parameters and safe solver seams before adding p
 - [x] Every vehicle parameter is classified as active, derived, runtime, appearance-only, diagnostic, or inactive/reserved.
 - [x] Every active parameter has documented units and validation bounds.
 - [x] No UI or documentation claims inactive parameters affect handling.
-- [ ] Physics stages have explicit inputs, outputs, and ordering.
+- [x] Physics stages have explicit inputs, outputs, and ordering.
 - [x] Existing physics baselines and deterministic tests still pass.
 
 ---
@@ -409,7 +409,7 @@ This work closes the multiplayer gap but does not block the stated AI-racing tar
 # Completion Summary
 
 - [x] Phase 0 — Identity and Core Architecture
-- [ ] Phase 1 — Physics Foundations
+- [x] Phase 1 — Physics Foundations
 - [ ] Phase 2 — Data-Driven Cars and Track Foundations
 - [ ] Phase 3 — Physics Implementation
 - [ ] Phase 4 — Complete Track System
