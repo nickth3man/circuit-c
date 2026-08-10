@@ -230,6 +230,10 @@ static const char *parse_string(Parser *p)
                         fail_here(p, "lone low surrogate");
                         return NULL;
                     }
+                    if (cp == 0) {
+                        fail_here(p, "NUL character is not permitted in string");
+                        return NULL;
+                    }
                     char ub[4];
                     const int n = encode_utf8(cp, ub);
                     if (n < 0) {
@@ -303,11 +307,23 @@ static JsonValue *parse_number(Parser *p)
         while (i < p->length - start && s[i] >= '0' && s[i] <= '9') i++;
     }
 
-    /* Parse the validated token. strtod is correctly rounded on the supported platforms; the
-     * token is isolated by a local length so it cannot read past the JSON value. */
+    /* Parse the validated token using a NUL-terminated stack buffer so strtod cannot read
+     * past the end of length-delimited input slices. */
+    char numBuf[128];
+    char *numStr = numBuf;
+    if (i >= sizeof(numBuf)) {
+        numStr = (char *)malloc(i + 1);
+        if (numStr == NULL) {
+            fail_here(p, "out of memory");
+            return NULL;
+        }
+    }
+    memcpy(numStr, s, i);
+    numStr[i] = '\0';
     char *endptr = NULL;
-    const double value = strtod(s, &endptr);
-    (void)endptr; /* the grammar check above already bounded the token */
+    const double value = strtod(numStr, &endptr);
+    (void)endptr;
+    if (numStr != numBuf) free(numStr);
     p->pos = start + i;
 
     JsonValue *v = alloc_value(p);
@@ -382,8 +398,10 @@ static JsonValue *parse_object(Parser *p, int depth)
     }
     for (;;) {
         skip_ws(p);
+        const size_t keyPos = p->pos;
         const char *key = parse_string(p);
         if (key == NULL) return NULL; /* v->keys/vals, if any, freed with the document */
+        skip_ws(p);
         if (p->pos >= p->length || p->text[p->pos] != ':') {
             fail_here(p, "expected ':' after object key");
             return NULL;
@@ -393,20 +411,31 @@ static JsonValue *parse_object(Parser *p, int depth)
         const JsonValue *val = parse_value(p, depth + 1);
         if (val == NULL) return NULL;
 
-        /* Append the (key, value) pair to this object's own arrays. Growing both in lockstep keeps
-         * their indices aligned; a realloc failure leaves the prior buffers intact for cleanup. */
+        /* Duplicate key check before inserting, using exact key position for diagnostics. */
+        for (int m = 0; m < v->memberCount; m++) {
+            if (strcmp(v->keys[m], key) == 0) {
+                fail_at(p, keyPos, "duplicate object key");
+                return NULL;
+            }
+        }
+
+        /* Append the (key, value) pair to this object's own arrays. Allocate into temporary
+         * pointers before modifying v->keys / v->vals to prevent dangling pointers on OOM. */
         if (v->memberCount >= cap) {
             const int ncap = (cap == 0) ? 4 : cap * 2;
-            const char **kg = (const char **)realloc(v->keys, (size_t)ncap * sizeof(*kg));
-            const JsonValue **vg =
-                (const JsonValue **)realloc(v->vals, (size_t)ncap * sizeof(*vg));
-            if (kg == NULL || vg == NULL) {
-                free(kg == NULL ? NULL : kg);
-                free(vg == NULL ? NULL : vg);
+            const char **kg =
+                (const char **)realloc((void *)v->keys, (size_t)ncap * sizeof(*kg));
+            if (kg == NULL) {
                 fail_here(p, "out of memory while parsing object");
                 return NULL;
             }
             v->keys = kg;
+            const JsonValue **vg =
+                (const JsonValue **)realloc((void *)v->vals, (size_t)ncap * sizeof(*vg));
+            if (vg == NULL) {
+                fail_here(p, "out of memory while parsing object");
+                return NULL;
+            }
             v->vals = vg;
             cap = ncap;
         }
@@ -430,20 +459,8 @@ static JsonValue *parse_object(Parser *p, int depth)
         }
         p->pos++;
     }
-
-    /* Duplicate keys would make two equivalent objects load as different values depending on
-     * which member won; reject them here. The check is quadratic but member counts are small. */
-    for (int a = 0; a < v->memberCount; a++) {
-        for (int b = a + 1; b < v->memberCount; b++) {
-            if (strcmp(v->keys[a], v->keys[b]) == 0) {
-                fail_here(p, "duplicate object key");
-                return NULL;
-            }
-        }
-    }
     return v;
 }
-
 static JsonValue *parse_literal(Parser *p, const char *text, JsonType type, double number)
 {
     const size_t len = strlen(text);
@@ -722,35 +739,25 @@ static uint32_t hash_value(const JsonValue *v, uint32_t h)
         case JSON_OBJECT: {
             h = hash_mix_bytes(h, "o", 1);
             h = hash_mix_u32(h, (uint32_t)v->memberCount);
-            /* Members are hashed in sorted-key order so reordering does not change the hash. */
-            int *order = NULL;
+            /* Members are hashed in sorted-key order so reordering does not change the hash.
+             * Selection pass uses no heap memory so hash calculation is always deterministic. */
             const int n = v->memberCount;
             if (n > 0) {
-                order = (int *)malloc((size_t)n * sizeof(int));
-                if (order == NULL) {
-                    /* Allocation failure: fall back to source order rather than aborting. */
+                const char *prevKey = NULL;
+                for (int pass = 0; pass < n; pass++) {
+                    int best = -1;
                     for (int i = 0; i < n; i++) {
-                        h = hash_string(h, "k", v->keys[i]);
-                        h = hash_value(v->vals[i], h);
+                        if (prevKey != NULL && strcmp(v->keys[i], prevKey) <= 0) continue;
+                        if (best < 0 || strcmp(v->keys[i], v->keys[best]) < 0) {
+                            best = i;
+                        }
                     }
-                    return h;
-                }
-                for (int i = 0; i < n; i++) order[i] = i;
-                /* Deterministic insertion sort by key; member counts are small. */
-                for (int i = 1; i < n; i++) {
-                    int cur = order[i];
-                    int j = i - 1;
-                    while (j >= 0 && strcmp(v->keys[order[j]], v->keys[cur]) > 0) {
-                        order[j + 1] = order[j];
-                        j--;
+                    if (best >= 0) {
+                        prevKey = v->keys[best];
+                        h = hash_string(h, "k", v->keys[best]);
+                        h = hash_value(v->vals[best], h);
                     }
-                    order[j + 1] = cur;
                 }
-                for (int i = 0; i < n; i++) {
-                    h = hash_string(h, "k", v->keys[order[i]]);
-                    h = hash_value(v->vals[order[i]], h);
-                }
-                free(order);
             }
             return h;
         }

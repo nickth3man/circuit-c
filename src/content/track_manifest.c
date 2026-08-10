@@ -82,10 +82,13 @@ static bool is_known_top_key(const char *name)
 static bool track_id_is_valid(const char *id)
 {
     if (id == NULL || id[0] == '\0') return false;
-    if (!(isalnum((unsigned char)id[0]))) return false;
+    const char c0 = id[0];
+    if (!((c0 >= 'a' && c0 <= 'z') || (c0 >= '0' && c0 <= '9'))) return false;
     for (size_t i = 1; id[i] != '\0'; i++) {
         const char c = id[i];
-        if (!(isalnum((unsigned char)c) || c == '.' || c == '_' || c == '-')) return false;
+        if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '.' || c == '_' ||
+              c == '-'))
+            return false;
         if (i > 62) return false;
     }
     return true;
@@ -104,11 +107,17 @@ static void set_error(char *error, size_t errorCap, const char *field, const cha
 static bool finite_number(const JsonValue *value, float *out, const char *key, char *error,
                           size_t errorCap)
 {
-    if (value == NULL || !json_is_number(value) || !isfinite(json_as_number(value))) {
+    if (value == NULL || !json_is_number(value)) {
         set_error(error, errorCap, key, "expected a finite number");
         return false;
     }
-    *out = (float)json_as_number(value);
+    const double d = json_as_number(value);
+    const float f = (float)d;
+    if (!isfinite(d) || !isfinite(f)) {
+        set_error(error, errorCap, key, "expected a finite number");
+        return false;
+    }
+    *out = f;
     return true;
 }
 
@@ -216,8 +225,13 @@ static bool parse_surfaces(const JsonValue *surfaces, TrackDefinition *out, char
         set_error(error, errorCap, "surfaces", "must be an object");
         return false;
     }
-    const char *offName = json_as_string(json_object_get(surfaces, "offTrack"));
-    if (offName != NULL) {
+    const JsonValue *offVal = json_object_get(surfaces, "offTrack");
+    if (offVal != NULL) {
+        if (!json_is_string(offVal)) {
+            set_error(error, errorCap, "surfaces.offTrack", "expected a string");
+            return false;
+        }
+        const char *offName = json_as_string(offVal);
         const SurfaceId parsed = track_manifest_surface_id(offName);
         if (parsed == (SurfaceId)-1) {
             set_error(error, errorCap, "surfaces.offTrack",
@@ -226,8 +240,13 @@ static bool parse_surfaces(const JsonValue *surfaces, TrackDefinition *out, char
         }
         out->offTrackSurfaceId = parsed;
     }
-    const char *runoffName = json_as_string(json_object_get(surfaces, "runoff"));
-    if (runoffName != NULL) {
+    const JsonValue *runoffVal = json_object_get(surfaces, "runoff");
+    if (runoffVal != NULL) {
+        if (!json_is_string(runoffVal)) {
+            set_error(error, errorCap, "surfaces.runoff", "expected a string");
+            return false;
+        }
+        const char *runoffName = json_as_string(runoffVal);
         const SurfaceId parsed = track_manifest_surface_id(runoffName);
         if (parsed == (SurfaceId)-1) {
             set_error(error, errorCap, "surfaces.runoff",
@@ -316,10 +335,19 @@ static bool parse_checkpoint(const JsonValue *cp, Checkpoint *out, int index, ch
     }
 
     const JsonValue *required = json_object_get(cp, "required");
+    if (required != NULL) {
+        if (!json_is_bool(required)) {
+            snprintf(field, sizeof(field), "checkpoints[%d].required", index);
+            set_error(error, errorCap, field, "required must be a boolean");
+            return false;
+        }
+        out->required = json_as_bool(required);
+    } else {
+        out->required = true;
+    }
     out->centerM = (Vector2){ x, y };
     out->forwardUnit = (Vector2){ fx, fy };
     out->halfWidthM = halfWidth;
-    out->required = (required == NULL) ? true : json_as_bool(required);
     return true;
 }
 
@@ -358,6 +386,7 @@ bool track_manifest_parse(const char *text, size_t length, TrackDefinition *out,
 {
     if (out == NULL) return false;
     track_free(out);
+    memset(out, 0, sizeof(*out));
     if (error != NULL && errorCap > 0) error[0] = '\0';
 
     JsonDocument *doc = json_parse(text, length, error, errorCap);
@@ -453,6 +482,8 @@ bool track_manifest_load(const char *path, TrackDefinition *out, uint32_t *manif
                          char *error, size_t errorCap)
 {
     if (out == NULL) return false;
+    track_free(out);
+    memset(out, 0, sizeof(*out));
     if (error != NULL && errorCap > 0) error[0] = '\0';
     if (path == NULL) {
         set_error(error, errorCap, NULL, "no track path given");
@@ -545,28 +576,36 @@ bool track_manifest_write(const TrackDefinition *track, const char *displayName,
     }
     fprintf(out, "    ]\n  },\n");
 
-    fprintf(out, "  \"surfaces\": { \"offTrack\": \"%s\", \"runoff\": \"%s\" },\n",
-            track_manifest_surface_name(track->offTrackSurfaceId),
-            track_manifest_surface_name(track->runoffSurfaceId));
+    const bool hasParking = track->isParkingLot;
+    const bool hasCheckpoints = (track->checkpointCount > 0);
 
-    if (track->isParkingLot) {
+    fprintf(out, "  \"surfaces\": { \"offTrack\": \"%s\", \"runoff\": \"%s\" }%s\n",
+            track_manifest_surface_name(track->offTrackSurfaceId),
+            track_manifest_surface_name(track->runoffSurfaceId),
+            (hasParking || hasCheckpoints) ? "," : "");
+
+    if (hasParking) {
         fprintf(out,
                 "  \"parkingLot\": { \"minX\": %.9g, \"maxX\": %.9g, \"minY\": %.9g, "
-                "\"maxY\": %.9g },\n",
+                "\"maxY\": %.9g }%s\n",
                 (double)track->lotMinXM, (double)track->lotMaxXM, (double)track->lotMinYM,
-                (double)track->lotMaxYM);
+                (double)track->lotMaxYM, hasCheckpoints ? "," : "");
     }
 
-    fprintf(out, "  \"checkpoints\": [\n");
-    for (int i = 0; i < track->checkpointCount; i++) {
-        const Checkpoint *c = &track->checkpoints[i];
-        fprintf(out,
-                "      { \"x\": %.9g, \"y\": %.9g, \"forwardX\": %.9g, \"forwardY\": %.9g, "
-                "\"halfWidth\": %.9g, \"required\": %s }%s\n",
-                (double)c->centerM.x, (double)c->centerM.y, (double)c->forwardUnit.x,
-                (double)c->forwardUnit.y, (double)c->halfWidthM, c->required ? "true" : "false",
-                (i + 1 < track->checkpointCount) ? "," : "");
+    if (hasCheckpoints) {
+        fprintf(out, "  \"checkpoints\": [\n");
+        for (int i = 0; i < track->checkpointCount; i++) {
+            const Checkpoint *c = &track->checkpoints[i];
+            fprintf(out,
+                    "      { \"x\": %.9g, \"y\": %.9g, \"forwardX\": %.9g, \"forwardY\": %.9g, "
+                    "\"halfWidth\": %.9g, \"required\": %s }%s\n",
+                    (double)c->centerM.x, (double)c->centerM.y, (double)c->forwardUnit.x,
+                    (double)c->forwardUnit.y, (double)c->halfWidthM,
+                    c->required ? "true" : "false",
+                    (i + 1 < track->checkpointCount) ? "," : "");
+        }
+        fprintf(out, "  ]\n");
     }
-    fprintf(out, "  ]\n}\n");
+    fprintf(out, "}\n");
     return true;
 }

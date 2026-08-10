@@ -56,7 +56,7 @@ byte-different files load as the same value.
 | `description`    | string   | no       | Free text (≤ 256 chars). Absent ⇒ empty. |
 | `contentVersion` | string   | yes      | Stored verbatim into `TrackDefinition::version`. |
 | `route`          | object   | yes      | The centreline. |
-| `surfaces`       | object   | no       | Off-track and runoff surface names. Absent ⇒ asphalt. |
+| `surfaces`       | object   | no       | Off-track and runoff surface names. Absent ⇒ grass. |
 | `parkingLot`     | object   | no       | Open-area bounds. Present iff `isParkingLot`. |
 | `checkpoints`    | array    | no       | Ordered gates. Absent ⇒ none. |
 
@@ -69,7 +69,7 @@ silently ignored.
 | Field    | Type   | Required | Notes |
 |----------|--------|----------|-------|
 | `closed` | bool   | yes      | Must be `true` in v1. Open routes are reserved for v2. |
-| `nodes`  | array  | yes      | Ordered centreline nodes (≥ 1). |
+| `nodes`  | array  | yes      | Ordered centreline nodes (≥ 2). A closed lap needs at least two points. |
 
 ### node
 

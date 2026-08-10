@@ -39,10 +39,11 @@ typedef enum {
 typedef struct JsonValue JsonValue;
 typedef struct JsonDocument JsonDocument;
 
-/* Parse `length` bytes of UTF-8 JSON text. On success returns a document whose root is reached
- * through json_document_root(); on failure returns NULL and, when error/errorCap are non-NULL,
- * writes a `line N, column M: reason` message. The document owns all of its memory; free it with
- * json_document_free(). NULL text or zero length is a clean parse failure, not a crash. */
+/* Parse `length` bytes of UTF-8 JSON text (pass 0 for `length` to use strlen(text)). On success
+ * returns a document whose root is reached through json_document_root(); on failure returns NULL and,
+ * when error/errorCap are non-NULL, writes a `line N, column M: reason` message. The document owns
+ * all of its memory; free it with json_document_free(). NULL text or empty input is a clean parse
+ * failure, not a crash. */
 JsonDocument *json_parse(const char *text, size_t length, char *error, size_t errorCap);
 
 void json_document_free(JsonDocument *doc);

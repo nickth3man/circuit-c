@@ -314,6 +314,7 @@ int test_generate_tracks(const char *dir)
 
     for (int i = 0; i < count; i++) {
         TrackDefinition track;
+        memset(&track, 0, sizeof(track));
         track_init(&track);
         layouts[i].load(&track);
 

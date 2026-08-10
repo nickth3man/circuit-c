@@ -58,11 +58,13 @@ static int top_key_index(const char *name)
 bool vehicle_manifest_id_is_valid(const char *id)
 {
     if (id == NULL || id[0] == '\0') return false;
-    /* First character: alphanumeric only. */
-    if (!(isalnum((unsigned char)id[0]))) return false;
+    const char c0 = id[0];
+    if (!((c0 >= 'a' && c0 <= 'z') || (c0 >= '0' && c0 <= '9'))) return false;
     for (size_t i = 1; id[i] != '\0'; i++) {
         const char c = id[i];
-        if (!(isalnum((unsigned char)c) || c == '.' || c == '_' || c == '-')) return false;
+        if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '.' || c == '_' ||
+              c == '-'))
+            return false;
         if (i > 62) return false; /* total length cap from the ownership contract */
     }
     return true;
@@ -103,6 +105,16 @@ static bool integer_value(const JsonValue *value, int min, int max, int *out)
     if (!isfinite(n) || floor(n) != n) return false;
     if (n < (double)min || n > (double)max) return false;
     *out = (int)n;
+    return true;
+}
+
+static bool uint32_value(const JsonValue *value, uint32_t min, uint32_t max, uint32_t *out)
+{
+    if (value == NULL || !json_is_number(value)) return false;
+    const double n = json_as_number(value);
+    if (!isfinite(n) || floor(n) != n) return false;
+    if (n < (double)min || n > (double)max) return false;
+    *out = (uint32_t)n;
     return true;
 }
 
@@ -334,13 +346,14 @@ bool vehicle_manifest_parse(const char *text, size_t length, VehicleManifest *ou
         return false;
     }
 
-    int contentVersion = 0;
-    if (!integer_value(json_object_get(root, kTopKeyNames[VM_KEY_CONTENT_VERSION]), 1,
-                       0x7fffffff, &contentVersion)) {
+    uint32_t contentVersion = 0;
+    if (!uint32_value(json_object_get(root, kTopKeyNames[VM_KEY_CONTENT_VERSION]), 1,
+                      0xffffffffu, &contentVersion)) {
         set_error(error, errorCap, "contentVersion", "expected a positive integer");
         json_document_free(doc);
         return false;
     }
+    out->definition.contentVersion = contentVersion;
 
     const char *appearanceId =
         json_as_string(json_object_get(root, kTopKeyNames[VM_KEY_APPEARANCE_ID]));
@@ -432,6 +445,7 @@ bool vehicle_manifest_parse(const char *text, size_t length, VehicleManifest *ou
 bool vehicle_manifest_load(const char *path, VehicleManifest *out, char *error, size_t errorCap)
 {
     if (out == NULL) return false;
+    memset(out, 0, sizeof(*out));
     if (error != NULL && errorCap > 0) error[0] = '\0';
     if (path == NULL) {
         set_error(error, errorCap, NULL, "no manifest path given");
@@ -476,8 +490,11 @@ static int compare_manifest_by_id(const void *a, const void *b)
 }
 
 /* Read a whole file into a malloc'd buffer. Returns NULL (and sets the error) on failure. */
-static char *read_file_text(const char *path, char *error, size_t errorCap)
+/* Read a whole file into a malloc'd buffer. Returns NULL (and sets error) on failure. */
+static char *read_file_bytes(const char *path, size_t *bytesReadOut, char *error,
+                             size_t errorCap)
 {
+    if (bytesReadOut != NULL) *bytesReadOut = 0;
     FILE *file = fopen(path, "rb");
     if (file == NULL) {
         set_error(error, errorCap, path, "could not open file");
@@ -504,6 +521,7 @@ static char *read_file_text(const char *path, char *error, size_t errorCap)
     const size_t read = fread(buffer, 1u, (size_t)size, file);
     fclose(file);
     buffer[read] = '\0';
+    if (bytesReadOut != NULL) *bytesReadOut = read;
     return buffer;
 }
 
@@ -563,12 +581,18 @@ bool vehicle_manifest_load_dir(const char *dir, VehicleCatalog *out, char *error
             ok = false;
             break;
         }
-        char *text = read_file_text(path, error, errorCap);
+        if (count >= fileCount) {
+            set_error(error, errorCap, dir, "catalog directory changed during load");
+            ok = false;
+            break;
+        }
+        size_t readBytes = 0;
+        char *text = read_file_bytes(path, &readBytes, error, errorCap);
         if (text == NULL) {
             ok = false;
             break;
         }
-        if (!vehicle_manifest_parse(text, strlen(text), &items[count], error, errorCap)) {
+        if (!vehicle_manifest_parse(text, readBytes, &items[count], error, errorCap)) {
             free(text);
             ok = false;
             break;

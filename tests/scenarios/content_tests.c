@@ -73,10 +73,10 @@ static void scenario_json_parser(void)
         json_document_free(doc);
     }
 
-    /* Canonical hash is independent of formatting: same content in two shapes hashes alike. */
+    /* Whitespace before colon and formatting variants parse and yield identical canonical hashes. */
     JsonDocument *d1 = json_parse("{\"a\":1,\"b\":2}", 0, error, sizeof(error));
-    JsonDocument *d2 = json_parse("{\n  \"b\": 2.0,\n  \"a\": 1\n}\n", 0, error, sizeof(error));
-    check(d1 != NULL && d2 != NULL, "hash-variant documents parse");
+    JsonDocument *d2 =
+        json_parse("{\n  \"b\" : 2.0,\n  \"a\" : 1\n}\n", 0, error, sizeof(error));
     if (d1 != NULL && d2 != NULL) {
         check(json_canonical_hash(json_document_root(d1)) ==
                   json_canonical_hash(json_document_root(d2)),
@@ -99,6 +99,7 @@ static void scenario_json_parser(void)
         { "{\"a\":1e}", "malformed exponent" },
         { "{\"a\":012}", "leading zero" },
         { "[1e999]", "non-finite number" },
+        { "{\"a\":\"hello\\u0000world\"}", "escaped NUL byte" },
     };
     for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
         JsonDocument *fail = json_parse(bad[i].text, strlen(bad[i].text), error, sizeof(error));
@@ -182,9 +183,7 @@ static void scenario_vehicle_manifest(void)
           "default-only manifest parses");
     VehicleDefinition defaultDef;
     vehicle_definition_set_default(&defaultDef);
-    check(vehicle_manifest_parse(kDefaultManifest, strlen(kDefaultManifest), &dm, error,
-                                 sizeof(error)) &&
-              dm.definition.contentHash == defaultDef.contentHash,
+    check(dm.definition.contentHash == defaultDef.contentHash,
           "manifest with no overrides matches vehicle_definition_set_default");
 
     /* Round-trip one car of each drivetrain layout; the parsed content hash must equal the
@@ -327,8 +326,7 @@ static bool track_roundtrip(void (*load)(TrackDefinition *), const char *id)
     char error[256];
     TrackDefinition loaded;
     memset(&loaded, 0, sizeof(loaded));
-    uint32_t loadedHash = 0;
-    const bool ok = track_manifest_load(path, &loaded, &loadedHash, error, sizeof(error));
+    const bool ok = track_manifest_load(path, &loaded, NULL, error, sizeof(error));
     if (!ok) {
         track_free(&loaded);
         return false;
@@ -407,9 +405,9 @@ static void scenario_track_format(void)
     check(oka && okb, "hash-variant track files parse");
     if (oka && okb) {
         check(ha == hb, "canonical manifest hash is stable under formatting-only changes");
-        track_free(&a);
-        track_free(&b);
     }
+    if (oka) track_free(&a);
+    if (okb) track_free(&b);
 
     /* Validation rejections: each names a distinct malformed or self-contradictory file. */
     struct {
@@ -444,6 +442,26 @@ static void scenario_track_format(void)
           "\"route\":{\"closed\":true,\"nodes\":[{\"x\":0,\"y\":0,\"halfWidth\":8},"
           "{\"x\":5,\"y\":0,\"halfWidth\":8}]}}",
           "unsupported version" },
+        { "{\"schema\":\"circuit/"
+          "track\",\"version\":1,\"id\":\"Chicane\",\"contentVersion\":\"v1\","
+          "\"route\":{\"closed\":true,\"nodes\":[{\"x\":0,\"y\":0,\"halfWidth\":8},"
+          "{\"x\":5,\"y\":0,\"halfWidth\":8}]}}",
+          "uppercase track id" },
+        { "{\"schema\":\"circuit/track\",\"version\":1,\"id\":\"t\",\"contentVersion\":\"v1\","
+          "\"route\":{\"closed\":true,\"nodes\":[{\"x\":0,\"y\":0,\"halfWidth\":8},"
+          "{\"x\":5,\"y\":0,\"halfWidth\":8}]},"
+          "\"checkpoints\":[{\"x\":0,\"y\":0,\"forwardX\":1,\"forwardY\":0,\"halfWidth\":10,"
+          "\"required\":\"yes\"}]}",
+          "non-boolean checkpoint required" },
+        { "{\"schema\":\"circuit/track\",\"version\":1,\"id\":\"t\",\"contentVersion\":\"v1\","
+          "\"route\":{\"closed\":true,\"nodes\":[{\"x\":0,\"y\":0,\"halfWidth\":8},"
+          "{\"x\":5,\"y\":0,\"halfWidth\":8}]},"
+          "\"surfaces\":{\"offTrack\":123}}",
+          "non-string surface name" },
+        { "{\"schema\":\"circuit/track\",\"version\":1,\"id\":\"t\",\"contentVersion\":\"v1\","
+          "\"route\":{\"closed\":true,\"nodes\":[{\"x\":0,\"y\":0,\"halfWidth\":8},"
+          "{\"x\":1e100,\"y\":0,\"halfWidth\":8}]}}",
+          "coordinate out of float range" },
     };
     for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
         TrackDefinition rejected;

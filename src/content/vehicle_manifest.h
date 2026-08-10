@@ -42,10 +42,11 @@
 #define VEHICLE_MANIFEST_SCHEMA "circuit/vehicle"
 #define VEHICLE_MANIFEST_VERSION 1
 
-#define VEHICLE_MANIFEST_TEXT_CHARS 128 /* displayName, appearanceId, provenance fields */
-#define VEHICLE_MANIFEST_DESC_CHARS 384 /* description */
+#define VEHICLE_MANIFEST_TEXT_CHARS \
+    129 /* displayName, appearanceId, provenance fields (128 chars + NUL) */
+#define VEHICLE_MANIFEST_DESC_CHARS 385 /* description (384 chars + NUL) */
 #define VEHICLE_MANIFEST_MAX_CLASS_TAGS 8
-#define VEHICLE_MANIFEST_CLASS_TAG_CHARS 32
+#define VEHICLE_MANIFEST_CLASS_TAG_CHARS 33 /* class tag (32 chars + NUL) */
 
 /* One loaded manifest. Plain data with fixed arrays, so it survives a hot reload and needs no
  * destructor beyond its own callers' lifetime. */
