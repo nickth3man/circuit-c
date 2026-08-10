@@ -1451,6 +1451,268 @@ static void scenario_resistance(void)
     }
 }
 
+/* ------------------------------------------------------------------------------------- */
+/* Scenario: solver-stages — the staged solver's ordering, contracts, and failure report    */
+/* ------------------------------------------------------------------------------------- */
+
+/* A vehicle rolling forward at a modest speed with a little steering: enough for every stage
+ * to have real work to do, and slow enough that nothing saturates. */
+static void solver_fixture(Game *game, float speedMps, float steer)
+{
+    game_init(game);
+    game->state = STATE_PLAYING;
+    game->autoTrans.enabled = false;
+    game->vehicle.selectedGear = 2;
+    game->vehicle.velocityLongitudinalMps = speedMps;
+    for (int i = 0; i < WHEEL_COUNT; i++) {
+        game->vehicle.wheels[i].angularVelocityRadS =
+            speedMps / vehicle_wheel_radius_m(&game->spec, i);
+    }
+    game->input.steer = steer;
+}
+
+/*
+ * What this asserts is the decomposition itself, not the physics.
+ *
+ * The stages run in a fixed order that does not depend on the vehicle's state; a prefix of
+ * them can be run and inspected, which is the whole point of the scratch object; each stage
+ * writes what its contract says and leaves the later stages' outputs alone; the step is
+ * bit-reproducible; and when a step does go non-finite, the rollback restores the previous
+ * state and the report names the stage that broke it.
+ */
+static void scenario_solver_stages(void)
+{
+    /* ---- 1. A prefix runs, and stops where it was told to ---- */
+    {
+        Game *game = alloc_game();
+        solver_fixture(game, 20.0f, 0.2f);
+
+        ControllerOutput controls;
+        controller_output_zero(&controls);
+        controls.throttle = 0.4f;
+
+        PhysicsStep step;
+        check(physics_step_init(&step, &game->spec, &game->vehicle, &game->derived,
+                                &game->renderState, &controls, FIXED_DT_S),
+              "a step initialises from a valid vehicle");
+        check(step.completedStage == PHYSICS_STAGE_NONE,
+              "and starts having completed nothing (got %d)", (int)step.completedStage);
+
+        const Vector2 positionBefore = game->vehicle.positionM;
+        physics_step_run(&step, PHYSICS_STAGE_NORMAL_LOADS);
+        check(step.completedStage == PHYSICS_STAGE_NORMAL_LOADS,
+              "running through a stage stops there (got %s)",
+              physics_stage_name(step.completedStage));
+        check(game->vehicle.positionM.x == positionBefore.x &&
+                  game->vehicle.positionM.y == positionBefore.y,
+              "and the integration stages have not run, so the car has not moved");
+
+        /* The normal-load stage's contract: four positive loads that sum to the vehicle's
+         * weight, because nothing is airborne and the transfer only moves load about. */
+        float sumFzN = 0.0f;
+        bool allPositive = true;
+        for (int i = 0; i < WHEEL_COUNT; i++) {
+            sumFzN += game->vehicle.wheels[i].normalLoadN;
+            if (game->vehicle.wheels[i].normalLoadN <= 0.0f) allPositive = false;
+        }
+        check(allPositive, "every wheel carries a positive normal load");
+        check_near((double)sumFzN, (double)(game->spec.massKg * GRAVITY_MPS2), 1.0,
+                   "the four normal loads sum to the vehicle's weight");
+
+        /* Continuing from where it stopped completes the step exactly once more. */
+        physics_step_run(&step, PHYSICS_STAGE_COUNT - 1);
+        check(step.completedStage == PHYSICS_STAGE_DIAGNOSTICS,
+              "continuing finishes the remaining stages (got %s)",
+              physics_stage_name(step.completedStage));
+        check(game->vehicle.positionM.x != positionBefore.x, "and now the car has moved");
+        free(game);
+    }
+
+    /* ---- 2. Stage contracts, one at a time ---- */
+    {
+        Game *game = alloc_game();
+        solver_fixture(game, 25.0f, 0.3f);
+        ControllerOutput controls;
+        controller_output_zero(&controls);
+        controls.throttle = 0.5f;
+        controls.steer = 0.3f;
+
+        PhysicsStep step;
+        (void)physics_step_init(&step, &game->spec, &game->vehicle, &game->derived,
+                                &game->renderState, &controls, FIXED_DT_S);
+
+        const Vector2 renderCurrBefore = game->renderState.currPositionM;
+        physics_step_run(&step, PHYSICS_STAGE_BEGIN);
+        check(game->renderState.prevPositionM.x == renderCurrBefore.x &&
+                  game->renderState.prevPositionM.y == renderCurrBefore.y,
+              "begin shifts the render history so this step can write a new current pose");
+
+        const float steerBefore = game->vehicle.frontRoadWheelAngleRad;
+        physics_step_run(&step, PHYSICS_STAGE_STEERING);
+        check(game->vehicle.frontRoadWheelAngleRad > steerBefore,
+              "steering actuates toward the demand (%.6f -> %.6f)", (double)steerBefore,
+              (double)game->vehicle.frontRoadWheelAngleRad);
+
+        physics_step_run(&step, PHYSICS_STAGE_POWERTRAIN);
+        check(step.torques.totalGearRatio != 0.0f,
+              "powertrain resolves a gear ratio (got %.4f)",
+              (double)step.torques.totalGearRatio);
+        check(game->vehicle.engineRpm >= game->spec.engineIdleRpm,
+              "and an engine speed at or above idle (got %.1f)",
+              (double)game->vehicle.engineRpm);
+
+        physics_step_run(&step, PHYSICS_STAGE_WHEEL_KINEMATICS);
+        bool slipFinite = true;
+        for (int i = 0; i < WHEEL_COUNT; i++) {
+            if (!isfinite(game->vehicle.wheels[i].slipAngleRad) ||
+                !isfinite(game->vehicle.wheels[i].slipRatio))
+                slipFinite = false;
+        }
+        check(slipFinite, "wheel kinematics produces a finite slip angle and ratio per wheel");
+        check(game->derived.wheelContactVelocityBodyMps[WHEEL_FRONT_LEFT].x > 0.0f,
+              "and contact-point velocities that follow the body");
+
+        physics_step_run(&step, PHYSICS_STAGE_TIRE_FORCES);
+        bool insideFrictionCircle = true;
+        for (int i = 0; i < WHEEL_COUNT; i++) {
+            const WheelState *wheel = &game->vehicle.wheels[i];
+            if (wheel->frictionUsage < 0.0f || wheel->frictionUsage > 1.0f + 1e-3f)
+                insideFrictionCircle = false;
+        }
+        check(insideFrictionCircle, "tire forces leave every wheel inside its friction circle");
+
+        physics_step_run(&step, PHYSICS_STAGE_RESISTANCE);
+        check(step.resistanceBodyN.x < 0.0f, "resistance opposes forward motion (got %.4f N)",
+              (double)step.resistanceBodyN.x);
+        check(step.longitudinalResistanceN == step.resistanceBodyN.x,
+              "and the longitudinal component the integrator uses is that same value");
+
+        physics_step_run(&step, PHYSICS_STAGE_ACCUMULATE);
+        check_near((double)game->derived.totalBodyForceN.y,
+                   (double)(game->derived.frontBodyForceN.y + game->derived.rearBodyForceN.y +
+                            step.resistanceBodyN.y),
+                   1e-3, "accumulate sums the axles and the resistance and nothing else");
+
+        const float vxBefore = game->vehicle.velocityLongitudinalMps;
+        physics_step_run(&step, PHYSICS_STAGE_INTEGRATE_BODY);
+        check_near(
+            (double)game->vehicle.velocityLongitudinalMps,
+            (double)(vxBefore + step.solved.velocityLongitudinalDerivativeMps2 * FIXED_DT_S),
+            1e-4, "the body integrates by exactly the solved derivative times dt");
+
+        physics_step_run(&step, PHYSICS_STAGE_DIAGNOSTICS);
+        check_near((double)game->derived.speedMps,
+                   (double)hypotf(game->vehicle.velocityLongitudinalMps,
+                                  game->vehicle.velocityLateralMps),
+                   1e-4, "diagnostics reports the speed of the integrated velocity");
+        check(game->derived.solverFailedStage == (int)PHYSICS_STAGE_NONE ||
+                  step.completedStage == PHYSICS_STAGE_DIAGNOSTICS,
+              "and a healthy step reports no failing stage");
+        free(game);
+    }
+
+    /* ---- 3. The step is reproducible: same input state, same result, bit for bit ---- */
+    {
+        Game *a = alloc_game();
+        Game *b = alloc_game();
+        solver_fixture(a, 30.0f, -0.4f);
+        solver_fixture(b, 30.0f, -0.4f);
+
+        ControllerOutput controls;
+        controller_output_zero(&controls);
+        controls.throttle = 0.7f;
+        controls.brake = 0.1f;
+
+        for (int i = 0; i < 240; i++) {
+            physics_fixed_update(&a->spec, &a->vehicle, &a->derived, &a->renderState, &controls,
+                                 FIXED_DT_S);
+            physics_fixed_update(&b->spec, &b->vehicle, &b->derived, &b->renderState, &controls,
+                                 FIXED_DT_S);
+        }
+        check(memcmp(&a->vehicle, &b->vehicle, sizeof(VehicleState)) == 0,
+              "240 steps from one starting state reproduce byte-identical vehicle state");
+        free(b);
+        free(a);
+    }
+
+    /* ---- 4. A non-finite step rolls back and names the stage that broke ---- */
+    {
+        Game *game = alloc_game();
+        solver_fixture(game, 10.0f, 0.0f);
+
+        ControllerOutput controls;
+        controller_output_zero(&controls); /* no brake: the powertrain stage stays clean */
+
+        /* Finite going in, catastrophic once the load transfer multiplies it by mass and CG
+         * height. The load stage is therefore the first one whose output stops being finite. */
+        game->vehicle.prevLongAccelMps2 = 1.0e38f;
+        game->vehicle.filteredLongAccelMps2 = 1.0e38f;
+        check(physics_state_is_valid(&game->spec, &game->vehicle, &game->derived),
+              "precondition: the poisoned state is still finite before the step");
+
+        /* Why the load stage and not another: the poisoned acceleration is finite, so every
+         * stage before this one passes it along untouched. The load stage is the first to
+         * multiply it — by mass and CG height — and that product overflows to infinity, which
+         * lands in the rear wheels' normal load. */
+
+        /* Prove the poison really does produce a state the validator rejects, without going
+         * through physics_fixed_update() — which asserts, and would abort a build that has
+         * assertions enabled. */
+        {
+            Game *poisoned = alloc_game();
+            solver_fixture(poisoned, 10.0f, 0.0f);
+            poisoned->vehicle.prevLongAccelMps2 = 1.0e38f;
+            poisoned->vehicle.filteredLongAccelMps2 = 1.0e38f;
+            PhysicsStep bad;
+            (void)physics_step_init(&bad, &poisoned->spec, &poisoned->vehicle,
+                                    &poisoned->derived, &poisoned->renderState, &controls,
+                                    FIXED_DT_S);
+            physics_step_run(&bad, PHYSICS_STAGE_COUNT - 1);
+            check(!physics_state_is_valid(&poisoned->spec, &poisoned->vehicle,
+                                          &poisoned->derived),
+                  "the poisoned step really does end in a state the validator rejects");
+            free(poisoned);
+        }
+
+#if defined(NDEBUG)
+        /* The rollback path itself runs through physics_fixed_update(), whose assert() is a
+         * deliberate stop-the-world in an asserting build. Exercise it only where assertions
+         * are compiled out — the canonical test binary — so the sanitizer build, which keeps
+         * them, is not aborted by a failure this scenario caused on purpose. */
+        const VehicleState before = game->vehicle;
+        physics_fixed_update(&game->spec, &game->vehicle, &game->derived, &game->renderState,
+                             &controls, FIXED_DT_S);
+
+        check(memcmp(&game->vehicle, &before, sizeof(VehicleState)) == 0,
+              "a step that goes non-finite rolls the vehicle back to where it started");
+        check(game->derived.solverFailedStage == (int)PHYSICS_STAGE_NORMAL_LOADS,
+              "and the report names the stage that broke it: normal-loads (got %s)",
+              physics_stage_name((PhysicsStage)game->derived.solverFailedStage));
+
+        /* A healthy step afterwards clears the report rather than leaving it latched. */
+        game->vehicle.prevLongAccelMps2 = 0.0f;
+        game->vehicle.filteredLongAccelMps2 = 0.0f;
+        physics_fixed_update(&game->spec, &game->vehicle, &game->derived, &game->renderState,
+                             &controls, FIXED_DT_S);
+        check(game->derived.solverFailedStage == (int)PHYSICS_STAGE_NONE,
+              "a healthy step clears the failure report (got %s)",
+              physics_stage_name((PhysicsStage)game->derived.solverFailedStage));
+#endif
+        free(game);
+    }
+
+    /* ---- 5. Every stage has a name, so a report can never be a bare number ---- */
+    {
+        bool named = true;
+        for (PhysicsStage s = PHYSICS_STAGE_NONE; s < PHYSICS_STAGE_COUNT;
+             s = (PhysicsStage)(s + 1)) {
+            const char *name = physics_stage_name(s);
+            if (name == NULL || name[0] == '\0') named = false;
+        }
+        check(named, "every stage reports a non-empty name");
+    }
+}
+
 static void scenario_rest(void)
 {
     Game *game = alloc_game();
@@ -3721,6 +3983,9 @@ static const TestScenario kPhysicsScenarios[] = {
     { "vehicle", "canonical structures, steering, contact velocity, render",
       scenario_vehicle_units },
     { "tire", "nonlinear curves, slip ratio, and combined-friction ellipse", scenario_tire },
+    { "solver-stages",
+      "staged solver: prefix runs, stage contracts, rollback and failure report",
+      scenario_solver_stages },
     { "drivetrain", "engine curve, gearing, torque splits, wheel lock and release",
       scenario_drivetrain },
     { "accel-filter", "previous-step load-transfer acceleration filter",

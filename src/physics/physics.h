@@ -12,6 +12,7 @@
 #include <stdbool.h>
 
 #include "game/controller_output.h"
+#include "physics/drivetrain.h" /* DrivetrainTorques, DifferentialMode */
 #include "physics/vehicle.h"
 
 typedef struct {
@@ -61,6 +62,106 @@ Vector2 physics_rotate_wheel_force_to_body(Vector2 wheelForceN, float steerAngle
 float physics_low_speed_blend(float velocityLongitudinalMps);
 bool physics_state_is_valid(const VehicleSpec *spec, const VehicleState *state,
                             const VehicleDerived *derived);
+
+/* ------------------------------------------------------------------------ solver stages --
+ *
+ * One fixed step is an ordered sequence of named stages. The order is the contract: each
+ * stage's inputs are the outputs of the ones before it, and the two places where that is
+ * subtle are called out at the stage that depends on them.
+ *
+ * THE ONE FEEDBACK LOOP. Normal loads depend on longitudinal acceleration, and longitudinal
+ * acceleration depends on tire forces, which depend on normal loads. That is an algebraic loop
+ * with no solution, so it is broken in time rather than iterated: PHYSICS_STAGE_NORMAL_LOADS
+ * consumes the PREVIOUS step's solved body acceleration through a first-order filter. There is
+ * no fixed-point iteration anywhere in the solver, and adding one would make the step count
+ * depend on the state.
+ *
+ * DETERMINISM. No stage allocates, calls the clock, or loops over anything but the four
+ * wheels. Every loop bound is a compile-time constant, so the operation count of a step is
+ * identical for every state the solver can be in.
+ */
+typedef enum {
+    PHYSICS_STAGE_NONE = 0,
+    PHYSICS_STAGE_BEGIN,            /* snapshot for rollback; shift render history */
+    PHYSICS_STAGE_STEERING,         /* steer actuation, wheel holds, locked-axle pre-equalize */
+    PHYSICS_STAGE_POWERTRAIN,       /* engine speed, drivetrain and brake torques */
+    PHYSICS_STAGE_WHEEL_KINEMATICS, /* contact velocities, slip angles, slip ratios */
+    PHYSICS_STAGE_NORMAL_LOADS,     /* acceleration filters, axle loads, per-wheel Fz */
+    PHYSICS_STAGE_TIRE_FORCES,      /* pure forces, relaxation lag, combined-friction limit */
+    PHYSICS_STAGE_RESISTANCE,       /* aero drag, rolling resistance, low-speed brake guard */
+    PHYSICS_STAGE_ACCUMULATE,       /* body-frame force sum and yaw moment */
+    PHYSICS_STAGE_INTEGRATE_BODY,   /* derivatives, blend, integrate pose and velocity */
+    PHYSICS_STAGE_INTEGRATE_WHEELS, /* wheel speeds, equilibrium landing, locked-axle post */
+    PHYSICS_STAGE_DIAGNOSTICS,      /* accelerations, sideslip, friction usage, render pose */
+    PHYSICS_STAGE_COUNT
+} PhysicsStage;
+
+/* Human-readable stage name, for failure reports. Never NULL. */
+const char *physics_stage_name(PhysicsStage stage);
+
+/*
+ * The per-tick scratch. It holds the step's inputs, the rollback snapshot, and every
+ * intermediate that crosses a stage boundary — which is precisely the set of values that used
+ * to be locals buried in one long function and were therefore impossible to inspect.
+ *
+ * It lives on the caller's stack for exactly one step. Nothing here is persistent simulation
+ * state: a value that must survive the step belongs in VehicleState, and a value that must be
+ * reported belongs in VehicleDerived.
+ */
+typedef struct {
+    /* Inputs, fixed for the step. */
+    const VehicleSpec *spec;
+    VehicleState *state;
+    VehicleDerived *derived;
+    VehicleRenderState *renderState;
+    ControllerOutput input;
+    float dt;
+
+    /* Rollback snapshot, taken by PHYSICS_STAGE_BEGIN. */
+    VehicleState lastGoodState;
+    VehicleDerived lastGoodDerived;
+    VehicleRenderState lastGoodRenderState;
+
+    /* Intermediates that cross stages. */
+    DifferentialMode diffMode;
+    float frontShare;
+    DrivetrainTorques torques;
+    AxleLoads loads;
+    Vector2 resistanceBodyN;
+    float longitudinalResistanceN;
+    VehicleDerivatives solved;
+
+    PhysicsStage completedStage; /* the last stage that ran to completion */
+} PhysicsStep;
+
+/*
+ * Prepare a step. Returns false when any input is unusable, in which case no stage may run.
+ * `input` is copied, so a caller cannot change the step's demands halfway through it.
+ */
+bool physics_step_init(PhysicsStep *step, const VehicleSpec *spec, VehicleState *state,
+                       VehicleDerived *derived, VehicleRenderState *renderState,
+                       const ControllerOutput *input, float dt);
+
+/*
+ * Run stages up to and including `throughStage`, continuing from wherever the step last got
+ * to. Running a prefix and inspecting the scratch is how a test asserts one stage's contract
+ * without the ones after it having overwritten the evidence.
+ */
+void physics_step_run(PhysicsStep *step, PhysicsStage throughStage);
+
+/*
+ * One complete fixed step: every stage, then validation, then rollback to the pre-step state
+ * if the result is rejected. On rollback the offending stage is identified by re-running the
+ * step from the snapshot one stage at a time, and reported in
+ * VehicleDerived.solverFailedStage — which costs nothing on the healthy path and turns "the
+ * vehicle went non-finite" into "it went non-finite in tire forces".
+ *
+ * Note that physics_state_is_valid() is a whole-step invariant, not a per-stage one: it
+ * cross-checks values that different stages produce against each other, so it is only
+ * meaningful once every stage has run. Attribution therefore asks the narrower question of
+ * where the state stopped being finite, and reports PHYSICS_STAGE_NONE when a step is rejected
+ * for a consistency or bounds reason that no single stage owns.
+ */
 void physics_fixed_update(const VehicleSpec *spec, VehicleState *state, VehicleDerived *derived,
                           VehicleRenderState *renderState, const ControllerOutput *input,
                           float dt);

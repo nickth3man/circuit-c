@@ -291,6 +291,12 @@ typedef struct {
     float differentialOmegaRadS[2];                /* rad/s; {omega_RL, omega_RR} post-diff */
     float differentialTorqueNm[2];                 /* N*m; {T_RL, T_RR} post-redistribution  */
     Vector2 looseSurfaceDragBodyN;                 /* N; summed per-wheel loose-surface drag */
+
+    /* Which solver stage first produced a non-finite state, as a PhysicsStage value, or 0 when
+     * the last step was healthy. Diagnostic only: it is recomputed every step and, like the
+     * rest of VehicleDerived, is excluded from the state checksum. physics_stage_name() turns
+     * it into something readable. */
+    int solverFailedStage;
 } VehicleDerived;
 
 typedef struct {
