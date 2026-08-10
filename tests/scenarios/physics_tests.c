@@ -3815,10 +3815,17 @@ static void scenario_roster(void)
     }
 
     /* Layout names are correct. */
-    check(strcmp(car_roster_layout_name(0), "RWD") == 0, "entry 0 is RWD");
-    check(strcmp(car_roster_layout_name(2), "FWD") == 0, "entry 2 is FWD");
-    check(strcmp(car_roster_layout_name(4), "AWD") == 0, "entry 4 is AWD");
+    const int rwdIdx = car_roster_find("rwd_grip");
+    const int fwdIdx = car_roster_find("fwd_light");
+    const int awdIdx = car_roster_find("awd_gt");
+    check(rwdIdx >= 0 && strcmp(car_roster_layout_name(rwdIdx), "RWD") == 0, "rwd_grip is RWD");
+    check(fwdIdx >= 0 && strcmp(car_roster_layout_name(fwdIdx), "FWD") == 0,
+          "fwd_light is FWD");
+    check(awdIdx >= 0 && strcmp(car_roster_layout_name(awdIdx), "AWD") == 0, "awd_gt is AWD");
 
+    /* Removing or querying a non-existent vehicle ID returns -1 (missing-ID error). */
+    check(car_roster_find("non_existent_car_id_xyz") == -1,
+          "car_roster_find returns -1 for missing vehicle ID");
     /* Profile round-trip: save each spec to a temp file, load it onto a fresh stock spec,
      * and verify every primary parameter survives. The directory is ensured here so the
      * scenario stands alone — it must not depend on scenario_telemetry having run first. */

@@ -68,5 +68,7 @@ uint32_t car_roster_spec_hash(int index);
 /* Index of the car with this id, or -1. Lets `--car rwd_grip` resolve without the caller
  * knowing the table order. */
 int car_roster_find(const char *id);
+/* Reload or reset the cached manifest catalog from data/vehicles/. */
+void car_roster_reload(void);
 
 #endif /* CIRCUIT_CAR_ROSTER_H */

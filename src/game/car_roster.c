@@ -1,14 +1,5 @@
 /*
- * car_roster.c — the six cars Milestone 1 validates. See the header for the contract.
- *
- * Each entry starts from a dev_presets.c archetype (the researched baseline numbers) and
- * overrides only what its layout demands: the drivetrain configuration, and whatever a car
- * of that layout must carry to be a fair example of it (a front-drive car carries its mass
- * over the driven axle; an all-wheel-drive car publishes a front torque split). Reusing the
- * presets keeps one set of researched numbers rather than a second, quietly diverging copy.
- *
- * The roster is pure: the same index always yields the same spec, whatever order calls come
- * in. Raylib-free and I/O-free, like car_corpus.c.
+ * car_roster.c — data-driven vehicle roster loaded from data/vehicles/ (Issue #30).
  */
 #include "game/car_roster.h"
 
@@ -16,199 +7,71 @@
 #include <string.h>
 
 #include "content/vehicle_manifest.h"
-#include "dev/dev_params.h"
-#include "dev/dev_presets.h"
 #include "physics/vehicle.h"
-/* -------------------------------------------------------------------------------------------- layout --
- * The parameter keys that turn a preset into a specific layout. Each key is resolved through
- * the registry at apply time, so a typo is caught as an unknown key rather than a silent
- * offset mismatch. */
-#define KEY_LAYOUT "drive.layout"
-#define KEY_SPLIT "drive.front_torque_split"
-#define KEY_CG_FRONT "body.cg_to_front"
-#define KEY_CG_REAR "body.cg_to_rear"
-#define KEY_BRAKE_BIAS "brake.bias_front"
-#define KEY_BRAKE_TORQUE "brake.max_torque"
-#define KEY_TIRE_MU_FRONT "tire.lat_front.mu"
-#define KEY_TIRE_MU_REAR "tire.lat_rear.mu"
 
-/* One roster entry's configuration: which preset to seed from, plus the overrides that make
- * it the car the roster wants it to be. */
-typedef struct {
-    int presetIndex;         /* dev_presets.c index to seed from */
-    DrivetrainLayout layout; /* which axle(s) the driveline drives */
-    float frontTorqueSplit;  /* AWD only; ignored for RWD/FWD */
-    const char *id;
-    const char *displayName;
-    const char *describe;
-    /* Layout-specific overrides beyond the drivetrain. A FWD car carries its mass over the
-     * driven axle, so cg_to_front/cg_to_rear and brake_bias_front are nudged. NULL-terminated
-     * pairs; the sentinel is { NULL, 0 }. */
-    const struct {
-        const char *key;
-        float value;
-    } overrides[8];
-} RosterEntry;
+static VehicleCatalog g_rosterCatalog;
+static bool g_rosterLoaded = false;
 
-static const RosterEntry kRoster[] = {
-    /* 0: rwd_grip — the reference car. Track Predator as-is; RWD is its native layout. */
-    {
-        4,
-        DRIVE_LAYOUT_RWD,
-        0.0f,
-        "rwd_grip",
-        "RWD Grip",
-        "high grip, moderate power, LSD \xe2\x80\x94 the reference",
-        { { NULL, 0 } },
-    },
-    /* 1: rwd_power — Pro D1GP, high power, lower rear mu. RWD is native. */
-    {
-        2,
-        DRIVE_LAYOUT_RWD,
-        0.0f,
-        "rwd_power",
-        "RWD Power",
-        "high power, lower rear \xce\xbc \xe2\x80\x94 power oversteer available",
-        { { NULL, 0 } },
-    },
-    /* 2: fwd_light — Shoebox converted to FWD. A front-drive kei car carries its mass over
-     * the driven axle and brakes forward. */
-    {
-        8,
-        DRIVE_LAYOUT_FWD,
-        0.0f,
-        "fwd_light",
-        "FWD Light",
-        "light, low power \xe2\x80\x94 understeer-limited",
-        {
-            { KEY_CG_FRONT, 0.99f }, /* mass over driven axle */
-            { KEY_CG_REAR, 1.21f },
-            { KEY_BRAKE_BIAS, 0.62f },
-            { NULL, 0 },
-        },
-    },
-    /* 3: fwd_hot — a more powerful FWD car in the Touge Hero mass class (PLAN Phase 2),
-     * with front-drive layout and a forward weight bias. Torque steer and lift-off rotation. */
-    {
-        1,
-        DRIVE_LAYOUT_FWD,
-        0.0f,
-        "fwd_hot",
-        "FWD Hot",
-        "more power \xe2\x80\x94 torque steer, lift-off rotation",
-        {
-            { KEY_CG_FRONT, 1.10f },
-            { KEY_CG_REAR, 1.45f },
-            { KEY_BRAKE_BIAS, 0.60f },
-            { NULL, 0 },
-        },
-    },
-    /* 4: awd_rally — Rally Devil with AWD. 50/50 split, loose-surface bias. */
-    {
-        5,
-        DRIVE_LAYOUT_AWD,
-        0.50f,
-        "awd_rally",
-        "AWD Rally",
-        "50/50 split, loose-surface bias",
-        { { NULL, 0 } },
-    },
-    /* 5: awd_gt — Track Predator converted to AWD. Front-biased split, high grip. */
-    {
-        4,
-        DRIVE_LAYOUT_AWD,
-        0.60f,
-        "awd_gt",
-        "AWD GT",
-        "front-biased split, high grip",
-        { { NULL, 0 } },
-    },
-};
+static bool ensure_roster_loaded(void)
+{
+    if (g_rosterLoaded) return (g_rosterCatalog.count > 0);
+    char error[256];
+    if (!vehicle_manifest_load_dir("data/vehicles", &g_rosterCatalog, error, sizeof(error))) {
+        return false;
+    }
+    g_rosterLoaded = true;
+    return (g_rosterCatalog.count > 0);
+}
 
-#define ROSTER_COUNT ((int)(sizeof(kRoster) / sizeof(kRoster[0])))
+void car_roster_reload(void)
+{
+    if (g_rosterLoaded) {
+        vehicle_catalog_free(&g_rosterCatalog);
+        g_rosterLoaded = false;
+    }
+}
 
 int car_roster_count(void)
 {
-    return ROSTER_COUNT;
+    if (!ensure_roster_loaded()) return 0;
+    return g_rosterCatalog.count;
 }
 
 bool car_roster_spec(int index, VehicleSpec *out)
 {
-    if (out == NULL || index < 0 || index >= ROSTER_COUNT) return false;
-
-    char id[128], path[256], error[256];
-    car_roster_id(index, id, sizeof(id));
-    snprintf(path, sizeof(path), "data/vehicles/%s.vehicle.json", id);
-
-    VehicleManifest manifest;
-    if (vehicle_manifest_load(path, &manifest, error, sizeof(error))) {
-        *out = manifest.definition.spec;
-        return true;
-    }
-
-    const RosterEntry *entry = &kRoster[index];
-
-    /* Start from the preset's researched baseline numbers. A bad preset index would leave
-     * *out unwritten and the overrides below would land on garbage, so refuse loudly. */
-    if (dev_preset_at(entry->presetIndex) == NULL) return false;
-    dev_preset_apply(out, entry->presetIndex);
-    /* Apply layout-specific overrides first, then the drivetrain configuration. The
-     * registry resolves keys to offsets, so a typo becomes an unknown key, not a bad write. */
-    DevParamAssignment items[16];
-    int count = 0;
-
-    for (int i = 0; entry->overrides[i].key != NULL && count < 16; i++) {
-        items[count].key = entry->overrides[i].key;
-        items[count].value = entry->overrides[i].value;
-        count++;
-    }
-
-    items[count].key = KEY_LAYOUT;
-    items[count].value = (float)entry->layout;
-    count++;
-
-    if (entry->layout == DRIVE_LAYOUT_AWD) {
-        items[count].key = KEY_SPLIT;
-        items[count].value = entry->frontTorqueSplit;
-        count++;
-    }
-
-    int unknown = 0;
-    int rejected = 0;
-    const int applied = dev_params_apply_assignments(out, items, count, &unknown, &rejected);
-    /* Every key above is a registered primary, so an unknown key, a rejected (out-of-range)
-     * value, or a short apply count is a typo in the roster table, not a runtime condition.
-     * Fail loudly rather than silently shipping a car that kept its stock preset value. */
-    if (unknown > 0 || rejected > 0 || applied != count) return false;
+    if (out == NULL || !ensure_roster_loaded()) return false;
+    if (index < 0 || index >= g_rosterCatalog.count) return false;
+    *out = g_rosterCatalog.items[index].definition.spec;
     return true;
 }
 
 void car_roster_id(int index, char *buf, size_t cap)
 {
     if (buf == NULL || cap == 0) return;
-    if (index < 0 || index >= ROSTER_COUNT) {
+    if (!ensure_roster_loaded() || index < 0 || index >= g_rosterCatalog.count) {
         buf[0] = '\0';
         return;
     }
-    snprintf(buf, cap, "%s", kRoster[index].id);
+    snprintf(buf, cap, "%s", g_rosterCatalog.items[index].definition.id);
 }
 
 const char *car_roster_display_name(int index)
 {
-    if (index < 0 || index >= ROSTER_COUNT) return "?";
-    return kRoster[index].displayName;
+    if (!ensure_roster_loaded() || index < 0 || index >= g_rosterCatalog.count) return "?";
+    return g_rosterCatalog.items[index].displayName;
 }
 
 const char *car_roster_describe(int index)
 {
-    if (index < 0 || index >= ROSTER_COUNT) return "";
-    return kRoster[index].describe;
+    if (!ensure_roster_loaded() || index < 0 || index >= g_rosterCatalog.count) return "";
+    return g_rosterCatalog.items[index].description;
 }
 
 const char *car_roster_layout_name(int index)
 {
-    if (index < 0 || index >= ROSTER_COUNT) return "?";
-    switch (kRoster[index].layout) {
+    VehicleSpec spec;
+    if (!car_roster_spec(index, &spec)) return "?";
+    switch ((DrivetrainLayout)(int)spec.drivetrainLayout) {
         case DRIVE_LAYOUT_FWD: return "FWD";
         case DRIVE_LAYOUT_AWD: return "AWD";
         case DRIVE_LAYOUT_RWD:
@@ -221,8 +84,6 @@ uint32_t car_roster_spec_hash(int index)
     VehicleSpec spec;
     if (!car_roster_spec(index, &spec)) return 0;
 
-    /* FNV-1a over the spec bytes. Padding is zeroed by the memset inside vehicle_spec_set_default
-     * (called through dev_preset_apply), so two specs with the same fields hash identically. */
     const unsigned char *bytes = (const unsigned char *)&spec;
     uint32_t hash = 0x811c9dc5u;
     for (size_t i = 0; i < sizeof(spec); i++) {
@@ -234,9 +95,9 @@ uint32_t car_roster_spec_hash(int index)
 
 int car_roster_find(const char *id)
 {
-    if (id == NULL) return -1;
-    for (int i = 0; i < ROSTER_COUNT; i++) {
-        if (strcmp(kRoster[i].id, id) == 0) return i;
+    if (id == NULL || !ensure_roster_loaded()) return -1;
+    for (int i = 0; i < g_rosterCatalog.count; i++) {
+        if (strcmp(g_rosterCatalog.items[i].definition.id, id) == 0) return i;
     }
     return -1;
 }
