@@ -31,7 +31,6 @@ body.door_count              = 4.000000     # (default 4.000000)
 body.cabin_rows              = 2.000000     # (default 2.000000)
 body.roof_type               = 0.000000     # (default 0.000000)
 body.drag_coefficient        = 0.320000     # (default 0.320000)
-body.rolling_resistance      = 0.015000     # (default 0.015000)
 body.load_filter_rate        = 20.000000    # Hz (default 20.000000)
 body.roll_stiffness_front    = 0.500000     # (default 0.500000)
 
@@ -84,6 +83,8 @@ tire.load_sensitivity_k      = 0.020000     # (default 0.020000)
 steer.max_angle              = 0.700000     # rad (default 0.700000)
 steer.rate                   = 5.000000     # rad/s (default 5.000000)
 steer.return_rate            = 7.000000     # rad/s (default 7.000000)
+steer.speed_ref              = 8.000000     # m/s (default 8.000000)
+steer.speed_min_factor       = 1.000000     # (default 1.000000)
 steer.ackermann_percent      = 1.000000     # (default 1.000000)
 
 # --- Suspension ---
@@ -138,8 +139,8 @@ brake.disc_radius_rear       = 0.140000     # m (default 0.140000)
 brake.pad_friction           = 0.380000     # (default 0.380000)
 
 # --- Aero ---
-aero.lift_front              = 0.050000     # (default 0.050000)
-aero.lift_rear               = -0.175676    # (default 0.100000)
+aero.lift_front              = 0.000000     # (default 0.000000)
+aero.lift_rear               = -0.175676    # (default 0.000000)
 aero.ref_area_front          = 0.400000     # m^2 (default 0.400000)
 aero.ref_area_rear           = 0.550000     # m^2 (default 0.550000)
 aero.cop_x                   = -0.200000    # m (default -0.200000)

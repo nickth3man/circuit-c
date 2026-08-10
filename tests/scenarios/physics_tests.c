@@ -1048,10 +1048,14 @@ static void scenario_load_transfer(void)
     vehicle_spec_set_default(&spec);
     const float weightN = spec.massKg * GRAVITY_MPS2;
 
+    /* Every case below is solved at zero road speed, so the aerodynamic vertical term is
+     * exactly zero and these remain assertions about the static split and the longitudinal
+     * transfer alone. The aero contribution has its own scenario (`aero-loads`). */
+
     /* Static distribution follows the CG position: a CG nearer the front axle puts more
      * weight on it, which is l_r / L, not l_f / L. */
     {
-        const AxleLoads loads = physics_axle_loads(&spec, 0.0f);
+        const AxleLoads loads = physics_axle_loads(&spec, 0.0f, 0.0f);
         check_near((double)loads.staticFrontN,
                    (double)(weightN * spec.cgToRearM / spec.wheelbaseM), 0.01,
                    "static front load is m*g*l_r/L");
@@ -1075,13 +1079,13 @@ static void scenario_load_transfer(void)
         forward.cgToFrontM = 0.90f;
         forward.cgToRearM = 1.65f;
         forward.wheelbaseM = forward.cgToFrontM + forward.cgToRearM;
-        const AxleLoads front = physics_axle_loads(&forward, 0.0f);
+        const AxleLoads front = physics_axle_loads(&forward, 0.0f, 0.0f);
 
         VehicleSpec rearward = spec;
         rearward.cgToFrontM = 1.65f;
         rearward.cgToRearM = 0.90f;
         rearward.wheelbaseM = rearward.cgToFrontM + rearward.cgToRearM;
-        const AxleLoads rear = physics_axle_loads(&rearward, 0.0f);
+        const AxleLoads rear = physics_axle_loads(&rearward, 0.0f, 0.0f);
 
         check(front.staticFrontN > rear.staticFrontN + 100.0f,
               "moving the CG forward increases the static front load (%.1f -> %.1f N)",
@@ -1099,7 +1103,7 @@ static void scenario_load_transfer(void)
      * m * ax * h / L in both directions. */
     {
         const float axMps2 = 5.0f;
-        const AxleLoads accelerating = physics_axle_loads(&spec, axMps2);
+        const AxleLoads accelerating = physics_axle_loads(&spec, axMps2, 0.0f);
         const float expectedN = spec.massKg * axMps2 * spec.cgHeightM / spec.wheelbaseM;
         check_near((double)accelerating.transferN, (double)expectedN, 0.01,
                    "load transfer is m * ax * h / L");
@@ -1113,7 +1117,7 @@ static void scenario_load_transfer(void)
                    (double)weightN, 0.01,
                    "transfer moves load without creating or destroying any");
 
-        const AxleLoads braking = physics_axle_loads(&spec, -axMps2);
+        const AxleLoads braking = physics_axle_loads(&spec, -axMps2, 0.0f);
         check_near((double)braking.transferN, -(double)expectedN, 0.01,
                    "braking transfer is the exact mirror of accelerating transfer");
         check(braking.unclampedFrontN > braking.staticFrontN,
@@ -1132,8 +1136,8 @@ static void scenario_load_transfer(void)
         low.cgHeightM = 0.25f;
         VehicleSpec high = spec;
         high.cgHeightM = 0.75f;
-        const AxleLoads lowLoads = physics_axle_loads(&low, 5.0f);
-        const AxleLoads highLoads = physics_axle_loads(&high, 5.0f);
+        const AxleLoads lowLoads = physics_axle_loads(&low, 5.0f, 0.0f);
+        const AxleLoads highLoads = physics_axle_loads(&high, 5.0f, 0.0f);
         check_near((double)highLoads.transferN, 3.0 * (double)lowLoads.transferN, 0.05,
                    "transfer is linear in CG height");
         check_near((double)lowLoads.staticFrontN, (double)highLoads.staticFrontN, 0.01,
@@ -1142,7 +1146,7 @@ static void scenario_load_transfer(void)
 
     /* The minimum-load clamp catches an unloaded axle without renormalising the other. */
     {
-        const AxleLoads extreme = physics_axle_loads(&spec, 40.0f);
+        const AxleLoads extreme = physics_axle_loads(&spec, 40.0f, 0.0f);
         check(extreme.unclampedFrontN < 0.0f,
               "an extreme acceleration drives the unclamped front load negative (%.1f N)",
               (double)extreme.unclampedFrontN);
@@ -1153,7 +1157,7 @@ static void scenario_load_transfer(void)
         check_near((double)(extreme.unclampedFrontN + extreme.unclampedRearN), (double)weightN,
                    0.01, "the unclamped pair still sums to mass * gravity after clamping");
 
-        const AxleLoads reverse = physics_axle_loads(&spec, -40.0f);
+        const AxleLoads reverse = physics_axle_loads(&spec, -40.0f, 0.0f);
         check_near((double)reverse.rearN, (double)MIN_NORMAL_LOAD_N, 1e-3,
                    "extreme braking clamps the rear load instead");
 
@@ -1199,6 +1203,181 @@ static void scenario_load_transfer(void)
               "the loaded rear axle has more lateral capacity than at rest (%.0f > %.0f N)",
               (double)rearCapacityN, (double)staticRearCapacityN);
         free(game);
+    }
+}
+
+/* ------------------------------------------------------------------------------------- */
+/* Scenario: aero-loads — speed-squared aerodynamic vertical load and balance (issue #17)   */
+/* ------------------------------------------------------------------------------------- */
+
+/*
+ * The authored lift coefficients and reference areas were inert: a wing sized the sprite and
+ * nothing else. They now produce a vertical load on their own axle. What is asserted here:
+ *
+ *   1. ZERO IS ZERO. No coefficient, or no speed, and the axle loads are bit-identical to the
+ *      pure static-plus-transfer solution. This is the criterion that makes the whole feature
+ *      safe to add to an existing baseline: a car with no aero is unchanged.
+ *   2. SPEED SQUARED. Doubling the speed quadruples the load, exactly.
+ *   3. SIGN. A positive (lift) coefficient unloads its axle; a negative one (a wing) loads it.
+ *      Each coefficient reaches ONLY its own axle, which is what makes the balance authorable.
+ *   4. CAPACITY AND FLOOR. Downforce raises the tire force available at speed; enough lift
+ *      drives the unclamped load negative, and the clamp still refuses to hand a wheel a
+ *      negative contact load.
+ */
+static void scenario_aero_loads(void)
+{
+    VehicleSpec spec;
+    vehicle_spec_set_default(&spec);
+
+    /* 1. A car with no aero devices is the old model exactly, at any speed. */
+    {
+        VehicleSpec neutral = spec;
+        neutral.aeroLiftCoefFront = 0.0f;
+        neutral.aeroLiftCoefRear = 0.0f;
+        const AxleLoads still = physics_axle_loads(&neutral, 1.5f, 0.0f);
+        const AxleLoads fast = physics_axle_loads(&neutral, 1.5f, 80.0f);
+        check(still.frontN == fast.frontN && still.rearN == fast.rearN,
+              "zero lift coefficients make speed irrelevant to axle load (%.6f / %.6f N)",
+              (double)fast.frontN, (double)fast.rearN);
+        check(fast.aeroFrontN == 0.0f && fast.aeroRearN == 0.0f,
+              "and report no aerodynamic load at all");
+
+        /* Speed alone, with the stock coefficients, is what turns the term on. */
+        const AxleLoads stockStill = physics_axle_loads(&spec, 1.5f, 0.0f);
+        check(stockStill.aeroFrontN == 0.0f && stockStill.aeroRearN == 0.0f,
+              "a stationary car generates no aerodynamic vertical load either");
+    }
+
+    /* 2. Speed squared, checked against the closed form and against itself. */
+    {
+        VehicleSpec wing = spec;
+        wing.aeroLiftCoefFront = -0.8f;
+        wing.aeroLiftCoefRear = -1.6f;
+        float frontN = 0.0f, rearN = 0.0f;
+        physics_aero_vertical_loads(&wing, 40.0f, &frontN, &rearN);
+        const float expectedFrontN = -0.5f * AIR_DENSITY_KGM3 * wing.aeroLiftCoefFront *
+                                     wing.aeroRefAreaFrontM2 * 40.0f * 40.0f;
+        const float expectedRearN = -0.5f * AIR_DENSITY_KGM3 * wing.aeroLiftCoefRear *
+                                    wing.aeroRefAreaRearM2 * 40.0f * 40.0f;
+        check_near((double)frontN, (double)expectedFrontN, 0.01,
+                   "front downforce is -0.5*rho*Cl*A*v^2");
+        check_near((double)rearN, (double)expectedRearN, 0.01,
+                   "rear downforce uses its own coefficient and its own area");
+
+        float halfFrontN = 0.0f, halfRearN = 0.0f;
+        physics_aero_vertical_loads(&wing, 20.0f, &halfFrontN, &halfRearN);
+        check_near((double)frontN, 4.0 * (double)halfFrontN, 0.05,
+                   "halving the speed quarters the front load");
+        check_near((double)rearN, 4.0 * (double)halfRearN, 0.05,
+                   "halving the speed quarters the rear load");
+    }
+
+    /* 3. Sign, and axle isolation. */
+    {
+        VehicleSpec frontWing = spec;
+        frontWing.aeroLiftCoefFront = -1.0f;
+        frontWing.aeroLiftCoefRear = 0.0f;
+        const AxleLoads loads = physics_axle_loads(&frontWing, 0.0f, 50.0f);
+        check(loads.aeroFrontN > 0.0f,
+              "a negative front coefficient is downforce: it LOADS the front axle (%.1f N)",
+              (double)loads.aeroFrontN);
+        check(loads.aeroRearN == 0.0f,
+              "and it reaches only the front axle, so aero balance is authorable");
+        check(loads.frontN > loads.staticFrontN + 100.0f,
+              "the front axle carries more than its static load at speed (%.1f > %.1f N)",
+              (double)loads.frontN, (double)loads.staticFrontN);
+        check_near((double)loads.rearN, (double)loads.staticRearN, 0.01,
+                   "while the rear axle carries exactly its static load");
+
+        VehicleSpec frontLift = spec;
+        frontLift.aeroLiftCoefFront = 1.0f;
+        frontLift.aeroLiftCoefRear = 0.0f;
+        const AxleLoads lifted = physics_axle_loads(&frontLift, 0.0f, 50.0f);
+        check(lifted.aeroFrontN < 0.0f,
+              "a positive front coefficient is lift: it UNLOADS the front axle (%.1f N)",
+              (double)lifted.aeroFrontN);
+        check_near((double)lifted.aeroFrontN, -(double)loads.aeroFrontN, 0.01,
+                   "equal and opposite coefficients give equal and opposite loads");
+    }
+
+    /* 4. The vertical sum closes, downforce buys grip, and lift cannot go through the floor. */
+    {
+        VehicleSpec wing = spec;
+        wing.aeroLiftCoefFront = -1.2f;
+        wing.aeroLiftCoefRear = -2.0f;
+        const AxleLoads loads = physics_axle_loads(&wing, 3.0f, 60.0f);
+        const float weightN = wing.massKg * GRAVITY_MPS2;
+        check_near((double)(loads.unclampedFrontN + loads.unclampedRearN),
+                   (double)(weightN + loads.aeroFrontN + loads.aeroRearN), 0.05,
+                   "the unclamped pair sums to weight plus the two aerodynamic loads");
+        check(loads.aeroFrontN + loads.aeroRearN > 1000.0f,
+              "a real wing package is worth more than a kilonewton at 60 m/s (%.0f N)",
+              (double)(loads.aeroFrontN + loads.aeroRearN));
+
+        /* Enough lift to fly: the model must report the negative unclamped load honestly and
+         * still refuse to give a wheel negative grip. */
+        VehicleSpec flying = spec;
+        flying.aeroLiftCoefFront = 1.0f;
+        flying.aeroRefAreaFrontM2 = 2.0f;
+        const AxleLoads airborne = physics_axle_loads(&flying, 0.0f, 100.0f);
+        check(airborne.unclampedFrontN < 0.0f,
+              "extreme lift drives the unclamped front load negative (%.1f N)",
+              (double)airborne.unclampedFrontN);
+        check_near((double)airborne.frontN, (double)MIN_NORMAL_LOAD_N, 1e-3,
+                   "and the clamp still stops the front load at MIN_NORMAL_LOAD_N");
+    }
+
+    /* 5. It reaches the running solver, not only the helper: at speed the reported axle loads
+     * differ from the static split by exactly the reported aerodynamic term. */
+    {
+        Game *game = alloc_game();
+        game_init(game);
+        game->spec.aeroLiftCoefFront = -1.0f;
+        game->spec.aeroLiftCoefRear = -1.8f;
+        set_vehicle_rolling_speed(game, 55.0f);
+        game->input.throttle = 0.0f;
+        for (int i = 0; i < 10; i++) game_fixed_update(game, FIXED_DT_S);
+
+        check(game->derived.aeroVerticalFrontN > 100.0f &&
+                  game->derived.aeroVerticalRearN > 100.0f,
+              "the solver reports downforce on both axles at 55 m/s (%.0f / %.0f N)",
+              (double)game->derived.aeroVerticalFrontN,
+              (double)game->derived.aeroVerticalRearN);
+        check_near(
+            (double)(game->derived.unclampedFrontLoadN + game->derived.unclampedRearLoadN),
+            (double)(game->spec.massKg * GRAVITY_MPS2 + game->derived.aeroVerticalFrontN +
+                     game->derived.aeroVerticalRearN),
+            1.0, "the solver's own load solution closes on weight plus downforce");
+        check(physics_state_is_valid(&game->spec, &game->vehicle, &game->derived),
+              "a heavily winged car at speed is still a valid state");
+        free(game);
+    }
+
+    /* 6. Balance moves high-speed handling the way a race engineer expects: the same total
+     * downforce placed forward makes the car turn in harder, placed rearward makes it push.
+     * Compared as the axle slip-angle difference, which is the sign of understeer itself, so
+     * the check reads the balance rather than a proxy for it. */
+    {
+        const float coefficients[2][2] = { { -1.6f, -0.4f }, { -0.4f, -1.6f } };
+        float balanceRad[2] = { 0.0f, 0.0f };
+        for (int b = 0; b < 2; b++) {
+            Game *game = alloc_game();
+            game_init(game);
+            game->spec.aeroLiftCoefFront = coefficients[b][0];
+            game->spec.aeroLiftCoefRear = coefficients[b][1];
+            set_vehicle_rolling_speed(game, 50.0f);
+            game->input.steer = 0.12f;
+            game->input.throttle = 0.20f;
+            for (int i = 0; i < 240; i++) game_fixed_update(game, FIXED_DT_S);
+            /* Positive = the front is sliding more than the rear = understeer. */
+            balanceRad[b] =
+                fabsf(game->derived.frontSlipAngleRad) - fabsf(game->derived.rearSlipAngleRad);
+            free(game);
+        }
+        check(balanceRad[0] < balanceRad[1],
+              "moving the same downforce rearward pushes the balance toward understeer "
+              "(front-biased %.4f rad vs rear-biased %.4f rad)",
+              (double)balanceRad[0], (double)balanceRad[1]);
     }
 }
 
@@ -1516,7 +1695,8 @@ static void scenario_solver_stages(void)
               "and the integration stages have not run, so the car has not moved");
 
         /* The normal-load stage's contract: four positive loads that sum to the vehicle's
-         * weight, because nothing is airborne and the transfer only moves load about. */
+         * weight plus whatever the air is pressing down with, because nothing is airborne and
+         * the longitudinal transfer only moves load about. */
         float sumFzN = 0.0f;
         bool allPositive = true;
         for (int i = 0; i < WHEEL_COUNT; i++) {
@@ -1524,8 +1704,10 @@ static void scenario_solver_stages(void)
             if (game->vehicle.wheels[i].normalLoadN <= 0.0f) allPositive = false;
         }
         check(allPositive, "every wheel carries a positive normal load");
-        check_near((double)sumFzN, (double)(game->spec.massKg * GRAVITY_MPS2), 1.0,
-                   "the four normal loads sum to the vehicle's weight");
+        check_near((double)sumFzN,
+                   (double)(game->spec.massKg * GRAVITY_MPS2 +
+                            game->derived.aeroVerticalFrontN + game->derived.aeroVerticalRearN),
+                   1.0, "the four normal loads sum to the weight plus the aerodynamic load");
 
         /* Continuing from where it stopped completes the step exactly once more. */
         physics_step_run(&step, PHYSICS_STAGE_COUNT - 1);
@@ -2820,23 +3002,31 @@ static void param_audit_check_owner(const VehicleSpec *defaults)
 
 static void param_audit_check_effect(const VehicleSpec *defaults, const TrackDefinition *track)
 {
-    /* Two baselines, because some parameters are live only under a configuration the stock
+    /* Three baselines, because some parameters are live only under a configuration the stock
      * car does not use, and "live only when enabled" is still live:
      *
      *   - drive.front_torque_split does nothing until the layout is all-wheel drive;
      *   - steer.speed_ref does nothing while steer.speed_min_factor is 1.0, which is the
-     *     stock value and the documented way to disable speed-sensitive steering.
+     *     stock value and the documented way to disable speed-sensitive steering;
+     *   - aero.ref_area_front/rear are the A in 0.5*rho*Cl*A*v^2, so they do nothing while the
+     *     stock car's lift coefficients are zero — which they are, deliberately, because no
+     *     reviewed aerodynamic data exists for it (see src/core/config.h).
      *
-     * Baseline 1 turns both on. Neither is a physics change: it configures the same solver. */
-    VehicleSpec bases[2];
+     * Baseline 1 turns the first two on, baseline 2 fits the car with a wing. Neither is a
+     * physics change: each configures the same solver. */
+    VehicleSpec bases[3];
     bases[0] = *defaults;
     bases[1] = *defaults;
+    bases[2] = *defaults;
     check(dev_param_set(&bases[1], dev_param_find("drive.layout"), (float)DRIVE_LAYOUT_AWD),
           "the audit second baseline configures an all-wheel-drive layout");
     check(dev_param_set(&bases[1], dev_param_find("steer.speed_min_factor"), 0.5f),
           "the audit second baseline enables speed-sensitive steering");
+    check(dev_param_set(&bases[2], dev_param_find("aero.lift_front"), -1.0f) &&
+              dev_param_set(&bases[2], dev_param_find("aero.lift_rear"), -1.5f),
+          "the audit third baseline fits front and rear aerodynamic devices");
 
-    for (int b = 0; b < 2; b++) {
+    for (int b = 0; b < 3; b++) {
         bool allFinite = false;
         int contacts = 0;
         (void)param_audit_drive_signature(&bases[b], &allFinite);
@@ -2846,8 +3036,8 @@ static void param_audit_check_effect(const VehicleSpec *defaults, const TrackDef
               contacts);
     }
 
-    uint32_t baseline[2];
-    for (int b = 0; b < 2; b++) baseline[b] = param_audit_signature(&bases[b], track);
+    uint32_t baseline[3];
+    for (int b = 0; b < 3; b++) baseline[b] = param_audit_signature(&bases[b], track);
 
     const int count = dev_params_count();
     int unproven = 0;
@@ -2858,7 +3048,7 @@ static void param_audit_check_effect(const VehicleSpec *defaults, const TrackDef
 
         bool changed = false;
         int probes = 0;
-        for (int b = 0; b < 2; b++) {
+        for (int b = 0; b < 3; b++) {
             VehicleSpec candidates[4];
             const int candidateCount = param_audit_candidates(&bases[b], param, candidates, 4);
             probes += candidateCount;
@@ -4027,6 +4217,8 @@ static const TestScenario kPhysicsScenarios[] = {
     { "load-transfer", "static split, dynamic transfer, clamping, wheel loads",
       scenario_load_transfer },
     { "resistance", "aerodynamic drag and per-wheel rolling resistance", scenario_resistance },
+    { "aero-loads", "issue #17: speed-squared aerodynamic vertical load, balance, and clamping",
+      scenario_aero_loads },
     { "rest", "rest stability and stationary steering", scenario_rest },
     { "launch-stop", "straight launch, braking, and zero-speed stability",
       scenario_launch_stop },

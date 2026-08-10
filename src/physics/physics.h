@@ -21,11 +21,14 @@ typedef struct {
     float yawRateDerivativeRadS2;
 } VehicleDerivatives;
 
-/* One axle-load solution: the static split, the transfer it was shifted by, the unclamped
- * result (which always sums to mass * g), and the clamped loads the tires actually see. */
+/* One axle-load solution: the static split, the aerodynamic load added to each axle, the
+ * longitudinal transfer between them, the unclamped result (which always sums to mass * g plus
+ * the two aerodynamic terms), and the clamped loads the tires actually see. */
 typedef struct {
     float staticFrontN;
     float staticRearN;
+    float aeroFrontN; /* positive = downforce; negative = lift unloading the axle */
+    float aeroRearN;
     float transferN; /* positive moves load rearward */
     float unclampedFrontN;
     float unclampedRearN;
@@ -42,8 +45,27 @@ void physics_static_axle_loads(const VehicleSpec *spec, float *frontLoadN, float
  * Returns `filtered` unchanged for a non-positive dt or a non-finite input. */
 float physics_filter_long_accel(float filteredMps2, float previousMps2, float rateHz, float dt);
 
-/* Static-plus-dynamic axle loads for a given filtered longitudinal acceleration. */
-AxleLoads physics_axle_loads(const VehicleSpec *spec, float filteredLongAccelMps2);
+/*
+ * Aerodynamic vertical load per axle at a given road speed, in newtons.
+ *
+ * SIGN. aeroLiftCoef* are LIFT coefficients, so the returned value is
+ * -0.5 * rho * Cl * A * v^2: a positive authored coefficient lifts the axle and returns a
+ * NEGATIVE load, a negative coefficient (a wing) returns positive downforce. The two axles use
+ * their own coefficient and their own reference area, which is what fixes the aerodynamic
+ * balance — there is no separate balance fraction to disagree with them.
+ *
+ * `speedMps` is the magnitude of the road-relative velocity, matching the drag model: a car
+ * travelling sideways is still moving through the same air. Below RESISTANCE_EPSILON_MPS, and
+ * for any non-finite or negative-area input, both outputs are zero, so a no-aero vehicle and a
+ * stationary one are bit-identical to the model without this term.
+ */
+void physics_aero_vertical_loads(const VehicleSpec *spec, float speedMps, float *frontN,
+                                 float *rearN);
+
+/* Static-plus-aerodynamic-plus-dynamic axle loads, for a given filtered longitudinal
+ * acceleration and road speed. */
+AxleLoads physics_axle_loads(const VehicleSpec *spec, float filteredLongAccelMps2,
+                             float speedMps);
 
 /* Aerodynamic drag in the body frame, opposing the full velocity vector. *magnitudeN
  * receives the scalar 0.5*rho*Cd*A*v^2 when non-NULL. */

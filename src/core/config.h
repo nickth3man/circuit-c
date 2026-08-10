@@ -215,9 +215,21 @@
 /* Scale so padFriction*area*pressure*(rF+rR)*scale == MAX_BRAKE_TORQUE_NM at stock. */
 #define BRAKE_TORQUE_SCALE 0.5730659029f
 
-/* Aero appendage inputs (visual + future downforce). */
-#define AERO_LIFT_COEF_FRONT 0.05f
-#define AERO_LIFT_COEF_REAR 0.10f
+/* Aero appendage inputs. Since issue #17 the two coefficients produce a real vertical load on
+ * their own axle: Fz = -0.5*rho*Cl*A*v^2, positive Cl being lift.
+ *
+ * THE COEFFICIENTS ARE ZERO ON PURPOSE. They previously read 0.05 and 0.10 — numbers authored
+ * while the field was appearance-only, whose whole job was to size a splitter and a wing, and
+ * which were copied unchanged onto all six roster cars. Activating the term would have turned
+ * that sprite-sizing data into a physical claim about six different vehicles that nobody has
+ * measured. "This car has no characterised aerodynamic vertical load" is a claim the project
+ * can stand behind; "0.05 front and 0.10 rear, on a kei-derived rally car and a GT alike" is
+ * not. Authoring real per-car aero is content work for the car lane.
+ *
+ * The reference areas stay authored: they are the A each coefficient is defined against, and
+ * they still size the drawn aero devices. */
+#define AERO_LIFT_COEF_FRONT 0.0f
+#define AERO_LIFT_COEF_REAR 0.0f
 #define AERO_REF_AREA_FRONT_M2 0.40f
 #define AERO_REF_AREA_REAR_M2 0.55f
 #define AERO_COP_X_M (-0.20f)

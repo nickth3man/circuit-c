@@ -266,8 +266,10 @@ typedef struct {
      */
     float staticFrontLoadN;    /* m*g*l_r/L */
     float staticRearLoadN;     /* m*g*l_f/L */
-    float unclampedFrontLoadN; /* static -/+ transfer, before MIN_NORMAL_LOAD_N */
-    float unclampedRearLoadN;  /* the pair always sums to m*g */
+    float aeroVerticalFrontN;  /* N; + = downforce on the front axle, - = lift (issue #17) */
+    float aeroVerticalRearN;   /* N; same sign convention on the rear axle */
+    float unclampedFrontLoadN; /* static + aero -/+ transfer, before MIN_NORMAL_LOAD_N */
+    float unclampedRearLoadN;  /* the pair always sums to m*g + the two aero terms */
     float loadTransferN;       /* m * filtered ax * h / L; positive = rearward */
 
     float previousLongAccelMps2; /* the value the filter consumed this step */

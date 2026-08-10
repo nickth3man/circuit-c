@@ -226,9 +226,13 @@ static bool evaluate_invariants(const Game *game, char *text, size_t capacity)
                  (double)d->solvedLongAccelMps2);
         return false;
     }
-    if (fabsf((d->unclampedFrontLoadN + d->unclampedRearLoadN) - weightN) > 1.0f) {
-        snprintf(text, capacity, "unclamped axle loads sum to %.1f N, not mass*g = %.1f N",
-                 (double)(d->unclampedFrontLoadN + d->unclampedRearLoadN), (double)weightN);
+    /* Weight plus the aerodynamic vertical load (issue #17), not weight alone: downforce is an
+     * external force on the body, so it adds to what the four contact patches carry. */
+    const float verticalN = weightN + d->aeroVerticalFrontN + d->aeroVerticalRearN;
+    if (fabsf((d->unclampedFrontLoadN + d->unclampedRearLoadN) - verticalN) > 1.0f) {
+        snprintf(text, capacity,
+                 "unclamped axle loads sum to %.1f N, not mass*g + aero = %.1f N",
+                 (double)(d->unclampedFrontLoadN + d->unclampedRearLoadN), (double)verticalN);
         return false;
     }
     if (fabsf(d->loadTransferN) > MAX_LOAD_TRANSFER_FRACTION * weightN) {

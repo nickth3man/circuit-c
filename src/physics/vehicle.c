@@ -387,6 +387,17 @@ bool vehicle_spec_is_valid(const VehicleSpec *spec)
           spec->rollStiffnessFrontFraction >= 0.0f && spec->rollStiffnessFrontFraction <= 1.0f))
         return false;
 
+    /* Aerodynamic vertical load is an active force since issue #17. A negative reference area
+     * has no physical reading and a non-finite coefficient would put a NaN straight into the
+     * axle loads, so both are rejected at load time rather than clamped silently at use. The
+     * coefficient itself is unbounded here on purpose: an extreme wing is legal content, and
+     * what protects the solver from it is the MIN_NORMAL_LOAD_N floor plus MAX_SAFE_SPEED_MPS,
+     * not a number invented in this predicate. */
+    if (!(isfinite(spec->aeroLiftCoefFront) && isfinite(spec->aeroLiftCoefRear))) return false;
+    if (!(isfinite(spec->aeroRefAreaFrontM2) && spec->aeroRefAreaFrontM2 >= 0.0f &&
+          isfinite(spec->aeroRefAreaRearM2) && spec->aeroRefAreaRearM2 >= 0.0f))
+        return false;
+
     /* Static toe reaches the contact patch (issue #14), so an unbounded or non-finite value is
      * now a force error rather than a cosmetic one. Rejected here, at the same boundary every
      * other active alignment input is checked, so a malformed manifest fails to load instead of

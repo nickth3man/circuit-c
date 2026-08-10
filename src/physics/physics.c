@@ -142,6 +142,15 @@ float physics_low_speed_blend(float velocityLongitudinalMps)
     return smoothstep(LOW_SPEED_BEGIN_MPS, LOW_SPEED_END_MPS, fabsf(velocityLongitudinalMps));
 }
 
+/* The body's speed through the air, before this step integrates anything. Both the drag model
+ * and the aerodynamic vertical loads are functions of it, and they must not disagree about
+ * which velocity the car is flying at. */
+static float body_speed_mps(const VehicleState *state)
+{
+    return sqrtf(state->velocityLongitudinalMps * state->velocityLongitudinalMps +
+                 state->velocityLateralMps * state->velocityLateralMps);
+}
+
 /* --------------------------------------------------------------------- Phase 3: loads -- */
 
 float physics_filter_long_accel(float filteredMps2, float previousMps2, float rateHz, float dt)
@@ -155,21 +164,53 @@ float physics_filter_long_accel(float filteredMps2, float previousMps2, float ra
     return isfinite(next) ? next : filteredMps2;
 }
 
-AxleLoads physics_axle_loads(const VehicleSpec *spec, float filteredLongAccelMps2)
+/* One axle's aerodynamic vertical load. Range-tested in double before the multiply so a large
+ * authored coefficient at MAX_SAFE_SPEED_MPS cannot produce an infinity that then propagates
+ * into the load solution as a NaN. */
+static float aero_axle_vertical_n(float liftCoefficient, float refAreaM2, float speedMps)
+{
+    if (!(isfinite(liftCoefficient) && isfinite(refAreaM2) && refAreaM2 >= 0.0f)) return 0.0f;
+    if (!(isfinite(speedMps) && speedMps > RESISTANCE_EPSILON_MPS)) return 0.0f;
+    const float loadN =
+        -0.5f * AIR_DENSITY_KGM3 * liftCoefficient * refAreaM2 * speedMps * speedMps;
+    return isfinite(loadN) ? loadN : 0.0f;
+}
+
+void physics_aero_vertical_loads(const VehicleSpec *spec, float speedMps, float *frontN,
+                                 float *rearN)
+{
+    if (frontN != NULL) *frontN = 0.0f;
+    if (rearN != NULL) *rearN = 0.0f;
+    if (spec == NULL) return;
+    if (frontN != NULL) {
+        *frontN =
+            aero_axle_vertical_n(spec->aeroLiftCoefFront, spec->aeroRefAreaFrontM2, speedMps);
+    }
+    if (rearN != NULL) {
+        *rearN =
+            aero_axle_vertical_n(spec->aeroLiftCoefRear, spec->aeroRefAreaRearM2, speedMps);
+    }
+}
+
+AxleLoads physics_axle_loads(const VehicleSpec *spec, float filteredLongAccelMps2,
+                             float speedMps)
 {
     AxleLoads out;
     memset(&out, 0, sizeof(out));
     if (!vehicle_spec_is_valid(spec)) return out;
 
     physics_static_axle_loads(spec, &out.staticFrontN, &out.staticRearN);
+    physics_aero_vertical_loads(spec, speedMps, &out.aeroFrontN, &out.aeroRearN);
 
     const float ax = isfinite(filteredLongAccelMps2) ? filteredLongAccelMps2 : 0.0f;
     out.transferN = spec->massKg * ax * spec->cgHeightM / spec->wheelbaseM;
 
     /* Accelerating forward (positive ax) unloads the front and loads the rear; the two
-     * halves are equal and opposite, so the unclamped pair still sums to mass * g. */
-    out.unclampedFrontN = out.staticFrontN - out.transferN;
-    out.unclampedRearN = out.staticRearN + out.transferN;
+     * halves are equal and opposite, so the transfer moves load without creating any. The
+     * aerodynamic terms DO create load — they are an external force on the body, not a
+     * couple — so the unclamped pair sums to mass * g plus the two of them. */
+    out.unclampedFrontN = out.staticFrontN + out.aeroFrontN - out.transferN;
+    out.unclampedRearN = out.staticRearN + out.aeroRearN + out.transferN;
 
     /* A wheel may be unloaded but never generates negative grip. The floor is applied
      * without renormalising the other axle: pretending the lost load went somewhere would
@@ -376,6 +417,8 @@ bool physics_state_is_valid(const VehicleSpec *spec, const VehicleState *state,
     FINITE_VALUE(derived->drivelineTorqueNm);
     FINITE_VALUE(derived->staticFrontLoadN);
     FINITE_VALUE(derived->staticRearLoadN);
+    FINITE_VALUE(derived->aeroVerticalFrontN);
+    FINITE_VALUE(derived->aeroVerticalRearN);
     FINITE_VALUE(derived->unclampedFrontLoadN);
     FINITE_VALUE(derived->unclampedRearLoadN);
     FINITE_VALUE(derived->loadTransferN);
@@ -413,11 +456,22 @@ bool physics_state_is_valid(const VehicleSpec *spec, const VehicleState *state,
         return false;
     }
     /* Transfer only MOVES load: what leaves one axle arrives at the other, so the unclamped
-     * pair still weighs the car. The clamped pair may legitimately exceed m*g once the floor
-     * has caught an unloaded axle, which is why the sum is asserted here and not there. */
-    if (fabsf((derived->unclampedFrontLoadN + derived->unclampedRearLoadN) - weightN) > 1.0f) {
+     * pair weighs the car plus whatever the air is pressing down with. The clamped pair may
+     * legitimately exceed that once the floor has caught an unloaded axle, which is why the sum
+     * is asserted here and not there.
+     *
+     * The aero pair is NOT recomputed from the state to compare against: the loads were solved
+     * from the speed at the START of the step and the state has since been integrated, so a
+     * fresh recompute would legitimately differ. What is checkable without that velocity is the
+     * direction — a lift coefficient must never load its axle, and a wing must never unload it.
+     */
+    const float verticalN = weightN + derived->aeroVerticalFrontN + derived->aeroVerticalRearN;
+    if (fabsf((derived->unclampedFrontLoadN + derived->unclampedRearLoadN) - verticalN) >
+        1.0f) {
         return false;
     }
+    if (derived->aeroVerticalFrontN * spec->aeroLiftCoefFront > 0.0f) return false;
+    if (derived->aeroVerticalRearN * spec->aeroLiftCoefRear > 0.0f) return false;
     if (fabsf(derived->loadTransferN) > MAX_LOAD_TRANSFER_FRACTION * weightN) return false;
     if (derived->normalLoadFrontN < MIN_NORMAL_LOAD_N - 1e-3f ||
         derived->normalLoadRearN < MIN_NORMAL_LOAD_N - 1e-3f)
@@ -678,7 +732,8 @@ static void stage_powertrain(PhysicsStep *step)
 
     /* Brake torque follows forward load transfer, never moving rearward from the configured
      * static bias. This keeps the rear axle from locking first when hard braking unloads it. */
-    const AxleLoads brakeLoads = physics_axle_loads(spec, state->filteredLongAccelMps2);
+    const AxleLoads brakeLoads =
+        physics_axle_loads(spec, state->filteredLongAccelMps2, body_speed_mps(state));
     const float rearOmegaLeftRadS = state->wheels[WHEEL_REAR_LEFT].angularVelocityRadS;
     const float rearOmegaRightRadS = state->wheels[WHEEL_REAR_RIGHT].angularVelocityRadS;
 
@@ -800,11 +855,13 @@ static void stage_normal_loads(PhysicsStep *step)
                                       spec->loadFilterRateHz, step->dt);
     }
 
-    step->loads = physics_axle_loads(spec, state->filteredLongAccelMps2);
+    step->loads = physics_axle_loads(spec, state->filteredLongAccelMps2, body_speed_mps(state));
     const AxleLoads loads = step->loads;
 
     derived->staticFrontLoadN = loads.staticFrontN;
     derived->staticRearLoadN = loads.staticRearN;
+    derived->aeroVerticalFrontN = loads.aeroFrontN;
+    derived->aeroVerticalRearN = loads.aeroRearN;
     derived->unclampedFrontLoadN = loads.unclampedFrontN;
     derived->unclampedRearLoadN = loads.unclampedRearN;
     derived->loadTransferN = loads.transferN;

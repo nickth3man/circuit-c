@@ -54,7 +54,7 @@ validation.
 | `susp.roll_centre_front` | `definition` | Front roll-centre height. Inactive: lateral load transfer uses the CG height and the roll-stiffness fraction. Kept as authored hardware. |
 | `susp.roll_centre_rear` | `definition` | Rear roll-centre height. Inactive: lateral load transfer uses the CG height and the roll-stiffness fraction. Kept as authored hardware. |
 | `brake.pad_friction` | `definition` | Pad friction coefficient. Inactive: brake torque is authored directly as brake.max_torque. Kept as authored hardware. |
-| `aero.cop_x` | `definition` | Centre of pressure X. Inactive: drag acts at the CG and no aerodynamic vertical load exists, so there is no pressure centre to place. |
+| `aero.cop_x` | `definition` | Centre of pressure X. Inactive: vertical load is authored per axle, which fixes where the pressure centre is — it is an outcome of the four aero values, not a fifth input. Drag still acts at the CG. |
 
 14 of 140 parameters are inactive.
 
@@ -234,11 +234,11 @@ validation.
 
 | Parameter | Class | Owner | Default | Unit | Range | Step | Tier | Reset | Meaning |
 |---|---|---|---:|---|---|---:|---|:-:|---|
-| `aero.lift_front` | `appearance` | `definition` | 0.05 | — | -2 .. 1 | 0.01 | advanced | — | Front lift coefficient. Appearance only: sizes the splitter and dive planes. No aerodynamic vertical load is computed anywhere. |
-| `aero.lift_rear` | `appearance` | `definition` | 0.1 | — | -3 .. 1 | 0.01 | advanced | — | Rear lift coefficient. Appearance only: sizes the rear wing. No aerodynamic vertical load is computed anywhere. |
-| `aero.ref_area_front` | `appearance` | `definition` | 0.4 | m^2 | 0.05 .. 2 | 0.01 | expert | — | Front aero reference area. Appearance only: scales the front aero device with aero.lift_front. |
-| `aero.ref_area_rear` | `appearance` | `definition` | 0.55 | m^2 | 0.05 .. 2 | 0.01 | expert | — | Rear aero reference area. Appearance only: scales the rear wing with aero.lift_rear. |
-| `aero.cop_x` | `inactive` | `definition` | -0.2 | m | -2 .. 2 | 0.01 | expert | — | Centre of pressure X. Inactive: drag acts at the CG and no aerodynamic vertical load exists, so there is no pressure centre to place. |
+| `aero.lift_front` | `physics` | `definition` | 0 | — | -2 .. 1 | 0.01 | advanced | — | Front lift coefficient in -0.5*rho*Cl*A*v^2. Positive lifts the front axle, negative is downforce; it also sizes the splitter and dive planes. |
+| `aero.lift_rear` | `physics` | `definition` | 0 | — | -3 .. 1 | 0.01 | advanced | — | Rear lift coefficient, same convention as aero.lift_front. The two coefficients and their reference areas are what set the aerodynamic balance. |
+| `aero.ref_area_front` | `physics` | `definition` | 0.4 | m^2 | 0.05 .. 2 | 0.01 | expert | — | Front aero reference area: the A in the front axle's vertical load, and the scale of the drawn front aero device. Inert while aero.lift_front is zero. |
+| `aero.ref_area_rear` | `physics` | `definition` | 0.55 | m^2 | 0.05 .. 2 | 0.01 | expert | — | Rear aero reference area: the A in the rear axle's vertical load, and the scale of the drawn rear wing. Inert while aero.lift_rear is zero. |
+| `aero.cop_x` | `inactive` | `definition` | -0.2 | m | -2 .. 2 | 0.01 | expert | — | Centre of pressure X. Inactive: vertical load is authored per axle, which fixes where the pressure centre is — it is an outcome of the four aero values, not a fifth input. Drag still acts at the CG. |
 
 ## Collision
 
