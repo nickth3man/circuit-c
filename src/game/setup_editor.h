@@ -74,7 +74,9 @@ float setup_editor_value(const SetupEditor *ed, int itemIndex); /* current value
 bool setup_editor_save(const SetupEditor *ed, const char *path, char *error, size_t errorCap);
 bool setup_editor_load(SetupEditor *ed, const char *path, char *error, size_t errorCap);
 /* Gate before a session starts: every setup value must be inside vehicle bounds and the
- * derived spec must still validate; optionally also checks class eligibility when a class
- * is supplied. Returns false with a human reason when the setup cannot start. */
+ * derived spec must still validate. Returns false with a human reason when the setup cannot
+ * start. Vehicle bounds only — class eligibility is not checked here and cannot be: a class
+ * constrains a manifest, not a setup, and it is enforced where content enters the roster
+ * (see car_roster.c) and again at the menu's start gate (game_can_start_race). */
 bool setup_editor_can_start(const SetupEditor *ed, char *reason, size_t reasonCap);
 #endif /* CIRCUIT_SETUP_EDITOR_H */

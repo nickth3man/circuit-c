@@ -16,6 +16,7 @@
  */
 #include "game/setup_editor.h"
 
+#include <ctype.h>
 #include <math.h>
 #include <stddef.h>
 #include <stdio.h>
@@ -277,11 +278,27 @@ bool setup_editor_load(SetupEditor *ed, const char *path, char *error, size_t er
         const char *key = line;
         const char *valStr = eq + 1;
         if (strcmp(key, "setup.hash") == 0) {
-            unsigned int h = 0;
-            if (sscanf(valStr, "%x", &h) == 1) {
-                fileHash = (uint32_t)h;
-                sawHash = true;
+            /*
+             * A hash line that does not parse must be an error, not a shrug. Leaving `sawHash`
+             * false on a malformed value silently turns verification off for the whole file —
+             * so the one line whose job is to detect corruption would be disabled by exactly
+             * the corruption it exists to catch. The format save writes is eight hex digits,
+             * and nothing else is accepted.
+             */
+            bool hexOk = (strlen(valStr) == 8);
+            for (const char *p = valStr; hexOk && *p != '\0'; p++) {
+                hexOk = isxdigit((unsigned char)*p) != 0;
             }
+            unsigned int h = 0;
+            if (!hexOk || sscanf(valStr, "%x", &h) != 1) {
+                if (error != NULL && errorCap > 0)
+                    snprintf(error, errorCap, "line %d: malformed setup.hash '%s'", lineNo,
+                             valStr);
+                fclose(f);
+                return false;
+            }
+            fileHash = (uint32_t)h;
+            sawHash = true;
             continue;
         }
         /* Locate editable item. */
@@ -306,20 +323,24 @@ bool setup_editor_load(SetupEditor *ed, const char *path, char *error, size_t er
             return false;
         }
         if (ed->items[idx].isGearCount) {
-            int iv = (int)lrint(d);
-            /* MAX_GEARS, not the editor's five-ratio ceiling. The ceiling exists to stop the
-             * menu creating a gear count it cannot repair; it is not a claim that six- to
-             * eight-gear setups are invalid. Applying it here would make a setup that saved
-             * cleanly fail to load. The vehicle_setup_is_valid() call below is the real gate:
-             * a count whose required ratios are not authored is rejected there. */
-            if (iv < 1 || iv > MAX_GEARS || (double)iv != d) {
+            /* The range test happens in double precision, BEFORE narrowing. lrint() of a
+             * finite-but-huge double (1e300) has an unspecified result and raises a domain
+             * error, and narrowing that to int is undefined — so a file could invoke UB on
+             * its way to being rejected. Bound it first, then convert.
+             *
+             * The bound is MAX_GEARS, not the editor's five-ratio ceiling. That ceiling exists
+             * to stop the menu creating a gear count it cannot repair; it is not a claim that
+             * six- to eight-gear setups are invalid, and applying it here would make a setup
+             * that saved cleanly fail to load. The vehicle_setup_is_valid() call below is the
+             * real gate: a count whose required ratios are not authored is rejected there. */
+            if (!(d >= 1.0 && d <= (double)MAX_GEARS) || (double)(int)d != d) {
                 if (error != NULL && errorCap > 0)
                     snprintf(error, errorCap, "line %d: gear_count %s out of range", lineNo,
                              valStr);
                 fclose(f);
                 return false;
             }
-            loaded.gearCount = iv;
+            loaded.gearCount = (int)d;
         } else {
             if (d < (double)ed->items[idx].min - 1e-6 ||
                 d > (double)ed->items[idx].max + 1e-6) {
