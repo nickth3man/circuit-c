@@ -1075,8 +1075,8 @@ static void scenario_race_entrant(void)
         game_init(sequential);
         game_init(reordered);
 
-        build_grid(&sequential->roster, kAscending, 4);
-        build_grid(&reordered->roster, kShuffled, 4);
+        build_grid(&sequential->session.roster, kAscending, 4);
+        build_grid(&reordered->session.roster, kShuffled, 4);
 
         const uint32_t sequentialChecksum = game_state_checksum(sequential);
         const uint32_t reorderedChecksum = game_state_checksum(reordered);
@@ -1086,7 +1086,7 @@ static void scenario_race_entrant(void)
               sequentialChecksum, reorderedChecksum);
 
         /* And the checksum is genuinely watching the roster: losing an entrant must show. */
-        check(race_roster_despawn(&reordered->roster, 3u),
+        check(race_roster_despawn(&reordered->session.roster, 3u),
               "entrant 3 leaves the second session");
         check(game_state_checksum(reordered) != sequentialChecksum,
               "a session that lost an entrant no longer checksums like one that did not");
@@ -1099,18 +1099,18 @@ static void scenario_race_entrant(void)
     {
         Game *game = alloc_game();
         game_init(game);
-        check(game->roster.count == 1 && game->roster.localEntrantId == 1u,
+        check(game->session.roster.count == 1 && game->session.roster.localEntrantId == 1u,
               "game_init() spawns exactly one local entrant through the roster (count %d, "
               "local %u)",
-              game->roster.count, game->roster.localEntrantId);
-        check(&game->vehicle == &game->roster.entrants[0].instance.vehicle &&
-                  &game->progress == &game->roster.entrants[0].progress &&
-                  &game->controller == &game->roster.entrants[0].controller,
+              game->session.roster.count, game->session.roster.localEntrantId);
+        check(&game->vehicle == &game->session.roster.entrants[0].instance.vehicle &&
+                  &game->progress == &game->session.roster.entrants[0].progress &&
+                  &game->controller == &game->session.roster.entrants[0].controller,
               "the one-entrant compatibility spellings name that roster slot and not a "
               "separate copy");
 
         game->vehicle.yawRateRadS = 0.5f;
-        check(game->roster.entrants[0].instance.vehicle.yawRateRadS == 0.5f,
+        check(game->session.roster.entrants[0].instance.vehicle.yawRateRadS == 0.5f,
               "so the existing single-car paths drive the collection's storage directly");
         free(game);
     }

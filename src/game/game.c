@@ -85,6 +85,7 @@ static uint32_t hash_entrant(uint32_t h, const RaceEntrant *entrant)
     h = hash_u32(h, (uint32_t)entrant->gridSlot);
     h = hash_u32(h, entrant->result.finished ? 1u : 0u);
     h = hash_u32(h, (uint32_t)entrant->result.finishPosition);
+    h = hash_f32(h, entrant->result.finishTimeS);
 
     const VehicleSetup *setup = &entrant->setup;
     h = hash_f32(h, setup->tirePressureFrontKpa);
@@ -198,12 +199,33 @@ GAME_API uint32_t game_state_checksum(const Game *game)
      * Which entrant the local presentation follows is deliberately absent: that is a
      * camera/audio decision, and a checksum that moved when the view changed would stop
      * meaning "the simulation diverged". */
-    h = hash_u32(h, (uint32_t)game->roster.count);
-    h = hash_u32(h, game->roster.nextId);
-    h = hash_u32(h, game->roster.reuseFloorId);
-    for (int i = 0; i < game->roster.count; i++) {
-        h = hash_entrant(h, &game->roster.entrants[i]);
+    h = hash_u32(h, (uint32_t)game->session.roster.count);
+    h = hash_u32(h, game->session.roster.nextId);
+    h = hash_u32(h, game->session.roster.reuseFloorId);
+    for (int i = 0; i < game->session.roster.count; i++) {
+        h = hash_entrant(h, &game->session.roster.entrants[i]);
     }
+
+    /* Session authority. Phase, race clock and countdown all decide whether a later tick
+     * simulates at all, and classification decides what the next finisher is called, so a
+     * divergence in any of them changes the future and belongs here.
+     *
+     * The event ring is summarised by its append count rather than hashed entry by entry: the
+     * entries are a report that nothing reads back into the simulation, but two runs that
+     * raised different numbers of events did not do the same thing. The results snapshot is
+     * likewise derived — it is written from state already hashed above. */
+    const RaceSession *session = &game->session;
+    h = hash_u32(h, (uint32_t)session->phase);
+    h = hash_u32(h, (uint32_t)session->resumePhase);
+    h = hash_u32(h, (uint32_t)session->rules.mode);
+    h = hash_u32(h, (uint32_t)session->rules.targetLaps);
+    h = hash_f32(h, session->rules.countdownS);
+    h = hash_u32(h, (uint32_t)session->trackId);
+    h = hash_u64(h, session->tick);
+    h = hash_f32(h, session->clockS);
+    h = hash_u32(h, (uint32_t)session->countdownTicksRemaining);
+    h = hash_u32(h, (uint32_t)session->classifiedCount);
+    h = hash_u32(h, session->events.totalAppended);
     return h;
 }
 
@@ -214,13 +236,13 @@ GAME_API void game_reset_sim(Game *game)
      * computed for where it used to be, so each entrant's private controller memory goes with
      * its vehicle state; kind and frozen configuration survive, because the reset changes the
      * situation rather than who is driving. */
-    race_roster_reset(&game->roster);
+    race_roster_reset(&game->session.roster);
 }
 
 GAME_API void game_apply_spec(Game *game, const VehicleSpec *spec)
 {
     if (game == NULL || spec == NULL) return;
-    RaceEntrant *entrant = race_roster_local(&game->roster);
+    RaceEntrant *entrant = race_roster_local(&game->session.roster);
     if (entrant == NULL) return;
 
     VehicleDefinition definition;
@@ -248,7 +270,18 @@ GAME_API bool game_configure_run(Game *game, const GameRunConfig *config)
         track_runtime_bind(&game->trackRuntime, &game->trackDef);
 
     game->dev.cameraZoomOverride = config->cameraZoomOverride;
-    game->targetLaps = (config->targetLaps > 0) ? config->targetLaps : RESULTS_TARGET_LAPS;
+
+    /* Freeze this run's rules and start the session on them. The lap target is the only rule a
+     * GameRunConfig carries today; mode and countdown take their defaults, which is what keeps
+     * a configured validation run behaving exactly as it did before sessions existed. */
+    RaceRules rules;
+    race_rules_set_default(&rules);
+    rules.targetLaps = (config->targetLaps > 0) ? config->targetLaps : RESULTS_TARGET_LAPS;
+    /* GAME_TRACK_KEEP means "leave the loaded track alone", so it must leave the session's
+     * idea of which track is loaded alone too — writing the sentinel would report and checksum
+     * a kept chicane as track 0. */
+    if (config->track != GAME_TRACK_KEEP) game->session.trackId = (int)config->track;
+    race_session_start(&game->session, &rules);
 
     if (config->track != GAME_TRACK_KEEP) return game_spawn_on_track(game);
     return true;
@@ -292,25 +325,59 @@ GAME_API bool game_spawn_on_track_at(Game *game, int checkpointIndex)
 }
 
 /*
+ * Put the cars back on the grid and start the race again from tick zero.
+ *
+ * `game_reset_sim()` is the vehicle half of this; the session half is what makes a restart a
+ * restart rather than a teleport — clock, countdown, classification, events and results all go
+ * back to their starting values, so nothing from the previous run can be read afterwards.
+ */
+static void restart_session(Game *game)
+{
+    game_reset_sim(game);
+    /* Route progress goes back with the cars. Without it a restart taken on or after the final
+     * lap re-satisfies the finish condition on its very next tick and drops straight back to
+     * the results screen, which is the opposite of what the player asked for. It is reset here
+     * rather than inside game_reset_sim() because that entry point is the vehicle half on its
+     * own, and physics scenarios call it mid-run without wanting their lap cursor moved.
+     *
+     * Deliberately NOT shared with the playback rewind below: a recording does not necessarily
+     * begin at gate zero, so a replay that forced one would measure the timeline against the
+     * wrong gate. Restoring a recording's starting progress needs it captured with the
+     * recording, which is the replay snapshot work in issue 44. */
+    track_reset_progress_at(&game->progress, &game->trackDef, 0);
+    race_session_start(&game->session, NULL);
+}
+
+/*
  * Application/session commands from `input`, gear requests from `output`.
  *
  * The split is the point: pause, reset, the debug overlay and the automatic-transmission
  * toggle belong to the session and are consumed exactly once per tick no matter how many
  * entrants exist, whereas a gear shift is something one driver asked its own car for and
  * arrives on that entrant's controller output.
+ *
+ * The two axes move together here and only here. `game->state` picks the screen, which is what
+ * the HUD switches on; the RaceSession call beside it moves the race. Pausing the screen
+ * without pausing the race would leave the race clock running behind a paused overlay.
  */
 static void apply_oneshots(Game *game, const Input *input, const ControllerOutput *output)
 {
     if (input->pausePressed) {
         switch (game->state) {
             case STATE_MENU:
-                game_reset_sim(game);
+                restart_session(game);
                 game->state = STATE_PLAYING;
                 break;
-            case STATE_PLAYING: game->state = STATE_PAUSED; break;
-            case STATE_PAUSED: game->state = STATE_PLAYING; break;
+            case STATE_PLAYING:
+                race_session_pause(&game->session);
+                game->state = STATE_PAUSED;
+                break;
+            case STATE_PAUSED:
+                race_session_resume(&game->session);
+                game->state = STATE_PLAYING;
+                break;
             case STATE_RESULTS:
-                game_reset_sim(game);
+                restart_session(game);
                 game->state = STATE_PLAYING;
                 break;
             default: break;
@@ -319,12 +386,20 @@ static void apply_oneshots(Game *game, const Input *input, const ControllerOutpu
     }
     if (input->resetPressed) {
         switch (game->state) {
-            case STATE_PLAYING: game_reset_sim(game); break;
+            case STATE_PLAYING: restart_session(game); break;
             case STATE_PAUSED:
-                game_reset_sim(game);
+                restart_session(game);
                 game->state = STATE_PLAYING;
                 break;
-            case STATE_RESULTS: game->state = STATE_MENU; break;
+            case STATE_RESULTS:
+                /* Leaving the results screen returns to the menu without restarting anything;
+                 * the next thing the player does decides what runs. A classified session is
+                 * left classified — race_session_abort() refuses it — so its results survive
+                 * for the results screen to keep showing. A race abandoned before it finished
+                 * is a different matter and is abandoned properly. */
+                race_session_abort(&game->session);
+                game->state = STATE_MENU;
+                break;
             default: break;
         }
         game->sim.resetCount++;
@@ -364,11 +439,15 @@ GAME_API void game_init(Game *game)
     /* One entrant, spawned through the same roster path a full grid uses: the default car,
      * driven by the human at the keyboard, in grid slot 0. Everything downstream reads it
      * either through race_roster_local() or through the compatibility view in game.h. */
-    race_roster_init(&game->roster);
+    race_session_init(&game->session);
     const RaceEntrantSpawn playerSpawn = { .controllerKind = CONTROLLER_KIND_HUMAN,
                                            .localPlayer = true,
                                            .gridSlot = 0 };
-    (void)race_roster_spawn(&game->roster, &playerSpawn, NULL);
+    (void)race_roster_spawn(&game->session.roster, &playerSpawn, NULL);
+    /* Released straight to green with the default rules. A caller that wants a countdown, a
+     * different distance or a multi-entrant race calls game_configure_run() (or drives the
+     * session directly), and the default keeps every existing caller on the timeline it had. */
+    race_session_start(&game->session, NULL);
 #if defined(CIRCUIT_HEADLESS)
     game->state = STATE_PLAYING; /* headless: no menus, simulate immediately */
 #else
@@ -381,7 +460,6 @@ GAME_API void game_init(Game *game)
     game->reloadCount = 0;
     game->reloadFlashTimerS = 0.0f;
     game->crashLockoutTimerS = 0.0f;
-    game->targetLaps = RESULTS_TARGET_LAPS;
     particle_pool_init(&game->particles);
     game->renderPixelsPerMeter = PIXELS_PER_METER;
     game->camera = (Camera2D){ .offset = { SCREEN_W * 0.5f, SCREEN_H * 0.5f },
@@ -443,66 +521,128 @@ GAME_API void game_post_reload(Game *game)
 #endif
 }
 
-GAME_API void game_fixed_update(Game *game, float dt)
+/* ------------------------------------------------------------------ fixed-update stages --
+ *
+ * One tick is a fixed sequence of named stages. Each one below documents what it reads and
+ * what it may write, and the order they run in is the contract in docs/SIMULATION_OWNERSHIP.md.
+ * Splitting them up is not decoration: it is what lets a reader answer "who wrote this value,
+ * and when" without reading a hundred-and-fifty-line function, and it is where per-entrant
+ * iteration goes when collision and localization arrive.
+ *
+ * No stage reads a frame rate, a wall clock, or a render quantity. Everything that varies with
+ * time takes the `dt` it is given.
+ */
+
+/*
+ * What one tick carries between its stages. It lives on the stack and dies with the tick — a
+ * stage that needs to remember something across ticks must write it to an owner (the entrant,
+ * the session, the track runtime), not here. That restriction is the reason this struct is
+ * safe to keep out of the checksum.
+ */
+typedef struct {
+    Input sample;              /* the input source this tick resolved to */
+    ControllerKind sourceKind; /* who authored `sample`: human, script, or a recording */
+    bool fromPlayback;
+    bool fromScript;
+    ControllerOutput applied; /* controller output after pre-physics gating */
+    Vector2 startPosM;        /* authoritative pose at the top of the physics stage */
+    bool trackLoaded;         /* a track with geometry is bound, so track queries are legal */
+} TickContext;
+
+/*
+ * Stage 1 — acquire tick inputs.
+ * Reads: replay buffer, latched Game.input, dev scenario. Writes: ctx.sample/sourceKind, and
+ * the replay cursor. Restores the recorded initial vehicle on the first playback tick.
+ */
+static void stage_acquire_inputs(Game *game, TickContext *ctx)
 {
-    if (game == NULL) return;
-    CIRCUIT_ZONE_BEGIN(fixedUpdate, "FixedUpdate");
-    Input tickInput;
-    input_zero(&tickInput);
-    bool fromPlayback = false;
+    input_zero(&ctx->sample);
+    ctx->fromPlayback = false;
     if (game->replay.mode == REPLAY_MODE_PLAYBACK) {
-        if (game->replay.playbackCursor == 0 && game->replay.initialVehicle.valid &&
-            !replay_restore_initial_vehicle(&game->replay, &game->vehicleDefinition,
-                                            &game->vehicleSetup, &game->vehicleInstance)) {
-            replay_stop(&game->replay);
+        if (game->replay.playbackCursor == 0) {
+            /* Validate before destroying anything. A recording whose snapshot does not fit this
+             * car is rejected, and a rejected playback must leave the live race exactly as it
+             * found it — restarting the session first would wipe the player's clock, results
+             * and events on the way to refusing to play.
+             *
+             * When it does fit, the session is rewound alongside the vehicle. The phase is
+             * sticky in a way the screen state never was: leaving it at whatever the live run
+             * reached means replaying into a race that is already classified, and a classified
+             * race does not simulate — so the playback would silently do nothing at all.
+             *
+             * Route progress is deliberately left alone. It is not ours to guess: a recording
+             * need not have started at gate zero, and restoring the real starting cursor means
+             * capturing it with the recording, alongside the vehicle snapshot (issue 44). */
+            const bool restored =
+                !game->replay.initialVehicle.valid ||
+                replay_restore_initial_vehicle(&game->replay, &game->vehicleDefinition,
+                                               &game->vehicleSetup, &game->vehicleInstance);
+            if (restored)
+                race_session_start(&game->session, NULL);
+            else
+                replay_stop(&game->replay);
         }
-        if (replay_next(&game->replay, &tickInput))
-            fromPlayback = true;
+        if (replay_next(&game->replay, &ctx->sample))
+            ctx->fromPlayback = true;
         else
             replay_stop(&game->replay);
     }
-    if (!fromPlayback) tickInput = game->input;
+    if (!ctx->fromPlayback) ctx->sample = game->input;
 
     /* A running scripted scenario replaces live input, but only when we are not already
      * replaying a timeline: playback must never be second-guessed. The substituted input is
      * recorded like any other, so the scenario itself is replayable. */
-    const bool fromScript = (!fromPlayback && game->dev.scenarioRunning);
-    if (fromScript) {
+    ctx->fromScript = (!ctx->fromPlayback && game->dev.scenarioRunning);
+    if (ctx->fromScript) {
         dev_scenario_input(game->dev.scenario, game->sim.tick - game->dev.scenarioStartTick,
-                           &tickInput);
+                           &ctx->sample);
     }
 
-    /* --- Controller stage ---
-     *
-     * Reads tick-start state and emits exactly one bounded ControllerOutput for this entrant.
-     * It runs BEFORE apply_oneshots so that a controller observes the state at the start of the
-     * tick and not a state a pause or reset has already changed; the validation AI used to be
-     * called by the platform loop immediately before this function, which is the same instant.
-     *
-     * Playback overrides the entrant's own kind: a recorded stream is authoritative, so an AI
+    /* Playback overrides the entrant's own kind: a recorded stream is authoritative, so an AI
      * entrant replays as recorded instead of re-deciding. */
-    const ControllerKind sourceKind = fromPlayback ? CONTROLLER_KIND_REPLAY
-                                      : fromScript ? CONTROLLER_KIND_SCRIPT
-                                                   : game->controller.kind;
-    const ControllerTickView view = { .sample = &tickInput,
+    ctx->sourceKind = ctx->fromPlayback ? CONTROLLER_KIND_REPLAY
+                      : ctx->fromScript ? CONTROLLER_KIND_SCRIPT
+                                        : game->controller.kind;
+}
+
+/*
+ * Stage 2 — controller decisions.
+ * Reads: tick-start world and vehicle state, ctx.sample. Writes: the entrant's private
+ * controller memory and its ControllerOutput, and nothing else.
+ *
+ * It runs BEFORE the command stage so that a controller observes the state at the start of the
+ * tick and not a state a pause or reset has already changed; the validation AI used to be
+ * called by the platform loop immediately before this function, which is the same instant.
+ */
+static void stage_controllers(Game *game, const TickContext *ctx, float dt)
+{
+    const ControllerTickView view = { .sample = &ctx->sample,
                                       .track = &game->trackDef,
                                       .runtime = &game->trackRuntime,
                                       .vehicle = &game->vehicle,
                                       .derived = &game->derived,
                                       .spec = &game->spec,
                                       .dt = dt };
-    controller_update(&game->controller, sourceKind, &view, &game->controllerOutput);
+    controller_update(&game->controller, ctx->sourceKind, &view, &game->controllerOutput);
+}
 
+/*
+ * Stage 3 — record the timeline and consume application commands.
+ * Reads: ctx.sample, the entrant's ControllerOutput. Writes: the replay buffer, Game.input's
+ * one-shot latches, the screen state, the session phase, and the entrant's gearbox.
+ *
+ * Recording the OUTPUT rather than the raw sample is what makes an AI or scripted run
+ * replayable through the same path a human run takes.
+ */
+static void stage_record_and_commands(Game *game, const TickContext *ctx)
+{
     if (game->replay.mode == REPLAY_MODE_RECORDING) {
         replay_capture_initial_vehicle(&game->replay, &game->vehicleDefinition,
                                        &game->vehicleSetup, &game->vehicleInstance);
     }
     input_clear_oneshots(&game->input);
 
-    /* The timeline records the authoritative controller output plus the application commands
-     * latched for this tick. Recording the OUTPUT rather than the raw sample is what makes an
-     * AI or scripted run replayable through the same path a human run takes. */
-    Input recordedFrame = tickInput;
+    Input recordedFrame = ctx->sample;
     recordedFrame.steer = game->controllerOutput.steer;
     recordedFrame.throttle = game->controllerOutput.throttle;
     recordedFrame.brake = game->controllerOutput.brake;
@@ -510,157 +650,262 @@ GAME_API void game_fixed_update(Game *game, float dt)
     recordedFrame.shiftUpPressed = game->controllerOutput.shiftUp;
     recordedFrame.shiftDownPressed = game->controllerOutput.shiftDown;
     replay_record(&game->replay, &recordedFrame);
-    apply_oneshots(game, &tickInput, &game->controllerOutput);
+    apply_oneshots(game, &ctx->sample, &game->controllerOutput);
+}
 
-    /* The gated copy: pre-physics assists rewrite this, never the controller's own output. */
-    ControllerOutput appliedControls = game->controllerOutput;
+/*
+ * Stage 4 — pre-physics gating.
+ * Reads: the session phase, the entrant's vehicle/spec/derived. Writes: ctx.applied and the
+ * entrant's automatic-transmission and committed control state.
+ *
+ * The controller's own output is never rewritten here; the gated copy is what physics
+ * consumes. A countdown gates by zeroing the copy, which is why a held grid needs no separate
+ * code path through the solver.
+ */
+static void stage_pre_physics(Game *game, TickContext *ctx, float dt)
+{
+    if (game->session.phase == RACE_PHASE_COUNTDOWN) {
+        controller_output_zero(&ctx->applied);
+    }
+    auto_transmission_update(&game->autoTrans, &game->vehicle, &game->spec, &game->derived,
+                             &ctx->applied, dt);
+    game->vehicleControls.steer = ctx->applied.steer;
+    game->vehicleControls.throttle = ctx->applied.throttle;
+    game->vehicleControls.brake = ctx->applied.brake;
+    game->vehicleControls.handbrake = ctx->applied.handbrake;
+}
 
-    /* Particle pool: always updates so existing particles fade over time regardless of the
-     * game state. Spawn only happens inside the PLAYING gate below. */
-    particle_pool_update(&game->particles, dt);
+/*
+ * Stage 5 — vehicle physics.
+ * Reads: the frozen spec and ctx.applied, plus the track for per-wheel surfaces. Writes: the
+ * entrant's vehicle state, derived diagnostics, and authoritative poses. Resolves no contact.
+ */
+static void stage_physics(Game *game, TickContext *ctx, float dt)
+{
+    CIRCUIT_ZONE_BEGIN(physics, "Physics");
+    /* Start-of-tick position, for the checkpoint crossing test in the progress stage.
+     *
+     * It has to be currPositionM read HERE, before the physics step. physics_fixed_update
+     * shifts curr into prev on entry and writes the new position into curr on exit, so
+     * reading prevPositionM afterwards yields the position two ticks ago — and a two-tick
+     * sweep overlaps the next tick's sweep, which makes every gate crossing get detected
+     * twice. That was invisible while only the expected gate was tested (the second detection
+     * simply failed to advance); testing all gates reports it as an out-of-order crossing,
+     * which is exactly the false accusation a lap validator must not make. */
+    ctx->startPosM = game->renderState.currPositionM;
 
-    if (game->state == STATE_PLAYING) {
-        /* Auto transmission: override gear and remap throttle/brake */
-        auto_transmission_update(&game->autoTrans, &game->vehicle, &game->spec, &game->derived,
-                                 &appliedControls, dt);
-        game->vehicleControls.steer = appliedControls.steer;
-        game->vehicleControls.throttle = appliedControls.throttle;
-        game->vehicleControls.brake = appliedControls.brake;
-        game->vehicleControls.handbrake = appliedControls.handbrake;
+    /* Per-wheel surface query: each contact point tests the track independently so the car can
+     * straddle two surfaces. This lives in game.c, not physics.c, keeping the physics TU free
+     * of track knowledge.
+     *
+     * Guarded: skip when no track is loaded so tests and scenarios that explicitly set
+     * per-wheel surfaceId are not overwritten. */
+    if (ctx->trackLoaded) {
+        for (int i = 0; i < WHEEL_COUNT; i++) {
+            const Vector2 worldContact =
+                physics_wheel_world_position(&game->vehicle, (WheelId)i);
+            game->vehicle.wheels[i].surfaceId =
+                Track_SurfaceAt(&game->trackDef, &game->trackRuntime, worldContact);
+        }
+    }
+    physics_fixed_update(&game->spec, &game->vehicle, &game->derived, &game->renderState,
+                         &ctx->applied, dt);
+    CIRCUIT_ZONE_END(physics);
+}
 
-        CIRCUIT_ZONE_BEGIN(physics, "Physics");
-        /* Start-of-tick position, for the checkpoint crossing test below.
-         *
-         * It has to be currPositionM read HERE, before the physics step. physics_fixed_update
-         * shifts curr into prev on entry and writes the new position into curr on exit, so
-         * reading prevPositionM at this point yields the position two ticks ago — and a
-         * two-tick sweep overlaps the next tick's sweep, which makes every gate crossing get
-         * detected twice. That was invisible while only the expected gate was tested (the
-         * second detection simply failed to advance); testing all gates reports it as an
-         * out-of-order crossing, which is exactly the false accusation a lap validator must
-         * not make. */
-        const Vector2 startPosM = game->renderState.currPositionM;
-
-        /* Per-wheel surface query: each contact point tests the track independently so the
-         * car can straddle two surfaces. This lives in game.c, not physics.c, keeping the
-         * physics TU free of track knowledge. The query is done every fixed tick before the
-         * physics step consumes the surface ids.
-         *
-         * Guarded: skip when no track is loaded so tests and scenarios that explicitly set
-         * per-wheel surfaceId are not overwritten. */
-        if (game->trackDef.nodes != NULL && game->trackDef.count > 0) {
-            for (int i = 0; i < WHEEL_COUNT; i++) {
-                const Vector2 worldContact =
-                    physics_wheel_world_position(&game->vehicle, (WheelId)i);
-                game->vehicle.wheels[i].surfaceId =
-                    Track_SurfaceAt(&game->trackDef, &game->trackRuntime, worldContact);
+/*
+ * Stage 6 — track localization and progress.
+ * Reads: the immutable track and the entrant's swept pose. Writes: that entrant's
+ * RacerProgress and the tick's checkpoint event reports. The definition is never written, so
+ * two entrants may run this against the same track without interacting.
+ *
+ * ORDER NOTE. This runs before the collision stage, which is where it has always run.
+ * docs/SIMULATION_OWNERSHIP.md's target order puts progress after collision, so that a gate is
+ * judged on the pose a car actually ended the tick at. That is a behaviour change rather than
+ * a refactor: a barrier strike on the same tick as a gate crossing would be judged
+ * differently.
+ *
+ * The swap was measured on this branch — all 46 telemetry scenarios and the full suite are
+ * unchanged by it, because no current scenario strikes a barrier across a gate on one tick. So
+ * it is safe to make, and it is deliberately not made here: the contract for the session
+ * extraction is that every recorded trace survives it, and a semantic change that no test can
+ * catch is one that should land beside the collision work it exists for (#26/#27), where a
+ * multi-car contact makes it observable and testable.
+ */
+static void stage_progress(Game *game, const TickContext *ctx, float dt)
+{
+    if (ctx->trackLoaded) {
+        TrackCheckpointEvent ev = track_update_checkpoints(
+            &game->trackDef, &game->progress, ctx->startPosM, game->renderState.currPositionM);
+        game->lastCheckpointEvent = ev;
+        if (ev.crossed) {
+            game->pendingTelemetryCheckpointEvent = ev;
+            if (ev.lapCompleted && game->session.roster.count > 0) {
+                race_session_log_event(&game->session, RACE_EVENT_LAP_COMPLETED,
+                                       game->session.roster.entrants[0].id,
+                                       (int32_t)game->progress.lap);
             }
         }
-        physics_fixed_update(&game->spec, &game->vehicle, &game->derived, &game->renderState,
-                             &appliedControls, dt);
-        CIRCUIT_ZONE_END(physics);
+        game->progress.lapTimerS += dt;
+    } else {
+        memset(&game->lastCheckpointEvent, 0, sizeof(game->lastCheckpointEvent));
+        game->lastCheckpointEvent.index = -1;
+        memset(&game->pendingTelemetryCheckpointEvent, 0,
+               sizeof(game->pendingTelemetryCheckpointEvent));
+        game->pendingTelemetryCheckpointEvent.index = -1;
+    }
+}
 
-        /* Checkpoint crossing: check whether the car passed a gate this tick. The event is
-         * kept for the tick so telemetry and the validation runner can record which gate was
-         * taken, and whether it was taken out of order. */
-        if (game->trackDef.nodes != NULL && game->trackDef.count > 0) {
-            TrackCheckpointEvent ev = track_update_checkpoints(
-                &game->trackDef, &game->progress, startPosM, game->renderState.currPositionM);
-            game->lastCheckpointEvent = ev;
-            if (ev.crossed) {
-                game->pendingTelemetryCheckpointEvent = ev;
-            }
-            game->progress.lapTimerS += dt;
-        } else {
-            memset(&game->lastCheckpointEvent, 0, sizeof(game->lastCheckpointEvent));
-            game->lastCheckpointEvent.index = -1;
-            memset(&game->pendingTelemetryCheckpointEvent, 0,
-                   sizeof(game->pendingTelemetryCheckpointEvent));
-            game->pendingTelemetryCheckpointEvent.index = -1;
+/*
+ * Stage 7 — collision.
+ * Reads: the immutable track and the entrant's post-physics pose. Writes: the entrant's pose
+ * and its crash lockout. Vehicle-to-vehicle contact is not resolved here yet (#26/#27).
+ */
+static void stage_collision(Game *game, const TickContext *ctx, float dt)
+{
+    /* Crash lockout timer: count down toward zero. It gates later contacts, so it is entrant
+     * state and is counted before this tick's contact is resolved. */
+    if (game->crashLockoutTimerS > 0.0f) {
+        game->crashLockoutTimerS -= dt;
+        if (game->crashLockoutTimerS < 0.0f) game->crashLockoutTimerS = 0.0f;
+    }
+
+    if (ctx->trackLoaded) {
+        const float oldLockout = game->crashLockoutTimerS;
+        collision_resolve_track(&game->spec, &game->vehicle, &game->renderState,
+                                &game->trackDef, &game->trackRuntime,
+                                &game->crashLockoutTimerS);
+        if (game->crashLockoutTimerS > oldLockout) {
+            audio_play_collision_thud();
         }
+    }
+}
 
-        /* Crash lockout timer: count down toward zero. */
-        if (game->crashLockoutTimerS > 0.0f) {
-            game->crashLockoutTimerS -= dt;
-            if (game->crashLockoutTimerS < 0.0f) game->crashLockoutTimerS = 0.0f;
-        }
+/*
+ * Stage 8 — rules and classification.
+ * Reads: every entrant's RacerProgress and the frozen rules. Writes: the session clock, phase,
+ * countdown, per-entrant results, the event log, and the screen the classified race hands to
+ * the player.
+ */
+static void stage_rules(Game *game)
+{
+    race_session_update_rules(&game->session);
+    if (game->session.phase == RACE_PHASE_CLASSIFIED) {
+        game->state = STATE_RESULTS;
+    }
+}
 
-        /* Collision with track barriers. */
-        if (game->trackDef.nodes != NULL && game->trackDef.count > 0) {
-            float oldLockout = game->crashLockoutTimerS;
-            collision_resolve_track(&game->spec, &game->vehicle, &game->renderState,
-                                    &game->trackDef, &game->trackRuntime,
-                                    &game->crashLockoutTimerS);
-            if (game->crashLockoutTimerS > oldLockout) {
-                audio_play_collision_thud();
-            }
-        }
+/*
+ * Stage 9 — presentation.
+ * Reads: the local entrant and the tick's applied controls. Writes: audio, particles, and
+ * development history — nothing a later tick can read back into the simulation, which is why
+ * this runs after the checksum has already been taken.
+ *
+ * Audio and tire smoke describe what the player is driving, so they read the entrant the
+ * roster designates as local. A session with no local entrant — a headless AI-only field —
+ * produces neither, which is the partition that keeps presentation from depending on
+ * simulation storage order.
+ */
+static void stage_presentation(Game *game, float dt)
+{
+    const RaceEntrant *localEntrant = race_roster_local_const(&game->session.roster);
+    if (localEntrant != NULL) {
+        const VehicleInstance *localCar = &localEntrant->instance;
+        audio_update(localCar->vehicle.engineRpm, localCar->spec.engineIdleRpm,
+                     localCar->spec.engineRedlineRpm, localCar->derived.physicallySliding,
+                     localCar->derived.speedMps, dt);
+    }
 
-        /* --- Presentation follows the local entrant, not "the first car" ---
-         *
-         * Audio and tyre smoke describe what the player is driving, so they read the entrant
-         * the roster designates as local. A session with no local entrant — a headless AI-only
-         * field — produces neither, which is precisely the partition that keeps presentation
-         * from depending on simulation storage order. */
-        const RaceEntrant *localEntrant = race_roster_local_const(&game->roster);
+    /* Tire smoke from the rear wheels while physically sliding. Two spawns per rear wheel per
+     * tick at 120 Hz is about 480 / s while sliding, which the 512-slot pool sustains over the
+     * 0.8 s particle life. */
+    if (localEntrant != NULL && localEntrant->instance.derived.physicallySliding &&
+        localEntrant->instance.derived.speedMps > 5.0f) {
+        const float heading = localEntrant->instance.vehicle.headingRad;
+        const float speedMps = fminf(localEntrant->instance.derived.speedMps, 50.0f);
 
-        /* Audio: per-tick engine pitch and tyre screech (after physics). */
-        if (localEntrant != NULL) {
-            const VehicleInstance *localCar = &localEntrant->instance;
-            audio_update(localCar->vehicle.engineRpm, localCar->spec.engineIdleRpm,
-                         localCar->spec.engineRedlineRpm, localCar->derived.physicallySliding,
-                         localCar->derived.speedMps, dt);
-        }
+        /* Base velocity: rearward, opposite to the car's heading. */
+        const float baseBackX = -cosf(heading) * speedMps * 0.25f;
+        const float baseBackY = -sinf(heading) * speedMps * 0.25f;
 
-        /* Results trigger: when the run's target lap count is reached, transition to
-         * STATE_RESULTS. The car is no longer simulated after this tick. */
-        if (game->progress.lap >= game->targetLaps) {
-            game->state = STATE_RESULTS;
-        }
+        for (int w = 0; w < 2; w++) {
+            const WheelId wheelId = (w == 0) ? WHEEL_REAR_LEFT : WHEEL_REAR_RIGHT;
+            const Vector2 wheelWorldM =
+                physics_wheel_world_position(&localEntrant->instance.vehicle, wheelId);
 
-        /* Particle spawn: tire smoke from the rear wheels while physically sliding.
-         * Two spawns per rear wheel per tick at 120 Hz ≈ 480 / s while sliding,
-         * which the 512-slot pool sustains over the 0.8 s particle life. */
-        if (localEntrant != NULL && localEntrant->instance.derived.physicallySliding &&
-            localEntrant->instance.derived.speedMps > 5.0f) {
-            const float heading = localEntrant->instance.vehicle.headingRad;
-            const float speedMps = fminf(localEntrant->instance.derived.speedMps, 50.0f);
+            for (int s = 0; s < 2; s++) {
+                /* Deterministic spread that varies per-tick for visual variety. */
+                const float hashX = (float)((int)(game->sim.tick * 7 + s * 13 + w * 31) & 0xFF);
+                const float hashY =
+                    (float)((int)(game->sim.tick * 11 + s * 17 + w * 23) & 0xFF);
+                const float spreadX = (hashX / 255.0f - 0.5f) * 1.2f;
+                const float spreadY = (hashY / 255.0f - 0.5f) * 1.2f + 0.6f;
+                const Vector2 vel = { baseBackX + spreadX, baseBackY + spreadY };
 
-            /* Base velocity: rearward, opposite to the car's heading. */
-            const float baseBackX = -cosf(heading) * speedMps * 0.25f;
-            const float baseBackY = -sinf(heading) * speedMps * 0.25f;
-
-            for (int w = 0; w < 2; w++) {
-                const WheelId wheelId = (w == 0) ? WHEEL_REAR_LEFT : WHEEL_REAR_RIGHT;
-                const Vector2 wheelWorldM =
-                    physics_wheel_world_position(&localEntrant->instance.vehicle, wheelId);
-
-                for (int s = 0; s < 2; s++) {
-                    /* Deterministic spread that varies per-tick for visual variety. */
-                    const float hashX =
-                        (float)((int)(game->sim.tick * 7 + s * 13 + w * 31) & 0xFF);
-                    const float hashY =
-                        (float)((int)(game->sim.tick * 11 + s * 17 + w * 23) & 0xFF);
-                    const float spreadX = (hashX / 255.0f - 0.5f) * 1.2f;
-                    const float spreadY = (hashY / 255.0f - 0.5f) * 1.2f + 0.6f;
-                    const Vector2 vel = { baseBackX + spreadX, baseBackY + spreadY };
-
-                    particle_spawn(&game->particles, wheelWorldM, vel, 0.30f,
-                                   (Color){ 200, 200, 200, 180 });
-                }
+                particle_spawn(&game->particles, wheelWorldM, vel, 0.30f,
+                               (Color){ 200, 200, 200, 180 });
             }
         }
     }
+}
+
+GAME_API void game_fixed_update(Game *game, float dt)
+{
+    if (game == NULL) return;
+    CIRCUIT_ZONE_BEGIN(fixedUpdate, "FixedUpdate");
+
+    TickContext ctx;
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.trackLoaded = (game->trackDef.nodes != NULL && game->trackDef.count > 0);
+
+    stage_acquire_inputs(game, &ctx);
+    stage_controllers(game, &ctx, dt);
+    stage_record_and_commands(game, &ctx);
+
+    /* The gated copy: pre-physics assists rewrite this, never the controller's own output. */
+    ctx.applied = game->controllerOutput;
+
+    /* Particles age on every tick, whatever the session is doing, so a paused or classified
+     * race still lets the smoke it already made fade out. Spawning happens in the presentation
+     * stage, which only runs when the session simulated. */
+    particle_pool_update(&game->particles, dt);
+
+    /* The simulation gate reads both axes: the screen has to be the playing screen, and the
+     * race has to be in a phase that runs. Either one alone would be a lie — a paused overlay
+     * over a running clock, or a race stepping forward behind the menu. */
+    if (game->state == STATE_PLAYING && race_session_is_simulating(&game->session)) {
+        /* Open the tick before anything can raise an event, so a lap crossing logged in the
+         * progress stage and the finish it triggers in the rules stage agree about when they
+         * happened. */
+        race_session_begin_tick(&game->session, dt);
+
+        stage_pre_physics(game, &ctx, dt);
+        stage_physics(game, &ctx, dt);
+        stage_progress(game, &ctx, dt);
+        stage_collision(game, &ctx, dt);
+        stage_rules(game);
+        stage_presentation(game, dt);
+    }
+
+    /* Stage 10 — finalize. The application tick and the rolling checksum advance once per tick
+     * whether or not the race ran, because a paused session is still a tick of the application
+     * that a replay has to reproduce.
+     *
+     * The presentation stage deliberately runs BEFORE this rather than after, as the ordering
+     * contract would otherwise have it: the deterministic tire-smoke spread is seeded from
+     * `sim.tick`, so advancing the counter first would move every particle ever spawned for no
+     * gain. Presentation still cannot reach the simulation — it writes audio and the particle
+     * pool, neither of which any stage reads. */
     game->sim.tick++;
     game->stateChecksum = game_state_checksum(game);
 
-    /* Development history: scope channels, trajectory, and the invariant monitor. Reads the
-     * state, writes only to game->dev, and is excluded from the checksum, so it cannot
+    /* Development history: scope channels, trajectory, and the invariant monitor. It records
+     * the finalized checksum, which is why it is the one consumer that runs after it. Reads
+     * the state, writes only to game->dev, and is excluded from the checksum, so it cannot
      * influence the simulation. */
-    dev_state_record(game, &appliedControls);
+    dev_state_record(game, &ctx.applied);
     CIRCUIT_ZONE_END(fixedUpdate);
 }
-
 #if defined(CIRCUIT_HEADLESS)
 GAME_API void game_draw(Game *game, float interpolationAlpha)
 {

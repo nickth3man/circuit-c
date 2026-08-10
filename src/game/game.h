@@ -21,8 +21,10 @@
  * costs the same one restart. It stores a kind, a frozen config and private decision memory —
  * plain values, no function pointer, so the reload invariant above still holds.
  *
- * Moving that entrant into a RaceRoster (issue 10) is the last of those layout changes, and the
- * roster is plain value storage like everything else here, so the invariant is unchanged.
+ * Moving that entrant into a RaceRoster (issue 10), and the roster into a RaceSession (issue
+ * 11), are layout changes for the same reason and cost the same one restart. Both are plain
+ * value storage — no function pointers, nothing pointing into the reloadable module — so the
+ * invariant above is unchanged.
  */
 #ifndef CIRCUIT_GAME_H
 #define CIRCUIT_GAME_H
@@ -39,7 +41,7 @@
 #include "game/controller.h"
 #include "game/input.h"
 #include "game/particle.h"
-#include "game/race_entrant.h"
+#include "game/race_session.h"
 #include "game/replay.h"
 #include "world/track.h"
 #include "physics/vehicle.h"
@@ -95,28 +97,29 @@ struct Game {
     Input input;
     SimState sim;
     /*
-     * Every entrant in the session. This is the storage — there is no separate "the player's
-     * car" any more, only `roster.entrants[i]`, walked in ascending EntrantId order.
+     * The active race: its roster, rules, phase, clock, events and results. Gameplay authority
+     * lives here rather than in `state` above, which now only chooses a screen.
      *
-     * The anonymous view beside it is the temporary one-entrant compatibility spelling. It
-     * overlays `entrants[0]`, so `game->vehicle`, `game->progress` and the rest keep naming
-     * that entrant's members while the subsystems that still assume a single car migrate to
-     * entrant iteration. The _Static_asserts below this struct hold the two layouts together,
-     * so reordering RaceEntrant is a compile error rather than a silent misread. New code
-     * should go through race_roster_local() / race_roster_find(); the view is deleted once
-     * nothing reads it. See docs/SIMULATION_OWNERSHIP.md.
+     * The anonymous view beside it is the temporary one-entrant compatibility spelling. The
+     * session's first member is its roster, whose first member is `entrants[0]`, so this view
+     * lands on that entrant and `game->vehicle`, `game->progress` and the rest keep naming its
+     * members while the subsystems that still assume a single car migrate to entrant
+     * iteration. The _Static_asserts below this struct hold the two layouts together, so
+     * reordering RaceSession or RaceEntrant is a compile error rather than a silent misread.
+     * New code should go through race_roster_local() / race_roster_find(); the view is deleted
+     * once nothing reads it. See docs/SIMULATION_OWNERSHIP.md.
      *
-     * PRECONDITION UNTIL ISSUE 11. game_fixed_update() still drives exactly one car — the one
-     * this view names, `entrants[0]` — because the ordered per-entrant session stages are
-     * issue 11's subject, not this one. A Game whose roster holds more than one entrant would
-     * therefore leave every other slot unsimulated, and a local entrant that sorts after some
-     * other id would be presented but never driven. game_init() spawns exactly one entrant, so
-     * no supported path can reach that state; build a multi-entrant roster through Game only
-     * once the session stages iterate it. Rosters used directly, as the "race-entrant"
-     * scenario does, are storage and are not subject to this.
+     * PRECONDITION. The staged fixed update drives exactly one car — the one this view names,
+     * `entrants[0]` — because per-entrant iteration of physics, collision and progress is the
+     * subject of the collision and localization issues (#26/#27, #38), not of the session
+     * skeleton. A Game whose roster holds more than one entrant would therefore leave every
+     * other slot unsimulated, and a local entrant that sorts after some other id would be
+     * presented but never driven. game_init() spawns exactly one entrant, so no supported path
+     * reaches that state. Rosters and sessions used directly, as the "race-entrant" and
+     * "race-session" scenarios do, are storage and are not subject to this.
      */
     union {
-        RaceRoster roster;
+        RaceSession session;
         struct {
             /* Issue #8's view, one level down: these five values are physically owned by one
              * VehicleInstance and spelled here as the fields callers already use. */
@@ -181,11 +184,6 @@ struct Game {
      * different scales and comparing checksums. */
     float renderPixelsPerMeter;
 
-    /* Laps this run ends after. Set by game_configure_run() from GameRunConfig.targetLaps and
-     * defaulted to RESULTS_TARGET_LAPS by game_init(), so a caller that never configures a run
-     * gets exactly the behaviour the constant always gave. */
-    int targetLaps;
-
     /* Presentation and diagnostics. */
     bool debugOverlay;
     int reloadCount;
@@ -204,26 +202,28 @@ struct Game {
  * assertions are the whole reason the view is safe to keep: add, remove or reorder a member of
  * RaceEntrant and the build stops here instead of quietly aliasing the wrong bytes.
  */
+_Static_assert(offsetof(RaceSession, roster) == 0,
+               "the roster must start the session: Game overlays entrants[0] through it");
 _Static_assert(offsetof(RaceRoster, entrants) == 0,
                "the entrant array must start the roster: Game overlays entrants[0]");
 _Static_assert(offsetof(RaceEntrant, instance) == 0,
                "VehicleInstance must start RaceEntrant: Game overlays it as spec/vehicle/...");
-_Static_assert(offsetof(Game, vehicleInstance) == offsetof(Game, roster),
+_Static_assert(offsetof(Game, vehicleInstance) == offsetof(Game, session),
                "the compatibility view must alias entrants[0]");
 _Static_assert(offsetof(Game, controller) ==
-                   offsetof(Game, roster) + offsetof(RaceEntrant, controller),
+                   offsetof(Game, session) + offsetof(RaceEntrant, controller),
                "Game.controller must alias entrants[0].controller");
 _Static_assert(offsetof(Game, controllerOutput) ==
-                   offsetof(Game, roster) + offsetof(RaceEntrant, controllerOutput),
+                   offsetof(Game, session) + offsetof(RaceEntrant, controllerOutput),
                "Game.controllerOutput must alias entrants[0].controllerOutput");
 _Static_assert(offsetof(Game, progress) ==
-                   offsetof(Game, roster) + offsetof(RaceEntrant, progress),
+                   offsetof(Game, session) + offsetof(RaceEntrant, progress),
                "Game.progress must alias entrants[0].progress");
 _Static_assert(offsetof(Game, vehicleDefinition) ==
-                   offsetof(Game, roster) + offsetof(RaceEntrant, definition),
+                   offsetof(Game, session) + offsetof(RaceEntrant, definition),
                "Game.vehicleDefinition must alias entrants[0].definition");
 _Static_assert(offsetof(Game, vehicleSetup) ==
-                   offsetof(Game, roster) + offsetof(RaceEntrant, setup),
+                   offsetof(Game, session) + offsetof(RaceEntrant, setup),
                "Game.vehicleSetup must alias entrants[0].setup");
 
 /*

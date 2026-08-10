@@ -66,7 +66,7 @@ After #6, #7 and #8 may run in parallel.
 - [x] [#10 — Introduce RaceEntrant and deterministic multi-vehicle storage](https://github.com/nickth3man/circuit-c/issues/10)
   - Depends on: #7, #8, #9
 
-- [ ] [#11 — Introduce RaceSession lifecycle, rules, and ordered fixed-update stages](https://github.com/nickth3man/circuit-c/issues/11)
+- [x] [#11 — Introduce RaceSession lifecycle, rules, and ordered fixed-update stages](https://github.com/nickth3man/circuit-c/issues/11)
   - Depends on: #10
 
 ## Phase 0 gate
@@ -77,8 +77,8 @@ After #6, #7 and #8 may run in parallel.
 - [x] Track content and racer progress have separate ownership.
 - [x] Vehicle definitions, setups, and runtime instances have separate ownership.
 - [x] All simulated entrants use the same controller contract.
-- [ ] A headless RaceSession can own multiple isolated entrants.
-- [ ] Single-car behavior remains operational through the new architecture.
+- [x] A headless RaceSession can own multiple isolated entrants.
+- [x] Single-car behavior remains operational through the new architecture.
 
 ---
 
@@ -408,7 +408,7 @@ This work closes the multiplayer gap but does not block the stated AI-racing tar
 
 # Completion Summary
 
-- [ ] Phase 0 — Identity and Core Architecture
+- [x] Phase 0 — Identity and Core Architecture
 - [ ] Phase 1 — Physics Foundations
 - [ ] Phase 2 — Data-Driven Cars and Track Foundations
 - [ ] Phase 3 — Physics Implementation
