@@ -108,7 +108,7 @@ The Cars and Tracks lanes can run primarily in parallel.
 
 ## Cars lane
 
-- [ ] [#29 — Define a versioned vehicle manifest and loader](https://github.com/nickth3man/circuit-c/issues/29)
+- [x] [#29 — Define a versioned vehicle manifest and loader](https://github.com/nickth3man/circuit-c/issues/29)
   - Depends on: #8, #12
 
 - [ ] [#30 — Migrate the six-car validated roster out of hard-coded C](https://github.com/nickth3man/circuit-c/issues/30)
@@ -127,7 +127,7 @@ After #30, #31 and #32 may run in parallel.
 
 ## Tracks lane
 
-- [ ] [#34 — Define a versioned external track format](https://github.com/nickth3man/circuit-c/issues/34)
+- [x] [#34 — Define a versioned external track format](https://github.com/nickth3man/circuit-c/issues/34)
   - Depends on: #7
 
 - [ ] [#35 — Implement headless track loading, validation, version migration, and hashes](https://github.com/nickth3man/circuit-c/issues/35)

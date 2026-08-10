@@ -31,6 +31,7 @@ TestScenarioGroup test_appearance_scenarios(void);
 TestScenarioGroup test_physics_scenarios(void);
 TestScenarioGroup test_handling_scenarios(void);
 TestScenarioGroup test_gameplay_scenarios(void);
+TestScenarioGroup test_content_scenarios(void);
 
 /* Releases the Game the last scripted handling run kept alive for failure bundles. */
 void test_handling_cleanup(void);
