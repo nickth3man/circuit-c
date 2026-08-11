@@ -653,6 +653,7 @@ bool vehicle_definition_init(VehicleDefinition *definition, const char *id,
         return false;
     candidate.contentVersion = contentVersion;
     candidate.contentHash = vehicle_content_hash(&candidate.spec);
+    candidate.aiEligible = true; /* built-in content is AI-validated; manifests may clear it */
     *definition = candidate;
     return true;
 }

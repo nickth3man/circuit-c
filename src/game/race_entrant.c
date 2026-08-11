@@ -77,6 +77,11 @@ bool race_roster_spawn(RaceRoster *roster, const RaceEntrantSpawn *spawn, Entran
     else
         vehicle_definition_set_default(&entrant.definition);
 
+    /* AI eligibility (issue #52): an AI controller on content that has not been validated
+     * for the driver is refused, fail-closed, before anything is allocated. */
+    if (spawn->controllerKind == CONTROLLER_KIND_AI && !entrant.definition.aiEligible)
+        return false;
+
     if (spawn->setup != NULL) {
         if (!vehicle_setup_is_valid(&entrant.definition, spawn->setup)) return false;
         entrant.setup = *spawn->setup;

@@ -494,6 +494,19 @@ bool vehicle_manifest_parse(const char *text, size_t length, VehicleManifest *ou
         memset(out, 0, sizeof(*out));
         return false;
     }
+    /* AI eligibility (issue #52): optional top-level key, defaults to true when absent. */
+    {
+        const JsonValue *aiElig = json_object_get(root, "aiEligible");
+        if (aiElig != NULL) {
+            if (!json_is_bool(aiElig)) {
+                set_error(error, errorCap, "aiEligible", "must be a boolean");
+                json_document_free(doc);
+                memset(out, 0, sizeof(*out));
+                return false;
+            }
+            out->definition.aiEligible = json_as_bool(aiElig);
+        }
+    }
     /* The default setup mirrors the authored setup fields straight out of the definition spec,
      * so a manifest's setup section is its default setup and the two cannot disagree. */
     vehicle_setup_set_default(&out->definition, &out->defaultSetup);

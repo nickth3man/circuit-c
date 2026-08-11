@@ -1093,6 +1093,141 @@ static void scenario_performance_budget(void)
 }
 
 /* ------------------------------------------------------------------------------------- */
+/* Scenario: session-ai — AI as a live session controller (issue #52)                    */
+/* ------------------------------------------------------------------------------------- */
+
+static void scenario_session_ai(void)
+{
+    /* ---- 1. AI eligibility: ineligible content refuses an AI spawn, eligible accepts. ---- */
+    {
+        RaceRoster roster;
+        race_roster_init(&roster);
+
+        VehicleDefinition ineligible;
+        vehicle_definition_set_default(&ineligible);
+        ineligible.aiEligible = false;
+        RaceEntrantSpawn spawn = { .controllerKind = CONTROLLER_KIND_AI,
+                                   .definition = &ineligible };
+        EntrantId id = RACE_ENTRANT_ID_NONE;
+        check(!race_roster_spawn(&roster, &spawn, &id),
+              "AI spawn on ineligible content is refused");
+        check(roster.count == 0, "the refused spawn leaves the roster untouched");
+
+        VehicleDefinition eligible;
+        vehicle_definition_set_default(&eligible);
+        check(eligible.aiEligible, "built-in default definition is AI-eligible");
+        spawn.definition = &eligible;
+        check(race_roster_spawn(&roster, &spawn, &id) && id != RACE_ENTRANT_ID_NONE,
+              "AI spawn on eligible content succeeds");
+    }
+
+    /* ---- 2. Two AI instances share no mutable controller state. ---- */
+    {
+        Game *game = alloc_game();
+        game_init(game);
+        track_load_chicane(&game->trackDef);
+        game_spawn_on_track(game);
+        for (int i = 0; i < 2; i++) {
+            const RaceEntrantSpawn ai = { .controllerKind = CONTROLLER_KIND_AI,
+                                          .gridSlot = -1 };
+            check(race_roster_spawn(&game->session.roster, &ai, NULL), "AI entrant %d spawned",
+                  i + 1);
+        }
+        check(game->session.roster.count == 3, "roster holds the local + 2 AI entrants");
+
+        const RaceEntrant *ai1 = race_roster_find_const(&game->session.roster, 2u);
+        const RaceEntrant *ai2 = race_roster_find_const(&game->session.roster, 3u);
+        check(ai1 != NULL && ai2 != NULL, "both AI entrants found by id");
+        if (ai1 != NULL && ai2 != NULL) {
+            check(&ai1->controller != &ai2->controller, "AI controllers are distinct objects");
+            check(ai1->controller.memory.ai.planOffsetM !=
+                      ai2->controller.memory.ai.planOffsetM,
+                  "AI planner state is per-controller, not shared");
+        }
+
+        /* Both drive independently and identically-built sessions stay deterministic. */
+        Game *b = alloc_game();
+        game_init(b);
+        track_load_chicane(&b->trackDef);
+        game_spawn_on_track(b);
+        for (int i = 0; i < 2; i++) {
+            const RaceEntrantSpawn ai = { .controllerKind = CONTROLLER_KIND_AI,
+                                          .gridSlot = -1 };
+            race_roster_spawn(&b->session.roster, &ai, NULL);
+        }
+        for (int i = 0; i < game->session.roster.count; i++) {
+            game->session.roster.entrants[i].instance.vehicle.positionM =
+                (Vector2){ -6.0f * (float)i, 0.0f };
+            game->session.roster.entrants[i].instance.renderState.prevPositionM =
+                game->session.roster.entrants[i].instance.vehicle.positionM;
+            game->session.roster.entrants[i].instance.renderState.currPositionM =
+                game->session.roster.entrants[i].instance.vehicle.positionM;
+            b->session.roster.entrants[i].instance.vehicle.positionM =
+                (Vector2){ -6.0f * (float)i, 0.0f };
+            b->session.roster.entrants[i].instance.renderState.prevPositionM =
+                b->session.roster.entrants[i].instance.vehicle.positionM;
+            b->session.roster.entrants[i].instance.renderState.currPositionM =
+                b->session.roster.entrants[i].instance.vehicle.positionM;
+        }
+        game->state = STATE_PLAYING;
+        b->state = STATE_PLAYING;
+        bool same = true;
+        for (int t = 0; t < 2000; t++) {
+            game_fixed_update(game, FIXED_DT_S);
+            game_fixed_update(b, FIXED_DT_S);
+            if (game_state_checksum(game) != game_state_checksum(b)) same = false;
+        }
+        check(same, "two-AI sessions are deterministic and independent over 2000 ticks");
+        free(b);
+        free(game);
+    }
+
+    /* ---- 3. A lone AI completes laps and finishes through the session path. ---- */
+    {
+        Game *game = alloc_game();
+        game_init(game);
+        track_load_chicane(&game->trackDef);
+        game_spawn_on_track(game);
+
+        /* Remove the human local entrant's role: replace it with an AI driver. */
+        game->controller.kind = CONTROLLER_KIND_AI;
+        game->state = STATE_PLAYING;
+        RaceRules rules;
+        race_rules_set_default(&rules);
+        rules.targetLaps = 2;
+        race_session_start(&game->session, &rules);
+
+        int ticks = 0;
+        const int budget = 30000;
+        while (ticks < budget && game->session.phase != RACE_PHASE_CLASSIFIED) {
+            game_fixed_update(game, FIXED_DT_S);
+            ticks++;
+        }
+        check(game->progress.lap >= 2,
+              "lone AI completed its laps through the session path (lap %d after %d ticks)",
+              (int)game->progress.lap, ticks);
+        check(game->session.phase == RACE_PHASE_CLASSIFIED,
+              "the session classified the AI run (phase %d)", (int)game->session.phase);
+        free(game);
+    }
+
+    /* ---- 4. Built-in tracks declare AI eligibility. ---- */
+    {
+        TrackDefinition chicane;
+        memset(&chicane, 0, sizeof(chicane));
+        track_load_chicane(&chicane);
+        check(chicane.aiEligible, "chicane declares AI eligibility");
+        track_free(&chicane);
+
+        TrackDefinition lot;
+        memset(&lot, 0, sizeof(lot));
+        track_init(&lot);
+        check(lot.aiEligible, "parking lot declares AI eligibility");
+        track_free(&lot);
+    }
+}
+
+/* ------------------------------------------------------------------------------------- */
 /* Scenario: collision-world — the deterministic CollisionWorld contract                  */
 /* ------------------------------------------------------------------------------------- */
 
@@ -4983,6 +5118,9 @@ static const TestScenario kGameplayScenarios[] = {
     { "performance-budget",
       "issue #45: multi-car fixed-step headroom (CIRCUIT_PERF_BENCH env gates the timing)",
       scenario_performance_budget },
+    { "session-ai",
+      "issue #52: AI eligibility, per-controller isolation, session lap/finish, track decls",
+      scenario_session_ai },
     { "collision-world",
       "issue #26 world contract: stable ids, layers, authored objects, multi-proxy order, "
       "penetration recovery, corners, contact feed",

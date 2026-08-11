@@ -148,6 +148,9 @@ typedef struct {
     /* Distributed markers: each owned by the definition, shared read-only by every entrant. */
     SectorMarker *sectorMarkers;
     int sectorMarkerCount;
+    /* AI eligibility policy (issue #52): a track may declare itself unsuitable for the AI
+     * driver. Built-in loads set it true; the external manifest may clear it. */
+    bool aiEligible;
     bool hasStartFinish;
     StartFinishLine startFinish;
     GridSlot *gridSlots;

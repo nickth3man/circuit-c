@@ -203,6 +203,16 @@ static bool parse_route(const JsonValue *route, TrackDefinition *out, char *erro
         return false;
     }
     out->routeClosed = json_as_bool(closed);
+    /* AI eligibility (issue #52): optional, defaults to true when absent. */
+    out->aiEligible = true;
+    const JsonValue *aiElig = json_object_get(route, "aiEligible");
+    if (aiElig != NULL) {
+        if (!json_is_bool(aiElig)) {
+            set_error(error, errorCap, "route.aiEligible", "must be a boolean");
+            return false;
+        }
+        out->aiEligible = json_as_bool(aiElig);
+    }
     const JsonValue *nodes = json_object_get(route, "nodes");
     if (nodes == NULL || !json_is_array(nodes) || json_array_count(nodes) < 2) {
         set_error(error, errorCap, "route.nodes", "must be an array of at least two nodes");
@@ -1111,8 +1121,9 @@ bool track_manifest_write(const TrackDefinition *track, const char *displayName,
     write_json_string(out, track->version);
     fprintf(out, ",\n");
 
-    fprintf(out, "  \"route\": {\n    \"closed\": %s,\n    \"nodes\": [\n",
-            track->routeClosed ? "true" : "false");
+    fprintf(out,
+            "  \"route\": {\n    \"closed\": %s,\n    \"aiEligible\": %s,\n    \"nodes\": [\n",
+            track->routeClosed ? "true" : "false", track->aiEligible ? "true" : "false");
     for (int i = 0; i < track->count; i++) {
         const TrackNode *n = &track->nodes[i];
         const char *surface = track_manifest_surface_name(n->surfaceId);

@@ -280,6 +280,7 @@ void track_init(TrackDefinition *track)
     track->offTrackSurfaceId = SURFACE_GRASS;
     track->runoffSurfaceId = SURFACE_GRASS;
     track->routeClosed = true;
+    track->aiEligible = true;
 
     /* The lot is an open area, not a circuit, but the perimeter still carries gates so that
      * lap bookkeeping behaves identically to before gates became explicit data. A racer's
@@ -569,6 +570,7 @@ void track_load_chicane(TrackDefinition *track)
 
     track->isParkingLot = false;
     track->routeClosed = true;
+    track->aiEligible = true;
     track->offTrackSurfaceId = SURFACE_GRASS;
     track->runoffSurfaceId = SURFACE_GRASS;
     snprintf(track->id, sizeof(track->id), "%s", "chicane");

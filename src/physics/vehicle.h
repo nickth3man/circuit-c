@@ -343,6 +343,11 @@ typedef struct {
     uint32_t contentHash;
     char appearanceId[VEHICLE_CONTENT_ID_CAPACITY];
     VehicleSpec spec;
+    /* AI eligibility policy (issue #52): content may declare itself unsuitable for the AI
+     * driver (e.g. appearance corpus). `race_roster_spawn` refuses an AI controller on an
+     * ineligible definition. Defaults to true for built-ins. Not part of the physics content
+     * hash: it is eligibility policy, not physics. */
+    bool aiEligible;
 } VehicleDefinition;
 
 /* The currently supported entrant adjustments. Issue 12 may classify more definition fields

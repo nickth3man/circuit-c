@@ -316,8 +316,11 @@ These tasks may run in parallel once their dependencies are complete.
     byte-identical). Per-entrant checksums + `game_divergence_report` naming tick/entrant/
     field. 4-entrant AI determinism scenario (3000 ticks, identical per-tick checksums).
 
-- [ ] [#45 — Establish fixed-step performance budgets and multi-car scale benchmarks](https://github.com/nickth3man/circuit-c/issues/45)
+- [x] [#45 — Establish fixed-step performance budgets and multi-car scale benchmarks](https://github.com/nickth3man/circuit-c/issues/45)
   - Depends on: #10, #26, #39
+  - `performance-budget` scenario (CIRCUIT_PERF_BENCH-gated) + `make benchmark-multi`:
+    1/4/8-car fields assert the 120 Hz budget with >= 25% headroom. Reference: 176.8 us/tick
+    at 8 cars (97.9% headroom, Ryzen 5 7600X UCRT64 release).
 
 - [ ] [#46 — Deliver interactive cross-platform builds and reproducible release packaging](https://github.com/nickth3man/circuit-c/issues/46)
   - Depends on: #5, #29, #35
