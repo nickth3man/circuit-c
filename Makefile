@@ -205,7 +205,9 @@ TEST_RUNNER_SRCS := tests/test_main.c tests/test_commands.c \
                     tests/support/appearance_metrics.c tests/support/car_sheet.c \
                     tests/scenarios/core_tests.c tests/scenarios/appearance_tests.c \
                     tests/scenarios/physics_tests.c tests/scenarios/handling_tests.c \
-                    tests/scenarios/gameplay_tests.c tests/scenarios/content_tests.c
+                    tests/scenarios/gameplay_tests.c tests/scenarios/content_tests.c \
+                    tests/scenarios/roster_gate_tests.c tests/scenarios/robustness_tests.c \
+                    tests/scenarios/stability_tests.c tests/scenarios/invariant_tests.c
 TEST_SRCS   := $(TEST_RUNNER_SRCS) src/platform/timestep.c $(GAME_SRCS) $(SHARED_SRCS)
 HOTRELOAD_HARNESS_SRCS := tests/hotreload/hotreload_harness.c src/platform/timestep.c $(HOTRELOAD_SRC) $(SHARED_SRCS)
 

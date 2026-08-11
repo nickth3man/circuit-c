@@ -111,8 +111,10 @@ int main(int argc, char **argv)
 {
     /* The declaration order here IS the run order, and it is the only thing that decides it. */
     const TestScenarioGroup groups[] = {
-        test_core_scenarios(),     test_appearance_scenarios(), test_physics_scenarios(),
-        test_handling_scenarios(), test_gameplay_scenarios(),   test_content_scenarios(),
+        test_core_scenarios(),        test_appearance_scenarios(), test_physics_scenarios(),
+        test_handling_scenarios(),    test_gameplay_scenarios(),   test_content_scenarios(),
+        test_roster_gate_scenarios(), test_robustness_scenarios(), test_stability_scenarios(),
+        test_invariant_scenarios(),
     };
     const size_t groupCount = sizeof(groups) / sizeof(groups[0]);
 
