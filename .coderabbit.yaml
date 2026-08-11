@@ -1,0 +1,195 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+# Repository-specific review policy for the C11 simulator and its Windows/MSYS2 toolchain.
+language: "en-US"
+early_access: false
+tone_instructions: >-
+  Be concise and evidence-based. Prioritize determinism, ownership, physical invariants, and
+  roadmap contracts. Drift is emergent physics only; reject drift scoring, obsolete identity,
+  speculative ECS/plugins/3D, and hidden AI advantages.
+
+reviews:
+  profile: "chill"
+  request_changes_workflow: false
+  high_level_summary: true
+  high_level_summary_instructions: >-
+    Summarize behavior changes, affected physical invariants or content contracts, and
+    verification evidence. Mention telemetry or baseline changes explicitly. Do not claim
+    checks passed unless the PR or GitHub Checks provides evidence.
+  high_level_summary_in_walkthrough: false
+  review_status: true
+  review_details: true
+  collapse_walkthrough: true
+  changed_files_summary: true
+  sequence_diagrams: false
+  estimate_code_review_effort: false
+  assess_linked_issues: true
+  related_issues: true
+  related_prs: true
+  suggested_labels: false
+  auto_apply_labels: false
+  suggested_reviewers: false
+  in_progress_fortune: false
+  poem: false
+  enable_prompt_for_ai_agents: false
+
+  # Build products, run evidence, vendored dependencies, and archived docs are not useful
+  # review targets. Tracked source, test code, manifests, and current docs remain in scope.
+  # Baseline CSVs follow CodeRabbit's default data-file handling; CI and the PR template remain
+  # authoritative for reviewing intentional baseline changes.
+  path_filters:
+    - "!build/**"
+    - "!artifacts/**"
+    - "!third_party/**"
+    - "!resources/sprite_examples/**"
+    - "!tools/visual/node_modules/**"
+    - "!docs/archive/**"
+
+  path_instructions:
+    - path: "src/**"
+      instructions: |
+        Review C11 changes for defects before style: undefined behavior, lifetime and ownership
+        errors, bounds and null handling, integer overflow, signedness, unchecked failures,
+        accidental per-tick allocation, and nondeterminism. Preserve the repository's existing
+        module boundaries, hot-reload rules, and SI-unit contracts. Do not suggest speculative
+        abstractions or formatting already enforced by clang-format.
+
+    - path: "src/physics/**"
+      instructions: |
+        Treat SI units, coordinate/sign conventions, and deterministic fixed-timestep ordering
+        as hard contracts. Distinguish primary inputs, derived values, appearance-only values,
+        diagnostics, and reserved values; do not claim inactive parameters affect handling. Check
+        dimensions and signs of forces and torques, finite-value guards, load transfer, integration
+        order, parameter ownership, and whether changed behavior has scenario or telemetry
+        evidence. Do not recommend changing equations merely to make a baseline pass; identify
+        the physical or numerical cause instead.
+
+    - path: "src/world/**"
+      instructions: |
+        Check geometry and collision changes for stable-ID and boundary correctness, consistent
+        coordinate conventions, deterministic candidate/contact ordering, memory safety, and
+        parity between accelerated and brute-force paths. Spatial acceleration must be justified
+        by measured multi-car bottlenecks or benchmarks. Flag changes that can alter results based
+        on iteration order or silently accept malformed track data.
+
+    - path: "src/game/**"
+      instructions: |
+        Check session and entrant ownership, tick-start snapshot semantics, controller isolation,
+        entrant ordering, input consumption, persistence across hot reload, replay/checksum state,
+        versioned settings persistence, and error handling. AI must enter through the normal
+        Controller boundary and receive no hidden grip, power, or rules advantage. Networking is
+        post-core and must not distort the single-process simulator architecture. Flag behavior
+        changes without focused scenario or deterministic regression coverage.
+
+    - path: "src/render/**"
+      instructions: |
+        Keep presentation separate from authoritative physics and session state. Check that
+        rendering does not mutate simulation state, raylib resources follow the reload lifecycle,
+        and persistent state never points into module code or static data. Prefer existing render
+        contracts over new parallel state or hidden physics calculations.
+
+    - path: "tests/**/*.c"
+      instructions: |
+        Review tests as executable behavioral contracts. Require assertions for observable outcomes,
+        boundaries, malformed input, error paths, determinism, replay/checksum parity, and relevant
+        physical invariants. Do not weaken an assertion or broaden a tolerance to fit an
+        implementation. Any baseline or golden-scenario change needs a clear physical justification
+        and matching PR evidence; tests should avoid encoding incidental implementation details.
+
+    - path: "tools/**/*.py"
+      instructions: |
+        Preserve the project's preference for Python standard-library tooling and explicit failure
+        paths. Check deterministic output, input validation, subprocess and path handling on
+        Windows, cross-platform packaging behavior, and the distinction between a real pass and a
+        reported SKIP. Do not introduce dependency drift or silently discard telemetry,
+        diagnostics, checksums, or generated artifacts.
+
+    - path: "data/**/*.json"
+      instructions: |
+        Treat manifests and track data as strict, reviewed content contracts. Check schema version,
+        stable IDs, allowed keys, units, numeric bounds, duplicate identities, round-trip/hash
+        expectations, and accidental generated or scratch data. Content migrations must preserve
+        existing behavior and validation evidence before compiled definitions are removed.
+
+    - path: "docs/**"
+      instructions: |
+        Check documentation against the current implementation and commands. Flag stale paths,
+        obsolete issue or phase claims, incorrect units or coordinate/sign semantics, and examples
+        that would not work in the supported Windows/MSYS2 workflow. Preserve reviewed contracts,
+        present-tense design guidance, the no-drift-scoring identity, and the post-core status of
+        networking; do not invent behavior to make prose sound complete.
+    - path: "docs/execution_tracker.md"
+      instructions: |
+        Treat the execution tracker as the roadmap authority. Do not start an issue before every
+        listed dependency is complete. Require focused deterministic regression evidence for
+        physics changes, preserve behavior during content migrations, respect phase gates unless
+        dependencies independently justify parallel work, keep #59 post-core, and keep #60 as the
+        final core release gate. Flag stale status boxes, dependency lists, or gate criteria.
+
+    - path: ".github/**"
+      instructions: |
+        Review workflow and template changes for correct job scope, permissions, action pinning,
+        Windows/MSYS2 shell behavior, timeout and cancellation behavior, release/package coverage,
+        and preservation of the strict CI gate. Do not weaken a required check or turn a missing
+        tool into a green SKIP; release gates must cover deterministic multi-car behavior and the
+        supported Windows/Linux targets.
+
+    - path: "**/Makefile"
+      instructions: |
+        Check that target dependencies, source manifests, tool discovery, Windows/MSYS2 host
+        guards, strict-mode failures, and generated-artifact paths remain correct. Preserve the
+        single-source-of-truth build structure and avoid silently changing what verify or CI runs.
+
+    - path: "**/*.{bat,sh}"
+      instructions: |
+        Review scripts for Windows/MSYS2 portability, quoting, exit-code propagation, cleanup,
+        toolchain selection, and safe handling of generated artifacts. Preserve the distinction
+        between UCRT64 normal builds and CLANG64 sanitizer builds; do not mask command failures.
+
+  tools:
+    shellcheck:
+      enabled: true
+    ruff:
+      enabled: true
+    markdownlint:
+      enabled: true
+    yamllint:
+      enabled: true
+    github-checks:
+      enabled: true
+      timeout_ms: 300000
+    languagetool:
+      enabled: true
+      disabled_categories:
+        - TYPOS
+        - TYPOGRAPHY
+        - CASING
+      level: default
+    biome:
+      enabled: false
+    hadolint:
+      enabled: false
+    fbinfer:
+      enabled: false
+  finishing_touches:
+    docstrings:
+      enabled: false
+    unit_tests:
+      enabled: false
+    simplify:
+      enabled: false
+    autofix:
+      enabled: false
+    fix_ci:
+      enabled: false
+    resolve_merge_conflict:
+      enabled: false
+
+  auto_review:
+    enabled: true
+    auto_incremental_review: true
+    drafts: true
+    base_branches:
+      - "main"
+
+chat:
+  auto_reply: true
