@@ -58,6 +58,17 @@ int collision_world_resolve_bodies(CollisionWorld *world, CollisionBodyContext *
                                    int contextCount);
 
 /*
+ * Resolve vehicle-vs-vehicle contacts between registered bodies (issue #27). Pairs are
+ * processed in ascending (idA, idB) order — independent of registration order — using the
+ * swept capsule poses; the first penetrating substep yields one two-body impulse contact per
+ * pair. Requires a CollisionBodyContext per registered body (same contract as
+ * collision_world_resolve_bodies). Returns the total contact events recorded, or -1 on a
+ * contract violation.
+ */
+int collision_resolve_body_pairs(CollisionWorld *world, CollisionBodyContext *contexts,
+                                 int contextCount);
+
+/*
  * The one-entrant path: begin a tick, register one vehicle body from its spec and render
  * pose, and resolve it. Returns the contacts resolved (0 if none). This is what the single-
  * car game path and the direct collision tests use; a multi-entrant caller drives the

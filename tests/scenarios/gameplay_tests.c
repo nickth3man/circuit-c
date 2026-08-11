@@ -537,6 +537,322 @@ static void scenario_collision_units(void)
 }
 
 /* ------------------------------------------------------------------------------------- */
+/* Scenario: vehicle-collision — two-body impulses conserve momentum (issue #27)          */
+/* ------------------------------------------------------------------------------------- */
+
+/* Register one body proxy from a spec and render triple. */
+static void make_body_proxy(CollisionBody *body, CollisionBodyId id, const VehicleSpec *spec,
+                            const VehicleRenderState *rs)
+{
+    memset(body, 0, sizeof(*body));
+    body->id = id;
+    body->layer = COLLISION_LAYER_VEHICLE_BODY;
+    body->mask = COLLISION_LAYER_VEHICLE_BODY | COLLISION_LAYER_STATIC_BARRIER;
+    body->cgToFrontM = spec->cgToFrontM;
+    body->cgToRearM = spec->cgToRearM;
+    body->radiusM = spec->bodyHalfWidthM;
+    body->prevPosM = rs->prevPositionM;
+    body->currPosM = rs->currPositionM;
+    body->prevHdgRad = rs->prevHeadingRad;
+    body->currHdgRad = rs->currHeadingRad;
+}
+
+static void scenario_vehicle_collision(void)
+{
+    VehicleSpec spec;
+    vehicle_spec_set_default(&spec);
+    spec.bodyHalfWidthM = 0.85f;
+    spec.collisionRestitution = 0.30f;
+    spec.collisionFriction = 0.50f;
+    spec.massKg = 1200.0f;
+    spec.yawInertiaKgM2 = 1500.0f;
+    vehicle_spec_refresh_derived(&spec);
+
+    /* World helper: begin a tick, add two bodies, resolve (statics + pairs). */
+    const struct {
+        CollisionWorld *world;
+    } w = { alloc_collision_world() };
+    collision_world_init(w.world);
+
+    /* --- 1. Head-on elastic: equal masses, equal opposing speeds. Momentum conserved;
+     *        velocities reverse with restitution < 1 so magnitudes shrink. --- */
+    {
+        VehicleState sA = { 0 }, sB = { 0 };
+        VehicleRenderState rA = { 0 }, rB = { 0 };
+        float loA = 0.0f, loB = 0.0f;
+
+        sA.positionM = (Vector2){ 0.0f, 0.0f };
+        sA.velocityLongitudinalMps = 5.0f; /* +X */
+        rA.prevPositionM = rA.currPositionM = sA.positionM;
+        rA.prevHeadingRad = rA.currHeadingRad = 0.0f;
+
+        sB.positionM = (Vector2){ 2.5f, 0.0f };
+        sB.velocityLongitudinalMps = -5.0f; /* -X */
+        rB.prevPositionM = rB.currPositionM = sB.positionM;
+        rB.prevHeadingRad = rB.currHeadingRad = 0.0f;
+
+        CollisionBody bA, bB;
+        make_body_proxy(&bA, 1u, &spec, &rA);
+        make_body_proxy(&bB, 2u, &spec, &rB);
+
+        collision_world_begin_tick(w.world);
+        check(collision_world_add_body(w.world, &bA), "head-on: body A registered");
+        check(collision_world_add_body(w.world, &bB), "head-on: body B registered");
+
+        CollisionBodyContext ctxs[2] = {
+            { .id = 1u,
+              .spec = &spec,
+              .state = &sA,
+              .renderState = &rA,
+              .crashLockoutTimerS = &loA },
+            { .id = 2u,
+              .spec = &spec,
+              .state = &sB,
+              .renderState = &rB,
+              .crashLockoutTimerS = &loB },
+        };
+        const int n = collision_world_resolve_bodies(w.world, ctxs, 2);
+        check(n >= 2, "head-on contact resolved (>= 2 events, got %d)", n);
+
+        /* Momentum: m*(vA + vB) unchanged. */
+        const float pBefore = 1200.0f * (5.0f + -5.0f);
+        const float pAfter =
+            1200.0f * (sA.velocityLongitudinalMps + sB.velocityLongitudinalMps);
+        check_near((double)pAfter, (double)pBefore, 0.5, "head-on: linear momentum conserved");
+
+        /* A reversed: was +5, now negative. B reversed: was -5, now positive. */
+        // cppcheck-suppress knownConditionTrueFalse
+        check(sA.velocityLongitudinalMps < 0.0f, "head-on: A reversed (%.3f m/s)",
+              (double)sA.velocityLongitudinalMps);
+        // cppcheck-suppress knownConditionTrueFalse
+        check(sB.velocityLongitudinalMps > 0.0f, "head-on: B reversed (%.3f m/s)",
+              (double)sB.velocityLongitudinalMps);
+
+        /* Separated positions: A pushed -X, B pushed +X. */
+        check(sA.positionM.x < 0.0f && sB.positionM.x > 2.5f,
+              "head-on: positional correction separated the cars");
+        // cppcheck-suppress knownConditionTrueFalse
+        check(loA > 0.0f && loB > 0.0f, "head-on at 5 m/s sets crash lockout on both");
+    }
+
+    /* --- 2. Stationary target: A moving +5 hits B at rest. B moves, A slows. --- */
+    {
+        VehicleState sA = { 0 }, sB = { 0 };
+        VehicleRenderState rA = { 0 }, rB = { 0 };
+        float loA = 0.0f, loB = 0.0f;
+
+        sA.positionM = (Vector2){ 0.0f, 0.0f };
+        sA.velocityLongitudinalMps = 5.0f;
+        rA.prevPositionM = rA.currPositionM = sA.positionM;
+
+        sB.positionM = (Vector2){ 2.5f, 0.0f };
+        rB.prevPositionM = rB.currPositionM = sB.positionM;
+
+        CollisionBody bA, bB;
+        make_body_proxy(&bA, 1u, &spec, &rA);
+        make_body_proxy(&bB, 2u, &spec, &rB);
+
+        collision_world_begin_tick(w.world);
+        collision_world_add_body(w.world, &bA);
+        collision_world_add_body(w.world, &bB);
+        CollisionBodyContext ctxs[2] = {
+            { .id = 1u,
+              .spec = &spec,
+              .state = &sA,
+              .renderState = &rA,
+              .crashLockoutTimerS = &loA },
+            { .id = 2u,
+              .spec = &spec,
+              .state = &sB,
+              .renderState = &rB,
+              .crashLockoutTimerS = &loB },
+        };
+        collision_world_resolve_bodies(w.world, ctxs, 2);
+
+        // cppcheck-suppress knownConditionTrueFalse
+        check(sB.velocityLongitudinalMps > 1.0f, "stationary target: B now moves (%.3f m/s)",
+              (double)sB.velocityLongitudinalMps);
+        // cppcheck-suppress knownConditionTrueFalse
+        check(sA.velocityLongitudinalMps < 5.0f, "stationary target: A slowed (%.3f m/s)",
+              (double)sA.velocityLongitudinalMps);
+        const float p = 1200.0f * (sA.velocityLongitudinalMps + sB.velocityLongitudinalMps);
+        check_near((double)p, 1200.0f * 5.0f, 0.5, "stationary target: momentum conserved");
+    }
+
+    /* --- 3. Order independence: registration order (B before A) yields the same result. --- */
+    {
+        VehicleState sA = { 0 }, sB = { 0 };
+        VehicleRenderState rA = { 0 }, rB = { 0 };
+        float loA = 0.0f, loB = 0.0f;
+
+        sA.positionM = (Vector2){ 0.0f, 0.0f };
+        sA.velocityLongitudinalMps = 5.0f;
+        rA.prevPositionM = rA.currPositionM = sA.positionM;
+        sB.positionM = (Vector2){ 2.5f, 0.0f };
+        sB.velocityLongitudinalMps = -5.0f;
+        rB.prevPositionM = rB.currPositionM = sB.positionM;
+
+        CollisionBody bA, bB;
+        make_body_proxy(&bA, 1u, &spec, &rA);
+        make_body_proxy(&bB, 2u, &spec, &rB);
+
+        /* Register B first: the world must still resolve (1,2) in id order. */
+        collision_world_begin_tick(w.world);
+        collision_world_add_body(w.world, &bB);
+        collision_world_add_body(w.world, &bA);
+        CollisionBodyContext ctxs[2] = {
+            { .id = 1u,
+              .spec = &spec,
+              .state = &sA,
+              .renderState = &rA,
+              .crashLockoutTimerS = &loA },
+            { .id = 2u,
+              .spec = &spec,
+              .state = &sB,
+              .renderState = &rB,
+              .crashLockoutTimerS = &loB },
+        };
+        collision_world_resolve_bodies(w.world, ctxs, 2);
+
+        /* Same outcome as case 1: A reversed, B reversed, separated. */
+        // cppcheck-suppress knownConditionTrueFalse
+        check(sA.velocityLongitudinalMps < 0.0f && sB.velocityLongitudinalMps > 0.0f,
+              "order independence: id-sorted pairs give the same reversal");
+        check(sA.positionM.x < 0.0f && sB.positionM.x > 2.5f,
+              "order independence: same positional separation");
+    }
+
+    /* --- 4. Resting contact: no impulse, no energy added. --- */
+    {
+        VehicleState sA = { 0 }, sB = { 0 };
+        VehicleRenderState rA = { 0 }, rB = { 0 };
+        float loA = 0.0f, loB = 0.0f;
+        sA.positionM = (Vector2){ 0.0f, 0.0f };
+        rA.prevPositionM = rA.currPositionM = sA.positionM;
+        sB.positionM = (Vector2){ 2.5f, 0.0f };
+        rB.prevPositionM = rB.currPositionM = sB.positionM;
+
+        CollisionBody bA, bB;
+        make_body_proxy(&bA, 1u, &spec, &rA);
+        make_body_proxy(&bB, 2u, &spec, &rB);
+        collision_world_begin_tick(w.world);
+        collision_world_add_body(w.world, &bA);
+        collision_world_add_body(w.world, &bB);
+        CollisionBodyContext ctxs[2] = {
+            { .id = 1u,
+              .spec = &spec,
+              .state = &sA,
+              .renderState = &rA,
+              .crashLockoutTimerS = &loA },
+            { .id = 2u,
+              .spec = &spec,
+              .state = &sB,
+              .renderState = &rB,
+              .crashLockoutTimerS = &loB },
+        };
+        collision_world_resolve_bodies(w.world, ctxs, 2);
+
+        check(sA.velocityLongitudinalMps == 0.0f && sB.velocityLongitudinalMps == 0.0f,
+              "resting contact: no impulse (velocities stay 0)");
+        check(loA == 0.0f && loB == 0.0f, "resting contact: no crash lockout");
+    }
+
+    /* --- 5. High-speed approach does not tunnel. --- */
+    {
+        VehicleState sA = { 0 }, sB = { 0 };
+        VehicleRenderState rA = { 0 }, rB = { 0 };
+        float loA = 0.0f, loB = 0.0f;
+        sA.positionM = (Vector2){ 0.0f, 0.0f };
+        sA.velocityLongitudinalMps = 60.0f;
+        rA.prevPositionM = rA.currPositionM = sA.positionM;
+        /* Closing at 1 m/tick (60+60 m/s at 120 Hz) from a 0.5 m envelope gap: the capsules
+         * only overlap mid-tick, so only the swept substeps can catch the contact. */
+        sB.positionM = (Vector2){ 3.0f, 0.0f };
+        sB.velocityLongitudinalMps = -60.0f;
+        rB.prevPositionM = rB.currPositionM = sB.positionM;
+
+        CollisionBody bA, bB;
+        make_body_proxy(&bA, 1u, &spec, &rA);
+        make_body_proxy(&bB, 2u, &spec, &rB);
+        collision_world_begin_tick(w.world);
+        collision_world_add_body(w.world, &bA);
+        collision_world_add_body(w.world, &bB);
+        CollisionBodyContext ctxs[2] = {
+            { .id = 1u,
+              .spec = &spec,
+              .state = &sA,
+              .renderState = &rA,
+              .crashLockoutTimerS = &loA },
+            { .id = 2u,
+              .spec = &spec,
+              .state = &sB,
+              .renderState = &rB,
+              .crashLockoutTimerS = &loB },
+        };
+        collision_world_resolve_bodies(w.world, ctxs, 2);
+
+        /* Reversed and separated — they did NOT pass through each other. cppcheck cannot
+         * see through collision_world_resolve_bodies and assumes the 60 m/s assignments
+         * survive, so the reversal check is suppressed as a false positive. */
+        // cppcheck-suppress knownConditionTrueFalse
+        check(sA.velocityLongitudinalMps < 0.0f && sB.velocityLongitudinalMps > 0.0f,
+              "high-speed: swept substeps caught the contact (no tunneling)");
+        check(isfinite(sA.positionM.x) && isfinite(sB.positionM.x),
+              "high-speed: positions stay finite");
+    }
+
+    /* --- 6. Multi-car pileup stays finite and reproducible for a long headless run. --- */
+    {
+        const int N = 4;
+        VehicleState states[4] = { 0 };
+        VehicleRenderState rs[4] = { 0 };
+        float lockouts[4] = { 0 };
+        const Vector2 starts[4] = {
+            { 0.0f, 0.0f }, { 2.2f, 0.3f }, { 4.4f, -0.3f }, { 6.6f, 0.0f }
+        };
+        for (int i = 0; i < N; i++) {
+            states[i].positionM = starts[i];
+            states[i].velocityLongitudinalMps = 4.0f - (float)i;
+            rs[i].prevPositionM = rs[i].currPositionM = starts[i];
+            rs[i].prevHeadingRad = rs[i].currHeadingRad = 0.0f;
+        }
+
+        CollisionBody bodies[4];
+        CollisionBodyContext ctxs[4];
+        for (int i = 0; i < N; i++) {
+            make_body_proxy(&bodies[i], (CollisionBodyId)(i + 1u), &spec, &rs[i]);
+            ctxs[i] = (CollisionBodyContext){ .id = (CollisionBodyId)(i + 1u),
+                                              .spec = &spec,
+                                              .state = &states[i],
+                                              .renderState = &rs[i],
+                                              .crashLockoutTimerS = &lockouts[i] };
+        }
+
+        bool finite = true;
+        for (int tick = 0; tick < 2000; tick++) {
+            collision_world_begin_tick(w.world);
+            for (int i = 0; i < N; i++) {
+                /* Sweep the pose forward slowly so the pileup keeps touching. */
+                states[i].positionM.x += 0.02f * (float)i;
+                rs[i].currPositionM = states[i].positionM;
+                make_body_proxy(&bodies[i], (CollisionBodyId)(i + 1u), &spec, &rs[i]);
+                if (!collision_world_add_body(w.world, &bodies[i])) finite = false;
+            }
+            collision_world_resolve_bodies(w.world, ctxs, N);
+            for (int i = 0; i < N; i++) {
+                if (!isfinite(states[i].positionM.x) || !isfinite(states[i].positionM.y) ||
+                    !isfinite(states[i].velocityLongitudinalMps) ||
+                    !isfinite(states[i].yawRateRadS))
+                    finite = false;
+            }
+        }
+        check(finite, "4-car pileup stays finite and registerable for 2000 ticks");
+    }
+
+    free(w.world);
+}
+
+/* ------------------------------------------------------------------------------------- */
 /* Scenario: collision-world — the deterministic CollisionWorld contract                  */
 /* ------------------------------------------------------------------------------------- */
 
@@ -4418,6 +4734,9 @@ static const TestScenario kGameplayScenarios[] = {
     { "collision-units",
       "direct collision_resolve_track tests: count, push, impulse, multi-contact",
       scenario_collision_units },
+    { "vehicle-collision",
+      "issue #27 two-body impulses: momentum, order independence, resting, tunneling, pileup",
+      scenario_vehicle_collision },
     { "collision-world",
       "issue #26 world contract: stable ids, layers, authored objects, multi-proxy order, "
       "penetration recovery, corners, contact feed",

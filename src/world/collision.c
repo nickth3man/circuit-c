@@ -339,6 +339,242 @@ static int resolve_body_vs_static(CollisionWorld *world, const CollisionBody *bo
 }
 
 /* ====================================================================================== */
+/*  Vehicle-vs-vehicle (issue #27)                                                         */
+/* ====================================================================================== */
+
+/* Closest points between two segments p1-p2 and q1-q2, and the squared distance between
+ * them (robust 2D algorithm: solve the parametric closest-point system, clamp, refine). */
+static float segment_segment_dist_sq(Vector2 p1, Vector2 p2, Vector2 q1, Vector2 q2,
+                                     Vector2 *closestP, Vector2 *closestQ)
+{
+    const Vector2 d1 = { p2.x - p1.x, p2.y - p1.y };
+    const Vector2 d2 = { q2.x - q1.x, q2.y - q1.y };
+    const Vector2 r = { p1.x - q1.x, p1.y - q1.y };
+    const float a = d1.x * d1.x + d1.y * d1.y;
+    const float e = d2.x * d2.x + d2.y * d2.y;
+    const float f = d2.x * r.x + d2.y * r.y;
+
+    float s, t;
+    if (a <= 1e-12f && e <= 1e-12f) {
+        s = 0.0f;
+        t = 0.0f;
+    } else if (a <= 1e-12f) {
+        s = 0.0f;
+        t = f / e;
+        if (t < 0.0f) t = 0.0f;
+        if (t > 1.0f) t = 1.0f;
+    } else {
+        const float c = d1.x * r.x + d1.y * r.y;
+        const float b = d1.x * d2.x + d1.y * d2.y;
+        const float denom = a * e - b * b;
+        if (denom > 1e-12f) {
+            s = (b * f - c * e) / denom;
+        } else {
+            s = 0.0f;
+        }
+        if (s < 0.0f) s = 0.0f;
+        if (s > 1.0f) s = 1.0f;
+        t = (b * s + f) / e;
+        if (t < 0.0f) t = 0.0f;
+        if (t > 1.0f) t = 1.0f;
+        /* One refinement pass with the clamped t. */
+        s = (b * t - c) / a;
+        if (s < 0.0f) s = 0.0f;
+        if (s > 1.0f) s = 1.0f;
+    }
+
+    *closestP = (Vector2){ p1.x + s * d1.x, p1.y + s * d1.y };
+    *closestQ = (Vector2){ q1.x + t * d2.x, q1.y + t * d2.y };
+    const float ex = closestP->x - closestQ->x;
+    const float ey = closestP->y - closestQ->y;
+    return ex * ex + ey * ey;
+}
+
+/* Resolve one body-body contact: bounded positional correction plus a two-body impulse that
+ * conserves linear momentum (equal and opposite on the two bodies) and applies torque at each
+ * body's contact point. `n` is the unit normal from A's surface toward B's surface; contact
+ * points cpA/cpB are the closest points at the substep pose. */
+static bool resolve_pair_contact(CollisionBodyContext *cA, CollisionBodyContext *cB,
+                                 Vector2 posA, Vector2 posB, Vector2 cpA, Vector2 cpB,
+                                 Vector2 n, float pen, CollisionWorld *world)
+{
+    VehicleState *sA = cA->state;
+    VehicleState *sB = cB->state;
+    const VehicleSpec *spA = cA->spec;
+    const VehicleSpec *spB = cB->spec;
+    if (sA == NULL || sB == NULL || spA == NULL || spB == NULL) return false;
+    const float massA = spA->massKg;
+    const float massB = spB->massKg;
+    const float yawIA = spA->yawInertiaKgM2;
+    const float yawIB = spB->yawInertiaKgM2;
+    if (!(massA > 0.0f) || !(massB > 0.0f) || !(yawIA > 0.0f) || !(yawIB > 0.0f)) return false;
+
+    const float invMA = 1.0f / massA;
+    const float invMB = 1.0f / massB;
+    const float invIA = 1.0f / yawIA;
+    const float invIB = 1.0f / yawIB;
+
+    /* Bounded positional correction: separate along the normal, split by inverse mass. */
+    if (pen > 0.0f) {
+        const float clamped = fminf(pen, 0.5f);
+        const float invSum = invMA + invMB;
+        const float pushA = clamped * (invMA / invSum);
+        const float pushB = clamped * (invMB / invSum);
+        sA->positionM.x -= n.x * pushA;
+        sA->positionM.y -= n.y * pushA;
+        sB->positionM.x += n.x * pushB;
+        sB->positionM.y += n.y * pushB;
+        if (cA->renderState != NULL) {
+            cA->renderState->currPositionM = sA->positionM;
+        }
+        if (cB->renderState != NULL) {
+            cB->renderState->currPositionM = sB->positionM;
+        }
+    }
+
+    /* Contact-point velocities. */
+    const Vector2 rA = { cpA.x - posA.x, cpA.y - posA.y };
+    const Vector2 rB = { cpB.x - posB.x, cpB.y - posB.y };
+    Vector2 vA =
+        world_velocity(sA->velocityLongitudinalMps, sA->velocityLateralMps, sA->headingRad);
+    Vector2 vB =
+        world_velocity(sB->velocityLongitudinalMps, sB->velocityLateralMps, sB->headingRad);
+    const Vector2 vContactA = { vA.x - sA->yawRateRadS * rA.y, vA.y + sA->yawRateRadS * rA.x };
+    const Vector2 vContactB = { vB.x - sB->yawRateRadS * rB.y, vB.y + sB->yawRateRadS * rB.x };
+    const Vector2 vRel = { vContactA.x - vContactB.x, vContactA.y - vContactB.y };
+
+    /* Normal velocity along n (A→B). Positive = A closing on B = approaching; the impulse
+     * fires on approach (opposite sign convention to the barrier path, whose push normal
+     * points into free space). */
+    const float vn = vRel.x * n.x + vRel.y * n.y;
+    const float approachMps = (vn > 0.0f) ? vn : 0.0f;
+    record_contact(world, cA->id, cB->id, cpA, n, approachMps);
+    record_contact(world, cB->id, cA->id, cpB, (Vector2){ -n.x, -n.y }, approachMps);
+    if (vn <= 0.0f) return true; /* separating: positional correction only */
+
+    const Vector2 tang = { -n.y, n.x };
+    const float vt = vRel.x * tang.x + vRel.y * tang.y;
+
+    /* Effective masses (normal and tangential) for the two-body system. */
+    const float rXn = rA.x * n.y - rA.y * n.x;
+    const float rXnB = rB.x * n.y - rB.y * n.x;
+    const float rXt = rA.x * tang.y - rA.y * tang.x;
+    const float rXtB = rB.x * tang.y - rB.y * tang.x;
+    const float effMassN = 1.0f / (invMA + invMB + rXn * rXn * invIA + rXnB * rXnB * invIB);
+    const float effMassT = 1.0f / (invMA + invMB + rXt * rXt * invIA + rXtB * rXtB * invIB);
+
+    /* Combined restitution and friction from the two bodies. */
+    const float e = 0.5f * (spA->collisionRestitution + spB->collisionRestitution);
+    const float mu = 0.5f * (spA->collisionFriction + spB->collisionFriction);
+
+    /* Normal impulse reflects the approach; friction is Coulomb-clamped. */
+    const float Jn = effMassN * (-(1.0f + e) * vn);
+    float Jt = -effMassT * vt;
+    const float JtMax = mu * Jn;
+    if (Jt > JtMax) Jt = JtMax;
+    if (Jt < -JtMax) Jt = -JtMax;
+
+    /* Total impulse: +J on A, -J on B (equal and opposite). */
+    const Vector2 J = { Jn * n.x + Jt * tang.x, Jn * n.y + Jt * tang.y };
+    vA.x += J.x * invMA;
+    vA.y += J.y * invMA;
+    vB.x -= J.x * invMB;
+    vB.y -= J.y * invMB;
+
+    world_vel_to_body(vA, sA->headingRad, &sA->velocityLongitudinalMps,
+                      &sA->velocityLateralMps);
+    world_vel_to_body(vB, sB->headingRad, &sB->velocityLongitudinalMps,
+                      &sB->velocityLateralMps);
+
+    /* Angular impulses: ω += (r × J) / I, opposite signs. */
+    sA->yawRateRadS += (rA.x * J.y - rA.y * J.x) * invIA;
+    sB->yawRateRadS -= (rB.x * J.y - rB.y * J.x) * invIB;
+
+    /* Crash lockout on a significant approach for either body. */
+    if (cA->crashLockoutTimerS != NULL && fabsf(vn) > COLLISION_LOCKOUT_THRESHOLD_MPS) {
+        *cA->crashLockoutTimerS = CRASH_LOCKOUT_S;
+    }
+    if (cB->crashLockoutTimerS != NULL && fabsf(vn) > COLLISION_LOCKOUT_THRESHOLD_MPS) {
+        *cB->crashLockoutTimerS = CRASH_LOCKOUT_S;
+    }
+    return true;
+}
+
+int collision_resolve_body_pairs(CollisionWorld *world, CollisionBodyContext *contexts,
+                                 int contextCount)
+{
+    if (world == NULL || contexts == NULL || world->bodyCount < 2) return 0;
+
+    int total = 0;
+    for (int ai = 0; ai < world->bodyCount; ai++) {
+        for (int bi = ai + 1; bi < world->bodyCount; bi++) {
+            const CollisionBody *bodyA = &world->bodies[ai];
+            const CollisionBody *bodyB = &world->bodies[bi];
+            /* Both bodies must be vehicle-layer (pairing is what consumes that layer). */
+            if (!(bodyA->mask & COLLISION_LAYER_VEHICLE_BODY)) continue;
+            if (!(bodyB->mask & COLLISION_LAYER_VEHICLE_BODY)) continue;
+
+            CollisionBodyContext *cA = NULL;
+            CollisionBodyContext *cB = NULL;
+            for (int c = 0; c < contextCount; c++) {
+                if (contexts[c].id == bodyA->id) cA = &contexts[c];
+                if (contexts[c].id == bodyB->id) cB = &contexts[c];
+            }
+            if (cA == NULL || cB == NULL) return -1;
+            if (cA->spec == NULL || cA->state == NULL || cB->spec == NULL || cB->state == NULL)
+                return -1;
+
+            const float sumR = bodyA->radiusM + bodyB->radiusM;
+            if (!(sumR > 0.0f)) continue;
+
+            /* Swept substeps: interpolate both poses, test capsule-capsule, resolve the first
+             * penetrating substep and move to the next pair. */
+            for (int sub = 0; sub < COLLISION_SUBSTEPS; sub++) {
+                const float t = (float)sub / (float)COLLISION_SUBSTEPS;
+                const Vector2 posA = lerp_vec(bodyA->prevPosM, bodyA->currPosM, t);
+                const float hdgA = lerp_angle_simple(bodyA->prevHdgRad, bodyA->currHdgRad, t);
+                const Vector2 posB = lerp_vec(bodyB->prevPosM, bodyB->currPosM, t);
+                const float hdgB = lerp_angle_simple(bodyB->prevHdgRad, bodyB->currHdgRad, t);
+
+                const Vector2 fA =
+                    world_from_body(body_front_position(bodyA->cgToFrontM), posA, hdgA);
+                const Vector2 rA =
+                    world_from_body(body_rear_position(bodyA->cgToRearM), posA, hdgA);
+                const Vector2 fB =
+                    world_from_body(body_front_position(bodyB->cgToFrontM), posB, hdgB);
+                const Vector2 rB =
+                    world_from_body(body_rear_position(bodyB->cgToRearM), posB, hdgB);
+
+                Vector2 cpA, cpB;
+                const float distSq = segment_segment_dist_sq(fA, rA, fB, rB, &cpA, &cpB);
+                const float dist = sqrtf(distSq);
+                if (dist < sumR && dist > 1e-9f) {
+                    /* Separation normal from centre to centre: robust even when the closest
+                     * segment points are collinear (their difference can point inward). */
+                    const float cdx = posB.x - posA.x;
+                    const float cdy = posB.y - posA.y;
+                    const float cdist = sqrtf(cdx * cdx + cdy * cdy);
+                    Vector2 n;
+                    if (cdist > 1e-9f) {
+                        n.x = cdx / cdist;
+                        n.y = cdy / cdist;
+                    } else {
+                        n.x = (cpB.x - cpA.x) / dist;
+                        n.y = (cpB.y - cpA.y) / dist;
+                    }
+                    if (resolve_pair_contact(cA, cB, posA, posB, cpA, cpB, n, sumR - dist,
+                                             world)) {
+                        total += 2; /* one contact event recorded per body */
+                    }
+                    break;
+                }
+            }
+        }
+    }
+    return total;
+}
+
+/* ====================================================================================== */
 /*  Ordered multi-body resolution                                                          */
 /* ====================================================================================== */
 
@@ -367,6 +603,14 @@ int collision_world_resolve_bodies(CollisionWorld *world, CollisionBodyContext *
                                              ctx->renderState, ctx->crashLockoutTimerS);
         if (n < 0) return -1;
         total += n;
+    }
+
+    /* Vehicle-vs-vehicle contacts resolve after every body has hit its statics, in ascending
+     * pair order (issue #27). Single-body worlds are a no-op here. */
+    if (world->bodyCount >= 2) {
+        const int pairs = collision_resolve_body_pairs(world, contexts, contextCount);
+        if (pairs < 0) return -1;
+        total += pairs;
     }
     return total;
 }
