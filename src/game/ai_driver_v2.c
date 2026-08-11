@@ -56,18 +56,20 @@
  * ticks 8312-8554; rwd_grip froze at pedal 0.03 for 226 ticks, rwd_power at 0.54 for 994).
  * Letting a braking demand through the hold is the whole of the Phase-2 change.
  *
- * Next steps, in order: (1) the slide monitor still false-positives on every corner approach
- * at speed — the reference yaw rate should be taken at the car rather than a node ahead, and
- * the yaw branch arguably needs sideslip corroboration, since counter-steer plus throttle hold
- * is an OVERSTEER remedy and oversteer is what sideslip identifies; a monitor that is latched
- * most of the lap is also the first suspect for v2's lap-time deficit. (2) the full-path
- * forward pass, which the per-tick reachable-preview formulation could not use (it pinned the
- * target to the current speed and the car crawled — observed and reverted). (3) the
- * tracking-error speed penalty is NOT currently shipped and no longer has a failing case
- * driving it — chicane is at 0.0% off-track — so it should wait for one. Known-good gains from
- * Phase 1: D-filter tau 0.06 s (was 0.12), feedforward gain 0.45 (was 0.85); signed (not
- * absolute) curvature in the feedforward was the difference between barrier-pinning and
- * lapping.
+ * PHASE-3 STATUS (2026-08-11, #81 item 1): the slide monitor no longer false-positives on a
+ * corner approach. The reference yaw rate is taken AT the car (the plan's curvature at the
+ * car's own segment) instead of a node ahead, and the yaw branch requires sideslip
+ * corroboration (0.05 rad) because counter-steer plus throttle hold is an oversteer remedy and
+ * oversteer is what sideslip identifies. A monitor that was latched for much of a lap was the
+ * first suspect for v2's lap-time deficit; lap times before/after are measured per #81.
+ *
+ * Next steps, in order: (1) the full-path forward pass, which the per-tick reachable-preview
+ * formulation could not use (it pinned the target to the current speed and the car crawled —
+ * observed and reverted). (2) the tracking-error speed penalty is NOT currently shipped and no
+ * longer has a failing case driving it — chicane is at 0.0% off-track — so it should wait for
+ * one. Known-good gains from Phase 1: D-filter tau 0.06 s (was 0.12), feedforward gain 0.45
+ * (was 0.85); signed (not absolute) curvature in the feedforward was the difference between
+ * barrier-pinning and lapping.
  *
  * Everything read is geometry the track publishes, grip the car publishes about itself, or
  * feelable state (sideslip, yaw rate, friction usage) — no force or torque internals. Nothing
@@ -89,12 +91,19 @@
  * as the knife-edge case.
  * ---------------------------------------------------------------------------
  */
-#define AI_V2_MIN_CURVATURE_1PM 1.0e-4f  /* curvature below this is a straight */
-#define AI_V2_D_FILTER_TAU_S 0.06f       /* low-pass tau for the cross-track derivative */
-#define AI_V2_FF_GAIN 0.45f              /* curvature feedforward gain (0 = off) */
-#define AI_V2_FF_NODE_LEAD 3             /* plan nodes ahead the feedforward reads */
-#define AI_V2_SLIDE_SIDESLIP_RAD 0.12f   /* |sideslip| above this is an excursion */
-#define AI_V2_SLIDE_YAW_ERR_RAD_S 0.50f  /* yaw-rate error above this is an excursion */
+#define AI_V2_MIN_CURVATURE_1PM 1.0e-4f /* curvature below this is a straight */
+#define AI_V2_D_FILTER_TAU_S 0.06f      /* low-pass tau for the cross-track derivative */
+#define AI_V2_FF_GAIN 0.45f             /* curvature feedforward gain (0 = off) */
+#define AI_V2_FF_NODE_LEAD 3            /* plan nodes ahead the feedforward reads */
+#define AI_V2_SLIDE_SIDESLIP_RAD 0.12f  /* |sideslip| above this is an excursion */
+#define AI_V2_SLIDE_YAW_ERR_RAD_S 0.50f /* yaw-rate error above this is an excursion */
+#define AI_V2_SLIDE_YAW_CORROBORATION_RAD \
+    0.05f /* the yaw branch also needs |sideslip| above this */
+/* The corroboration level sits between stable cornering (p95 |sideslip| <= 0.06 on every roster
+ * car, <= 0.04 on all but the knife-edge awd_rally) and a genuine excursion (0.12+), so a
+ * corner-entry transient — car not yet rotating, yaw error large, sideslip still ~0.02 — does
+ * not corroborate. Counter-steer plus throttle hold is an OVERSTEER remedy, and oversteer is
+ * what sideslip identifies. (#81 item 1.) */
 #define AI_V2_SLIDE_MIN_SPEED_MPS 3.0f   /* below this the monitor stays off */
 #define AI_V2_SLIDE_CONFIRM_TICKS 2      /* threshold ticks before declaring a slide */
 #define AI_V2_SLIDE_RELEASE_TICKS 30     /* clean ticks before the slide is over (0.25 s) */
@@ -309,11 +318,22 @@ void ai_driver_update_v2(const AiDriverConfig *cfg, AiDriverState *state,
                                            spec->wheelbaseM);
 
     /* --- Slide monitor: gated slip/yaw excursion, the coupled stability layer. --- */
-    const float kappaHere = ai_v2_plan_curvature_ahead(state, track, bestSegment, 1);
+    /* Reference yaw rate AT the car, not a node ahead: the plan's curvature at the car's own
+     * segment is what its current rotation is being checked against. Reading a node ahead
+     * compared a straight, stable car against the corner it was APPROACHING, so the error was
+     * large by geometry alone (a 37.8 m/s car nearing a kappa=0.0211 corner read -0.766 rad/s
+     * against the 0.50 threshold) and the monitor latched for much of a lap. (#81 item 1.) */
+    const float kappaHere = ai_v2_plan_curvature_ahead(state, track, bestSegment, 0);
     const float yawErrRadS = vehicle->yawRateRadS - speedMps * kappaHere;
-    const bool thresholdHit = (speedMps > AI_V2_SLIDE_MIN_SPEED_MPS) &&
-                              (fabsf(derived->bodySideslipRad) > AI_V2_SLIDE_SIDESLIP_RAD ||
-                               fabsf(yawErrRadS) > AI_V2_SLIDE_YAW_ERR_RAD_S);
+    /* The yaw branch needs sideslip corroboration: counter-steer plus throttle hold is an
+     * OVERSTEER remedy, and oversteer is what sideslip identifies. A pure yaw-error reading on
+     * its own cannot tell "not yet rotating into the corner" from "rotating too much". */
+    const bool yawExcursion =
+        (fabsf(yawErrRadS) > AI_V2_SLIDE_YAW_ERR_RAD_S) &&
+        (fabsf(derived->bodySideslipRad) > AI_V2_SLIDE_YAW_CORROBORATION_RAD);
+    const bool thresholdHit =
+        (speedMps > AI_V2_SLIDE_MIN_SPEED_MPS) &&
+        (fabsf(derived->bodySideslipRad) > AI_V2_SLIDE_SIDESLIP_RAD || yawExcursion);
     if (thresholdHit) {
         state->slideTicks++;
         state->slideCleanTicks = 0;
