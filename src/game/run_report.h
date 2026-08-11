@@ -63,6 +63,19 @@ typedef struct {
     int checkpointsMissed;
     int outOfOrderEvents;
 
+    /* Failure classification (issue #78): the fine-grained reason a run failed, the earliest
+     * causal tick, the contributing events in first-occurrence order, and where the run stopped
+     * and what it owed. All zero/empty for a PASS. */
+    const char
+        *classificationReason; /* primary class token ("pass", "spin_then_departure", ...) */
+    uint64_t firstFaultTick;   /* earliest causal-event tick; 0 if pass */
+    int contributingCount;     /* 0..8 classes detected, in first-occurrence order */
+    const char *contributingReasons[8]; /* their closed-set tokens */
+    int lastCheckpointIndex;            /* last gate crossed this run, -1 if none */
+    int expectedCheckpointIndex;        /* next gate owed at the end */
+    double furthestRouteDistanceM;      /* furthest lap-relative progress reached (m) */
+    double timeSinceProgressS;          /* run end minus last meaningful progress (s) */
+
     /* Metrics block. May be NULL only when status is RUN_FAIL_SPEC_INVALID (no run happened). */
     const ValidationMetrics *metrics;
 

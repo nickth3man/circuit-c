@@ -50,6 +50,7 @@
 #include "game/game.h"
 #include "game/input.h"
 #include "game/run_report.h"
+#include "game/validation_classifier.h"
 #include "game/validation_metrics.h"
 #include "platform/hotreload.h"
 #include "platform/timestep.h"
@@ -719,17 +720,51 @@ static int run_validate_lap(Game *game, const Options *options)
         memset(&metrics, 0, sizeof(metrics));
     }
 
+    /* Failure classification (issue #78): a pure reduction over the rows, metrics, and run
+     * inputs that gives a failed run its primary reason, the earliest causal tick, the
+     * contributing events, and where it stopped and what it owed. */
+    ValidationClassification classification;
+    ClassificationInputs clsInputs;
+    memset(&clsInputs, 0, sizeof(clsInputs));
+    clsInputs.checkpointCount = game->trackDef.checkpointCount;
+    clsInputs.startCheckpointIndex = options->startCheckpoint;
+    clsInputs.targetLaps = VALIDATION_RUN_LAPS;
+    clsInputs.tickBudget = budgetTicks;
+    clsInputs.ticksRun = ticksRun;
+    clsInputs.fixedDtS = FIXED_DT_S;
+    clsInputs.meaningfulProgressM = 10.0; /* the 10 m diagnostic progress-bin interval */
+    clsInputs.stallSpeedMps = 0.5;        /* speed at/under which the car counts as stopped */
+    clsInputs.stallDurationS = 3.0;       /* stopped this long => stalled */
+    clsInputs.wrongWayHoldS = 1.5;        /* wrong-way this long => wrong_way */
+    clsInputs.departureHoldS = 0.75;      /* beyond-runoff this long => route_departure */
+    clsInputs.mismatchHoldS = 1.0;        /* AI/route segment mismatch this long */
+    clsInputs.collisionSpeedMpsEps = 0.1; /* contacts below this don't attribute a collision */
+    clsInputs.spinSideslipRad = 1.48;     /* |sideslip| above this is a spin attitude */
+    clsInputs.spinMinSpeedMps = 2.0;      /* ...only while still moving */
+    clsInputs.spinMinDurationS = 0.25;    /* ...that must persist this long */
+    validation_classify(rowsBuffer, rowCount, &metrics, &clsInputs, &classification);
+
+    /* Status selection, now driven by the classification so the unreachable branches are
+     * reachable and distinct (issue #78 §5): RUN_FAIL_STALLED fires when the car is stalled or
+     * stuck, and RUN_FAIL_TICK_BUDGET_EXCEEDED fires only when the budget expired while the car
+     * was still progressing — a stopped car at budget expiry is a stall, not a slow timeout. */
     RunStatus status = RUN_PASS;
     if (!allFinite) {
         status = RUN_FAIL_INVALID_STATE;
     } else if (writeFailed || (pipe != NULL && ffmpegStatus != 0)) {
         status = RUN_FAIL_VIDEO_ENCODE_FAILED;
-    } else if (outOfOrder > 0) {
+    } else if (classification.primary == RUN_CLASS_CHECKPOINT_OUT_OF_ORDER ||
+               classification.primary == RUN_CLASS_CHECKPOINT_SKIPPED) {
         status = RUN_FAIL_CHECKPOINT_OUT_OF_ORDER;
+    } else if (classification.primary == RUN_CLASS_STALLED_ON_TRACK ||
+               classification.primary == RUN_CLASS_STALLED_OFF_TRACK ||
+               classification.primary == RUN_CLASS_COLLISION_STUCK ||
+               classification.primary == RUN_CLASS_SPIN_THEN_DEPARTURE) {
+        status = RUN_FAIL_STALLED;
+    } else if (classification.primary == RUN_CLASS_SLOW_TIMEOUT) {
+        status = RUN_FAIL_TICK_BUDGET_EXCEEDED;
     } else if (game->progress.lap < VALIDATION_RUN_LAPS) {
         status = RUN_FAIL_CHECKPOINT_MISSED;
-    } else if (ticksRun >= budgetTicks) {
-        status = RUN_FAIL_TICK_BUDGET_EXCEEDED;
     }
 
     char checksumHex[16];
@@ -771,9 +806,31 @@ static int run_validate_lap(Game *game, const Options *options)
     rep.ticksRun = ticksRun;
     rep.status = status;
     rep.checkpointsPassed = metrics.checkpointsPassed;
-    rep.checkpointsMissed =
-        (status == RUN_PASS) ? 0 : (game->trackDef.checkpointCount - metrics.checkpointsPassed);
+    /* Lap-aware missing-checkpoint accounting (issue #78 §5): count what the CURRENT incomplete
+     * lap still owed, never checkpointCount minus the whole run's crossings (which goes negative
+     * after one completed lap). Clamped so it can never report a negative miss. */
+    {
+        const int count = game->trackDef.checkpointCount;
+        const int crossedThisLap =
+            (count > 0)
+                ? ((game->progress.nextCheckpoint - game->progress.lapStartCheckpoint + count) %
+                   count)
+                : 0;
+        const int stillOwed = (count > crossedThisLap) ? (count - crossedThisLap) : 0;
+        rep.checkpointsMissed = (status == RUN_PASS) ? 0 : stillOwed;
+    }
     rep.outOfOrderEvents = outOfOrder;
+    rep.classificationReason = failure_class_reason(classification.primary);
+    rep.firstFaultTick = classification.firstFaultTick;
+    rep.contributingCount = classification.contributingCount;
+    for (int i = 0; i < classification.contributingCount && i < 8; i++) {
+        rep.contributingReasons[i] =
+            failure_class_reason(classification.contributing[i].reason);
+    }
+    rep.lastCheckpointIndex = classification.lastCheckpointIndex;
+    rep.expectedCheckpointIndex = classification.expectedCheckpointIndex;
+    rep.furthestRouteDistanceM = classification.furthestRouteDistanceM;
+    rep.timeSinceProgressS = classification.timeSinceProgressS;
     rep.metrics = &metrics;
     rep.hasVideo = (!options->noVideo && pipe != NULL && !writeFailed);
     rep.hasReplay = replaySaved;
@@ -786,11 +843,12 @@ static int run_validate_lap(Game *game, const Options *options)
     if (status != RUN_PASS) {
         char failureText[256];
         snprintf(failureText, sizeof(failureText),
-                 "validate-lap %s: %s (laps %d/2, %d checkpoint crossings over %d per lap, "
-                 "out-of-order %d, ticks %d/%d)",
-                 runId, run_failure_reason(status), game->progress.lap,
-                 metrics.checkpointsPassed, game->trackDef.checkpointCount, outOfOrder,
-                 ticksRun, budgetTicks);
+                 "validate-lap %s: %s (laps %d/%d, primary %s, first-fault tick %llu, "
+                 "%d checkpoint crossings over %d per lap, out-of-order %d, ticks %d/%d)",
+                 runId, run_failure_reason(status), game->progress.lap, VALIDATION_RUN_LAPS,
+                 failure_class_reason(classification.primary),
+                 (unsigned long long)classification.firstFaultTick, metrics.checkpointsPassed,
+                 game->trackDef.checkpointCount, outOfOrder, ticksRun, budgetTicks);
 
         FailureBundle bundle;
         memset(&bundle, 0, sizeof(bundle));
@@ -799,7 +857,16 @@ static int run_validate_lap(Game *game, const Options *options)
         bundle.telemetryPath = csvOpened ? csvPath : NULL;
         bundle.replay = &game->replay;
         bundle.spec = &game->spec;
-        bundle.failingTick = (firstFaultTick != 0) ? firstFaultTick : game->sim.tick;
+        /* The first-fault tick must point at the earliest detected causal event, not at the
+         * final budget timeout (issue #78 §6). The classifier's tick is authoritative; the
+         * local firstFaultTick (non-finite/out-of-order) and the sim tick are fallbacks. */
+        if (classification.firstFaultTick != 0) {
+            bundle.failingTick = classification.firstFaultTick;
+        } else if (firstFaultTick != 0) {
+            bundle.failingTick = firstFaultTick;
+        } else {
+            bundle.failingTick = game->sim.tick;
+        }
         bundle.checksum = game->stateChecksum;
         /* One check was run -- the run's own verdict -- and it failed. Leaving checksRun at 0
          * made summary.json report the impossible pair checks_run 0 / checks_failed 1. */
@@ -814,8 +881,9 @@ static int run_validate_lap(Game *game, const Options *options)
         }
     }
 
-    printf("VALIDATE: car=%s status=%s timed_lap=%.3fs out_lap=%.3fs -> %s\n", carId,
-           run_status_label(status), metrics.timedLapTimeS, metrics.outLapTimeS, jsonPath);
+    printf("VALIDATE: car=%s status=%s primary=%s timed_lap=%.3fs out_lap=%.3fs -> %s\n", carId,
+           run_status_label(status), failure_class_reason(classification.primary),
+           metrics.timedLapTimeS, metrics.outLapTimeS, jsonPath);
 
     free(rowsBuffer);
     return (status == RUN_PASS) ? 0 : 1;

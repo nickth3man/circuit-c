@@ -10,10 +10,11 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <inttypes.h>
 
 #include "platform/build_info.h"
 
-#define RUN_SCHEMA_VERSION "1.0.0"
+#define RUN_SCHEMA_VERSION "1.1.0"
 
 const char *run_status_label(RunStatus s)
 {
@@ -130,6 +131,25 @@ bool run_report_write(const char *path, const RunReportInput *in)
             m != NULL ? m->timedLapsCompleted : 0, m != NULL ? m->bestTimedLapTimeS : 0.0,
             m != NULL ? m->meanTimedLapTimeS : 0.0, in->checkpointsPassed,
             in->checkpointsMissed, in->outOfOrderEvents);
+
+    /* Failure classification (issue #78 §5/§6). The coarse result.status stays the closed-set
+     * verdict; this block carries the fine-grained primary reason, the first causal tick, the
+     * contributing events, and where the run stopped and what it owed. */
+    fprintf(file, "  \"classification\": { \"reason\": ");
+    write_json_string(file,
+                      in->classificationReason != NULL ? in->classificationReason : "pass");
+    fprintf(file, ", \"first_fault_tick\": %" PRIu64 ", \"contributing\": [",
+            in->firstFaultTick);
+    for (int i = 0; i < in->contributingCount && i < 8; i++) {
+        fprintf(file, "%s", (i > 0) ? ", " : "");
+        write_json_string(file,
+                          in->contributingReasons[i] != NULL ? in->contributingReasons[i] : "");
+    }
+    fprintf(file,
+            "], \"last_checkpoint_index\": %d, \"expected_checkpoint_index\": %d, "
+            "\"furthest_route_distance_m\": %.3f, \"time_since_progress_s\": %.3f },\n",
+            in->lastCheckpointIndex, in->expectedCheckpointIndex, in->furthestRouteDistanceM,
+            in->timeSinceProgressS);
 
     if (m != NULL) {
         fprintf(file, "  \"metrics\": {\n");
