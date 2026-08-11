@@ -48,5 +48,6 @@
 
     "terminal.integrated.env.windows": {
         "MSYS2_ROOT": "C:\\msys64"
-    }
+    },
+    "makefile.configureOnOpen": true
 }
