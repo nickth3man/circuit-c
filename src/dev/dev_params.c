@@ -75,25 +75,31 @@ static const DevParameter g_params[] = {
      * in each entry, and validity rejects an endpoint wider than widthOverallM (see vehicle.c). */
     { "body.nose_width", "Body", "m", SPEC_OFFSET(noseWidthM), VEH_NOSE_WIDTH_M, 0.8f, 2.2f,
       0.01f, false, false, 1, DEV_CLASS_APPEARANCE, DEV_OWNER_DEFINITION,
-      "Width at the foremost hull station (full width). [identity] endpoint; 0.8..2.2 m = "
+      "Width at the foremost hull station (full width). [identity] endpoint; 0.8..2.2 m "
+      "= "
       "11..29 px." },
     { "body.tail_width", "Body", "m", SPEC_OFFSET(tailWidthM), VEH_TAIL_WIDTH_M, 0.8f, 2.4f,
       0.01f, false, false, 1, DEV_CLASS_APPEARANCE, DEV_OWNER_DEFINITION,
-      "Width at the rearmost hull station (full width). [identity] endpoint; 0.8..2.4 m = "
+      "Width at the rearmost hull station (full width). [identity] endpoint; 0.8..2.4 m "
+      "= "
       "11..32 px." },
     { "body.shoulder_x", "Body", "m", SPEC_OFFSET(shoulderXM), VEH_SHOULDER_X_M, -2.0f, 2.0f,
       0.01f, false, false, 1, DEV_CLASS_APPEARANCE, DEV_OWNER_DEFINITION,
-      "Station of maximum body width, layout frame (axle midpoint origin). Same convention as "
-      "cowl_x/backlight_x; moves the widest point over ~53 px of body length at stock." },
+      "Station of maximum body width, layout frame (axle midpoint origin). Same "
+      "convention as "
+      "cowl_x/backlight_x; moves the widest point over ~53 px of body length at "
+      "stock." },
     { "body.fender_flare_front", "Body", "m", SPEC_OFFSET(fenderFlareFrontM),
       VEH_FENDER_FLARE_FRONT_M, 0.0f, 0.12f, 0.002f, false, false, 1, DEV_CLASS_APPEARANCE,
       DEV_OWNER_DEFINITION,
-      "Front arch flare proud of the hull over the wheel arch; 0 = none. 0..0.12 m = 0..1.6 "
+      "Front arch flare proud of the hull over the wheel arch; 0 = none. 0..0.12 m = "
+      "0..1.6 "
       "px." },
     { "body.fender_flare_rear", "Body", "m", SPEC_OFFSET(fenderFlareRearM),
       VEH_FENDER_FLARE_REAR_M, 0.0f, 0.15f, 0.002f, false, false, 1, DEV_CLASS_APPEARANCE,
       DEV_OWNER_DEFINITION,
-      "Rear arch flare proud of the hull over the wheel arch; 0 = none. 0..0.15 m = 0..2 px." },
+      "Rear arch flare proud of the hull over the wheel arch; 0 = none. 0..0.15 m = "
+      "0..2 px." },
     /* Phase C greenhouse. Longitudinal stations remain in the layout frame. Rake angles are
      * SI radians; comments state the degree envelope used by vehicle measurements. */
     { "body.roof_start_x", "Body", "m", SPEC_OFFSET(roofStartXM), VEH_ROOF_START_X_M, -4.0f,
@@ -109,7 +115,8 @@ static const DevParameter g_params[] = {
     { "body.windscreen_rake", "Body", "rad", SPEC_OFFSET(windscreenRakeRad),
       VEH_WINDSCREEN_RAKE_RAD, VEH_WINDSCREEN_RAKE_MIN_RAD, VEH_WINDSCREEN_RAKE_MAX_RAD, 0.01f,
       false, false, 1, DEV_CLASS_PHYSICS_INPUT, DEV_OWNER_DEFINITION,
-      "A-pillar angle from vertical, 20..70 deg; moves glass by ~7 px and feeds effective "
+      "A-pillar angle from vertical, 20..70 deg; moves glass by ~7 px and feeds "
+      "effective "
       "Cd." },
     { "body.backlight_rake", "Body", "rad", SPEC_OFFSET(backlightRakeRad),
       VEH_BACKLIGHT_RAKE_RAD, VEH_BACKLIGHT_RAKE_MIN_RAD, VEH_BACKLIGHT_RAKE_MAX_RAD, 0.01f,
@@ -223,12 +230,14 @@ static const DevParameter g_params[] = {
     { "wheel.offset_et_front", "Wheels", "mm", SPEC_OFFSET(wheelOffsetEtFrontMm),
       WHEEL_OFFSET_ET_FRONT_MM, -20.0f, 60.0f, 1.0f, false, false, 2, DEV_CLASS_INACTIVE,
       DEV_OWNER_DEFINITION,
-      "Front wheel ET offset. Inactive: wheel poke is drawn from track width and tire width, "
+      "Front wheel ET offset. Inactive: wheel poke is drawn from track width and tire "
+      "width, "
       "never from ET. Kept as authored hardware." },
     { "wheel.offset_et_rear", "Wheels", "mm", SPEC_OFFSET(wheelOffsetEtRearMm),
       WHEEL_OFFSET_ET_REAR_MM, -20.0f, 60.0f, 1.0f, false, false, 2, DEV_CLASS_INACTIVE,
       DEV_OWNER_DEFINITION,
-      "Rear wheel ET offset. Inactive: wheel poke is drawn from track width and tire width, "
+      "Rear wheel ET offset. Inactive: wheel poke is drawn from track width and tire "
+      "width, "
       "never from ET. Kept as authored hardware." },
     { "tire.section_width_front", "Tires", "mm", SPEC_OFFSET(tireSectionWidthFrontMm),
       TIRE_SECTION_WIDTH_MM, 145.0f, 355.0f, 5.0f, false, false, 0, DEV_CLASS_PHYSICS_INPUT,
@@ -243,10 +252,10 @@ static const DevParameter g_params[] = {
       TIRE_RIM_WIDTH_IN, 4.0f, 14.0f, 0.5f, false, false, 2, DEV_CLASS_APPEARANCE,
       DEV_OWNER_DEFINITION, "Front rim width. Appearance only: sets the drawn tire width." },
     { "tire.pressure_front", "Tires", "kPa", SPEC_OFFSET(tirePressureFrontKpa),
-      TIRE_PRESSURE_KPA, 120.0f, 400.0f, 5.0f, false, false, 2, DEV_CLASS_INACTIVE,
+      TIRE_PRESSURE_KPA, 120.0f, 400.0f, 5.0f, false, false, 2, DEV_CLASS_PHYSICS_INPUT,
       DEV_OWNER_SETUP,
-      "Front cold pressure. Inactive: carried by VehicleSetup and hashed, but no dynamics or "
-      "appearance path reads it. Kept as the authored setup value." },
+      "Front cold pressure. Scales lateral and longitudinal tire stiffness via a reduced-order "
+      "inflation model (issue #16)." },
     { "tire.section_width_rear", "Tires", "mm", SPEC_OFFSET(tireSectionWidthRearMm),
       TIRE_SECTION_WIDTH_MM, 145.0f, 355.0f, 5.0f, false, false, 0, DEV_CLASS_PHYSICS_INPUT,
       DEV_OWNER_DEFINITION, "Rear tire section width." },
@@ -260,9 +269,9 @@ static const DevParameter g_params[] = {
       4.0f, 14.0f, 0.5f, false, false, 2, DEV_CLASS_APPEARANCE, DEV_OWNER_DEFINITION,
       "Rear rim width. Appearance only: sets the drawn tire width." },
     { "tire.pressure_rear", "Tires", "kPa", SPEC_OFFSET(tirePressureRearKpa), TIRE_PRESSURE_KPA,
-      120.0f, 400.0f, 5.0f, false, false, 2, DEV_CLASS_INACTIVE, DEV_OWNER_SETUP,
-      "Rear cold pressure. Inactive: carried by VehicleSetup and hashed, but no dynamics or "
-      "appearance path reads it. Kept as the authored setup value." },
+      120.0f, 400.0f, 5.0f, false, false, 2, DEV_CLASS_PHYSICS_INPUT, DEV_OWNER_SETUP,
+      "Rear cold pressure. Scales lateral and longitudinal tire stiffness via a reduced-order "
+      "inflation model (issue #16)." },
     { "tire.lat_front.b", "Tires", "", SPEC_OFFSET(tireBLatFront), TIRE_B_LAT_FRONT, 2.0f,
       25.0f, 0.1f, false, false, 1, DEV_CLASS_PHYSICS_INPUT, DEV_OWNER_DEFINITION,
       "Front lateral stiffness factor." },
@@ -317,15 +326,15 @@ static const DevParameter g_params[] = {
       ACKERMANN_PERCENT, 0.0f, 1.0f, 0.01f, false, false, 1, DEV_CLASS_PHYSICS_INPUT,
       DEV_OWNER_DEFINITION, "Ackermann blend." },
     { "susp.camber_front", "Suspension", "rad", SPEC_OFFSET(suspCamberFrontRad),
-      SUSP_CAMBER_FRONT_RAD, -0.12f, 0.05f, 0.001f, false, false, 2, DEV_CLASS_APPEARANCE,
+      SUSP_CAMBER_FRONT_RAD, -0.12f, 0.05f, 0.001f, false, false, 2, DEV_CLASS_PHYSICS_INPUT,
       DEV_OWNER_SETUP,
-      "Front static camber. Appearance only: narrows the drawn contact patch. It does not "
-      "change tire force." },
+      "Front static camber. Adds camber thrust to the lateral tire force via a reduced-order "
+      "planar model (issue #15)." },
     { "susp.camber_rear", "Suspension", "rad", SPEC_OFFSET(suspCamberRearRad),
-      SUSP_CAMBER_REAR_RAD, -0.12f, 0.05f, 0.001f, false, false, 2, DEV_CLASS_APPEARANCE,
+      SUSP_CAMBER_REAR_RAD, -0.12f, 0.05f, 0.001f, false, false, 2, DEV_CLASS_PHYSICS_INPUT,
       DEV_OWNER_SETUP,
-      "Rear static camber. Appearance only: narrows the drawn contact patch. It does not "
-      "change tire force." },
+      "Rear static camber. Adds camber thrust to the lateral tire force via a reduced-order "
+      "planar model (issue #15)." },
     { "susp.toe_front", "Suspension", "rad", SPEC_OFFSET(suspToeFrontRad), SUSP_TOE_FRONT_RAD,
       -SUSP_TOE_LIMIT_RAD, SUSP_TOE_LIMIT_RAD, 0.001f, false, false, 2, DEV_CLASS_PHYSICS_INPUT,
       DEV_OWNER_SETUP,
@@ -338,15 +347,15 @@ static const DevParameter g_params[] = {
       "Rear static toe, positive = toe-in. Offsets each rear wheel's effective heading; rear "
       "toe-in adds straight-line stability and drag." },
     { "susp.caster_front", "Suspension", "rad", SPEC_OFFSET(suspCasterFrontRad),
-      SUSP_CASTER_FRONT_RAD, 0.0f, 0.25f, 0.001f, false, false, 2, DEV_CLASS_INACTIVE,
+      SUSP_CASTER_FRONT_RAD, 0.0f, 0.25f, 0.001f, false, false, 2, DEV_CLASS_PHYSICS_INPUT,
       DEV_OWNER_SETUP,
-      "Front caster. Inactive: no steering or tire path reads it. Kept as the authored setup "
-      "value." },
+      "Front caster. Induces camber gain from steering: gamma_caster = side * sin(caster) * "
+      "sin(steer), feeding the camber thrust model (issue #15)." },
     { "susp.caster_rear", "Suspension", "rad", SPEC_OFFSET(suspCasterRearRad),
-      SUSP_CASTER_REAR_RAD, 0.0f, 0.25f, 0.001f, false, false, 2, DEV_CLASS_INACTIVE,
+      SUSP_CASTER_REAR_RAD, 0.0f, 0.25f, 0.001f, false, false, 2, DEV_CLASS_PHYSICS_INPUT,
       DEV_OWNER_SETUP,
-      "Rear caster. Inactive: no steering or tire path reads it. Kept as the authored setup "
-      "value." },
+      "Rear caster. Rear wheels do not steer, so caster induces no camber gain. Kept active "
+      "for setup hash consistency; the physics path reads but nulls it (issue #15)." },
     { "susp.wheel_rate_front", "Suspension", "N/m", SPEC_OFFSET(suspWheelRateFrontNpm),
       SUSP_WHEEL_RATE_FRONT_NPM, 5000.0f, 80000.0f, 100.0f, false, false, 2, DEV_CLASS_INACTIVE,
       DEV_OWNER_DEFINITION,

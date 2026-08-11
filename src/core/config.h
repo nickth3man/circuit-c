@@ -353,6 +353,18 @@
 #define SURFACE_REFERENCE_MU_LONG \
     1.35f /* asphalt longitudinal mu; documentation reference only */
 #define RELAXATION_VX_FLOOR_MPS 0.50f /* m/s; floor for relaxation vx denominator */
+/* Phase 5 tire model — camber/caster and dimension/pressure effects (issues #15, #16) ---- */
+/* Camber thrust coefficient: F_camber = coeff * mu * gamma * Fz at zero slip, where the mu
+ * scaling comes from folding the effect into the Pacejka slip-angle shift. Dimensionless per
+ * radian. Pacejka reports camber stiffness at ~0.02-0.05 of cornering stiffness for radial
+ * tires; the value 0.10 is at the low end of the published range. */
+#define CAMBER_THRUST_COEFF 0.10f
+/* Reduced-order exponents for tire dimension → stiffness relationships. The contact patch
+ * model gives cornering stiffness ∝ sqrt(width * radius / load) to first order, so the
+ * width exponent is 0.5 and the pressure exponent is 0.5 (inflation stiffness saturates
+ * rather than scaling linearly). At nominal width/pressure the scales are 1.0 (baseline). */
+#define TIRE_WIDTH_STIFFNESS_EXP 0.5f    /* (section_width/ref)^exp on cornering stiffness */
+#define TIRE_PRESSURE_STIFFNESS_EXP 0.5f /* (pressure/ref)^exp on lat+long stiffness */
 
 /* -------------------------------------------------------------------------------------
  * Window and presentation (no effect on the simulation layer)

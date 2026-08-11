@@ -3462,12 +3462,13 @@ static void scenario_setup_editor(void)
     SetupEditor ed;
     setup_editor_init(&ed, &manifest->definition, &manifest->defaultSetup);
 
-    /* Every setup-owned physics-input registry key (drive.gear1..gear5, drive.reverse,
+    /* Every setup-owned physics-input registry key: drive.gear1..gear5, drive.reverse,
      * drive.final, drive.diff_mode, drive.diff_bias_ratio, drive.diff_preload,
-     * brake.bias_front, and — since issue #14 activated static alignment — susp.toe_front and
-     * susp.toe_rear) plus the typed int drive.gear_count. */
-    check(ed.itemCount == 14,
-          "editor exposes 13 registry setup-physics keys + gear_count (got %d)", ed.itemCount);
+     * brake.bias_front, susp.toe_front/rear (#14), susp.camber_front/rear and
+     * susp.caster_front/rear (#15), tire.pressure_front/rear (#16), plus the typed int
+     * drive.gear_count. */
+    check(ed.itemCount == 20,
+          "editor exposes 19 registry setup-physics keys + gear_count (got %d)", ed.itemCount);
     check(setup_editor_is_valid(&ed), "baseline setup is valid");
     const uint32_t h0 = setup_editor_hash(&ed);
     const float baseValue0 = setup_editor_value(&ed, 0);

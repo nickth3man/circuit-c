@@ -43,10 +43,6 @@ validation.
 |---|---|---|
 | `wheel.offset_et_front` | `definition` | Front wheel ET offset. Inactive: wheel poke is drawn from track width and tire width, never from ET. Kept as authored hardware. |
 | `wheel.offset_et_rear` | `definition` | Rear wheel ET offset. Inactive: wheel poke is drawn from track width and tire width, never from ET. Kept as authored hardware. |
-| `tire.pressure_front` | `setup` | Front cold pressure. Inactive: carried by VehicleSetup and hashed, but no dynamics or appearance path reads it. Kept as the authored setup value. |
-| `tire.pressure_rear` | `setup` | Rear cold pressure. Inactive: carried by VehicleSetup and hashed, but no dynamics or appearance path reads it. Kept as the authored setup value. |
-| `susp.caster_front` | `setup` | Front caster. Inactive: no steering or tire path reads it. Kept as the authored setup value. |
-| `susp.caster_rear` | `setup` | Rear caster. Inactive: no steering or tire path reads it. Kept as the authored setup value. |
 | `susp.wheel_rate_front` | `definition` | Front wheel rate. Inactive: no suspension is simulated; load transfer is quasi-static. Kept as authored hardware for a later ride-model change. |
 | `susp.wheel_rate_rear` | `definition` | Rear wheel rate. Inactive: no suspension is simulated; load transfer is quasi-static. Kept as authored hardware for a later ride-model change. |
 | `susp.anti_roll_front` | `definition` | Front anti-roll stiffness. Inactive: the roll split comes from body.roll_stiffness_front, not from these rates. Kept as authored hardware. |
@@ -56,7 +52,7 @@ validation.
 | `brake.pad_friction` | `definition` | Pad friction coefficient. Inactive: brake torque is authored directly as brake.max_torque. Kept as authored hardware. |
 | `aero.cop_x` | `definition` | Centre of pressure X. Inactive: vertical load is authored per axle, which fixes where the pressure centre is — it is an outcome of the four aero values, not a fifth input. Drag still acts at the CG. |
 
-14 of 140 parameters are inactive.
+10 of 140 parameters are inactive.
 
 ## Body
 
@@ -140,12 +136,12 @@ validation.
 | `tire.aspect_front` | `physics` | `definition` | 45 | % | 25 .. 80 | 1 | advanced | — | Front tire aspect ratio. |
 | `tire.rim_diameter_front` | `physics` | `definition` | 17 | in | 12 .. 22 | 0.5 | advanced | — | Front rim diameter. |
 | `tire.rim_width_front` | `appearance` | `definition` | 8 | in | 4 .. 14 | 0.5 | expert | — | Front rim width. Appearance only: sets the drawn tire width. |
-| `tire.pressure_front` | `inactive` | `setup` | 220 | kPa | 120 .. 400 | 5 | expert | — | Front cold pressure. Inactive: carried by VehicleSetup and hashed, but no dynamics or appearance path reads it. Kept as the authored setup value. |
+| `tire.pressure_front` | `physics` | `setup` | 220 | kPa | 120 .. 400 | 5 | expert | — | Front cold pressure. Scales lateral and longitudinal tire stiffness via a reduced-order inflation model (issue #16). |
 | `tire.section_width_rear` | `physics` | `definition` | 225 | mm | 145 .. 355 | 5 | essential | — | Rear tire section width. |
 | `tire.aspect_rear` | `physics` | `definition` | 45 | % | 25 .. 80 | 1 | advanced | — | Rear tire aspect ratio. |
 | `tire.rim_diameter_rear` | `physics` | `definition` | 17 | in | 12 .. 22 | 0.5 | advanced | — | Rear rim diameter. |
 | `tire.rim_width_rear` | `appearance` | `definition` | 8 | in | 4 .. 14 | 0.5 | expert | — | Rear rim width. Appearance only: sets the drawn tire width. |
-| `tire.pressure_rear` | `inactive` | `setup` | 220 | kPa | 120 .. 400 | 5 | expert | — | Rear cold pressure. Inactive: carried by VehicleSetup and hashed, but no dynamics or appearance path reads it. Kept as the authored setup value. |
+| `tire.pressure_rear` | `physics` | `setup` | 220 | kPa | 120 .. 400 | 5 | expert | — | Rear cold pressure. Scales lateral and longitudinal tire stiffness via a reduced-order inflation model (issue #16). |
 | `tire.lat_front.b` | `physics` | `definition` | 10 | — | 2 .. 25 | 0.1 | advanced | — | Front lateral stiffness factor. |
 | `tire.lat_front.c` | `physics` | `definition` | 1.45 | — | 1 .. 2.2 | 0.01 | advanced | — | Front lateral shape factor. |
 | `tire.lat_front.mu` | `physics` | `definition` | 1.3 | — | 0.3 .. 2 | 0.01 | advanced | — | Front lateral peak friction. |
@@ -174,12 +170,12 @@ validation.
 
 | Parameter | Class | Owner | Default | Unit | Range | Step | Tier | Reset | Meaning |
 |---|---|---|---:|---|---|---:|---|:-:|---|
-| `susp.camber_front` | `appearance` | `setup` | -0.0175 | rad | -0.12 .. 0.05 | 0.001 | expert | — | Front static camber. Appearance only: narrows the drawn contact patch. It does not change tire force. |
-| `susp.camber_rear` | `appearance` | `setup` | -0.0175 | rad | -0.12 .. 0.05 | 0.001 | expert | — | Rear static camber. Appearance only: narrows the drawn contact patch. It does not change tire force. |
+| `susp.camber_front` | `physics` | `setup` | -0.0175 | rad | -0.12 .. 0.05 | 0.001 | expert | — | Front static camber. Adds camber thrust to the lateral tire force via a reduced-order planar model (issue #15). |
+| `susp.camber_rear` | `physics` | `setup` | -0.0175 | rad | -0.12 .. 0.05 | 0.001 | expert | — | Rear static camber. Adds camber thrust to the lateral tire force via a reduced-order planar model (issue #15). |
 | `susp.toe_front` | `physics` | `setup` | 0.0035 | rad | -0.05 .. 0.05 | 0.001 | expert | — | Front static toe, positive = toe-in. Offsets each front wheel's effective heading, so it changes slip angle, straight-line drag and turn-in. |
 | `susp.toe_rear` | `physics` | `setup` | 0.0017 | rad | -0.05 .. 0.05 | 0.001 | expert | — | Rear static toe, positive = toe-in. Offsets each rear wheel's effective heading; rear toe-in adds straight-line stability and drag. |
-| `susp.caster_front` | `inactive` | `setup` | 0.087 | rad | 0 .. 0.25 | 0.001 | expert | — | Front caster. Inactive: no steering or tire path reads it. Kept as the authored setup value. |
-| `susp.caster_rear` | `inactive` | `setup` | 0.052 | rad | 0 .. 0.25 | 0.001 | expert | — | Rear caster. Inactive: no steering or tire path reads it. Kept as the authored setup value. |
+| `susp.caster_front` | `physics` | `setup` | 0.087 | rad | 0 .. 0.25 | 0.001 | expert | — | Front caster. Induces camber gain from steering: gamma_caster = side * sin(caster) * sin(steer), feeding the camber thrust model (issue #15). |
+| `susp.caster_rear` | `physics` | `setup` | 0.052 | rad | 0 .. 0.25 | 0.001 | expert | — | Rear caster. Rear wheels do not steer, so caster induces no camber gain. Kept active for setup hash consistency; the physics path reads but nulls it (issue #15). |
 | `susp.wheel_rate_front` | `inactive` | `definition` | 28000 | N/m | 5000 .. 80000 | 100 | expert | — | Front wheel rate. Inactive: no suspension is simulated; load transfer is quasi-static. Kept as authored hardware for a later ride-model change. |
 | `susp.wheel_rate_rear` | `inactive` | `definition` | 26000 | N/m | 5000 .. 80000 | 100 | expert | — | Rear wheel rate. Inactive: no suspension is simulated; load transfer is quasi-static. Kept as authored hardware for a later ride-model change. |
 | `susp.anti_roll_front` | `inactive` | `definition` | 18000 | N/m | 0 .. 60000 | 100 | expert | — | Front anti-roll stiffness. Inactive: the roll split comes from body.roll_stiffness_front, not from these rates. Kept as authored hardware. |
