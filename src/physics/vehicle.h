@@ -56,7 +56,8 @@ typedef struct {
     float slipRatio;
     float forceLongitudinalN;
     float forceLateralN;
-    float forceLateralRelaxedN; /* N; persistent relaxation state (Phase 4 feature 6) */
+    float forceLateralRelaxedN;      /* N; persistent lateral relaxation state (#20) */
+    float forceLongitudinalRelaxedN; /* N; persistent longitudinal relaxation state (#20) */
     float frictionUsage;
     bool locked;
     SurfaceId surfaceId;
@@ -150,6 +151,7 @@ typedef struct {
     float maxBrakeTorqueNm;
     float rollStiffnessFrontFraction;
     float tireRelaxationLengthM;
+    float tireLongRelaxationLengthM;
     float tireLoadRefPerWheelN;
 
     float maxRoadWheelAngleRad;
@@ -300,7 +302,9 @@ typedef struct {
      * separated from the slip-angle force. Recomputed every fixed update, never integrated,
      * excluded from the state checksum. */
     float effectiveCamberRad[WHEEL_COUNT]; /* rad; static + caster-induced, SAE convention */
-    float camberThrustN[WHEEL_COUNT];      /* N; camber-derived lateral force per wheel */
+    float aligningMomentNm
+        [WHEEL_COUNT];                /* N*m; self-aligning moment from pneumatic trail (#20) */
+    float camberThrustN[WHEEL_COUNT]; /* N; camber-derived lateral force per wheel */
 
     /* Which solver stage first produced a non-finite state, as a PhysicsStage value, or 0 when
      * the last step was healthy. Diagnostic only: it is recomputed every step and, like the

@@ -133,6 +133,7 @@ static uint32_t hash_entrant(uint32_t h, const RaceEntrant *entrant)
         h = hash_f32(h, wheel->forceLongitudinalN);
         h = hash_f32(h, wheel->forceLateralN);
         h = hash_f32(h, wheel->forceLateralRelaxedN);
+        h = hash_f32(h, wheel->forceLongitudinalRelaxedN);
         h = hash_f32(h, wheel->frictionUsage);
         h = hash_u32(h, wheel->locked ? 1u : 0u);
         h = hash_u32(h, (uint32_t)wheel->surfaceId);

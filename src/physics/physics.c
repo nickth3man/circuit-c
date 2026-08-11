@@ -391,6 +391,7 @@ bool physics_state_is_valid(const VehicleSpec *spec, const VehicleState *state,
         FINITE_VALUE(wheel->forceLongitudinalN);
         FINITE_VALUE(wheel->forceLateralN);
         FINITE_VALUE(wheel->forceLateralRelaxedN);
+        FINITE_VALUE(wheel->forceLongitudinalRelaxedN);
         FINITE_VALUE(wheel->frictionUsage);
         if (wheel->normalLoadN <= 0.0f || wheel->frictionUsage < 0.0f ||
             wheel->frictionUsage > 1.0f + FRICTION_TOLERANCE)
@@ -1028,8 +1029,10 @@ static void stage_tire_forces(PhysicsStep *step)
         }
         derived->camberThrustN[i] = derived->pureLateralForceN[i] - fySlipOnly;
 
-        /* Tire relaxation: first-order lag on lateral force buildup. With
-         * tireRelaxationLengthM at the default 0, fyRelaxed = fySteady (bit-identical). */
+        /* Tire relaxation: first-order lag on force buildup. With tireRelaxationLengthM at the
+         * default 0, relaxed = steady (bit-identical). Both lateral and longitudinal forces are
+         * relaxed before the combined-slip limiter so transients stay inside the friction
+         * ellipse (#20). */
         const float fySteady = derived->pureLateralForceN[i];
         float fyRelaxed;
         if (spec->tireRelaxationLengthM > 0.0f) {
@@ -1044,8 +1047,32 @@ static void stage_tire_forces(PhysicsStep *step)
         }
         wheel->forceLateralRelaxedN = fyRelaxed;
 
-        tire_apply_combined_limit(derived->pureLongitudinalForceN[i], fyRelaxed,
-                                  muLongitudinalEff * wheel->normalLoadN,
+        /* Longitudinal relaxation: same first-order lag on longitudinal force (#20). */
+        const float fxSteady = derived->pureLongitudinalForceN[i];
+        float fxRelaxed;
+        if (spec->tireLongRelaxationLengthM > 0.0f) {
+            const float vxEff = fmaxf(fabsf(derived->wheelContactVelocityBodyMps[i].x),
+                                      RELAXATION_VX_FLOOR_MPS);
+            const float coeff =
+                clampf(vxEff * step->dt / spec->tireLongRelaxationLengthM, 0.0f, 1.0f);
+            fxRelaxed = wheel->forceLongitudinalRelaxedN +
+                        (fxSteady - wheel->forceLongitudinalRelaxedN) * coeff;
+        } else {
+            fxRelaxed = fxSteady;
+        }
+        wheel->forceLongitudinalRelaxedN = fxRelaxed;
+
+        /* Self-aligning moment from pneumatic trail (#20 diagnostic). The trail is maximum at
+         * zero slip and decays toward saturation (slip^2 model), producing a restoring moment
+         * that opposes slip: Mz = -trail * Fy. Diagnostic only — excluded from the checksum. */
+        {
+            const float slipMag = fabsf(wheel->slipAngleRad);
+            const float trailScale = 1.0f / (1.0f + slipMag * slipMag * 4.0f);
+            const float pneumaticTrailM = 0.03f * trailScale;
+            derived->aligningMomentNm[i] = -pneumaticTrailM * fySlipOnly;
+        }
+
+        tire_apply_combined_limit(fxRelaxed, fyRelaxed, muLongitudinalEff * wheel->normalLoadN,
                                   muLateralEff * wheel->normalLoadN, &wheel->forceLongitudinalN,
                                   &wheel->forceLateralN, &wheel->frictionUsage);
     }
@@ -1461,8 +1488,8 @@ static bool state_is_finite(const VehicleState *state)
         if (!isfinite(wheel->steerAngleRad) || !isfinite(wheel->angularVelocityRadS) ||
             !isfinite(wheel->normalLoadN) || !isfinite(wheel->slipAngleRad) ||
             !isfinite(wheel->slipRatio) || !isfinite(wheel->forceLongitudinalN) ||
-            !isfinite(wheel->forceLateralN) || !isfinite(wheel->forceLateralRelaxedN) ||
-            !isfinite(wheel->frictionUsage))
+            !isfinite(wheel->forceLateralRelaxedN) ||
+            !isfinite(wheel->forceLongitudinalRelaxedN) || !isfinite(wheel->frictionUsage))
             return false;
     }
     return true;

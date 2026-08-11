@@ -117,6 +117,7 @@ static bool write_vehicle_snapshot(FILE *file, const ReplayVehicleSnapshot *snap
         WRITE_F32(wheel->forceLongitudinalN);
         WRITE_F32(wheel->forceLateralN);
         WRITE_F32(wheel->forceLateralRelaxedN);
+        WRITE_F32(wheel->forceLongitudinalRelaxedN);
         WRITE_F32(wheel->frictionUsage);
         WRITE_U32(wheel->locked ? 1u : 0u);
         WRITE_I32(wheel->surfaceId);
@@ -316,6 +317,7 @@ static void read_vehicle_snapshot(Reader *reader, ReplayVehicleSnapshot *snapsho
         READ_F32(wheel->forceLongitudinalN);
         READ_F32(wheel->forceLateralN);
         READ_F32(wheel->forceLateralRelaxedN);
+        READ_F32(wheel->forceLongitudinalRelaxedN);
         READ_F32(wheel->frictionUsage);
         wheel->locked = read_bool(reader);
         READ_I32(wheel->surfaceId);

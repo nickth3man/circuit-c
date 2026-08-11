@@ -341,12 +341,13 @@
 /* N; the staged refresh derives this as m*g/4, so the constant must be that expression
  * rather than a rounded literal — the params scenario compares the two exactly. */
 #define TIRE_LOAD_REF_PER_WHEEL_N (VEH_MASS_KG * GRAVITY_MPS2 * 0.25f)
-#define TIRE_RELAXATION_LENGTH_M 0.30f   /* m; realistic 0.20..0.50. 0 disables */
-#define ACKERMANN_PERCENT 1.00f          /* dimensionless; 0=parallel, 1=true Ackermann */
-#define DIFFERENTIAL_MODE_DEFAULT 2      /* 0=LOCKED, 1=OPEN, 2=LSD */
-#define DIFFERENTIAL_BIAS_RATIO 2.0f     /* dimensionless; LSD slower/faster cap */
-#define DIFFERENTIAL_PRELOAD_NM 60.0f    /* N*m; LSD clutch preload */
-#define DIFF_OMEGA_EPSILON_RAD_S 1.0e-3f /* rad/s; LSD omega-difference deadband */
+#define TIRE_RELAXATION_LENGTH_M 0.30f     /* m; realistic 0.20..0.50. 0 disables */
+#define TIRE_LONG_RELAXATION_LENGTH_M 0.0f /* m; 0 disables longitudinal relaxation (#20) */
+#define ACKERMANN_PERCENT 1.00f            /* dimensionless; 0=parallel, 1=true Ackermann */
+#define DIFFERENTIAL_MODE_DEFAULT 2        /* 0=LOCKED, 1=OPEN, 2=LSD */
+#define DIFFERENTIAL_BIAS_RATIO 2.0f       /* dimensionless; LSD slower/faster cap */
+#define DIFFERENTIAL_PRELOAD_NM 60.0f      /* N*m; LSD clutch preload */
+#define DIFF_OMEGA_EPSILON_RAD_S 1.0e-3f   /* rad/s; LSD omega-difference deadband */
 #define ROLL_STIFFNESS_FRONT_FRACTION \
     0.50f                              /* dimensionless 0..1; front axle roll-moment share */
 #define SURFACE_REFERENCE_MU_LAT 1.30f /* asphalt lateral mu; tireMuLat* are absolute vs this */

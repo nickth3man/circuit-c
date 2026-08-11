@@ -1694,6 +1694,92 @@ static void scenario_tire_relaxation(void)
 }
 
 /*
+ * long-relaxation: longitudinal force builds gradually after a sudden throttle step (#20).
+ *
+ * Mirrors tire-relaxation but for the longitudinal channel. With tireLongRelaxationLengthM > 0,
+ * the relaxed longitudinal force lags the pure steady-state force after a step change in
+ * throttle. At 0 (the default), there is no lag. Also checks the self-aligning moment sign.
+ */
+static void scenario_longitudinal_relaxation(void)
+{
+    /* Enable longitudinal relaxation. */
+    Game *game = alloc_game();
+    game_init(game);
+    game->spec.tireLongRelaxationLengthM = 0.30f;
+
+    /* Cruise at steady speed with gentle throttle, then stamp brake for a clean step. */
+    set_vehicle_rolling_speed(game, 15.0f);
+    game->input.steer = 0.0f;
+    game->input.throttle = 0.15f;
+    for (int i = 0; i < 60; i++) game_fixed_update(game, FIXED_DT_S);
+
+    /* Aligning moment at zero steer: near-zero slip → small Mz. */
+    const float mzCoast = fabsf(game->derived.aligningMomentNm[WHEEL_FRONT_LEFT]);
+    check(mzCoast < 10.0f, "near-zero slip at cruise: aligning moment is small (%.3f N*m)",
+          (double)mzCoast);
+
+    /* Stamp brake and run several ticks. Tire force changes gradually because the solver
+     * computes tire forces from the previous tick's wheel speed; the brake torque changes
+     * the wheel speed in the drivetrain stage AFTER the tire-force stage. After 3+ ticks
+     * the pure force has dropped and the relaxed force lags behind it. */
+    game->input.throttle = 0.0f;
+    game->input.brake = 1.0f;
+    float maxLagN = 0.0f;
+    for (int i = 0; i < 5; i++) {
+        game_fixed_update(game, FIXED_DT_S);
+        const float pure = game->derived.pureLongitudinalForceN[WHEEL_REAR_LEFT];
+        const float relax = game->vehicle.wheels[WHEEL_REAR_LEFT].forceLongitudinalRelaxedN;
+        const float lag = fabsf(pure - relax);
+        if (lag > maxLagN) maxLagN = lag;
+    }
+    check(maxLagN > 1.0f,
+          "braking transient: relaxed longitudinal force lags pure at some point "
+          "(max gap %.1f N)",
+          (double)maxLagN);
+
+    /* After enough ticks, the relaxation state should converge. */
+    for (int i = 0; i < 30; i++) game_fixed_update(game, FIXED_DT_S);
+
+    const float pureN = game->derived.pureLongitudinalForceN[WHEEL_REAR_LEFT];
+    const float relaxN = game->vehicle.wheels[WHEEL_REAR_LEFT].forceLongitudinalRelaxedN;
+    check_near((double)relaxN, (double)pureN, fmaxf(fabsf(pureN) * 0.15f, 10.0f),
+               "after several time constants, relaxed longitudinal force converges");
+
+    /* Disable: with longRelaxationLengthM=0, no lag — equal on the first tick. */
+    Game *game2 = alloc_game();
+    game2->spec.tireLongRelaxationLengthM = 0.0f;
+    set_vehicle_rolling_speed(game2, 15.0f);
+    game2->input.steer = 0.0f;
+    game2->input.throttle = 0.15f;
+    for (int i = 0; i < 60; i++) game_fixed_update(game2, FIXED_DT_S);
+
+    game2->input.throttle = 0.0f;
+    game2->input.brake = 1.0f;
+    game_fixed_update(game2, FIXED_DT_S);
+
+    const float pureN2 = game2->derived.pureLongitudinalForceN[WHEEL_REAR_LEFT];
+    const float relaxN2 = game2->vehicle.wheels[WHEEL_REAR_LEFT].forceLongitudinalRelaxedN;
+    check_near((double)relaxN2, (double)pureN2, 1e-3,
+               "at longRelaxationLengthM=0, relaxed force equals pure force — no lag");
+
+    /* Aligning moment grows with slip. Cornering at moderate steer produces a nonzero Mz. */
+    Game *game3 = alloc_game();
+    game_init(game3);
+    set_vehicle_rolling_speed(game3, 12.0f);
+    game3->input.steer = 0.30f;
+    game3->input.throttle = 0.15f;
+    for (int i = 0; i < 120; i++) game_fixed_update(game3, FIXED_DT_S);
+
+    const float mzCorner = fabsf(game3->derived.aligningMomentNm[WHEEL_FRONT_LEFT]);
+    check(mzCorner > 0.1f, "moderate cornering: aligning moment is nonzero (%.3f N*m)",
+          (double)mzCorner);
+
+    free(game3);
+    free(game2);
+    free(game);
+}
+
+/*
  * steer-speed-feel: steering rate decreases at higher speed.
  *
  * At low speed (<= steerSpeedRefMps) the rate is full. At high speed it
@@ -2907,6 +2993,9 @@ static const TestScenario kHandlingScenarios[] = {
       scenario_tire_load_sensitivity },
     { "tire-relaxation", "tire relaxation: lateral force lag and convergence",
       scenario_tire_relaxation },
+    { "long-relaxation",
+      "longitudinal force relaxation lag, convergence, and aligning moment (#20)",
+      scenario_longitudinal_relaxation },
     { "steer-speed-feel", "steering rate decreases with speed via feel layer",
       scenario_steer_speed_feel },
     { "lane-change", "ISO 3888-1 projected: step-steer double lane-change, envelope-checked",
