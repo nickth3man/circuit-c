@@ -124,7 +124,10 @@ static void capsule_aabb(const CollisionBody *body, Vector2 pos, float hdg, Vect
                          Vector2 *maxMOut)
 {
     const float r = body->radiusM;
-    const Vector2 bodyPts[2] = { { body->cgToFrontM, 0.0f }, { -body->cgToRearM, 0.0f } };
+    /* Same body-frame circle positions resolve_body_vs_static uses, so the query box always
+     * matches the narrowphase's capsule geometry. */
+    const Vector2 bodyPts[2] = { body_front_position(body->cgToFrontM),
+                                 body_rear_position(body->cgToRearM) };
     Vector2 minM = { INFINITY, INFINITY };
     Vector2 maxM = { -INFINITY, -INFINITY };
     for (int c = 0; c < 2; c++) {

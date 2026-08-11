@@ -539,11 +539,12 @@ static void scenario_collision_units(void)
 /* ------------------------------------------------------------------------------------- */
 
 /* The box: nodes CCW from (0,0), hw 4, runoff 6 -> barriers at +/-6 from the centreline.
- * Closed loop, 4 edges -> 8 barrier shapes, ids in segment order (left then right per edge):
- *   0 seg0 left  (y = +6),  1 seg0 right (y = -6)
- *   2 seg1 left  (x = 26),  3 seg1 right (x = 14)
- *   4 seg2 left  (y = 14),  5 seg2 right (y = 26)
- *   6 seg3 left  (x = -6),  7 seg3 right (x = 6)   <- wait: seg3 runs (0,20)->(0,0), dir (0,-1)
+ * Closed loop, 4 edges -> 8 barrier shapes, ids in segment order (left then right per edge).
+ * Each side is centreline +/- perp * 6 with perp = (-dir.y, dir.x); "left" is the +perp side:
+ *   0 seg0 left  (y = +6),  1 seg0 right (y = -6)   edge (0,0)->(20,0),  dir (1,0),  perp (0,1)
+ *   2 seg1 left  (x = 14),  3 seg1 right (x = 26)   edge (20,0)->(20,20), dir (0,1),  perp (-1,0)
+ *   4 seg2 left  (y = 14),  5 seg2 right (y = 26)   edge (20,20)->(0,20), dir (-1,0), perp (0,-1)
+ *   6 seg3 left  (x = 6),   7 seg3 right (x = -6)   edge (0,20)->(0,0),  dir (0,-1), perp (1,0)
  */
 static void build_collision_box_track(TrackDefinition *track)
 {
@@ -852,8 +853,13 @@ static void scenario_collision_world(void)
         collision_world_begin_tick(multi);
         check(collision_world_add_body(multi, &bodies[0]), "body re-registered for the "
                                                            "missing-context probe");
+        /* One registered body (id 3), one context naming a different id: the registered
+         * body has no context, which is the contract violation under test. */
+        CollisionBodyContext orphan = contexts[1]; /* id 5, never registered this tick */
+        check(collision_world_resolve_bodies(multi, &orphan, 1) == -1,
+              "a registered body with no matching context is reported as -1");
         check(collision_world_resolve_bodies(multi, NULL, 0) == -1,
-              "missing context is reported as -1");
+              "a null context array is reported as -1");
         free(multi);
     }
 
@@ -886,7 +892,9 @@ static uint32_t broadphase_rng_next(void)
 
 static float broadphase_rng_unit(void)
 {
-    return (float)(broadphase_rng_next() & 0xFFFFu) / 65535.0f;
+    /* Take the high 16 bits: in a power-of-two-modulus LCG, bit k has period 2^(k+1), so
+     * the low bits are strongly correlated between consecutive draws. */
+    return (float)(broadphase_rng_next() >> 16) / 65535.0f;
 }
 
 /* Independent brute-force candidate reference, implemented here rather than reusing the
@@ -993,7 +1001,8 @@ static void scenario_collision_broadphase(void)
             const float w = 1.0f + broadphase_rng_unit() * 8.0f;
             const Vector2 minM = { cx - w, cy - w };
             const Vector2 maxM = { cx + w, cy + w };
-            const CollisionShapeId afterId = (CollisionShapeId)(broadphase_rng_next() % 1024u);
+            const CollisionShapeId afterId =
+                (CollisionShapeId)((broadphase_rng_next() >> 22) & 0x3FFu); /* high 10 bits */
             const int g = collision_world_query_static(
                 ringWorld, minM, maxM, COLLISION_LAYER_STATIC_BARRIER, afterId, gridIds, 2048);
             const int r = reference_brute_query(
@@ -1183,11 +1192,14 @@ static void scenario_collision_broadphase(void)
         }
     }
 
-    /* ---- 6. Benchmark: measured query cost at representative track/body counts ---- */
-    {
+    /* ---- 6. Benchmark: measured query cost at representative track/body counts. The
+     * timing loop is gated behind CIRCUIT_COLLISION_BENCH (any value): the deterministic
+     * parity assertions above always run, but ~4800 timed resolves must not slow every
+     * scenario pass or flood its log. ---- */
+    if (getenv("CIRCUIT_COLLISION_BENCH") != NULL) {
         struct BenchCase {
             const char *name;
-            int shapes;
+            int nodes; /* 0 = build the parking lot instead of a ring */
         };
         const struct BenchCase cases[] = {
             { "parking-lot (10)", 0 }, /* filled below from real tracks */
@@ -1198,17 +1210,18 @@ static void scenario_collision_broadphase(void)
         const int bodyCounts[] = { 1, 4, 8 };
         const int iterations = 200;
 
-        printf("[collision-broadphase] benchmark: per-tick resolve, 6 substeps, %d "
+        printf("[collision-broadphase] benchmark: one collision_resolve_track call per "
+               "body, %d "
                "iterations (lower is better)\n",
                iterations);
         printf("  %-20s %-8s %-14s %-14s\n", "track", "bodies", "grid (us)", "brute (us)");
         for (size_t ci = 0; ci < sizeof(cases) / sizeof(cases[0]); ci++) {
             TrackDefinition track;
-            if (cases[ci].shapes == 0) {
+            if (cases[ci].nodes == 0) {
                 memset(&track, 0, sizeof(track));
                 track_init(&track);
             } else {
-                build_ring_track(&track, cases[ci].shapes, 200.0f);
+                build_ring_track(&track, cases[ci].nodes, 200.0f);
             }
             for (size_t bi = 0; bi < sizeof(bodyCounts) / sizeof(bodyCounts[0]); bi++) {
                 CollisionWorld *grid = alloc_collision_world();
@@ -1547,6 +1560,11 @@ static void scenario_progress_isolation(void)
      * The runtime embeds the collision world (plain data, ~160 KB), so it lives on the heap
      * rather than the scenario's stack frame. */
     TrackRuntime *runtime = (TrackRuntime *)calloc(1, sizeof(TrackRuntime));
+    if (runtime == NULL) {
+        fprintf(stderr, "FATAL: could not allocate TrackRuntime (%zu bytes)\n",
+                sizeof(TrackRuntime));
+        exit(126);
+    }
     track_runtime_bind(runtime, &track);
     const uint32_t hashAtBind = track_geometry_hash(&track);
 
@@ -3751,7 +3769,7 @@ static const TestScenario kGameplayScenarios[] = {
       scenario_collision_world },
     { "collision-broadphase",
       "issue #26 broadphase: grid-vs-brute property tests with fixed seeds, overflow flag, "
-      "measured query benchmark",
+      "measured query benchmark (timing gated behind CIRCUIT_COLLISION_BENCH)",
       scenario_collision_broadphase },
     { "checkpoint-lap", "ordered gates, out-of-order detection, forward-only, and lap timing",
       scenario_checkpoint_lap },

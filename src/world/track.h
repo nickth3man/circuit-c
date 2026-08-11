@@ -322,9 +322,11 @@ void track_free(TrackDefinition *track); /* free arrays, zero the struct */
 
 /*
  * Bind a runtime to the definition a session is about to race on, recording its geometry
- * hash. Call after the definition is loaded and before the first fixed update.
+ * hash. Call after the definition is loaded and before the first fixed update. Returns false
+ * when the definition's collision world cannot be built (no geometry, or more barriers than
+ * the world holds); the hash is then left untouched so a later bind retries.
  */
-void track_runtime_bind(TrackRuntime *runtime, const TrackDefinition *track);
+bool track_runtime_bind(TrackRuntime *runtime, const TrackDefinition *track);
 
 /*
  * True when `track` still hashes to what `runtime` recorded at bind time — that is, when the

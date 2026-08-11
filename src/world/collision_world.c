@@ -28,6 +28,7 @@
 /*  Small helpers                                                                          */
 /* ====================================================================================== */
 
+/* qsort comparator: ascending stable id order, the world's canonical candidate order. */
 static int compare_shape_ids(const void *a, const void *b)
 {
     const CollisionShapeId ia = *(const CollisionShapeId *)a;
@@ -35,6 +36,7 @@ static int compare_shape_ids(const void *a, const void *b)
     return (ia > ib) - (ia < ib);
 }
 
+/* Clamp an integer to [lo, hi]. */
 static int clamp_int(int value, int lo, int hi)
 {
     if (value < lo) return lo;
@@ -49,19 +51,27 @@ static bool aabb_overlaps(Vector2 minA, Vector2 maxA, Vector2 minB, Vector2 maxB
     return minA.x <= maxB.x && maxA.x >= minB.x && minA.y <= maxB.y && maxA.y >= minB.y;
 }
 
+/* Grid cell for a world coordinate, clamped to the grid. The normalized coordinate is
+ * clamped BEFORE the float→int conversion: a finite query far outside the grid can otherwise
+ * push the subtraction/division to ±infinity, and casting infinity to int is undefined
+ * behaviour. NaN (which no comparison orders) clamps to the low edge. */
+static int cell_index(float coordM, float originM, float cellSizeM, int lo, int hi)
+{
+    const float norm = (coordM - originM) / cellSizeM;
+    if (!(norm >= (float)lo)) return lo; /* NaN and -inf clamp to the low edge */
+    if (norm >= (float)hi) return hi;    /* +inf clamps to the high edge */
+    return (int)floorf(norm);
+}
+
 /* Cell index range spanned by a box, clamped to the grid. The grid covers the whole shape
  * AABB plus a cell margin, so every shape sits inside the clamped range. */
 static void cell_range(const CollisionWorld *world, Vector2 minM, Vector2 maxM, int *c0,
                        int *r0, int *c1, int *r1)
 {
-    *c0 = clamp_int((int)floorf((minM.x - world->gridOriginXM) / world->gridCellSizeM), 0,
-                    world->gridCols - 1);
-    *c1 = clamp_int((int)floorf((maxM.x - world->gridOriginXM) / world->gridCellSizeM), 0,
-                    world->gridCols - 1);
-    *r0 = clamp_int((int)floorf((minM.y - world->gridOriginYM) / world->gridCellSizeM), 0,
-                    world->gridRows - 1);
-    *r1 = clamp_int((int)floorf((maxM.y - world->gridOriginYM) / world->gridCellSizeM), 0,
-                    world->gridRows - 1);
+    *c0 = cell_index(minM.x, world->gridOriginXM, world->gridCellSizeM, 0, world->gridCols - 1);
+    *c1 = cell_index(maxM.x, world->gridOriginXM, world->gridCellSizeM, 0, world->gridCols - 1);
+    *r0 = cell_index(minM.y, world->gridOriginYM, world->gridCellSizeM, 0, world->gridRows - 1);
+    *r1 = cell_index(maxM.y, world->gridOriginYM, world->gridCellSizeM, 0, world->gridRows - 1);
 }
 
 /* ====================================================================================== */
@@ -170,11 +180,15 @@ bool collision_world_finalize(CollisionWorld *world)
     if (world == NULL) return false;
     if (!world->gridDirty) return world->shapeCount > 0;
     world->gridDirty = false;
-    if (world->shapeCount < COLLISION_WORLD_GRID_MIN_SHAPES) {
-        world->gridEnabled = false; /* measured: brute scan is cheaper at this size */
-        return true;
+    if (world->shapeCount == 0) {
+        world->gridEnabled = false;
+        return false;
     }
-    world->gridEnabled = build_grid(world);
+    /* Always build the grid data, so a test that forces gridEnabled cannot query an unbuilt
+     * grid; gridEnabled stays the query-path selector. Measured: the brute scan is cheaper
+     * below COLLISION_WORLD_GRID_MIN_SHAPES. */
+    const bool built = build_grid(world);
+    world->gridEnabled = built && world->shapeCount >= COLLISION_WORLD_GRID_MIN_SHAPES;
     return true;
 }
 
@@ -194,7 +208,11 @@ int collision_world_query_static(CollisionWorld *world, Vector2 minM, Vector2 ma
     if (world->gridDirty && !collision_world_finalize(world)) return 0;
 
     int count = 0;
-    if (world->gridEnabled) {
+    /* Defensive: gridEnabled must never select a grid whose layout was not built (a caller
+     * could flip the flag before finalize). Fall back to the brute scan in that case. */
+    const bool gridReady = world->gridEnabled && world->gridCellSizeM > 0.0f &&
+                           world->gridCols > 0 && world->gridRows > 0;
+    if (gridReady) {
         /* Grid path: collect from each overlapped cell, dedupe with a per-query stamp, and
          * re-verify the exact AABB overlap (cells are conservative). The collected ids are
          * then sorted ascending so the answer is bit-identical to the brute scan whatever
@@ -224,12 +242,22 @@ int collision_world_query_static(CollisionWorld *world, Vector2 minM, Vector2 ma
                                        maxM)) {
                         continue;
                     }
-                    if (count < capacity) idsOut[count] = id;
-                    count++;
+                    if (count < capacity) {
+                        idsOut[count++] = id;
+                    } else {
+                        /* Buffer full: keep the capacity smallest ids so a truncated answer
+                         * matches the brute scan's leading prefix (the parity contract).
+                         * Cells are visited in traversal order, not id order, so the first
+                         * `capacity` candidates are not the smallest. */
+                        int worst = 0;
+                        for (int k = 1; k < capacity; k++) {
+                            if (idsOut[k] > idsOut[worst]) worst = k;
+                        }
+                        if (id < idsOut[worst]) idsOut[worst] = id;
+                    }
                 }
             }
         }
-        if (count > capacity) count = capacity;
         qsort(idsOut, (size_t)count, sizeof(CollisionShapeId), compare_shape_ids);
         return count;
     }
@@ -328,13 +356,18 @@ bool collision_world_build_from_track(CollisionWorld *world, const TrackDefiniti
 
         if (collision_world_add_static_segment(world, leftA, leftB, pushLeft,
                                                COLLISION_LAYER_STATIC_BARRIER) < 0) {
-            return false; /* shape cap exceeded: refuse the track rather than drop barriers */
+            /* Shape cap exceeded: refuse the track. Leave an empty world so no caller can
+             * race against a half-fenced circuit. */
+            collision_world_init(world);
+            return false;
         }
         if (collision_world_add_static_segment(world, rightA, rightB, pushRight,
                                                COLLISION_LAYER_STATIC_BARRIER) < 0) {
+            collision_world_init(world);
             return false;
         }
     }
-    (void)collision_world_finalize(world);
-    return true;
+    /* The finalizer's result is the build's result: a route whose every edge is degenerate
+     * produced no shapes and must be refused, not silently raced without barriers. */
+    return collision_world_finalize(world);
 }
