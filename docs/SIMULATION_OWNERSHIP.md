@@ -94,6 +94,26 @@ presentation runs before finalize because the deterministic tire-smoke spread is
 the application tick. The rolling checksum gained phase, rules, session tick/clock, countdown,
 classification and the event-append count.
 
+Issue 26 is implemented by `CollisionWorld` in `src/world/collision_world.{h,c}`: one
+deterministic collision world holding static barrier/object shapes with stable ids and
+collision layers, dynamic body proxies keyed by `EntrantId`, a per-tick physical contact
+feed, and a uniform-grid broadphase whose candidate sets are proven identical to a brute
+scan. `TrackRuntime` now embeds the world; `track_runtime_bind()` rebuilds it from the
+definition's barriers, and the collision stage refreshes it whenever the bound hash differs
+— so a track loaded behind the session's back (a headless test calling `track_load_*`
+directly) still collides. The world is a rebuildable cache of immutable definition geometry:
+it is excluded from the rolling checksum, its contents cannot change results, and it is plain
+data with no heap, so it cannot leak and survives hot reload. The swept narrowphase in
+`src/world/collision.c` now resolves the world's candidates in ascending shape-id order,
+re-querying strictly ahead of its cursor after a contact pushes the body; that sequence is
+bit-identical to the legacy single brute-force pass, which the 46-scenario telemetry
+regression proves (identical checksums, no cell differs). Broadphase use is a measured
+decision — the `collision-broadphase` scenario benchmarks the grid against the brute scan
+and the `COLLISION_WORLD_GRID_MIN_SHAPES` threshold records where the grid wins. Presentation
+no longer sniffs the crash-lockout delta for its thud: it consumes the contact feed, which
+records every resolved contact (body id, shape id, point, push normal, approach speed) in
+deterministic order and is rebuilt every tick.
+
 ## Context
 
 The current single-car `Game`, `Track`, and `VehicleSpec` aggregates mix immutable content,
@@ -336,7 +356,7 @@ target owner. It also records intentional ordering changes for the later session
 | Checkpoint crossing/timer | Reads geometry and pose; writes `Track.nextCheckpoint`, `lap`, timers, and event reports | Writes only that entrant's `RacerProgress` in progress stage; definition remains immutable |
 | Crash lockout countdown | Writes `Game.crashLockoutTimerS` | Entrant collision/damage state in `VehicleInstance`; checksummed if it gates later contacts |
 | Track collision | Reads spec/track; writes vehicle/pose/lockout | Collision stage reads definition/runtime and writes only the entrant instance |
-| Collision audio | Reads lockout change and calls audio | Presentation event consumer after authoritative events; never mutates simulation |
+| Collision audio | Reads the world's contact feed (significant approach) and calls audio | Presentation event consumer after authoritative events; never mutates simulation |
 | Engine/tire audio | Reads vehicle/spec/derived | Presentation snapshot consumer; excluded |
 | Results trigger | Reads lap and target; writes `Game.state` | Rules stage reads `RacerProgress`, writes `RaceSession` phase/classification; `Game` selects results screen afterward |
 | Tire-smoke spawn | Reads derived/vehicle/tick; writes particles | Presentation snapshot/effect consumer; excluded even though deterministic today |

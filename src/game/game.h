@@ -25,6 +25,10 @@
  * 11), are layout changes for the same reason and cost the same one restart. Both are plain
  * value storage — no function pointers, nothing pointing into the reloadable module — so the
  * invariant above is unchanged.
+ *
+ * Embedding the CollisionWorld in TrackRuntime (issue 26) is a layout change for the same
+ * reason and costs the same one restart. It is plain value storage (~180 KB of fixed arrays,
+ * no heap, no function pointers), so the reload invariant above is unchanged.
  */
 #ifndef CIRCUIT_GAME_H
 #define CIRCUIT_GAME_H
