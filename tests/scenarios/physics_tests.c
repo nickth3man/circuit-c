@@ -2852,9 +2852,17 @@ static uint32_t param_audit_collide_signature(const VehicleSpec *spec,
 
     float crashLockoutTimerS = 0.0f;
     int contacts = 0;
+    CollisionWorld world;
+    if (!collision_world_build_from_track(&world, track)) {
+        /* A build failure is a harness failure, not a valid signature: 0u is a legitimate
+         * hash, so returning it silently would collapse base and perturbed signatures to
+         * the same 0 and mask any collision-parameter regression as "no behavior change". */
+        check(false, "param audit: the collide track could not build a collision world");
+        return 0u;
+    }
     for (int tick = 0; tick < PARAM_AUDIT_COLLIDE_TICKS; tick++) {
         physics_fixed_update(spec, &state, &derived, &renderState, &input, FIXED_DT_S);
-        contacts += collision_resolve_track(spec, &state, &renderState, track, NULL,
+        contacts += collision_resolve_track(&world, 1u, spec, &state, &renderState,
                                             &crashLockoutTimerS);
     }
 

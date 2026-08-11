@@ -144,10 +144,21 @@ void track_free(TrackDefinition *track)
     track->version[0] = '\0';
 }
 
-void track_runtime_bind(TrackRuntime *runtime, const TrackDefinition *track)
+bool track_runtime_bind(TrackRuntime *runtime, const TrackDefinition *track)
 {
-    if (runtime == NULL) return;
+    if (runtime == NULL) return false;
+    if (!collision_world_build_from_track(&runtime->collisionWorld, track)) {
+        /* The definition's collision world could not be built (no geometry, or more
+         * barriers than the world holds). Leave the hash untouched so a later bind retries
+         * and the immutability check cannot pass for a runtime that was never bound; the
+         * build failure path has already emptied the world so nothing resolves against a
+         * partial fence. */
+        return false;
+    }
+    /* Publish the hash only after a successful build: recording it first would let the
+     * collision stage treat a failed bind as current and never rebuild. */
     runtime->definitionHash = track_geometry_hash(track);
+    return true;
 }
 
 bool track_runtime_definition_unchanged(const TrackRuntime *runtime,
@@ -647,6 +658,9 @@ uint32_t track_geometry_hash(const TrackDefinition *track)
         h = hash_f32(h, c->required ? 1.0f : 0.0f);
     }
     h = hash_f32(h, track->routeClosed ? 1.0f : 0.0f);
+    /* isParkingLot selects the barrier push normals in collision_world_build_from_track,
+     * so a change to it must refresh the collision world. */
+    h = hash_f32(h, track->isParkingLot ? 1.0f : 0.0f);
     for (int i = 0; i < track->sectorMarkerCount; i++) {
         const SectorMarker *s = &track->sectorMarkers[i];
         h = hash_f32(h, s->centerM.x);

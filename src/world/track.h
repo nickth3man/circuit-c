@@ -34,8 +34,9 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "raylib.h"          /* Vector2 */
-#include "physics/vehicle.h" /* SurfaceId */
+#include "raylib.h"                /* Vector2 */
+#include "physics/vehicle.h"       /* SurfaceId */
+#include "world/collision_world.h" /* CollisionWorld embedded in TrackRuntime */
 
 #define TRACK_ID_CHARS 32
 #define TRACK_VERSION_CHARS 16
@@ -276,15 +277,30 @@ typedef struct {
 /*
  * Mutable track state that belongs to the session rather than to any one racer.
  *
- * Today it holds only the hash of the definition it was bound to, which is what lets a test
- * prove the shared geometry was not written during a session. Deterministic weather/wetness
- * and derived query caches join it later; a cache that differs per racer belongs in that
+ * It holds the hash of the definition it was bound to — which is what lets a test prove the
+ * shared geometry was not written during a session — and the collision world (issue 26).
+ * The world is a rebuildable cache derived only from the definition: track_runtime_bind()
+ * rebuilds it, and the collision stage refreshes it whenever the hash differs, so a track
+ * loaded behind the session's back still collides. Deterministic weather/wetness and other
+ * derived query caches join it later; a cache that differs per racer belongs in that
  * entrant's RacerProgress instead, not here.
  */
 typedef struct {
     /* track_geometry_hash() of the definition bound at session start. */
     uint32_t definitionHash;
+    /* Deterministic collision world: static barrier shapes, dynamic body proxies, and the
+     * per-tick contact feed. Plain data — no heap, no ownership, survives hot reload. */
+    CollisionWorld collisionWorld;
 } TrackRuntime;
+
+/*
+ * Build the world's static shapes from a track's barriers: one segment per centreline edge
+ * (closing the loop on a closed route), left side then right side, in the exact arithmetic
+ * and order the swept narrowphase resolves. Implemented in collision_world.c; declared here
+ * because track.h is the header that has both types. Returns false when the track cannot be
+ * represented (no geometry, or more barriers than the world holds).
+ */
+bool collision_world_build_from_track(CollisionWorld *world, const TrackDefinition *track);
 
 /*
  * Barrier distance from the centreline for this node.
@@ -306,9 +322,11 @@ void track_free(TrackDefinition *track); /* free arrays, zero the struct */
 
 /*
  * Bind a runtime to the definition a session is about to race on, recording its geometry
- * hash. Call after the definition is loaded and before the first fixed update.
+ * hash. Call after the definition is loaded and before the first fixed update. Returns false
+ * when the definition's collision world cannot be built (no geometry, or more barriers than
+ * the world holds); the hash is then left untouched so a later bind retries.
  */
-void track_runtime_bind(TrackRuntime *runtime, const TrackDefinition *track);
+bool track_runtime_bind(TrackRuntime *runtime, const TrackDefinition *track);
 
 /*
  * True when `track` still hashes to what `runtime` recorded at bind time — that is, when the
