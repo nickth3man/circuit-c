@@ -194,8 +194,12 @@ Multiple lanes may operate in parallel after #13, but dependencies within each l
     both via reduced-order sqrt exponents (`TIRE_WIDTH_STIFFNESS_EXP = 0.5`,
     `TIRE_PRESSURE_STIFFNESS_EXP = 0.5`). Tire pressure reclassified as setup-owned physics input.
 
-- [ ] [#20 — Add longitudinal relaxation and aligning-moment diagnostics](https://github.com/nickth3man/circuit-c/issues/20)
+- [x] [#20 — Add longitudinal relaxation and aligning-moment diagnostics](https://github.com/nickth3man/circuit-c/issues/20)
   - Depends on: #13, #15, #16
+  - First-order longitudinal relaxation (`forceLongitudinalRelaxedN`) behind a separate
+    `tireLongRelaxationLengthM` (default 0 = bit-identical), coordinated with lateral before
+    the friction ellipse. Aligning moment diagnostic (`aligningMomentNm`) from pneumatic
+    trail. Verified: 150 scenarios, 13240 checks, 0 failed; 46/46 regression PASS.
 
 - [ ] [#21 — Add deterministic tire temperature and pressure state](https://github.com/nickth3man/circuit-c/issues/21)
   - Depends on: #8, #16, #20

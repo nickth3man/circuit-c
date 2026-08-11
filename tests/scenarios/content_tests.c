@@ -1987,6 +1987,64 @@ static void scenario_route_localization(void)
 
 /* --------------------------------------------------------------------------------------------- registry */
 
+/*
+ * track-query-cache — issue #39: the hinted local-neighbourhood search returns the exact
+ * same surface as the brute-force scan for every sampled point.
+ *
+ * Property test: for a fixed deterministic point grid around each built-in track, query the
+ * surface with a fresh runtime (hint = 0, then hint evolves) and compare against the
+ * brute-force result obtained with a NULL runtime. The results must match exactly.
+ */
+static void scenario_track_query_cache(void)
+{
+    typedef void (*LoadFn)(TrackDefinition *);
+    const LoadFn loads[] = { track_load_chicane, track_load_sprint, track_load_technical };
+    const char *names[] = { "chicane", "sprint", "technical" };
+
+    for (size_t l = 0; l < sizeof(loads) / sizeof(loads[0]); l++) {
+        TrackDefinition track;
+        memset(&track, 0, sizeof(track));
+        loads[l](&track);
+        check(track.nodes != NULL && track.count > 0, "%s loaded for query-cache test",
+              names[l]);
+
+        TrackRuntime runtime;
+        memset(&runtime, 0, sizeof(runtime));
+
+        /* Deterministic grid of probe points around the track: sample the centreline box
+         * plus a margin, stepping at 7 m. */
+        float minX = 1e30f, minY = 1e30f, maxX = -1e30f, maxY = -1e30f;
+        for (int i = 0; i < track.count; i++) {
+            minX = fminf(minX, track.nodes[i].centerM.x);
+            minY = fminf(minY, track.nodes[i].centerM.y);
+            maxX = fmaxf(maxX, track.nodes[i].centerM.x);
+            maxY = fmaxf(maxY, track.nodes[i].centerM.y);
+        }
+        minX -= 20.0f;
+        minY -= 20.0f;
+        maxX += 20.0f;
+        maxY += 20.0f;
+
+        int mismatches = 0;
+        int points = 0;
+        for (float y = minY; y <= maxY; y += 7.0f) {
+            for (float x = minX; x <= maxX; x += 7.0f) {
+                const Vector2 p = { x, y };
+                const SurfaceId brute = Track_SurfaceAt(&track, NULL, p);
+                const SurfaceId hinted = Track_SurfaceAt(&track, &runtime, p);
+                points++;
+                if (brute != hinted) mismatches++;
+            }
+        }
+        check(points > 0, "%s query-cache probe grid covered points", names[l]);
+        check(mismatches == 0,
+              "%s hinted surface == brute force on all %d points (%d mismatches)", names[l],
+              points, mismatches);
+
+        track_free(&track);
+    }
+}
+
 static const TestScenario kScenarios[] = {
     { "json-parser", "strict JSON reader, escapes, and canonical hash", scenario_json_parser },
     { "vehicle-manifest",
@@ -2013,6 +2071,9 @@ static const TestScenario kScenarios[] = {
       "issue #38: continuity localization, wrong-way hysteresis, race distance, per-entrant "
       "isolation",
       scenario_route_localization },
+    { "track-query-cache",
+      "issue #39: hinted local-neighbourhood surface queries match brute force exactly",
+      scenario_track_query_cache },
 };
 
 TestScenarioGroup test_content_scenarios(void)

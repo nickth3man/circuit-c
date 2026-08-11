@@ -62,6 +62,184 @@ static float nearest_centerline_distance_sq(const TrackNode *nodes, int count, b
     return best;
 }
 
+/* Build the exact nearest-segment grid from a definition's centreline (#39). The grid is a
+ * pure derived cache: the build is deterministic and reads only geometry. Returns false when
+ * the track exceeds the grid caps, in which case queries fall back to the linear scan. */
+static bool track_grid_build(TrackQueryGrid *grid, const TrackDefinition *track)
+{
+    memset(grid, 0, sizeof(*grid));
+    if (track == NULL || track->nodes == NULL || track->count < 2) return false;
+    const int count = track->count;
+    const int segCount = track->routeClosed ? count : count - 1;
+
+    float minX = 1e30f, minY = 1e30f, maxX = -1e30f, maxY = -1e30f;
+    float maxSegLen = 0.0f;
+    for (int i = 0; i < segCount; i++) {
+        const int j = track->routeClosed ? (i + 1) % count : i + 1;
+        const Vector2 a = track->nodes[i].centerM;
+        const Vector2 b = track->nodes[j].centerM;
+        minX = fminf(minX, fminf(a.x, b.x));
+        minY = fminf(minY, fminf(a.y, b.y));
+        maxX = fmaxf(maxX, fmaxf(a.x, b.x));
+        maxY = fmaxf(maxY, fmaxf(a.y, b.y));
+        const float len = sqrtf((b.x - a.x) * (b.x - a.x) + (b.y - a.y) * (b.y - a.y));
+        if (len > maxSegLen) maxSegLen = len;
+    }
+    if (!isfinite(maxSegLen) || maxSegLen <= 0.0f) return false;
+
+    /* Cell size is forced to at least the longest segment so a segment spans at most 2x2
+     * cells (same sizing rule as the collision broadphase). */
+    const float spanX = fmaxf(maxX - minX, 1e-6f);
+    const float spanY = fmaxf(maxY - minY, 1e-6f);
+    int cols = (int)ceilf(spanX / maxSegLen);
+    int rows = (int)ceilf(spanY / maxSegLen);
+    if (cols > TRACK_GRID_MAX_COLS) cols = TRACK_GRID_MAX_COLS;
+    if (rows > TRACK_GRID_MAX_ROWS) rows = TRACK_GRID_MAX_ROWS;
+    if (cols < 1) cols = 1;
+    if (rows < 1) rows = 1;
+    const float cellW = spanX / (float)cols;
+    const float cellH = spanY / (float)rows;
+
+    /* Pass 1: count segments per cell, using cellStarts as a scratch count array. */
+    memset(grid->cellStarts, 0, sizeof(int) * (size_t)(cols * rows + 1));
+    int total = 0;
+    for (int s = 0; s < segCount && total <= TRACK_GRID_MAX_ENTRIES; s++) {
+        const int j = track->routeClosed ? (s + 1) % count : s + 1;
+        const Vector2 a = track->nodes[s].centerM;
+        const Vector2 b = track->nodes[j].centerM;
+        int c0x = (int)floorf((fminf(a.x, b.x) - minX) / cellW);
+        int c1x = (int)floorf((fmaxf(a.x, b.x) - minX) / cellW);
+        int c0y = (int)floorf((fminf(a.y, b.y) - minY) / cellH);
+        int c1y = (int)floorf((fmaxf(a.y, b.y) - minY) / cellH);
+        if (c0x < 0) c0x = 0;
+        if (c1x >= cols) c1x = cols - 1;
+        if (c0y < 0) c0y = 0;
+        if (c1y >= rows) c1y = rows - 1;
+        for (int cy = c0y; cy <= c1y; cy++) {
+            for (int cx = c0x; cx <= c1x; cx++) {
+                grid->cellStarts[cy * cols + cx]++;
+                total++;
+            }
+        }
+    }
+    if (total > TRACK_GRID_MAX_ENTRIES) return false; /* too dense: fall back to linear */
+
+    /* Prefix sums: cellStarts[c] becomes the start offset of cell c's entries. */
+    int acc = 0;
+    for (int c = 0; c < cols * rows; c++) {
+        const int n = grid->cellStarts[c];
+        grid->cellStarts[c] = acc;
+        acc += n;
+    }
+    grid->cellStarts[cols * rows] = acc;
+
+    /* Pass 2: fill entries in ascending segment order (deterministic). */
+    int cursor[TRACK_GRID_MAX_CELLS];
+    memcpy(cursor, grid->cellStarts, sizeof(int) * (size_t)(cols * rows));
+    for (int s = 0; s < segCount; s++) {
+        const int j = track->routeClosed ? (s + 1) % count : s + 1;
+        const Vector2 a = track->nodes[s].centerM;
+        const Vector2 b = track->nodes[j].centerM;
+        int c0x = (int)floorf((fminf(a.x, b.x) - minX) / cellW);
+        int c1x = (int)floorf((fmaxf(a.x, b.x) - minX) / cellW);
+        int c0y = (int)floorf((fminf(a.y, b.y) - minY) / cellH);
+        int c1y = (int)floorf((fmaxf(a.y, b.y) - minY) / cellH);
+        if (c0x < 0) c0x = 0;
+        if (c1x >= cols) c1x = cols - 1;
+        if (c0y < 0) c0y = 0;
+        if (c1y >= rows) c1y = rows - 1;
+        for (int cy = c0y; cy <= c1y; cy++) {
+            for (int cx = c0x; cx <= c1x; cx++) {
+                const int cell = cy * cols + cx;
+                grid->entries[cursor[cell]++] = s;
+            }
+        }
+    }
+
+    grid->cols = cols;
+    grid->rows = rows;
+    grid->minX = minX;
+    grid->minY = minY;
+    grid->cellW = cellW;
+    grid->cellH = cellH;
+    grid->built = true;
+    return true;
+}
+
+/* Exact nearest-segment query through the grid: expands in Chebyshev rings and stops when the
+ * nearest unsearched ring square is farther than the current best — the classic exact
+ * grid nearest-neighbour termination. Returns the squared distance and writes *closestIdx. */
+static float track_grid_nearest_sq(const TrackQueryGrid *grid, const TrackDefinition *track,
+                                   Vector2 point, int *closestIdx)
+{
+    const int count = track->count;
+    const int cols = grid->cols;
+    const int rows = grid->rows;
+
+    /* Clamp the point into the grid; every segment is inside the grid. */
+    const float px = point.x < grid->minX ? grid->minX
+                                          : (point.x > grid->minX + (float)cols * grid->cellW
+                                                 ? grid->minX + (float)cols * grid->cellW
+                                                 : point.x);
+    const float py = point.y < grid->minY ? grid->minY
+                                          : (point.y > grid->minY + (float)rows * grid->cellH
+                                                 ? grid->minY + (float)rows * grid->cellH
+                                                 : point.y);
+    int cx = (int)floorf((px - grid->minX) / grid->cellW);
+    int cy = (int)floorf((py - grid->minY) / grid->cellH);
+    if (cx < 0) cx = 0;
+    if (cx >= cols) cx = cols - 1;
+    if (cy < 0) cy = 0;
+    if (cy >= rows) cy = rows - 1;
+
+    float best = 1e30f;
+    int bestIdx = -1;
+    const int maxRing = (cols > rows ? cols : rows);
+
+    for (int r = 0; r <= maxRing; r++) {
+        /* Distance from the point to the ring square [cx-r, cx+r] x [cy-r, cy+r]. */
+        const int gx0 = cx - r < 0 ? 0 : cx - r;
+        const int gx1 = cx + r >= cols ? cols - 1 : cx + r;
+        const int gy0 = cy - r < 0 ? 0 : cy - r;
+        const int gy1 = cy + r >= rows ? rows - 1 : cy + r;
+        const float wx0 = grid->minX + (float)gx0 * grid->cellW;
+        const float wx1 = grid->minX + (float)(gx1 + 1) * grid->cellW;
+        const float wy0 = grid->minY + (float)gy0 * grid->cellH;
+        const float wy1 = grid->minY + (float)(gy1 + 1) * grid->cellH;
+        const float dx = fmaxf(wx0 - point.x, fmaxf(0.0f, point.x - wx1));
+        const float dy = fmaxf(wy0 - point.y, fmaxf(0.0f, point.y - wy1));
+        if (dx * dx + dy * dy >= best) break; /* no unsearched cell can beat the best */
+
+        for (int cyy = gy0; cyy <= gy1; cyy++) {
+            for (int cxx = gx0; cxx <= gx1; cxx++) {
+                const int cdist = (cxx > cx ? cxx - cx : cx - cxx);
+                const int cdistY = (cyy > cy ? cyy - cy : cy - cyy);
+                const int cheb = cdist > cdistY ? cdist : cdistY;
+                if (cheb != r) continue; /* inner cells were handled by earlier rings */
+                const int cell = cyy * cols + cxx;
+                const int start = grid->cellStarts[cell];
+                const int end = grid->cellStarts[cell + 1];
+                for (int e = start; e < end; e++) {
+                    const int s = grid->entries[e];
+                    const int j = track->routeClosed ? (s + 1) % count : s + 1;
+                    const float dSq = point_to_segment_sq(point, track->nodes[s].centerM,
+                                                          track->nodes[j].centerM);
+                    if (dSq < best) {
+                        best = dSq;
+                        bestIdx = s;
+                    }
+                }
+            }
+        }
+    }
+
+    if (bestIdx < 0) /* defensive: grid empty or all segments degenerate */
+        return nearest_centerline_distance_sq(track->nodes, count, track->routeClosed, point,
+                                              closestIdx);
+    if (closestIdx != NULL) *closestIdx = bestIdx;
+    return best;
+}
+
 /* --------------- public API -------------------------------------------------------------- */
 
 void track_init(TrackDefinition *track)
@@ -190,8 +368,18 @@ SurfaceId Track_SurfaceAt(const TrackDefinition *track, const TrackRuntime *runt
     }
 
     int closestIdx = 0;
-    const float dSq = nearest_centerline_distance_sq(track->nodes, track->count,
-                                                     track->routeClosed, pointM, &closestIdx);
+    float dSq;
+    TrackRuntime *mutableRuntime = (TrackRuntime *)runtime;
+    if (mutableRuntime != NULL && !mutableRuntime->queryGrid.built) {
+        /* Build the exact spatial index lazily on first query (#39). */
+        track_grid_build(&mutableRuntime->queryGrid, track);
+    }
+    if (mutableRuntime != NULL && mutableRuntime->queryGrid.built) {
+        dSq = track_grid_nearest_sq(&mutableRuntime->queryGrid, track, pointM, &closestIdx);
+    } else {
+        dSq = nearest_centerline_distance_sq(track->nodes, track->count, track->routeClosed,
+                                             pointM, &closestIdx);
+    }
     const TrackNode *seg = &track->nodes[closestIdx];
 
     /* Three bands: racing surface, then runoff, then off-track. The runoff band is what makes

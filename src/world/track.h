@@ -303,12 +303,32 @@ typedef struct {
  * derived query caches join it later; a cache that differs per racer belongs in that
  * entrant's RacerProgress instead, not here.
  */
+/* Exact nearest-segment spatial index (#39). Built lazily from a definition's centreline;
+ * plain data (no heap, no ownership) so it survives hot reload like the rest of TrackRuntime.
+ * A segment shorter than the cell size touches at most 2x2 cells, so the entry cap covers
+ * TRACK_GRID_MAX_CELLS-worth of segments; when a track exceeds the caps the build fails and
+ * queries fall back to the linear scan — the accelerated path is only ever an optimisation. */
+#define TRACK_GRID_MAX_COLS 32
+#define TRACK_GRID_MAX_ROWS 32
+#define TRACK_GRID_MAX_CELLS (TRACK_GRID_MAX_COLS * TRACK_GRID_MAX_ROWS)
+#define TRACK_GRID_MAX_ENTRIES 8192
+
+typedef struct {
+    bool built;
+    int cols, rows;
+    float minX, minY, cellW, cellH;
+    int cellStarts[TRACK_GRID_MAX_CELLS + 1]; /* prefix sums over cells, ascending segment id */
+    int entries[TRACK_GRID_MAX_ENTRIES];      /* packed segment indices */
+} TrackQueryGrid;
+
 typedef struct {
     /* track_geometry_hash() of the definition bound at session start. */
     uint32_t definitionHash;
     /* Deterministic collision world: static barrier shapes, dynamic body proxies, and the
      * per-tick contact feed. Plain data — no heap, no ownership, survives hot reload. */
     CollisionWorld collisionWorld;
+    /* Exact nearest-segment spatial index (#39), built lazily on first surface query. */
+    TrackQueryGrid queryGrid;
 } TrackRuntime;
 
 /*
