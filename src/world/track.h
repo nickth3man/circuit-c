@@ -233,6 +233,11 @@ typedef struct {
  * backwards progress, so a stationary car cannot arm the flag on float noise. */
 #define ROUTE_WRONG_WAY_BACKWARD_EPS_M 0.001f
 
+/* Non-scoring progress-bin interval (#78 §2). Diagnostic bins derived from
+ * RouteLocation.longitudinalM; they never affect lap validity, classification, replay, or the
+ * rolling checksum. 10 m gives ~70 bins on the ~690 m chicane, enough to localise a fault. */
+#define AI_PROGRESS_BIN_M 10.0f
+
 /*
  * One racer's position around the route. Exactly one per entrant, never shared, and the only
  * thing a checkpoint crossing writes. A zeroed RacerProgress is a valid "start of an out-lap

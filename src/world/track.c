@@ -676,6 +676,9 @@ void track_reset_progress_at(RacerProgress *progress, const TrackDefinition *tra
     progress->raceDistanceM = 0.0f;
     progress->wrongWay = false;
     progress->wrongWayTimerS = 0.0f;
+    progress->progressBinM = 0.0f;
+    progress->furthestProgressMLap = 0.0f;
+    progress->lastProgressTick = 0;
     if (track == NULL || track->checkpointCount <= 0) {
         progress->nextCheckpoint = 0;
         progress->lapStartCheckpoint = 0;

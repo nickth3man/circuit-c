@@ -34,7 +34,16 @@
     "distance_to_centerline_m,on_track,"                                                      \
     "slip_angle_front_left_rad,slip_angle_front_right_rad,slip_angle_rear_left_rad,"          \
     "slip_angle_rear_right_rad,slip_ratio_front_left,slip_ratio_front_right,"                 \
-    "slip_ratio_rear_left,slip_ratio_rear_right"
+    "slip_ratio_rear_left,slip_ratio_rear_right,"                                             \
+    "route_segment_index,route_segment_t,route_longitudinal_m,route_lateral_m,"               \
+    "route_heading_error_rad,route_confidence,on_route_flag,route_departure_dist_m,"          \
+    "wheels_off_asphalt,beyond_runoff,"                                                       \
+    "progress_bin_m,furthest_progress_m,"                                                     \
+    "last_crossed_index,ticks_since_cross,lap_armed_flag,lap_invalid_flag,lap_timer_s,"       \
+    "wrong_way_flag,"                                                                         \
+    "ai_segment,ai_cross_track_m,ai_target_speed_mps,ai_lookahead_rad,"                       \
+    "ai_binding_curv_1pm,ai_binding_dist_m,ai_pedal_axis,ai_steer_axis,ai_grip_cut,"          \
+    "ai_plan_base_node,ai_plan_layer_count"
 
 const char *telemetry_header(void)
 {
@@ -126,7 +135,9 @@ bool telemetry_write_row(TelemetryWriter *writer, const TelemetryRow *row)
         "%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%d,%d,%" PRIu32 ","
         "%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%"
         ".6f,%.6f,%d,%d,%d,%d,%d,%d,%d,%d,%.6f,%.6f,%d,"
-        "%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f\n",
+        "%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,"
+        "%d,%.6f,%.6f,%.6f,%.6f,%.6f,%d,%.6f,%d,%d,%.6f,%.6f,"
+        "%d,%d,%d,%d,%.6f,%d,%d,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%d,%d\n",
         row->tick, row->timeS, (double)row->positionXM, (double)row->positionYM,
         (double)row->headingRad, (double)row->velocityLongitudinalMps,
         (double)row->velocityLateralMps, (double)row->speedMps, (double)row->yawRateRadS,
@@ -158,7 +169,17 @@ bool telemetry_write_row(TelemetryWriter *writer, const TelemetryRow *row)
         (double)row->slipAngleFrontRightRad, (double)row->slipAngleRearLeftRad,
         (double)row->slipAngleRearRightRad, (double)row->slipRatioFrontLeft,
         (double)row->slipRatioFrontRight, (double)row->slipRatioRearLeft,
-        (double)row->slipRatioRearRight);
+        (double)row->slipRatioRearRight, row->routeSegmentIndex, (double)row->routeSegmentT,
+        (double)row->routeLongitudinalM, (double)row->routeLateralM,
+        (double)row->routeHeadingErrorRad, (double)row->routeConfidence, row->onRouteFlag,
+        (double)row->routeDepartureDistM, row->wheelsOffAsphalt, row->beyondRunoff,
+        (double)row->progressBinM, (double)row->furthestProgressM, row->lastCrossedIndex,
+        row->ticksSinceCross, row->lapArmedFlag, row->lapInvalidFlag, (double)row->lapTimerSCol,
+        row->wrongWayFlag, row->aiSegment, (double)row->aiCrossTrackM,
+        (double)row->aiTargetSpeedMps, (double)row->aiLookaheadRad,
+        (double)row->aiBindingCurv1pm, (double)row->aiBindingDistM, (double)row->aiPedalAxis,
+        (double)row->aiSteerAxis, (double)row->aiGripCut, row->aiPlanBaseNode,
+        row->aiPlanLayerCount);
     if (written < 0) {
         fprintf(stderr, "TELEMETRY: write failed after %ld rows\n", writer->rowCount);
         writer->failed = true;
