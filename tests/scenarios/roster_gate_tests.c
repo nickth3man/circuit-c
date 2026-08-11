@@ -40,6 +40,7 @@ static void scenario_ai_roster_graded(void)
     const int budgetTicks = REPLAY_CAPACITY_TICKS;
     TelemetryRow *rows = (TelemetryRow *)malloc((size_t)budgetTicks * sizeof(TelemetryRow));
     check(rows != NULL, "graded gate allocated its per-car telemetry buffer");
+    if (rows == NULL) return;
 
     for (int i = 0; i < rosterCount; i++) {
         VehicleSpec spec;

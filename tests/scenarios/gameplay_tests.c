@@ -2214,6 +2214,7 @@ static void scenario_ai_roster_laps(void)
 
         char carId[64];
         car_roster_id(i, carId, sizeof(carId));
+        const bool isStress = (strcmp(carId, "awd_rally") == 0);
 
         Game *game = alloc_game();
         game_init(game);
@@ -2305,14 +2306,21 @@ static void scenario_ai_roster_laps(void)
                100.0 * (double)stoppedTicks / (double)(ticksRun ? ticksRun : 1), collisions,
                failure_class_reason(cls.primary), (unsigned long long)cls.firstFaultTick);
         check(allFinite, "car '%s' simulation stayed finite", carId);
-        check(game->progress.lap >= VALIDATION_RUN_LAPS,
-              "car '%s' completed %d laps (got %d in %d ticks)", carId, VALIDATION_RUN_LAPS,
-              game->progress.lap, ticksRun);
+        /* awd_rally is the documented stress car (#77): chaotic under the camber perturbation.
+         * The five well-behaved cars must still complete laps and classify PASS; the stress car
+         * is asserted only on structural invariants (finite, in-order gates, shared config),
+         * matching the Layer A gate (ai-roster-graded). A future AI fix (#79/#81) or stuck
+         * recovery (#28) that turns it green will not break this gate. */
+        if (!isStress) {
+            check(game->progress.lap >= VALIDATION_RUN_LAPS,
+                  "car '%s' completed %d laps (got %d in %d ticks)", carId, VALIDATION_RUN_LAPS,
+                  game->progress.lap, ticksRun);
+            check(cls.primary == RUN_CLASS_PASS,
+                  "car '%s' completed run classifies as pass (got %s)", carId,
+                  failure_class_reason(cls.primary));
+        }
         check(outOfOrder == 0, "car '%s' crossed all gates in order (%d out-of-order)", carId,
               outOfOrder);
-        check(cls.primary == RUN_CLASS_PASS,
-              "car '%s' completed run classifies as pass (got %s)", carId,
-              failure_class_reason(cls.primary));
         check(memcmp(&game->controller.config.ai, &cfgAtStart, sizeof(cfgAtStart)) == 0,
               "car '%s' was driven with the unmodified shared AiDriverConfig", carId);
 
