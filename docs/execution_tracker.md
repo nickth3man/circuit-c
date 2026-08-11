@@ -30,6 +30,18 @@ If work is in progress, append `— IN PROGRESS` to its line.
 6. Issue #59 is post-core and does not block the AI-racing target.
 7. Issue #60 is the final core release gate.
 
+## Cross-cutting validation tooling
+
+- [ ] [#78 — Make AI lap-validation failures diagnosable with denser route coverage and first-fault telemetry](https://github.com/nickth3man/circuit-c/issues/78) — IN PROGRESS
+  - Denser chicane route coverage (8 → 25 required gates, v2 track versions), non-scoring 10 m
+    progress bins, route + AI decision telemetry (append-only), an explicit failure classifier
+    with a primary reason, the earliest causal tick, and contributing events, lap-aware
+    `checkpoints_missed` accounting, `RUN_FAIL_STALLED`/`tick_budget_exceeded` selection,
+    `ai-roster-laps` reusing the classifier, and focused scenarios for every failure class.
+    Supplies the observability #77 needs to judge whether #15/#16/#18 fail on physics or on the
+    validation AI losing control. Failure taxonomy documented in `docs/VALIDATION_FAILURES.md`.
+    (Landing via PR #80; the AI-driver-quality follow-up is issue #79.)
+
 ---
 
 # Phase 0 — Identity and Core Architecture

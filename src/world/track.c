@@ -339,6 +339,41 @@ static float chicane_offset_at(float u)
     return CHICANE_OFFSET_M * s * s;
 }
 
+/*
+ * World-space centreline point on the far straight at x: (x, farY + offset(u)). Same u as
+ * chicane_far_forward(), so a gate's centre and its forward are derived from the same authored
+ * geometry and can never drift apart (PR #80 review).
+ */
+static Vector2 chicane_far_point(float x)
+{
+    const float u = (CHICANE_ENTRY_X_M - x) / CHICANE_SPAN_M;
+    return (Vector2){ x, CHICANE_FAR_STRAIGHT_Y_M + chicane_offset_at(u) };
+}
+
+/*
+ * Unit forward (travel direction) at world x on the far straight, where the chicane displaces
+ * the centreline vertically by offset(u), u = (ENTRY_X - x) / SPAN. Travel is -X, so the
+ * tangent for an infinitesimal step in -X is (-1, -dy/dx) normalized, where dy/dx is the
+ * centreline slope. Derived from the same offset() the node builder uses, so a gate's forward
+ * is exactly unit and exactly aligned with the authored geometry rather than hand-trig. Returns
+ * (-1, 0) on the straight portions outside the chicane (zero slope there).
+ */
+static Vector2 chicane_far_forward(float x)
+{
+    const float pi = 3.14159265358979323846f;
+    const float intoChicane = CHICANE_ENTRY_X_M - x;
+    float dydx = 0.0f;
+    if (intoChicane >= 0.0f && intoChicane <= CHICANE_SPAN_M) {
+        const float u = intoChicane / CHICANE_SPAN_M;
+        /* offset(u) = OFFSET * sin^2(pi u); d/du = OFFSET * pi * sin(2 pi u); du/dx = -1/SPAN. */
+        dydx = CHICANE_OFFSET_M * pi * sinf(2.0f * pi * u) * (-1.0f / CHICANE_SPAN_M);
+    }
+    const float fx = -1.0f;
+    const float fy = -dydx;
+    const float len = sqrtf(fx * fx + fy * fy);
+    return (Vector2){ fx / len, fy / len };
+}
+
 void track_load_chicane(TrackDefinition *track)
 {
     if (track == NULL) return;
@@ -349,7 +384,7 @@ void track_load_chicane(TrackDefinition *track)
     track->offTrackSurfaceId = SURFACE_GRASS;
     track->runoffSurfaceId = SURFACE_GRASS;
     snprintf(track->id, sizeof(track->id), "%s", "chicane");
-    snprintf(track->version, sizeof(track->version), "%s", "chicane_v1");
+    snprintf(track->version, sizeof(track->version), "%s", "chicane_v2");
 
     /* Generous upper bound; the builder stops at capacity and count is what is used. */
     const int capacity = 512;
@@ -407,38 +442,119 @@ void track_load_chicane(TrackDefinition *track)
     track->count = b.count;
 
     /*
-     * Eight required gates. Deliberately far fewer than there are nodes: gates exist to prove
-     * the car went the right way round, and one per node would make a lap fail for a
-     * momentary wide line rather than for cutting the course.
+     * Twenty-five required gates (issue #78). The eight-gate layout could prove a car went the
+     * right way round, but it could not say WHERE a failed run stopped: ~690 m of route reduced
+     * to eight scoring gates left a spin, a departure, and a stall all reading as "missed a
+     * gate somewhere". The denser layout places a gate at every corner entry/apex/exit, before
+     * and after the chicane's direction changes, and along the straights, so the first gate a
+     * failed run stops reporting narrows the fault to ~30 m of road. The 10 m non-scoring
+     * progress bins (route_localization.c) carry the finer resolution; these gates stay
+     * route-validation rules, not timing loops.
+     *
+     * Gate forwards are the route tangent at the gate (axis-aligned on the straights and at the
+     * curve apices, 45 deg at the curve quarters, and the local chicane tangent through the
+     * chicane direction changes). A car that cuts the chicane by holding y = farY crosses the
+     * entry-side gates but misses the apex gate and then trips the chicane-exit gate out of
+     * order, so a shortcut is rejected loudly rather than silently scored. Half-width stays at
+     * GATE_HALF_WIDTH_M so a wide but legal line still scores.
      */
-    const int gateCount = 8;
+    const int gateCount = 25;
     track->checkpoints = (Checkpoint *)calloc((size_t)gateCount, sizeof(Checkpoint));
     if (track->checkpoints == NULL) return;
     track->checkpointCount = gateCount;
 
+    const float q = 0.7071068f;                      /* cos/sin 45 deg, unit to ~6e-7 */
+    const float curveQ = CHICANE_CURVE_RADIUS_M * q; /* 45 m radius quarter offset */
     const float chicaneApexX = CHICANE_ENTRY_X_M - 0.5f * CHICANE_SPAN_M;
-    const Checkpoint gates[8] = {
-        /* 0: start/finish, on the near straight, facing +X */
-        { { -60.0f, 0.0f }, { 1.0f, 0.0f }, GATE_HALF_WIDTH_M, true },
-        /* 1: end of the near straight, before turn-in */
-        { { halfX, 0.0f }, { 1.0f, 0.0f }, GATE_HALF_WIDTH_M, true },
-        /* 2: right curve apex, facing +Y */
-        { { halfX + radius, radius }, { 0.0f, 1.0f }, GATE_HALF_WIDTH_M, true },
-        /* 3: far straight entry, facing -X */
-        { { halfX, farY }, { -1.0f, 0.0f }, GATE_HALF_WIDTH_M, true },
-        /* 4: chicane entry */
-        { { CHICANE_ENTRY_X_M, farY }, { -1.0f, 0.0f }, GATE_HALF_WIDTH_M, true },
-        /* 5: chicane apex, at the peak of the displacement */
-        { { chicaneApexX, farY + CHICANE_OFFSET_M }, { -1.0f, 0.0f }, GATE_HALF_WIDTH_M, true },
-        /* 6: chicane exit */
+    const Checkpoint gates[25] = {
+        /* Near straight, travelling +X along y = 0. Gate 0 is start/finish. */
+        { { -60.0f, 0.0f }, { 1.0f, 0.0f }, GATE_HALF_WIDTH_M, true }, /* 0: start/finish */
+        { { -20.0f, 0.0f }, { 1.0f, 0.0f }, GATE_HALF_WIDTH_M, true }, /* 1 */
+        { { 20.0f, 0.0f }, { 1.0f, 0.0f }, GATE_HALF_WIDTH_M, true },  /* 2 */
+        { { 60.0f, 0.0f }, { 1.0f, 0.0f }, GATE_HALF_WIDTH_M, true },  /* 3 */
+        { { halfX, 0.0f }, { 1.0f, 0.0f }, GATE_HALF_WIDTH_M, true },  /* 4: turn-in */
+        /* Right curve (centre (halfX, radius), -90 to +90 deg). */
+        { { halfX + curveQ, radius - curveQ },
+          { q, q },
+          GATE_HALF_WIDTH_M,
+          true }, /* 5: entry quarter */
+        { { halfX + radius, radius },
+          { 0.0f, 1.0f },
+          GATE_HALF_WIDTH_M,
+          true }, /* 6: apex +Y */
+        { { halfX + curveQ, radius + curveQ },
+          { -q, q },
+          GATE_HALF_WIDTH_M,
+          true }, /* 7: exit quarter */
+        /* Far straight, travelling -X along y = farY, with the chicane set into it. */
+        { { halfX, farY },
+          { -1.0f, 0.0f },
+          GATE_HALF_WIDTH_M,
+          true }, /* 8: far-straight entry */
+        { { 75.0f, farY }, { -1.0f, 0.0f }, GATE_HALF_WIDTH_M, true }, /* 9 */
+        { { CHICANE_ENTRY_X_M, farY },
+          { -1.0f, 0.0f },
+          GATE_HALF_WIDTH_M,
+          true }, /* 10: chicane entry */
+        /* Chicane direction changes: centres and forwards are derived from the same authored
+         * geometry the centreline was built from (chicane_far_point / chicane_far_forward
+         * below), so a change to the constants cannot leave a gate floating off the route.
+         * The y in the table is a placeholder (-1) overwritten by the derived centre. */
+        { { 44.0f, -1.0f }, { -1.0f, 0.0f }, GATE_HALF_WIDTH_M, true }, /* 11: climbing */
+        { { 36.0f, -1.0f }, { -1.0f, 0.0f }, GATE_HALF_WIDTH_M, true }, /* 12: climbing */
+        { { 28.0f, -1.0f },
+          { -1.0f, 0.0f },
+          GATE_HALF_WIDTH_M,
+          true }, /* 13: approaching apex */
+        { { chicaneApexX, farY + CHICANE_OFFSET_M },
+          { -1.0f, 0.0f },
+          GATE_HALF_WIDTH_M,
+          true },                                                        /* 14: apex */
+        { { 4.0f, -1.0f }, { -1.0f, 0.0f }, GATE_HALF_WIDTH_M, true },   /* 15: descending */
+        { { -8.0f, -1.0f }, { -1.0f, 0.0f }, GATE_HALF_WIDTH_M, true },  /* 16: descending */
+        { { -16.0f, -1.0f }, { -1.0f, 0.0f }, GATE_HALF_WIDTH_M, true }, /* 17: exiting */
         { { CHICANE_ENTRY_X_M - CHICANE_SPAN_M, farY },
           { -1.0f, 0.0f },
           GATE_HALF_WIDTH_M,
-          true },
-        /* 7: left curve apex, facing -Y */
-        { { -halfX - radius, radius }, { 0.0f, -1.0f }, GATE_HALF_WIDTH_M, true },
+          true },                                                       /* 18: chicane exit */
+        { { -60.0f, farY }, { -1.0f, 0.0f }, GATE_HALF_WIDTH_M, true }, /* 19 */
+        { { -halfX, farY },
+          { -1.0f, 0.0f },
+          GATE_HALF_WIDTH_M,
+          true }, /* 20: left-curve turn-in */
+        /* Left curve (centre (-halfX, radius), +90 to +270 deg). */
+        { { -halfX - curveQ, radius + curveQ },
+          { -q, -q },
+          GATE_HALF_WIDTH_M,
+          true }, /* 21: entry quarter */
+        { { -halfX - radius, radius },
+          { 0.0f, -1.0f },
+          GATE_HALF_WIDTH_M,
+          true }, /* 22: apex -Y */
+        { { -halfX - curveQ, radius - curveQ },
+          { q, -q },
+          GATE_HALF_WIDTH_M,
+          true }, /* 23: exit quarter */
+        /* Seam approach: the last gate before the wrap back to start/finish. */
+        { { -halfX, 0.0f }, { 1.0f, 0.0f }, GATE_HALF_WIDTH_M, true }, /* 24 */
     };
     memcpy(track->checkpoints, gates, sizeof(gates));
+
+    /* The chicane tangent gates (11, 12, 13, 15, 16, 17) sit on direction changes; their
+     * centres and forwards are derived from the same geometry the centreline was built from.
+     * Done after the copy because C initializers cannot call functions. */
+    track->checkpoints[11].centerM = chicane_far_point(track->checkpoints[11].centerM.x);
+    track->checkpoints[12].centerM = chicane_far_point(track->checkpoints[12].centerM.x);
+    track->checkpoints[13].centerM = chicane_far_point(track->checkpoints[13].centerM.x);
+    track->checkpoints[15].centerM = chicane_far_point(track->checkpoints[15].centerM.x);
+    track->checkpoints[16].centerM = chicane_far_point(track->checkpoints[16].centerM.x);
+    track->checkpoints[17].centerM = chicane_far_point(track->checkpoints[17].centerM.x);
+    track->checkpoints[11].forwardUnit = chicane_far_forward(track->checkpoints[11].centerM.x);
+    track->checkpoints[12].forwardUnit = chicane_far_forward(track->checkpoints[12].centerM.x);
+    track->checkpoints[13].forwardUnit = chicane_far_forward(track->checkpoints[13].centerM.x);
+    track->checkpoints[15].forwardUnit = chicane_far_forward(track->checkpoints[15].centerM.x);
+    track->checkpoints[16].forwardUnit = chicane_far_forward(track->checkpoints[16].centerM.x);
+    track->checkpoints[17].forwardUnit = chicane_far_forward(track->checkpoints[17].centerM.x);
 }
 void track_load_sprint(TrackDefinition *track)
 {
@@ -466,7 +582,7 @@ void track_load_sprint(TrackDefinition *track)
         }
     }
     snprintf(track->id, sizeof(track->id), "%s", "sprint");
-    snprintf(track->version, sizeof(track->version), "%s", "sprint_v1");
+    snprintf(track->version, sizeof(track->version), "%s", "sprint_v2");
 }
 void track_load_technical(TrackDefinition *track)
 {
@@ -507,7 +623,7 @@ void track_load_technical(TrackDefinition *track)
         checkpoint->halfWidthM = 7.0f;
     }
     snprintf(track->id, sizeof(track->id), "%s", "technical");
-    snprintf(track->version, sizeof(track->version), "%s", "technical_v1");
+    snprintf(track->version, sizeof(track->version), "%s", "technical_v2");
 }
 
 bool track_build_checkpoints_from_nodes(TrackDefinition *track)
@@ -578,6 +694,9 @@ void track_reset_progress_at(RacerProgress *progress, const TrackDefinition *tra
     progress->raceDistanceM = 0.0f;
     progress->wrongWay = false;
     progress->wrongWayTimerS = 0.0f;
+    progress->progressBinM = 0.0f;
+    progress->furthestProgressMLap = 0.0f;
+    progress->lastProgressTick = 0;
     if (track == NULL || track->checkpointCount <= 0) {
         progress->nextCheckpoint = 0;
         progress->lapStartCheckpoint = 0;

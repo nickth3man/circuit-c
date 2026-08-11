@@ -1,10 +1,10 @@
 {
   "schema": "circuit/track",
-  "version": 1,
+  "version": 2,
   "id": "sprint",
   "displayName": "Sprint Circuit",
   "description": "scaled stadium layout for AI following",
-  "contentVersion": "sprint_v1",
+  "contentVersion": "sprint_v2",
   "route": {
     "closed": true,
     "nodes": [
@@ -183,12 +183,29 @@
   "surfaces": { "offTrack": "grass", "runoff": "grass" },
   "checkpoints": [
       { "x": -49.2000008, "y": 0, "forwardX": 1, "forwardY": 0, "halfWidth": 10, "required": true },
+      { "x": -16.3999996, "y": 0, "forwardX": 1, "forwardY": 0, "halfWidth": 10, "required": true },
+      { "x": 16.3999996, "y": 0, "forwardX": 1, "forwardY": 0, "halfWidth": 10, "required": true },
+      { "x": 49.2000008, "y": 0, "forwardX": 1, "forwardY": 0, "halfWidth": 10, "required": true },
       { "x": 82, "y": 0, "forwardX": 1, "forwardY": 0, "halfWidth": 10, "required": true },
+      { "x": 108.092239, "y": 11.5985699, "forwardX": 0.681725621, "forwardY": 0.731607974, "halfWidth": 10, "required": true },
       { "x": 118.900002, "y": 39.5999985, "forwardX": 0, "forwardY": 1, "halfWidth": 10, "required": true },
+      { "x": 108.092239, "y": 67.6014328, "forwardX": -0.681725621, "forwardY": 0.731607974, "halfWidth": 10, "required": true },
       { "x": 82, "y": 79.1999969, "forwardX": -1, "forwardY": 0, "halfWidth": 10, "required": true },
+      { "x": 61.5, "y": 79.1999969, "forwardX": -1, "forwardY": 0, "halfWidth": 10, "required": true },
       { "x": 45.0999985, "y": 79.1999969, "forwardX": -1, "forwardY": 0, "halfWidth": 10, "required": true },
+      { "x": 36.079998, "y": 81.6678848, "forwardX": -0.889847755, "forwardY": 0.456257463, "halfWidth": 10, "required": true },
+      { "x": 29.5200005, "y": 85.6876526, "forwardX": -0.829919159, "forwardY": 0.55788362, "halfWidth": 10, "required": true },
+      { "x": 22.9599991, "y": 89.918396, "forwardX": -0.866932809, "forwardY": 0.498425096, "halfWidth": 10, "required": true },
       { "x": 12.3000002, "y": 93.2799988, "forwardX": -1, "forwardY": 0, "halfWidth": 10, "required": true },
+      { "x": 3.27999997, "y": 90.8121109, "forwardX": -0.889847755, "forwardY": -0.456257522, "halfWidth": 10, "required": true },
+      { "x": -6.55999994, "y": 84.5965424, "forwardX": -0.836273253, "forwardY": -0.548312843, "halfWidth": 10, "required": true },
+      { "x": -13.1199999, "y": 80.8867416, "forwardX": -0.916016579, "forwardY": -0.401140511, "halfWidth": 10, "required": true },
       { "x": -20.5, "y": 79.1999969, "forwardX": -1, "forwardY": 0, "halfWidth": 10, "required": true },
-      { "x": -118.900002, "y": 39.5999985, "forwardX": 0, "forwardY": -1, "halfWidth": 10, "required": true }
+      { "x": -49.2000008, "y": 79.1999969, "forwardX": -1, "forwardY": 0, "halfWidth": 10, "required": true },
+      { "x": -82, "y": 79.1999969, "forwardX": -1, "forwardY": 0, "halfWidth": 10, "required": true },
+      { "x": -108.092239, "y": 67.6014328, "forwardX": -0.681725621, "forwardY": -0.731607974, "halfWidth": 10, "required": true },
+      { "x": -118.900002, "y": 39.5999985, "forwardX": 0, "forwardY": -1, "halfWidth": 10, "required": true },
+      { "x": -108.092239, "y": 11.5985699, "forwardX": 0.681725621, "forwardY": -0.731607974, "halfWidth": 10, "required": true },
+      { "x": -82, "y": 0, "forwardX": 1, "forwardY": 0, "halfWidth": 10, "required": true }
   ]
 }

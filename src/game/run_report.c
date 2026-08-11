@@ -10,10 +10,11 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <inttypes.h>
 
 #include "platform/build_info.h"
 
-#define RUN_SCHEMA_VERSION "1.0.0"
+#define RUN_SCHEMA_VERSION "1.1.0"
 
 const char *run_status_label(RunStatus s)
 {
@@ -33,6 +34,26 @@ const char *run_failure_reason(RunStatus s)
         case RUN_FAIL_SPEC_INVALID: return "spec_invalid";
     }
     return "unknown";
+}
+
+int run_report_missed_checkpoints(const RacerProgress *progress, int checkpointCount)
+{
+    if (progress == NULL || checkpointCount <= 0) return 0;
+    /* Crossings in the current lap, anchor included: nextCheckpoint is lapStartCheckpoint+1 on
+     * a fresh lap, so the raw offset already counts the anchor. The wrap (nextCheckpoint ==
+     * lapStartCheckpoint, raw offset 0) is the state right after the last scored gate: every
+     * scored gate is crossed, only the anchor crossing that closes the lap remains, so the
+     * lap reads as fully crossed rather than as a fresh one (PR #80 review). */
+    const int delta = progress->nextCheckpoint - progress->lapStartCheckpoint;
+    /* Fully normalized modulo: if a caller passes a checkpointCount that does not belong to
+     * the progress state, delta can be negative enough that one addition does not fix it, and
+     * C integer % keeps the sign — the doc'd [0, checkpointCount) range would break. The
+     * double-modulo idiom matches validation_classifier.c's forward-offset computation
+     * (PR #80 review). */
+    const int raw = ((delta % checkpointCount) + checkpointCount) % checkpointCount;
+    const int crossedThisLap = (raw == 0) ? checkpointCount : raw;
+    const int stillOwed = checkpointCount - crossedThisLap;
+    return (stillOwed > 0) ? stillOwed : 0;
 }
 
 /* Minimal JSON string escaping, byte-for-byte the same rule as failure_bundle.c's helper so the
@@ -130,6 +151,27 @@ bool run_report_write(const char *path, const RunReportInput *in)
             m != NULL ? m->timedLapsCompleted : 0, m != NULL ? m->bestTimedLapTimeS : 0.0,
             m != NULL ? m->meanTimedLapTimeS : 0.0, in->checkpointsPassed,
             in->checkpointsMissed, in->outOfOrderEvents);
+
+    /* Failure classification (issue #78 §5/§6). The coarse result.status stays the closed-set
+     * verdict; this block carries the fine-grained primary reason, the first causal tick, the
+     * contributing events, and where the run stopped and what it owed. A NULL reason means no
+     * classifier ran (pre-run failures such as an invalid car/spec or an ffmpeg start error):
+     * that is reported as "unclassified", never as a pass (PR #80 review). */
+    fprintf(file, "  \"classification\": { \"reason\": ");
+    write_json_string(file, in->classificationReason != NULL ? in->classificationReason
+                                                             : "unclassified");
+    fprintf(file, ", \"first_fault_tick\": %" PRIu64 ", \"contributing\": [",
+            in->firstFaultTick);
+    for (int i = 0; i < in->contributingCount && i < RUN_REPORT_MAX_CONTRIBUTING; i++) {
+        fprintf(file, "%s", (i > 0) ? ", " : "");
+        write_json_string(file,
+                          in->contributingReasons[i] != NULL ? in->contributingReasons[i] : "");
+    }
+    fprintf(file,
+            "], \"last_checkpoint_index\": %d, \"expected_checkpoint_index\": %d, "
+            "\"furthest_route_distance_m\": %.3f, \"time_since_progress_s\": %.3f },\n",
+            in->lastCheckpointIndex, in->expectedCheckpointIndex, in->furthestRouteDistanceM,
+            in->timeSinceProgressS);
 
     if (m != NULL) {
         fprintf(file, "  \"metrics\": {\n");

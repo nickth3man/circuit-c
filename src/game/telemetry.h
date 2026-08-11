@@ -132,6 +132,67 @@ typedef struct {
     float slipRatioFrontRight;
     float slipRatioRearLeft;
     float slipRatioRearRight;
+
+    /* Phase 6: validation diagnosability (#78). Appended so every earlier column stays in place
+     * and in order; zero for runs that have no checkpointed track or no AI controller, which is
+     * why appending cannot move a committed baseline. The metrics layer and the failure
+     * classifier (validation_classifier.h) are pure reducers over these. */
+
+    /* Authoritative route localization (RacerProgress.location), so a failed run reports WHERE
+     * on the route it stopped rather than only which gate it owed. */
+    int routeSegmentIndex;      /* centreline segment nodes[i]->nodes[i+1]; -1 if invalid */
+    float routeSegmentT;        /* [0,1] along that segment */
+    float routeLongitudinalM;   /* arc length from node 0 along the route */
+    float routeLateralM;        /* signed offset from centreline, +left of travel */
+    float routeHeadingErrorRad; /* car heading minus route heading, [-PI,PI) */
+    float routeConfidence;      /* 1 on surface -> 0 across runoff -> 0 at/beyond barrier */
+    int onRouteFlag;            /* 1 iff within the segment's racing half-width */
+    float routeDepartureDistM; /* |pos - closest centreline point|; the actual leave distance */
+
+    /* Named off-track definitions (#78 §5), reported side by side rather than collapsed into one
+     * ambiguous boolean. iRacing/ACC/FIA each name a different definition; this carries all of
+     * them so a report is explicit about which one fired. */
+    int wheelsOffAsphalt; /* 0..4 count of wheels not on the racing surface */
+    int beyondRunoff;     /* 1 iff at/past the barrier (routeConfidence <= 0) */
+
+    /* Non-scoring progress bins (#78 §2). Derived from routeLongitudinalM at a 10 m interval;
+     * DIAGNOSTIC ONLY — they never mutate nextCheckpoint, lap validity, or the checksum. */
+    float progressBinM;      /* current lap-relative bin (longitudinalM mod lap, binned) */
+    float furthestProgressM; /* furthest bin reached in the current lap */
+
+    /* Lap/checkpoint state the classifier correlates with route position. */
+    int lastCrossedIndex; /* last gate crossed this run, -1 initially */
+    int ticksSinceCross;  /* hysteresis ticks since the last crossing */
+    int lapArmedFlag;     /* SF latch state */
+    int lapInvalidFlag;   /* a required gate was skipped */
+    float lapTimerSCol;   /* seconds since the last checkpoint/lap */
+    int wrongWayFlag;     /* latched wrong-way state */
+
+    /* AI decision telemetry (AiDriverState + emitted controls), so a planner/localization
+     * disagreement is visible rather than inferred. Reported beside the authoritative route
+     * segment above. Zero on non-AI runs. */
+    int aiSegment;          /* the segment the driver matched last tick */
+    float aiCrossTrackM;    /* signed; + when left of the planned line */
+    float aiTargetSpeedMps; /* what the speed controller was aiming for */
+    float aiLookaheadRad;   /* bearing to the lookahead point, body frame */
+    float aiBindingCurv1pm; /* curvature that set the speed target */
+    float aiBindingDistM;   /* how far ahead that curvature was */
+    float aiPedalAxis;      /* +1 full throttle / -1 full brake (one signed axis) */
+    float aiSteerAxis;      /* the steering axis actually emitted */
+    float aiGripCut;        /* throttle surrendered to traction management */
+    int aiPlanBaseNode;     /* centreline node the plan window starts at */
+    int aiPlanLayerCount;   /* plan layers currently held */
+
+    /* PR #80 review follow-up: an explicit AI-presence flag and the gate the most recent
+     * checkpoint event actually crossed. An out-of-order crossing does NOT advance
+     * progress->lastCrossedIndex (it names the previous legal gate), so the classifier needs
+     * the event's own index to tell a forward skip from a gate behind the owed one. aiPresent
+     * stays 0 on rows without an AI controller; checkpointCrossedIndex is -1 whenever the row
+     * carries no crossing — a 0 is always a real gate index, so the classifier never has to
+     * guess what a missing value meant (PR #80 review). Appending keeps every earlier column
+     * in place and in order. */
+    int aiPresent;              /* 1 iff an AI controller drove this row; 0 otherwise */
+    int checkpointCrossedIndex; /* gate crossed by the last checkpoint event; -1 when none */
 } TelemetryRow;
 
 typedef struct {

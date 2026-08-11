@@ -228,6 +228,13 @@ therefore well defined across lap boundaries and on open point-to-point routes a
 `track_reset_progress_at()` clears all four, because a car put back on the grid must not inherit
 the segment it left from.
 
+The diagnostic progress-bin members (`progressBinM`, `furthestProgressMLap`, `lastProgressTick`,
+issue #78 §2) are **recomputed diagnostics, not authoritative state**: they are derived from
+`location.longitudinalM` at a fixed 10 m interval, nothing in the simulation reads them back
+into a later tick, and they are deliberately excluded from `hash_entrant()` and from the rolling
+checksum. They exist so a failure classifier can tell a slow-but-moving car from a stationary
+one without touching lap validity, classification, replay authority, or the checksum contract.
+
 ### Controller
 
 The controller boundary consumes a read-only tick-start view and emits one plain value:
