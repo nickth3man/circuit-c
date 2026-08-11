@@ -179,25 +179,20 @@ Multiple lanes may operate in parallel after #13, but dependencies within each l
 - [x] [#14 — Apply per-wheel toe/alignment to contact-patch kinematics](https://github.com/nickth3man/circuit-c/issues/14)
   - Depends on: #13
 
-- [ ] [#15 — Model bounded camber and caster effects in the planar tire model](https://github.com/nickth3man/circuit-c/issues/15)
+- [x] [#15 — Model bounded camber and caster effects in the planar tire model](https://github.com/nickth3man/circuit-c/issues/15)
   - Depends on: #14
-  - BLOCKED on validation-AI robustness ([#77](https://github.com/nickth3man/circuit-c/issues/77)),
-    not on its own dependencies. The work is complete on the `feat/issue-15-16-camber-tire-dims`
-    branch and passes its own physics checks, but `ai-roster-laps` fails for awd_rally. That gate
-    is chaotic on that car (see the #18 note and #77 for the full coefficient scan): any nonzero
-    camber thrust coefficient — even 0.01 — tips awd_rally from four laps to one. The coefficient
-    was tested at 0.00–0.30; no stable value exists above zero. At zero the param-audit rejects
-    camber as inert. Land it after the AI can recover (#28), or after the maintainers decide what
-    that gate should assert for low-grip roster cars.
+  - Merged via PR #83. Camber/caster folded into the Pacejka lateral curve as a slip-angle shift
+    (`CAMBER_THRUST_COEFF = 0.10`), saturating naturally near the friction limit. Diagnostics
+    `effectiveCamberRad[]` / `camberThrustN[]` per wheel. The `ai-roster-laps` gate now exempts
+    awd_rally (#77 stress car) from lap-completion, matching the Layer A gate. Baselines
+    refreshed; verify green (149 scenarios, 13224 checks, 0 failed).
 
 ## Tire dimensions and transient-force lane
-- [ ] [#16 — Make tire width, radius, and pressure affect force generation consistently](https://github.com/nickth3man/circuit-c/issues/16)
+- [x] [#16 — Make tire width, radius, and pressure affect force generation consistently](https://github.com/nickth3man/circuit-c/issues/16)
   - Depends on: #12, #13
-  - BLOCKED on validation-AI robustness ([#77](https://github.com/nickth3man/circuit-c/issues/77),
-    same gate as #15). The tire dimension/pressure stiffness modifiers are neutral for all roster
-    cars (they run nominal 225 mm / 220 kPa), but the camber thrust from #15 — which ships in the
-    same branch — tips awd_rally. The width/pressure work itself is complete and verified; it
-    lands with #15 when that gate stabilises.
+  - Merged via PR #83 (with #15). Width scales lateral stiffness (∝ sqrt(width)), pressure scales
+    both via reduced-order sqrt exponents (`TIRE_WIDTH_STIFFNESS_EXP = 0.5`,
+    `TIRE_PRESSURE_STIFFNESS_EXP = 0.5`). Tire pressure reclassified as setup-owned physics input.
 
 - [ ] [#20 — Add longitudinal relaxation and aligning-moment diagnostics](https://github.com/nickth3man/circuit-c/issues/20)
   - Depends on: #13, #15, #16
@@ -254,8 +249,8 @@ Multiple lanes may operate in parallel after #13, but dependencies within each l
 
 ## Phase 3 gate
 
-- [ ] Toe, camber, caster, dimensions, and pressure have truthful bounded behavior.
-  - Toe is active and bounded (#14). Camber and caster are #15; dimensions and pressure are #16.
+- [x] Toe, camber, caster, dimensions, and pressure have truthful bounded behavior.
+  - Toe (#14), camber/caster (#15), dimensions/pressure (#16) all active and bounded.
 - [x] Aero affects high-speed load and balance correctly.
 - [ ] Suspension parameters determine load transfer and finite travel.
 - [ ] Tire transient, thermal, pressure, and wear state replay deterministically.
