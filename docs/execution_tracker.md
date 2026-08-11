@@ -269,8 +269,11 @@ Multiple lanes may operate in parallel after #13, but dependencies within each l
 
 # Phase 4 — Complete the Track System
 
-- [ ] [#39 — Cache local track queries and add measured spatial acceleration](https://github.com/nickth3man/circuit-c/issues/39)
+- [x] [#39 — Cache local track queries and add measured spatial acceleration](https://github.com/nickth3man/circuit-c/issues/39)
   - Depends on: #26, #38
+  - Exact uniform-grid nearest-segment index (plain data in TrackRuntime, built lazily,
+    Chebyshev-ring query with exact termination; linear-scan fallback on cap overflow).
+    Property test proves hinted == brute force on all built-ins. No physics change.
 
 - [ ] [#40 — Add elevation, grade, banking, kerb, and road-profile effects for the 2.5D solver](https://github.com/nickth3man/circuit-c/issues/40)
   - Depends on: #19, #35, #38
