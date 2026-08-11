@@ -12,6 +12,12 @@ static float signf_nonzero(float value)
     return 0.0f;
 }
 
+/* TODO(vehicle-audit #5): the 7-point curve is linearly interpolated idle->redline with no
+ * high-rpm rolloff, so peak POWER lands at the limiter (real engines peak below redline).
+ * Separately, engine.cylinders/displacement are appearance-only and inconsistent with output:
+ * every car is tagged "4-cyl 2.0 L" yet peak torque spans 65 Nm (fwd_light) to 550 Nm
+ * (rwd_power). A 2.0 L making 65 Nm is broken; 550 Nm implies forced induction. See #23. */
+
 float drivetrain_engine_torque_at_rpm(const VehicleSpec *spec, float engineRpm)
 {
     if (spec == NULL ||
@@ -86,6 +92,12 @@ float drivetrain_driven_mean_omega(const float omegaRadS[WHEEL_COUNT], float fro
      * speed whether or not its axle is receiving the larger share. */
     return 0.5f * (frontMean + rearMean);
 }
+
+/* TODO(vehicle-audit #7): rwd_power ships with diff_mode LOCKED (a spool — drag/crude-race
+ * hardware, rare on road cars) AND worse rear tires (muR 0.80 < muF 1.15 on identical 225-mm
+ * rubber), which is how you force oversteer in a sim, not how a real RWD sports car is built
+ * (wider/stickier rears; the throttle rotates it). Review the authored diff_mode/tire stagger
+ * for rwd_power against its "race" class intent. */
 
 void drivetrain_split_axle_torque(DifferentialMode mode, float axleTorqueNm,
                                   float omegaLeftRadS, float omegaRightRadS,
@@ -212,6 +224,11 @@ DrivetrainTorques drivetrain_calculate_torques(const VehicleSpec *spec, int sele
             &out.driveTorqueNm[WHEEL_REAR_LEFT], &out.driveTorqueNm[WHEEL_REAR_RIGHT]);
     }
 
+    /* TODO(vehicle-audit #8): maxBrakeTorqueNm is authored per car, not derived from disc radius
+     * or pad friction (both inactive) or mass, so braking capacity does not track grip or weight:
+     * rwd_power (heaviest, fastest) brakes at ~0.85 g while the lighter awd_gt manages 1.32 g
+     * simply because it is given more torque. Derive brake torque from hardware/mu when #25
+     * (driver assists) or brake-hardware activation lands. */
     const float frontServiceTotalNm = brake * spec->maxBrakeTorqueNm * spec->brakeBiasFront;
     const float rearServiceTotalNm =
         brake * spec->maxBrakeTorqueNm * (1.0f - spec->brakeBiasFront);

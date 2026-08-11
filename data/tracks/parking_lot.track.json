@@ -1,6 +1,6 @@
 {
   "schema": "circuit/track",
-  "version": 1,
+  "version": 2,
   "id": "parking_lot",
   "displayName": "Parking Lot",
   "description": "open practice area",

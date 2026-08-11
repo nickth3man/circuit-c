@@ -30,7 +30,7 @@ byte-different files load as the same value.
   "id": "chicane",
   "displayName": "Chicane Validation Circuit",
   "description": "the lap every car is validated against",
-  "contentVersion": "chicane_v1",
+  "contentVersion": "chicane_v2",
   "route": {
     "closed": true,
     "nodes": [

@@ -1014,6 +1014,26 @@ static void stage_progress(Game *game, const TickContext *ctx, float dt)
         }
         game->progress.lapTimerS += dt;
         game->progress.sectorTimerS += dt;
+        /* Non-scoring progress bins (#78 §2): diagnostic only, excluded from the checksum. The
+         * furthest lap-relative bin reached and the tick it last advanced let the failure
+         * classifier tell a slow-but-moving car from a stationary one; reset to the new lap's
+         * first bin when a lap closes. */
+        {
+            const float lapLen = track_length_m(&game->trackDef);
+            float lapRel = game->progress.location.longitudinalM;
+            if (game->trackDef.routeClosed && lapLen > 0.0f) {
+                lapRel = fmodf(lapRel, lapLen);
+                if (lapRel < 0.0f) lapRel += lapLen;
+            }
+            const float bin = floorf(lapRel / AI_PROGRESS_BIN_M) * AI_PROGRESS_BIN_M;
+            if (ev.lapCompleted) {
+                game->progress.furthestProgressMLap = bin;
+            } else if (bin > game->progress.furthestProgressMLap + 0.5f) {
+                game->progress.furthestProgressMLap = bin;
+                game->progress.lastProgressTick = game->sim.tick;
+            }
+            game->progress.progressBinM = bin;
+        }
         /* Mirror to roster entrant 0 when a session is active, so headless tests that inspect
          * the roster see the same progress as the legacy single-progress path. */
         if (game->session.roster.count > 0) {
@@ -1353,6 +1373,13 @@ GAME_API TelemetryRow game_telemetry_row(const Game *game, int substepCount)
     row.lapIndex = game->progress.lap;
     row.lapState = (game->progress.lap < 1) ? 0 : 1;
     row.checkpointEvent = encode_checkpoint_event(&game->pendingTelemetryCheckpointEvent);
+    /* The event's own gate index: an out-of-order crossing never advances
+     * progress->lastCrossedIndex, so this is the only place the actually-crossed gate is
+     * available to the classifier. -1 when nothing was crossed. */
+    row.checkpointCrossedIndex = -1;
+    if (game->pendingTelemetryCheckpointEvent.crossed) {
+        row.checkpointCrossedIndex = game->pendingTelemetryCheckpointEvent.index;
+    }
     /* Consume the 60 Hz telemetry event latch so it is sampled exactly once into CSV/metrics. */
     ((Game *)game)->pendingTelemetryCheckpointEvent.crossed = false;
     row.crashLockoutS = game->crashLockoutTimerS;
@@ -1374,5 +1401,64 @@ GAME_API TelemetryRow game_telemetry_row(const Game *game, int substepCount)
     row.slipRatioFrontRight = game->vehicle.wheels[WHEEL_FRONT_RIGHT].slipRatio;
     row.slipRatioRearLeft = game->vehicle.wheels[WHEEL_REAR_LEFT].slipRatio;
     row.slipRatioRearRight = game->vehicle.wheels[WHEEL_REAR_RIGHT].slipRatio;
+    /* Phase 6 (#78): validation diagnosability — authoritative route localization, named
+     * off-track definitions, non-scoring progress bins, lap/checkpoint state, and the AI
+     * controller's own decision state, so a failed run and the failure classifier can say where
+     * it stopped, what it owed, and whether the planner agreed with the route. Route fields read
+     * RacerProgress.location (the single localization contract); AI fields read the entrant's
+     * controller memory and stay zero on non-AI runs. */
+    {
+        const RouteLocation *loc = &game->progress.location;
+        row.routeSegmentIndex = loc->valid ? loc->segmentIndex : -1;
+        row.routeSegmentT = loc->segmentT;
+        row.routeLongitudinalM = loc->longitudinalM;
+        row.routeLateralM = loc->lateralM;
+        row.routeHeadingErrorRad = loc->headingErrorRad;
+        row.routeConfidence = loc->confidence;
+        row.onRouteFlag = loc->onRoute ? 1 : 0;
+        /* Leave distance is only meaningful while localization is valid: an invalid RouteLocation
+         * has a zeroed pointM (origin), so the raw projection would report distance to the
+         * origin. Report 0 instead, the "no closest centreline point" sentinel. */
+        row.routeDepartureDistM = 0.0f;
+        if (loc->valid) {
+            const float dx = game->vehicle.positionM.x - loc->pointM.x;
+            const float dy = game->vehicle.positionM.y - loc->pointM.y;
+            row.routeDepartureDistM = sqrtf(dx * dx + dy * dy);
+        }
+        row.wheelsOffAsphalt =
+            (int)(game->vehicle.wheels[WHEEL_FRONT_LEFT].surfaceId != SURFACE_ASPHALT) +
+            (int)(game->vehicle.wheels[WHEEL_FRONT_RIGHT].surfaceId != SURFACE_ASPHALT) +
+            (int)(game->vehicle.wheels[WHEEL_REAR_LEFT].surfaceId != SURFACE_ASPHALT) +
+            (int)(game->vehicle.wheels[WHEEL_REAR_RIGHT].surfaceId != SURFACE_ASPHALT);
+        /* Zero confidence means "at/past the barrier" only when localization is actually
+         * tracking the route; an invalid localization (no route loaded, continuity lost)
+         * also carries confidence 0 but is not a barrier crossing. */
+        row.beyondRunoff = (loc->valid && loc->confidence <= 0.0f) ? 1 : 0;
+        row.progressBinM = game->progress.progressBinM;
+        row.furthestProgressM = game->progress.furthestProgressMLap;
+        row.lastCrossedIndex = game->progress.lastCrossedIndex;
+        row.ticksSinceCross = game->progress.ticksSinceCross;
+        row.lapArmedFlag = game->progress.lapArmed ? 1 : 0;
+        row.lapInvalidFlag = game->progress.lapInvalid ? 1 : 0;
+        row.lapTimerSCol = game->progress.lapTimerS;
+        row.wrongWayFlag = game->progress.wrongWay ? 1 : 0;
+    }
+    /* AI decision telemetry stays zero on non-AI runs; aiPresent is the explicit marker the
+     * classifier requires before it may compare an AI decision against the route segment. */
+    row.aiPresent = (game->controller.kind == CONTROLLER_KIND_AI) ? 1 : 0;
+    if (game->controller.kind == CONTROLLER_KIND_AI) {
+        const AiDriverState *ai = &game->controller.memory.ai;
+        row.aiSegment = ai->nearestSegment;
+        row.aiCrossTrackM = ai->crossTrackErrorM;
+        row.aiTargetSpeedMps = ai->targetSpeedMps;
+        row.aiLookaheadRad = ai->lookaheadAngleRad;
+        row.aiBindingCurv1pm = ai->bindingCurvature1pm;
+        row.aiBindingDistM = ai->bindingDistanceM;
+        row.aiPedalAxis = ai->pedalAxis;
+        row.aiSteerAxis = ai->steerAxis;
+        row.aiGripCut = ai->gripCut;
+        row.aiPlanBaseNode = ai->planBaseNode;
+        row.aiPlanLayerCount = ai->planLayerCount;
+    }
     return row;
 }

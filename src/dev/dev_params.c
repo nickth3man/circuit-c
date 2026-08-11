@@ -26,6 +26,14 @@
  * one vehicle_instance_derive() overwrites. Every float in VehicleSpec is described here
  * exactly once, by byte offset, so a new field cannot be added without being classified.
  */
+/* TODO(vehicle-audit #1): 14 of 140 registry entries are authored, hashed, and surfaced as
+ * Physics-Lab sliders but read by no dynamics path — suspension springs/anti-roll/roll-centres,
+ * tire pressures, caster, brake pad friction, wheel offsets, and the aero centre-of-pressure.
+ * All six shipped cars carry IDENTICAL suspension hardware (28k/26k N/m wheel rate, 18k/16k
+ * anti-roll) that affects nothing, so a player cannot tune handling with springs, pressures, or
+ * camber yet. Each entry is activated by its own validated slice: #15 (camber/caster), #16
+ * (tire width/pressure), #18/#19 (suspension load transfer/travel), #20/#21/#22 (tire
+ * transient/thermal/wear). */
 static const DevParameter g_params[] = {
     { "body.wheelbase", "Body", "m", SPEC_OFFSET(wheelbaseM), VEH_WHEELBASE_M, 1.8f, 7.0f,
       0.01f, true, false, 0, DEV_CLASS_PHYSICS_INPUT, DEV_OWNER_DEFINITION,

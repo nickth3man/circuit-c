@@ -1,10 +1,10 @@
 {
   "schema": "circuit/track",
-  "version": 1,
+  "version": 2,
   "id": "technical",
   "displayName": "Technical Circuit",
   "description": "tight, narrow layout",
-  "contentVersion": "technical_v1",
+  "contentVersion": "technical_v2",
   "route": {
     "closed": true,
     "nodes": [
@@ -183,12 +183,29 @@
   "surfaces": { "offTrack": "grass", "runoff": "grass" },
   "checkpoints": [
       { "x": -37.2000008, "y": -3, "forwardX": 0.996764004, "forwardY": 0.0803841949, "halfWidth": 7, "required": true },
+      { "x": -12.3999996, "y": -1, "forwardX": 0.996764004, "forwardY": 0.0803841949, "halfWidth": 7, "required": true },
+      { "x": 12.3999996, "y": 1, "forwardX": 0.996764004, "forwardY": 0.0803841949, "halfWidth": 7, "required": true },
+      { "x": 37.2000008, "y": 3, "forwardX": 0.996764004, "forwardY": 0.0803841949, "halfWidth": 7, "required": true },
       { "x": 62, "y": 5, "forwardX": 0.996764004, "forwardY": 0.0803841949, "halfWidth": 7, "required": true },
+      { "x": 82.782692, "y": 14.2355022, "forwardX": 0.74329412, "forwardY": 0.668964744, "halfWidth": 7, "required": true },
       { "x": 93.5, "y": 33.3499985, "forwardX": 0.13663739, "forwardY": 0.99062109, "halfWidth": 7, "required": true },
+      { "x": 87.8738632, "y": 51.1464806, "forwardX": -0.713684142, "forwardY": 0.700467706, "halfWidth": 7, "required": true },
       { "x": 69.1999969, "y": 57.1999969, "forwardX": -0.996764004, "forwardY": -0.0803841949, "halfWidth": 7, "required": true },
+      { "x": 53.7000008, "y": 55.9499969, "forwardX": -0.996764004, "forwardY": -0.0803841949, "halfWidth": 7, "required": true },
       { "x": 41.2999992, "y": 54.9499969, "forwardX": -0.996764004, "forwardY": -0.0803841949, "halfWidth": 7, "required": true },
+      { "x": 34.7043533, "y": 56.0265579, "forwardX": -0.931536674, "forwardY": 0.363647431, "halfWidth": 7, "required": true },
+      { "x": 30.109787, "y": 58.2759476, "forwardX": -0.876305461, "forwardY": 0.481755972, "halfWidth": 7, "required": true },
+      { "x": 25.5344009, "y": 60.6643944, "forwardX": -0.911324084, "forwardY": 0.411689758, "halfWidth": 7, "required": true },
       { "x": 17.7799988, "y": 62.2299995, "forwardX": -0.996764004, "forwardY": -0.0803841949, "halfWidth": 7, "required": true },
+      { "x": 10.7356453, "y": 60.0534363, "forwardX": -0.895513117, "forwardY": -0.44503516, "halfWidth": 7, "required": true },
+      { "x": 2.73059511, "y": 55.3568115, "forwardX": -0.855778098, "forwardY": -0.517343104, "halfWidth": 7, "required": true },
+      { "x": -2.56665993, "y": 52.5117188, "forwardX": -0.915567577, "forwardY": -0.402164102, "halfWidth": 7, "required": true },
       { "x": -8.30000019, "y": 50.9499969, "forwardX": -0.996764004, "forwardY": -0.0803841949, "halfWidth": 7, "required": true },
-      { "x": -86.3000031, "y": 18.8499985, "forwardX": -0.13663739, "forwardY": -0.99062109, "halfWidth": 7, "required": true }
+      { "x": -30, "y": 49.1999969, "forwardX": -0.996764004, "forwardY": -0.0803841949, "halfWidth": 7, "required": true },
+      { "x": -54.7999992, "y": 47.1999969, "forwardX": -0.996764004, "forwardY": -0.0803841949, "halfWidth": 7, "required": true },
+      { "x": -75.582695, "y": 37.9644966, "forwardX": -0.74329412, "forwardY": -0.668964744, "halfWidth": 7, "required": true },
+      { "x": -86.3000031, "y": 18.8499985, "forwardX": -0.13663739, "forwardY": -0.99062109, "halfWidth": 7, "required": true },
+      { "x": -80.6738663, "y": 1.05352116, "forwardX": 0.713684142, "forwardY": -0.700467706, "halfWidth": 7, "required": true },
+      { "x": -62, "y": -5, "forwardX": 0.996764004, "forwardY": 0.0803841949, "halfWidth": 7, "required": true }
   ]
 }

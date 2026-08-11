@@ -52,6 +52,12 @@
 #define AI_PLAN_LAYERS 64
 #define AI_PLAN_OFFSETS 9
 
+/* Driver architectures (issue #79). The baseline driver is the default and stays the gate the
+ * roster is asserted against; the limit-aware clean-slate driver (ai_driver_v2.c) is built
+ * behind this switch and is flipped for the whole roster only when it passes every gate. */
+#define AI_DRIVER_ARCH_LEGACY 0
+#define AI_DRIVER_ARCH_LIMIT 1
+
 /*
  * Tuning shared by every car. Values are physical wherever they can be, so that the same
  * numbers mean the same thing for a 900 kg hatchback and a 1400 kg GT car.
@@ -128,6 +134,9 @@ typedef struct {
     /* Fixed ticks between searches. A driver commits to a line through a corner rather than
      * reconsidering it 120 times a second, and the plan is stable over far longer than this. */
     int planReplanTicks;
+
+    /* Which driver architecture runs (AI_DRIVER_ARCH_*). Defaults to the baseline (#79). */
+    int architecture;
 } AiDriverConfig;
 
 /* The driver's memory between ticks. Plain value data: it lives inside Game. */
@@ -170,6 +179,13 @@ typedef struct {
     int planLayerCount;
     int planBaseNode;
     int ticksSinceReplan;
+
+    /* v2 (AI_DRIVER_ARCH_LIMIT) state. Unused by the baseline architecture; a zeroed state
+     * means "no slide, no filtered error", which is what every caller memsets it to (#79). */
+    float filteredErrorRateMps; /* EMA of the cross-track error rate, steering D-term input */
+    bool slideActive;           /* the gated slip/yaw monitor is managing an excursion */
+    int slideTicks;             /* consecutive ticks above the slide thresholds */
+    int slideCleanTicks;        /* consecutive ticks below the slide thresholds */
 } AiDriverState;
 
 /* Sensible starting values for every field. Never per car. */

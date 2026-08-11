@@ -56,6 +56,11 @@ float physics_wheel_toe_offset_rad(float toeRad, float wheelLateralPositionM)
     return (wheelLateralPositionM > 0.0f) ? -toeRad : toeRad;
 }
 
+/* TODO(vehicle-audit #10): maxRoadWheelAngleRad is authored per car, and the two "grip" cars
+ * (awd_gt, rwd_grip) get only 25.8 deg — less than a real road car (~35-40 deg), so they cannot
+ * tighten their line in a hairpin — while rwd_power gets 64.7 deg (drift territory) and awd_rally
+ * 55 deg. Re-author per-car steer max angle against real benchmarks. */
+
 void physics_update_steering(const VehicleSpec *spec, VehicleState *state, float steerInput,
                              float dt)
 {
@@ -191,6 +196,12 @@ static float aero_axle_vertical_n(float liftCoefficient, float refAreaM2, float 
     if (!(loadN < (double)FLT_MAX)) return FLT_MAX;
     return (float)loadN;
 }
+
+/* TODO(vehicle-audit #2): aerodynamic vertical loads are fully implemented (#17) but every
+ * shipped car has aeroLiftCoef 0, so no car produces downforce or lift. The fast "race" cars
+ * (awd_gt/rwd_grip at 277 km/h, rwd_power at 295 km/h) are therefore grip-only and under-corner
+ * at speed versus real counterparts, which run wings/splitters. Author per-car negative lift
+ * coefficients and reference areas. */
 
 void physics_aero_vertical_loads(const VehicleSpec *spec, float speedMps, float *frontN,
                                  float *rearN)
@@ -962,6 +973,14 @@ static void stage_tire_forces(PhysicsStep *step)
         /* Surface-relative friction and stiffness. On asphalt the surface ratios equal 1.0
          * and tireBScale is 1.0, so this block is a complete no-op for the surface factor.
          * The width/pressure scales are independent of surface and multiply through here. */
+        /* TODO(vehicle-audit #3): tire friction multiplies surface friction here, so a low
+         * per-car tireMu reads as a permanent surface condition rather than a dry tire.
+         * awd_rally's tireMu of 0.55-0.58 is wet-gravel grip baked into the rubber; real dry
+         * tire μ ≈ 0.9-1.1 (street) to 1.4-1.7 (semi-slick). Decide whether awd_rally's low grip
+         * should come from the track SURFACE (gravel) instead of the tire compound. */
+
+        /* Surface-relative friction and stiffness. On asphalt the surface ratios equal 1.0 and
+         * tireBScale is 1.0, so this block is a complete no-op. */
         const SurfaceSpec *s = Surface_Get(wheel->surfaceId);
         const float muLateralEff =
             lateralMuAxle * (s->muLateral / SURFACE_REFERENCE_MU_LAT) * muScale;

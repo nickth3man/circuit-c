@@ -50,6 +50,7 @@
 #include "game/game.h"
 #include "game/input.h"
 #include "game/run_report.h"
+#include "game/validation_classifier.h"
 #include "game/validation_metrics.h"
 #include "platform/hotreload.h"
 #include "platform/timestep.h"
@@ -154,6 +155,7 @@ typedef struct {
     int startCheckpoint; /* ordered checkpoint used as the standing-start pose */
     bool noVideo;        /* --no-video flag */
     bool listCars;       /* --list-cars flag */
+    int aiMode;          /* 0 legacy (default), 1 limit-aware v2 (#79 A/B switch) */
 } Options;
 
 /*
@@ -194,7 +196,7 @@ static void print_usage(const char *argv0)
     printf("       %s --capture-scene NAME [--width W] [--height H] [--ticks N]\n", argv0);
     printf("               [--seed N] [--output PATH] [--video]\n");
     printf("       %s --validate-lap [--car ID] [--track NAME] [--start-checkpoint N] "
-           "[--output DIR] [--no-video]\n",
+           "[--ai-mode legacy|v2] [--output DIR] [--no-video]\n",
            argv0);
     printf("       %s --list-cars\n", argv0);
     printf("       %s --list-scenes\n", argv0);
@@ -219,6 +221,7 @@ static bool parse_options(int argc, char **argv, Options *options, int *statusOu
     options->startCheckpoint = 0;
     options->noVideo = false;
     options->listCars = false;
+    options->aiMode = 0;
     *statusOut = 0;
 
     for (int i = 1; i < argc; i++) {
@@ -264,6 +267,19 @@ static bool parse_options(int argc, char **argv, Options *options, int *statusOu
             options->startCheckpoint = atoi(argv[++i]);
         } else if (strcmp(arg, "--no-video") == 0) {
             options->noVideo = true;
+        } else if (strcmp(arg, "--ai-mode") == 0 && hasValue) {
+            /* #79 A/B switch: v2 runs the limit-aware driver under test, legacy is the
+             * baseline the gates assert. */
+            const char *mode = argv[++i];
+            if (strcmp(mode, "v2") == 0) {
+                options->aiMode = 1;
+            } else if (strcmp(mode, "legacy") == 0) {
+                options->aiMode = 0;
+            } else {
+                fprintf(stderr, "error: unknown --ai-mode '%s' (try 'legacy' or 'v2')\n", mode);
+                *statusOut = 2;
+                return false;
+            }
         } else if (strcmp(arg, "--list-cars") == 0) {
             options->listCars = true;
         } else {
@@ -520,6 +536,10 @@ static int run_validate_lap(Game *game, const Options *options)
         rep.runId = "invalid_car";
         rep.carId = carId;
         rep.status = RUN_FAIL_SPEC_INVALID;
+        /* No validation run happened: checkpoint sentinels must say so rather than claiming
+         * gate 0 was crossed (PR #80 review). */
+        rep.lastCheckpointIndex = -1;
+        rep.expectedCheckpointIndex = -1;
         run_report_write(jsonPath, &rep);
         return 2;
     }
@@ -532,6 +552,10 @@ static int run_validate_lap(Game *game, const Options *options)
         rep.runId = "invalid_spec";
         rep.carId = carId;
         rep.status = RUN_FAIL_SPEC_INVALID;
+        /* No validation run happened: checkpoint sentinels must say so rather than claiming
+         * gate 0 was crossed (PR #80 review). */
+        rep.lastCheckpointIndex = -1;
+        rep.expectedCheckpointIndex = -1;
         run_report_write(jsonPath, &rep);
         return 2;
     }
@@ -554,6 +578,10 @@ static int run_validate_lap(Game *game, const Options *options)
             rep.runId = "ffmpeg_failed";
             rep.carId = carId;
             rep.status = RUN_FAIL_VIDEO_ENCODE_FAILED;
+            /* No validation run happened: checkpoint sentinels must say so rather than claiming
+             * gate 0 was crossed (PR #80 review). */
+            rep.lastCheckpointIndex = -1;
+            rep.expectedCheckpointIndex = -1;
             run_report_write(jsonPath, &rep);
             return 3;
         }
@@ -600,6 +628,11 @@ static int run_validate_lap(Game *game, const Options *options)
      * the platform loop pokes into Game.input. game_fixed_update() runs it in its controller
      * stage, at the same instant the explicit call used to happen. */
     controller_init(&game->controller, CONTROLLER_KIND_AI);
+    /* #79 A/B switch: --ai-mode v2 runs the limit-aware driver under test; the default
+     * (legacy) is the baseline every gate asserts. */
+    if (options->aiMode == 1) {
+        game->controller.config.ai.architecture = AI_DRIVER_ARCH_LIMIT;
+    }
 
     const int budgetTicks = REPLAY_CAPACITY_TICKS; /* 300 s max, the replay ring's capacity */
     const int maxRows = budgetTicks / VIDEO_TICKS_PER_FRAME;
@@ -719,17 +752,47 @@ static int run_validate_lap(Game *game, const Options *options)
         memset(&metrics, 0, sizeof(metrics));
     }
 
+    /* Failure classification (issue #78): a pure reduction over the rows, metrics, and run
+     * inputs that gives a failed run its primary reason, the earliest causal tick, the
+     * contributing events, and where it stopped and what it owed. */
+    ValidationClassification classification;
+    ClassificationInputs clsInputs;
+    validation_classification_inputs_default(&clsInputs);
+    /* Per-run inputs only; the thresholds come from the shared defaults so the runner,
+     * ai-roster-laps, and the by-construction scenario cannot drift apart (PR #80 review). */
+    clsInputs.checkpointCount = game->trackDef.checkpointCount;
+    clsInputs.startCheckpointIndex = options->startCheckpoint;
+    clsInputs.targetLaps = VALIDATION_RUN_LAPS;
+    clsInputs.tickBudget = budgetTicks;
+    clsInputs.ticksRun = ticksRun;
+    clsInputs.fixedDtS = FIXED_DT_S;
+    validation_classify(rowsBuffer, rowCount, &metrics, &clsInputs, &classification);
+
+    /* Status selection, now driven by the classification so the unreachable branches are
+     * reachable and distinct (issue #78 §5): RUN_FAIL_STALLED fires when the car is stalled or
+     * stuck, and RUN_FAIL_TICK_BUDGET_EXCEEDED fires only when the budget expired while the car
+     * was still progressing — a stopped car at budget expiry is a stall, not a slow timeout. */
     RunStatus status = RUN_PASS;
-    if (!allFinite) {
+    if (!allFinite || classification.primary == RUN_CLASS_INVALID_PHYSICS) {
+        /* The loop only checks position X/Y; a non-finite speed (or a row the loop never saw)
+         * is caught by the classifier's finite_row, which maps to the same coarse verdict
+         * (docs/VALIDATION_FAILURES.md). PR #80 review: the classifier branch was missing, so a
+         * non-finite speed fell through to checkpoint_missed. */
         status = RUN_FAIL_INVALID_STATE;
     } else if (writeFailed || (pipe != NULL && ffmpegStatus != 0)) {
         status = RUN_FAIL_VIDEO_ENCODE_FAILED;
-    } else if (outOfOrder > 0) {
+    } else if (classification.primary == RUN_CLASS_CHECKPOINT_OUT_OF_ORDER ||
+               classification.primary == RUN_CLASS_CHECKPOINT_SKIPPED) {
         status = RUN_FAIL_CHECKPOINT_OUT_OF_ORDER;
+    } else if (classification.primary == RUN_CLASS_STALLED_ON_TRACK ||
+               classification.primary == RUN_CLASS_STALLED_OFF_TRACK ||
+               classification.primary == RUN_CLASS_COLLISION_STUCK ||
+               classification.primary == RUN_CLASS_SPIN_THEN_DEPARTURE) {
+        status = RUN_FAIL_STALLED;
+    } else if (classification.primary == RUN_CLASS_SLOW_TIMEOUT) {
+        status = RUN_FAIL_TICK_BUDGET_EXCEEDED;
     } else if (game->progress.lap < VALIDATION_RUN_LAPS) {
         status = RUN_FAIL_CHECKPOINT_MISSED;
-    } else if (ticksRun >= budgetTicks) {
-        status = RUN_FAIL_TICK_BUDGET_EXCEEDED;
     }
 
     char checksumHex[16];
@@ -743,8 +806,8 @@ static int run_validate_lap(Game *game, const Options *options)
         dev_replay_save(&game->replay, replayPath, "validate-lap", 0u, game->stateChecksum);
 
     char runId[128];
-    snprintf(runId, sizeof(runId), "%s-%s-start%d", game->trackDef.id, carId,
-             options->startCheckpoint);
+    snprintf(runId, sizeof(runId), "%s-%s-start%d%s", game->trackDef.id, carId,
+             options->startCheckpoint, (options->aiMode == 1) ? "-v2" : "");
 
     RunReportInput rep;
     memset(&rep, 0, sizeof(rep));
@@ -771,9 +834,29 @@ static int run_validate_lap(Game *game, const Options *options)
     rep.ticksRun = ticksRun;
     rep.status = status;
     rep.checkpointsPassed = metrics.checkpointsPassed;
-    rep.checkpointsMissed =
-        (status == RUN_PASS) ? 0 : (game->trackDef.checkpointCount - metrics.checkpointsPassed);
+    /* Lap-aware missing-checkpoint accounting (issue #78 §5): count what the CURRENT
+     * incomplete lap still owed, never checkpointCount minus the whole run's crossings (which
+     * goes negative after one completed lap). Extracted into
+     * run_report_missed_checkpoints() so the accounting test drives the same function the
+     * runner reports with (PR #80 review). */
+    {
+        const int stillOwed =
+            run_report_missed_checkpoints(&game->progress, game->trackDef.checkpointCount);
+        rep.checkpointsMissed = (status == RUN_PASS) ? 0 : stillOwed;
+    }
     rep.outOfOrderEvents = outOfOrder;
+    rep.classificationReason = failure_class_reason(classification.primary);
+    rep.firstFaultTick = classification.firstFaultTick;
+    rep.contributingCount = classification.contributingCount;
+    for (int i = 0; i < classification.contributingCount && i < RUN_REPORT_MAX_CONTRIBUTING;
+         i++) {
+        rep.contributingReasons[i] =
+            failure_class_reason(classification.contributing[i].reason);
+    }
+    rep.lastCheckpointIndex = classification.lastCheckpointIndex;
+    rep.expectedCheckpointIndex = classification.expectedCheckpointIndex;
+    rep.furthestRouteDistanceM = classification.furthestRouteDistanceM;
+    rep.timeSinceProgressS = classification.timeSinceProgressS;
     rep.metrics = &metrics;
     rep.hasVideo = (!options->noVideo && pipe != NULL && !writeFailed);
     rep.hasReplay = replaySaved;
@@ -786,11 +869,12 @@ static int run_validate_lap(Game *game, const Options *options)
     if (status != RUN_PASS) {
         char failureText[256];
         snprintf(failureText, sizeof(failureText),
-                 "validate-lap %s: %s (laps %d/2, %d checkpoint crossings over %d per lap, "
-                 "out-of-order %d, ticks %d/%d)",
-                 runId, run_failure_reason(status), game->progress.lap,
-                 metrics.checkpointsPassed, game->trackDef.checkpointCount, outOfOrder,
-                 ticksRun, budgetTicks);
+                 "validate-lap %s: %s (laps %d/%d, primary %s, first-fault tick %llu, "
+                 "%d checkpoint crossings over %d per lap, out-of-order %d, ticks %d/%d)",
+                 runId, run_failure_reason(status), game->progress.lap, VALIDATION_RUN_LAPS,
+                 failure_class_reason(classification.primary),
+                 (unsigned long long)classification.firstFaultTick, metrics.checkpointsPassed,
+                 game->trackDef.checkpointCount, outOfOrder, ticksRun, budgetTicks);
 
         FailureBundle bundle;
         memset(&bundle, 0, sizeof(bundle));
@@ -799,7 +883,20 @@ static int run_validate_lap(Game *game, const Options *options)
         bundle.telemetryPath = csvOpened ? csvPath : NULL;
         bundle.replay = &game->replay;
         bundle.spec = &game->spec;
-        bundle.failingTick = (firstFaultTick != 0) ? firstFaultTick : game->sim.tick;
+        /* The first-fault tick must point at the earliest detected causal event, not at the
+         * final budget timeout (issue #78 §6). The classifier's tick is the telemetry-row
+         * (30 Hz) sample the event first showed up in; the local firstFaultTick is the exact
+         * 60 Hz tick captured in the fixed-tick loop for out-of-order/non-finite events, which
+         * can be up to one sample earlier. Either may be the earliest for a given run, so take
+         * the earlier nonzero value; the sim tick is the last-resort fallback (PR #80 review). */
+        if (classification.firstFaultTick != 0 &&
+            (firstFaultTick == 0 || classification.firstFaultTick < firstFaultTick)) {
+            bundle.failingTick = classification.firstFaultTick;
+        } else if (firstFaultTick != 0) {
+            bundle.failingTick = firstFaultTick;
+        } else {
+            bundle.failingTick = game->sim.tick;
+        }
         bundle.checksum = game->stateChecksum;
         /* One check was run -- the run's own verdict -- and it failed. Leaving checksRun at 0
          * made summary.json report the impossible pair checks_run 0 / checks_failed 1. */
@@ -814,8 +911,9 @@ static int run_validate_lap(Game *game, const Options *options)
         }
     }
 
-    printf("VALIDATE: car=%s status=%s timed_lap=%.3fs out_lap=%.3fs -> %s\n", carId,
-           run_status_label(status), metrics.timedLapTimeS, metrics.outLapTimeS, jsonPath);
+    printf("VALIDATE: car=%s status=%s primary=%s timed_lap=%.3fs out_lap=%.3fs -> %s\n", carId,
+           run_status_label(status), failure_class_reason(classification.primary),
+           metrics.timedLapTimeS, metrics.outLapTimeS, jsonPath);
 
     free(rowsBuffer);
     return (status == RUN_PASS) ? 0 : 1;
