@@ -133,3 +133,4 @@ debug/
 .claude/*
 docs/archive/
 .prompts/*
+data/input/last_car.txt

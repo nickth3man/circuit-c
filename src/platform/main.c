@@ -975,6 +975,18 @@ int main(int argc, char **argv)
     const bool smoke_test = options.smokeTest;
     const bool capture = (options.captureScene != NULL);
     const bool gallery = (options.galleryPage > 0);
+    const char *title = "Circuit";
+    if (smoke_test) title = "Circuit - smoke test";
+    if (capture) title = "Circuit - scene capture";
+    if (gallery) title = "Circuit - vehicle gallery";
+
+    InitWindow(options.width, options.height, title);
+    if (!IsWindowReady()) {
+        fprintf(stderr, "FATAL: InitWindow failed (%dx%d)\n", options.width, options.height);
+        Game_UnloadModule();
+        free(game);
+        return 1;
+    }
 
     /*
      * Bounded capture modes are offline renders, not playback: the frame limiter would pace
