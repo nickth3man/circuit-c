@@ -247,6 +247,117 @@ GAME_API uint32_t game_state_checksum(const Game *game)
     return h;
 }
 
+GAME_API uint32_t game_entrant_state_checksum(const Game *game, EntrantId id)
+{
+    if (game == NULL || id == RACE_ENTRANT_ID_NONE) return 0u;
+    const RaceEntrant *entrant = race_roster_find_const(&game->session.roster, id);
+    if (entrant == NULL) return 0u;
+    return hash_entrant(FNV1A_OFFSET_BASIS, entrant);
+}
+
+GAME_API bool game_divergence_report(const Game *a, const Game *b, char *out, size_t cap)
+{
+    if (out == NULL || cap == 0) return false;
+    out[0] = '\0';
+    if (a == NULL || b == NULL) return false;
+
+    /* Session-level authority first: if the phases or clocks differ, that is where the
+     * divergence is. */
+    const RaceSession *sa = &a->session;
+    const RaceSession *sb = &b->session;
+    if (sa->phase != sb->phase) {
+        snprintf(out, cap, "session.phase %d vs %d", (int)sa->phase, (int)sb->phase);
+        return true;
+    }
+    if (sa->clockS != sb->clockS) {
+        snprintf(out, cap, "session.clockS %.9f vs %.9f", (double)sa->clockS,
+                 (double)sb->clockS);
+        return true;
+    }
+    if (sa->tick != sb->tick) {
+        snprintf(out, cap, "session.tick %llu vs %llu", (unsigned long long)sa->tick,
+                 (unsigned long long)sb->tick);
+        return true;
+    }
+
+    /* Per-entrant authoritative fields, in the same order hash_entrant folds them. */
+    const int count = sa->roster.count;
+    for (int i = 0; i < count; i++) {
+        const RaceEntrant *ea = &sa->roster.entrants[i];
+        const RaceEntrant *eb = &sb->roster.entrants[i];
+        char field[128];
+
+#define REPORT_IF_DIFFERS(fmt_expr, ...)                                                   \
+    do {                                                                                   \
+        if (!((fmt_expr))) {                                                               \
+            snprintf(out, cap, "tick %llu entrant %u %s", (unsigned long long)a->sim.tick, \
+                     ea->id, field);                                                       \
+            return true;                                                                   \
+        }                                                                                  \
+    } while (0)
+
+        if (ea->id != eb->id) {
+            snprintf(out, cap, "tick %llu roster entrant %d id %u vs %u",
+                     (unsigned long long)a->sim.tick, i, ea->id, eb->id);
+            return true;
+        }
+        const VehicleState *va = &ea->instance.vehicle;
+        const VehicleState *vb = &eb->instance.vehicle;
+        const VehicleSetup *ua = &ea->setup;
+        const VehicleSetup *ub = &eb->setup;
+        const RacerProgress *pa = &ea->progress;
+        const RacerProgress *pb = &eb->progress;
+
+        snprintf(field, sizeof(field), "vehicle.positionM.x");
+        REPORT_IF_DIFFERS(va->positionM.x == vb->positionM.x, "%.9f vs %.9f",
+                          (double)va->positionM.x, (double)vb->positionM.x);
+        snprintf(field, sizeof(field), "vehicle.positionM.y");
+        REPORT_IF_DIFFERS(va->positionM.y == vb->positionM.y, "%.9f vs %.9f",
+                          (double)va->positionM.y, (double)vb->positionM.y);
+        snprintf(field, sizeof(field), "vehicle.headingRad");
+        REPORT_IF_DIFFERS(va->headingRad == vb->headingRad, "%.9f vs %.9f",
+                          (double)va->headingRad, (double)vb->headingRad);
+        snprintf(field, sizeof(field), "vehicle.velocityLongitudinalMps");
+        REPORT_IF_DIFFERS(va->velocityLongitudinalMps == vb->velocityLongitudinalMps,
+                          "%.9f vs %.9f", (double)va->velocityLongitudinalMps,
+                          (double)vb->velocityLongitudinalMps);
+        snprintf(field, sizeof(field), "vehicle.velocityLateralMps");
+        REPORT_IF_DIFFERS(va->velocityLateralMps == vb->velocityLateralMps, "%.9f vs %.9f",
+                          (double)va->velocityLateralMps, (double)vb->velocityLateralMps);
+        snprintf(field, sizeof(field), "vehicle.yawRateRadS");
+        REPORT_IF_DIFFERS(va->yawRateRadS == vb->yawRateRadS, "%.9f vs %.9f",
+                          (double)va->yawRateRadS, (double)vb->yawRateRadS);
+        snprintf(field, sizeof(field), "vehicle.engineRpm");
+        REPORT_IF_DIFFERS(va->engineRpm == vb->engineRpm, "%.9f vs %.9f", (double)va->engineRpm,
+                          (double)vb->engineRpm);
+        snprintf(field, sizeof(field), "vehicle.selectedGear");
+        REPORT_IF_DIFFERS(va->selectedGear == vb->selectedGear, "%d vs %d", va->selectedGear,
+                          vb->selectedGear);
+        for (int w = 0; w < WHEEL_COUNT; w++) {
+            snprintf(field, sizeof(field), "vehicle.wheels[%d].angularVelocityRadS", w);
+            REPORT_IF_DIFFERS(va->wheels[w].angularVelocityRadS ==
+                                  vb->wheels[w].angularVelocityRadS,
+                              "%.9f vs %.9f", (double)va->wheels[w].angularVelocityRadS,
+                              (double)vb->wheels[w].angularVelocityRadS);
+        }
+        snprintf(field, sizeof(field), "progress.nextCheckpoint");
+        REPORT_IF_DIFFERS(pa->nextCheckpoint == pb->nextCheckpoint, "%d vs %d",
+                          (int)pa->nextCheckpoint, (int)pb->nextCheckpoint);
+        snprintf(field, sizeof(field), "progress.lap");
+        REPORT_IF_DIFFERS(pa->lap == pb->lap, "%d vs %d", (int)pa->lap, (int)pb->lap);
+        snprintf(field, sizeof(field), "progress.lapTimerS");
+        REPORT_IF_DIFFERS(pa->lapTimerS == pb->lapTimerS, "%.9f vs %.9f", (double)pa->lapTimerS,
+                          (double)pb->lapTimerS);
+        snprintf(field, sizeof(field), "setup.tirePressureFrontKpa");
+        REPORT_IF_DIFFERS(ua->tirePressureFrontKpa == ub->tirePressureFrontKpa, "%.9f vs %.9f",
+                          (double)ua->tirePressureFrontKpa, (double)ub->tirePressureFrontKpa);
+
+#undef REPORT_IF_DIFFERS
+    }
+
+    return false;
+}
+
 GAME_API void game_reset_sim(Game *game)
 {
     if (game == NULL) return;
@@ -881,6 +992,23 @@ static void stage_controllers(Game *game, const TickContext *ctx, float dt)
                                       .spec = &game->spec,
                                       .dt = dt };
     controller_update(&game->controller, ctx->sourceKind, &view, &game->controllerOutput);
+
+    /* Every additional entrant decides with the same controller contract against its own
+     * vehicle state (issue #44). Controllers run every tick, even when the session is not
+     * simulating, so an AI observes the world while paused or classified like the local
+     * driver does. */
+    for (int i = 1; i < game->session.roster.count; i++) {
+        RaceEntrant *entrant = &game->session.roster.entrants[i];
+        const ControllerTickView eview = { .sample = &ctx->sample,
+                                           .track = &game->trackDef,
+                                           .runtime = &game->trackRuntime,
+                                           .vehicle = &entrant->instance.vehicle,
+                                           .derived = &entrant->instance.derived,
+                                           .spec = &entrant->instance.spec,
+                                           .dt = dt };
+        controller_update(&entrant->controller, ctx->sourceKind, &eview,
+                          &entrant->controllerOutput);
+    }
 }
 
 /*
@@ -1042,10 +1170,70 @@ static void stage_progress(Game *game, const TickContext *ctx, float dt)
         }
     } else {
         memset(&game->lastCheckpointEvent, 0, sizeof(game->lastCheckpointEvent));
+        memset(&game->lastCheckpointEvent, 0, sizeof(game->lastCheckpointEvent));
         game->lastCheckpointEvent.index = -1;
         memset(&game->pendingTelemetryCheckpointEvent, 0,
                sizeof(game->pendingTelemetryCheckpointEvent));
         game->pendingTelemetryCheckpointEvent.index = -1;
+    }
+}
+
+/*
+     * Multi-entrant simulation (issue #44): the gated pre-physics + physics + progress stages for
+     * one NON-local roster entrant, mirroring exactly what stage_pre_physics/stage_physics/
+     * stage_progress do for the compat entrant (entrants[0]). Runs after the compat stages so the
+     * roster's ascending-id order is the simulation order; each entrant owns its applied controls,
+     * vehicle instance and progress, and only its own session events (lap/sector) are logged.
+     * The compat view is never written here.
+     */
+static void simulate_extra_entrant(Game *game, RaceEntrant *entrant, const TickContext *ctx,
+                                   float dt)
+{
+    ControllerOutput applied = entrant->controllerOutput;
+    if (game->session.phase == RACE_PHASE_COUNTDOWN) {
+        controller_output_zero(&applied);
+    }
+    auto_transmission_update(&entrant->instance.autoTrans, &entrant->instance.vehicle,
+                             &entrant->instance.spec, &entrant->instance.derived, &applied, dt);
+    entrant->instance.vehicleControls.steer = applied.steer;
+    entrant->instance.vehicleControls.throttle = applied.throttle;
+    entrant->instance.vehicleControls.brake = applied.brake;
+    entrant->instance.vehicleControls.handbrake = applied.handbrake;
+
+    /* Start-of-tick position for the crossing test, captured before physics shifts poses. */
+    const Vector2 startPosM = entrant->instance.renderState.currPositionM;
+
+    if (ctx->trackLoaded) {
+        for (int w = 0; w < WHEEL_COUNT; w++) {
+            const Vector2 worldContact =
+                physics_wheel_world_position(&entrant->instance.vehicle, (WheelId)w);
+            entrant->instance.vehicle.wheels[w].surfaceId =
+                Track_SurfaceAt(&game->trackDef, &game->trackRuntime, worldContact);
+        }
+    }
+    physics_fixed_update(&entrant->instance.spec, &entrant->instance.vehicle,
+                         &entrant->instance.derived, &entrant->instance.renderState, &applied,
+                         dt);
+
+    if (ctx->trackLoaded) {
+        const TrackProgressEvent pev =
+            track_update_progress(&game->trackDef, &entrant->progress, startPosM,
+                                  entrant->instance.renderState.currPositionM,
+                                  entrant->instance.vehicle.headingRad, dt);
+        const TrackCheckpointEvent ev = pev.checkpoint;
+        if (ev.crossed) {
+            if (ev.lapCompleted) {
+                race_session_log_event(&game->session, RACE_EVENT_LAP_COMPLETED, entrant->id,
+                                       (int32_t)entrant->progress.lap);
+            }
+        }
+        const TrackSectorEvent sev = pev.sector;
+        if (sev.crossed) {
+            race_session_log_event(&game->session, RACE_EVENT_SECTOR_COMPLETED, entrant->id,
+                                   sev.index);
+        }
+        entrant->progress.lapTimerS += dt;
+        entrant->progress.sectorTimerS += dt;
     }
 }
 
@@ -1062,11 +1250,14 @@ static void stage_progress(Game *game, const TickContext *ctx, float dt)
  */
 static void stage_collision(Game *game, const TickContext *ctx, float dt)
 {
-    /* Crash lockout timer: count down toward zero. It gates later contacts, so it is entrant
-     * state and is counted before this tick's contact is resolved. */
-    if (game->crashLockoutTimerS > 0.0f) {
-        game->crashLockoutTimerS -= dt;
-        if (game->crashLockoutTimerS < 0.0f) game->crashLockoutTimerS = 0.0f;
+    /* Crash lockout timers: count down toward zero. They gate later contacts, so they are
+     * entrant state and are counted before this tick's contact is resolved. */
+    for (int i = 0; i < game->session.roster.count; i++) {
+        float *lockout = &game->session.roster.entrants[i].instance.crashLockoutTimerS;
+        if (*lockout > 0.0f) {
+            *lockout -= dt;
+            if (*lockout < 0.0f) *lockout = 0.0f;
+        }
     }
 
     if (ctx->trackLoaded) {
@@ -1078,10 +1269,44 @@ static void stage_collision(Game *game, const TickContext *ctx, float dt)
             return;
         }
         CollisionWorld *world = &game->trackRuntime.collisionWorld;
-        const CollisionBodyId bodyId =
-            (game->session.roster.count > 0) ? game->session.roster.entrants[0].id : 1u;
-        collision_resolve_track(world, bodyId, &game->spec, &game->vehicle, &game->renderState,
-                                &game->crashLockoutTimerS);
+
+        if (game->session.roster.count == 1) {
+            /* Historical single-entrant path: begin_tick + one body + resolve. */
+            const CollisionBodyId bodyId = game->session.roster.entrants[0].id;
+            collision_resolve_track(world, bodyId, &game->spec, &game->vehicle,
+                                    &game->renderState, &game->crashLockoutTimerS);
+        } else {
+            /* Multi-entrant path (issue #27/#44): register every entrant's swept body, then
+             * resolve statics and vehicle-vehicle pairs in one ordered pass. */
+            collision_world_begin_tick(world);
+            const int count = game->session.roster.count;
+            CollisionBodyContext contexts[RACE_MAX_ENTRANTS];
+            for (int i = 0; i < count; i++) {
+                RaceEntrant *entrant = &game->session.roster.entrants[i];
+                VehicleInstance *inst = &entrant->instance;
+                CollisionBody body;
+                memset(&body, 0, sizeof(body));
+                body.id = entrant->id;
+                body.layer = COLLISION_LAYER_VEHICLE_BODY;
+                body.mask = COLLISION_LAYER_STATIC_BARRIER | COLLISION_LAYER_VEHICLE_BODY;
+                body.cgToFrontM = inst->spec.cgToFrontM;
+                body.cgToRearM = inst->spec.cgToRearM;
+                body.radiusM = inst->spec.bodyHalfWidthM;
+                body.prevPosM = inst->renderState.prevPositionM;
+                body.currPosM = inst->renderState.currPositionM;
+                body.prevHdgRad = inst->renderState.prevHeadingRad;
+                body.currHdgRad = inst->renderState.currHeadingRad;
+                if (!collision_world_add_body(world, &body)) return;
+                contexts[i] = (CollisionBodyContext){
+                    .id = entrant->id,
+                    .spec = &inst->spec,
+                    .state = &inst->vehicle,
+                    .renderState = &inst->renderState,
+                    .crashLockoutTimerS = &inst->crashLockoutTimerS,
+                };
+            }
+            collision_world_resolve_bodies(world, contexts, count);
+        }
     }
 }
 
@@ -1204,6 +1429,12 @@ GAME_API void game_fixed_update(Game *game, float dt)
         stage_pre_physics(game, &ctx, dt);
         stage_physics(game, &ctx, dt);
         stage_progress(game, &ctx, dt);
+        /* Multi-entrant simulation (issue #44): the compat stages above drove entrants[0];
+         * every additional roster entrant runs the same gated pre-physics + physics + progress
+         * pipeline in ascending-id order. Collision below then resolves every body together. */
+        for (int i = 1; i < game->session.roster.count; i++) {
+            simulate_extra_entrant(game, &game->session.roster.entrants[i], &ctx, dt);
+        }
         stage_collision(game, &ctx, dt);
         stage_rules(game);
         stage_presentation(game, dt);

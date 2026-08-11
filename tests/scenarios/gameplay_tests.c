@@ -853,6 +853,154 @@ static void scenario_vehicle_collision(void)
 }
 
 /* ------------------------------------------------------------------------------------- */
+/* Scenario: multi-car-determinism — per-tick checksum parity across identical sessions   */
+/* ------------------------------------------------------------------------------------- */
+
+/* Build a 4-entrant game (local + 3 AI) on the chicane, positioned staggered behind the
+ * start, session started, ready to tick. */
+static Game *build_multi_car_game(void)
+{
+    Game *game = alloc_game();
+    game_init(game);
+    track_load_chicane(&game->trackDef);
+    game_spawn_on_track(game);
+
+    for (int i = 0; i < 3; i++) {
+        const RaceEntrantSpawn spawn = { .controllerKind = CONTROLLER_KIND_AI, .gridSlot = -1 };
+        check(race_roster_spawn(&game->session.roster, &spawn, NULL),
+              "multi-car fixture: AI entrant %d spawned", i + 1);
+    }
+
+    /* Stagger the AI field behind the local car (start at the origin heading +X). */
+    for (int i = 1; i < game->session.roster.count; i++) {
+        RaceEntrant *entrant = &game->session.roster.entrants[i];
+        entrant->instance.vehicle.positionM = (Vector2){ -6.0f * (float)i, 0.0f };
+        entrant->instance.renderState.prevPositionM = entrant->instance.vehicle.positionM;
+        entrant->instance.renderState.currPositionM = entrant->instance.vehicle.positionM;
+    }
+
+    game->state = STATE_PLAYING;
+    RaceRules rules;
+    race_rules_set_default(&rules);
+    rules.targetLaps = 4;
+    race_session_start(&game->session, &rules);
+    return game;
+}
+
+static void scenario_multi_car_determinism(void)
+{
+    /* ---- 1. Two identically-built sessions produce identical per-tick checksums. ---- */
+    Game *a = build_multi_car_game();
+    Game *b = build_multi_car_game();
+    check(a->session.roster.count == 4 && b->session.roster.count == 4,
+          "multi-car fixture holds 4 entrants");
+
+    int diverged = 0;
+    int firstDivergedTick = -1;
+    const int runTicks = 3000;
+    for (int t = 0; t < runTicks; t++) {
+        game_fixed_update(a, FIXED_DT_S);
+        game_fixed_update(b, FIXED_DT_S);
+        const uint32_t ca = game_state_checksum(a);
+        const uint32_t cb = game_state_checksum(b);
+        if (ca != cb && firstDivergedTick < 0) firstDivergedTick = t;
+        if (ca != cb) diverged++;
+    }
+    check(diverged == 0,
+          "4-entrant AI session: per-tick checksums identical across two runs "
+          "(first divergence at tick %d)",
+          firstDivergedTick);
+
+    /* Every entrant actually moved — the test would be vacuous if nobody drove. */
+    float maxDist = 0.0f;
+    for (int i = 0; i < a->session.roster.count; i++) {
+        const float dx = a->session.roster.entrants[i].instance.vehicle.positionM.x;
+        const float dy = a->session.roster.entrants[i].instance.vehicle.positionM.y;
+        const float d = sqrtf(dx * dx + dy * dy);
+        if (d > maxDist) maxDist = d;
+    }
+    check(maxDist > 10.0f, "the AI field actually raced (furthest %.1f m from origin)",
+          (double)maxDist);
+
+    /* ---- 2. Per-entrant checksums agree and identify each car. ---- */
+    {
+        bool perEntrantMatch = true;
+        for (int i = 0; i < a->session.roster.count; i++) {
+            const EntrantId id = a->session.roster.entrants[i].id;
+            if (game_entrant_state_checksum(a, id) != game_entrant_state_checksum(b, id))
+                perEntrantMatch = false;
+        }
+        check(perEntrantMatch, "per-entrant state checksums agree across the two runs");
+    }
+
+    /* ---- 3. A controlled perturbation is caught: the checksum moves, per-entrant hashes
+     *        name the entrant, and the divergence report names tick + entrant + field. ---- */
+    {
+        /* Rewind both to tick 500 by rebuilding, then perturb B's entrant 2 yaw rate. */
+        free(a);
+        free(b);
+        a = build_multi_car_game();
+        b = build_multi_car_game();
+        for (int t = 0; t < 500; t++) {
+            game_fixed_update(a, FIXED_DT_S);
+            game_fixed_update(b, FIXED_DT_S);
+        }
+        const uint32_t beforeA = game_state_checksum(a);
+        const uint32_t beforeB = game_state_checksum(b);
+        check(beforeA == beforeB, "pre-perturbation checksums agree");
+
+        /* Teleport entrant 2: positionM.x is the FIRST authoritative field in the report
+         * walk, so the report must name exactly that field. */
+        RaceEntrant *perturbed = race_roster_find(&b->session.roster, 2u);
+        check(perturbed != NULL, "entrant 2 exists to perturb");
+        if (perturbed != NULL) {
+            perturbed->instance.vehicle.positionM.x += 0.5f;
+            perturbed->instance.renderState.currPositionM =
+                perturbed->instance.vehicle.positionM;
+        }
+        game_fixed_update(a, FIXED_DT_S);
+        game_fixed_update(b, FIXED_DT_S);
+
+        check(game_state_checksum(a) != game_state_checksum(b),
+              "a single-field perturbation on entrant 2 diverges the session checksum");
+
+        uint32_t entrantA2 = game_entrant_state_checksum(a, 2u);
+        uint32_t entrantB2 = game_entrant_state_checksum(b, 2u);
+        uint32_t entrantA1 = game_entrant_state_checksum(a, 1u);
+        uint32_t entrantB1 = game_entrant_state_checksum(b, 1u);
+        check(entrantA2 != entrantB2, "per-entrant checksum names entrant 2");
+        check(entrantA1 == entrantB1, "entrant 1 is untouched by the divergence");
+
+        char report[256] = "";
+        check(game_divergence_report(a, b, report, sizeof(report)),
+              "divergence report fires on the perturbed pair");
+        printf("    divergence report: %s\n", report);
+        check(strstr(report, "entrant 2") != NULL,
+              "divergence report names entrant 2 (got '%s')", report);
+        check(strstr(report, "vehicle.positionM.x") != NULL,
+              "divergence report names the differing field (got '%s')", report);
+    }
+
+    /* ---- 4. Matched sessions produce no report. ---- */
+    {
+        Game *cleanA = build_multi_car_game();
+        Game *cleanB = build_multi_car_game();
+        for (int t = 0; t < 300; t++) {
+            game_fixed_update(cleanA, FIXED_DT_S);
+            game_fixed_update(cleanB, FIXED_DT_S);
+        }
+        char report[256] = "unset";
+        check(!game_divergence_report(cleanA, cleanB, report, sizeof(report)),
+              "identical sessions produce no divergence report");
+        free(cleanA);
+        free(cleanB);
+    }
+
+    free(a);
+    free(b);
+}
+
+/* ------------------------------------------------------------------------------------- */
 /* Scenario: collision-world — the deterministic CollisionWorld contract                  */
 /* ------------------------------------------------------------------------------------- */
 
@@ -4737,6 +4885,9 @@ static const TestScenario kGameplayScenarios[] = {
     { "vehicle-collision",
       "issue #27 two-body impulses: momentum, order independence, resting, tunneling, pileup",
       scenario_vehicle_collision },
+    { "multi-car-determinism",
+      "issue #44: per-tick checksum parity, per-entrant hashes, first-divergence reporting",
+      scenario_multi_car_determinism },
     { "collision-world",
       "issue #26 world contract: stable ids, layers, authored objects, multi-proxy order, "
       "penetration recovery, corners, contact feed",

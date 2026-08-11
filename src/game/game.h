@@ -264,6 +264,19 @@ _Static_assert(offsetof(Game, vehicleSetup) ==
  * field, so the checksum depends on the input timeline and nothing else. */
 GAME_API uint32_t game_state_checksum(const Game *game);
 
+/* One entrant's authoritative checksum contribution (issue #44): hashes exactly the fields
+ * game_state_checksum folds into the session digest for this entrant, so a divergence report
+ * can name the offending entrant by comparing per-entrant hashes. Returns 0 for a missing id.
+ */
+GAME_API uint32_t game_entrant_state_checksum(const Game *game, EntrantId id);
+
+/* First-divergence diagnostic (issue #44): walks two games' authoritative state in the same
+ * field order as the checksum and writes the first difference found into `out` as a compact
+ * line naming the tick, entrant, and field (e.g. "tick 42 entrant 2 vehicle.velocityLateralMps
+ * 1.234 vs 1.000"). Returns true when the games differ, false when they match. Never writes
+ * past `cap`. */
+GAME_API bool game_divergence_report(const Game *a, const Game *b, char *out, size_t cap);
+
 /* Returns false with a human reason when the current menu selection/setup cannot start a
  * session (no car, setup outside vehicle bounds, missing class tag, or non-player-selectable
  * kind). Headless tests call this directly to prove invalid setups are rejected before a

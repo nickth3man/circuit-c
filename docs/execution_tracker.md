@@ -245,8 +245,12 @@ Multiple lanes may operate in parallel after #13, but dependencies within each l
 - [x] [#26 — Introduce a deterministic collision world and measured broadphase](https://github.com/nickth3man/circuit-c/issues/26)
   - Depends on: #10, #11
 
-- [ ] [#27 — Implement deterministic vehicle-to-vehicle contact response](https://github.com/nickth3man/circuit-c/issues/27)
+- [x] [#27 — Implement deterministic vehicle-to-vehicle contact response](https://github.com/nickth3man/circuit-c/issues/27)
   - Depends on: #26
+  - Capsule-capsule narrowphase over swept substeps; two-body impulses (momentum conserving,
+    combined restitution, Coulomb friction), bounded positional correction, ascending-pair
+    ordering (registration-order independent). Wired into `collision_world_resolve_bodies`.
+    Verified: 152 scenarios, 13267 checks, 0 failed; 46/46 regression PASS.
 
 - [ ] [#28 — Add configurable collision damage and deterministic stuck recovery](https://github.com/nickth3man/circuit-c/issues/28)
   - Depends on: #11, #27
