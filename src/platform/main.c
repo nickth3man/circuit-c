@@ -155,6 +155,7 @@ typedef struct {
     int startCheckpoint; /* ordered checkpoint used as the standing-start pose */
     bool noVideo;        /* --no-video flag */
     bool listCars;       /* --list-cars flag */
+    int aiMode;          /* 0 legacy (default), 1 limit-aware v2 (#79 A/B switch) */
 } Options;
 
 /*
@@ -195,7 +196,7 @@ static void print_usage(const char *argv0)
     printf("       %s --capture-scene NAME [--width W] [--height H] [--ticks N]\n", argv0);
     printf("               [--seed N] [--output PATH] [--video]\n");
     printf("       %s --validate-lap [--car ID] [--track NAME] [--start-checkpoint N] "
-           "[--output DIR] [--no-video]\n",
+           "[--ai-mode legacy|v2] [--output DIR] [--no-video]\n",
            argv0);
     printf("       %s --list-cars\n", argv0);
     printf("       %s --list-scenes\n", argv0);
@@ -220,6 +221,7 @@ static bool parse_options(int argc, char **argv, Options *options, int *statusOu
     options->startCheckpoint = 0;
     options->noVideo = false;
     options->listCars = false;
+    options->aiMode = 0;
     *statusOut = 0;
 
     for (int i = 1; i < argc; i++) {
@@ -265,6 +267,19 @@ static bool parse_options(int argc, char **argv, Options *options, int *statusOu
             options->startCheckpoint = atoi(argv[++i]);
         } else if (strcmp(arg, "--no-video") == 0) {
             options->noVideo = true;
+        } else if (strcmp(arg, "--ai-mode") == 0 && hasValue) {
+            /* #79 A/B switch: v2 runs the limit-aware driver under test, legacy is the
+             * baseline the gates assert. */
+            const char *mode = argv[++i];
+            if (strcmp(mode, "v2") == 0) {
+                options->aiMode = 1;
+            } else if (strcmp(mode, "legacy") == 0) {
+                options->aiMode = 0;
+            } else {
+                fprintf(stderr, "error: unknown --ai-mode '%s' (try 'legacy' or 'v2')\n", mode);
+                *statusOut = 2;
+                return false;
+            }
         } else if (strcmp(arg, "--list-cars") == 0) {
             options->listCars = true;
         } else {
@@ -613,6 +628,11 @@ static int run_validate_lap(Game *game, const Options *options)
      * the platform loop pokes into Game.input. game_fixed_update() runs it in its controller
      * stage, at the same instant the explicit call used to happen. */
     controller_init(&game->controller, CONTROLLER_KIND_AI);
+    /* #79 A/B switch: --ai-mode v2 runs the limit-aware driver under test; the default
+     * (legacy) is the baseline every gate asserts. */
+    if (options->aiMode == 1) {
+        game->controller.config.ai.architecture = AI_DRIVER_ARCH_LIMIT;
+    }
 
     const int budgetTicks = REPLAY_CAPACITY_TICKS; /* 300 s max, the replay ring's capacity */
     const int maxRows = budgetTicks / VIDEO_TICKS_PER_FRAME;
@@ -786,8 +806,8 @@ static int run_validate_lap(Game *game, const Options *options)
         dev_replay_save(&game->replay, replayPath, "validate-lap", 0u, game->stateChecksum);
 
     char runId[128];
-    snprintf(runId, sizeof(runId), "%s-%s-start%d", game->trackDef.id, carId,
-             options->startCheckpoint);
+    snprintf(runId, sizeof(runId), "%s-%s-start%d%s", game->trackDef.id, carId,
+             options->startCheckpoint, (options->aiMode == 1) ? "-v2" : "");
 
     RunReportInput rep;
     memset(&rep, 0, sizeof(rep));

@@ -36,6 +36,8 @@
  * and nothing here writes anywhere but the ControllerOutput.
  */
 #include "game/ai_driver.h"
+#include "game/ai_driver_internal.h"
+#include "game/ai_driver_v2.h"
 
 #include <math.h>
 #include <stddef.h>
@@ -113,13 +115,14 @@ void ai_driver_config_default(AiDriverConfig *cfg)
      * is just a stale plan. */
     cfg->planCurvatureWeight = 7500.0f;
     cfg->planHysteresisWeight = 0.5f;
-    cfg->planReplanTicks = 12; /* 10 Hz at 120 Hz fixed step */
+    cfg->planReplanTicks = 12;                 /* 10 Hz at 120 Hz fixed step */
+    cfg->architecture = AI_DRIVER_ARCH_LEGACY; /* the baseline stays the gate (#79) */
 }
 
 /* Move an axis toward its demand no faster than the control can physically travel.
  * Moving away from zero is a press, moving toward zero is a release. */
-static float slew_axis(float current, float target, float pressRatePerS, float releaseRatePerS,
-                       float deadband, float dt)
+float slew_axis(float current, float target, float pressRatePerS, float releaseRatePerS,
+                float deadband, float dt)
 {
     /* Hold rather than chase: a control held at a steady pressure does not dither, and
      * without this the limiter tracks every small wobble in the demand at full rate.
@@ -143,12 +146,12 @@ static float slew_axis(float current, float target, float pressRatePerS, float r
 /* Geometry                                                                                */
 /* ------------------------------------------------------------------------------------- */
 
-static Vector2 vec_sub(Vector2 a, Vector2 b)
+Vector2 vec_sub(Vector2 a, Vector2 b)
 {
     return (Vector2){ a.x - b.x, a.y - b.y };
 }
 
-static float vec_len(Vector2 v)
+float vec_len(Vector2 v)
 {
     return sqrtf(v.x * v.x + v.y * v.y);
 }
@@ -158,7 +161,7 @@ static float vec_len(Vector2 v)
  * distance. A degenerate segment reports t = 0, which is the correct answer for a zero-length
  * segment and keeps the caller free of a special case.
  */
-static float closest_on_segment(Vector2 a, Vector2 b, Vector2 p, float *tOut, Vector2 *pointOut)
+float closest_on_segment(Vector2 a, Vector2 b, Vector2 p, float *tOut, Vector2 *pointOut)
 {
     const Vector2 ab = vec_sub(b, a);
     const float lenSq = ab.x * ab.x + ab.y * ab.y;
@@ -180,7 +183,7 @@ static float closest_on_segment(Vector2 a, Vector2 b, Vector2 p, float *tOut, Ve
  * curves are, and it degrades gracefully to zero on a straight rather than dividing by a
  * near-zero radius.
  */
-static float menger_curvature(Vector2 a, Vector2 b, Vector2 c)
+float menger_curvature(Vector2 a, Vector2 b, Vector2 c)
 {
     const Vector2 ab = vec_sub(b, a);
     const Vector2 bc = vec_sub(c, b);
@@ -194,7 +197,7 @@ static float menger_curvature(Vector2 a, Vector2 b, Vector2 c)
 
 /* Unit normal to the centreline at node i, pointing left of travel. Taken from the chord
  * between the node's neighbours so it is the tangent of the curve rather than of one segment. */
-static Vector2 node_normal(const TrackDefinition *track, int i)
+Vector2 node_normal(const TrackDefinition *track, int i)
 {
     const int count = track->count;
     Vector2 prev, next;
@@ -220,15 +223,14 @@ static Vector2 node_normal(const TrackDefinition *track, int i)
 }
 
 /* How far either side of the centreline a planned point may sit at node i. */
-static float usable_half_width(const TrackDefinition *track, int i, float marginM)
+float usable_half_width(const TrackDefinition *track, int i, float marginM)
 {
     const float usable = track->nodes[i].halfWidthM - marginM;
     return (usable > 0.0f) ? usable : 0.0f;
 }
 
 /* The planned lateral offset at a centreline node, or 0 (the centreline) outside the window. */
-static float plan_offset_at(const AiDriverState *state, const TrackDefinition *track,
-                            int nodeIndex)
+float plan_offset_at(const AiDriverState *state, const TrackDefinition *track, int nodeIndex)
 {
     if (state->planLayerCount <= 0) return 0.0f;
     const int count = track->count;
@@ -269,8 +271,8 @@ Vector2 ai_driver_plan_point(const AiDriverState *state, const TrackDefinition *
  *
  * The walk is capped at one lap so a lookahead longer than the circuit cannot spin forever.
  */
-static Vector2 plan_point_ahead(const AiDriverState *state, const TrackDefinition *track,
-                                int segment, float t, float distanceM)
+Vector2 plan_point_ahead(const AiDriverState *state, const TrackDefinition *track, int segment,
+                         float t, float distanceM)
 {
     const int count = track->count;
     const Vector2 a = ai_driver_plan_point(state, track, segment);
@@ -321,8 +323,8 @@ static Vector2 plan_point_ahead(const AiDriverState *state, const TrackDefinitio
  * table AI_PLAN_OFFSETS^2 wide and the transition cost O(AI_PLAN_OFFSETS) — the reason the
  * offset count is the parameter worth keeping small.
  */
-static void plan_path(const AiDriverConfig *cfg, AiDriverState *state,
-                      const TrackDefinition *track, int baseSegment, float carOffsetM)
+void plan_path(const AiDriverConfig *cfg, AiDriverState *state, const TrackDefinition *track,
+               int baseSegment, float carOffsetM)
 {
     const int count = track->count;
     const int layers = (count < AI_PLAN_LAYERS) ? count : AI_PLAN_LAYERS;
@@ -448,9 +450,9 @@ static void plan_path(const AiDriverConfig *cfg, AiDriverState *state,
  * the tyres fitted and the surface under the car. Composed exactly the way physics.c composes
  * them, so the driver's expectation and the car's behaviour cannot silently diverge.
  */
-static void available_grip(const VehicleSpec *spec, const TrackDefinition *track,
-                           const TrackRuntime *runtime, Vector2 positionM, float *muLatOut,
-                           float *muLongOut)
+void available_grip(const VehicleSpec *spec, const TrackDefinition *track,
+                    const TrackRuntime *runtime, Vector2 positionM, float *muLatOut,
+                    float *muLongOut)
 {
     const SurfaceId id = (track != NULL) ? Track_SurfaceAt(track, runtime, positionM)
                                          : (SurfaceId)SURFACE_ASPHALT;
@@ -472,6 +474,14 @@ void ai_driver_update(const AiDriverConfig *cfg, AiDriverState *state,
     if (cfg == NULL || state == NULL || out == NULL) return;
     if (track == NULL || track->nodes == NULL || track->count < 3) return;
     if (vehicle == NULL || derived == NULL || spec == NULL) return;
+
+    /* Architecture switch (#79): the limit-aware driver is built behind this field and is
+     * flipped for the whole roster only when it passes every gate; the legacy path below is
+     * the baseline and is never touched by it. */
+    if (cfg->architecture == AI_DRIVER_ARCH_LIMIT) {
+        ai_driver_update_v2(cfg, state, track, runtime, vehicle, derived, spec, out, dt);
+        return;
+    }
 
     const TrackNode *nodes = track->nodes;
     const int count = track->count;
