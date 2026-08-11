@@ -33,6 +33,7 @@
 #include "dev/failure_bundle.h"
 #include "physics/surface.h"
 #include "game/game.h"
+#include "game/validation_classifier.h"
 #include "game/validation_metrics.h"
 #include "game/input.h"
 #include "core/math_utils.h"
@@ -2227,6 +2228,9 @@ static void scenario_ai_roster_laps(void)
         controller_init(&game->controller, CONTROLLER_KIND_AI);
 
         const int budgetTicks = REPLAY_CAPACITY_TICKS; /* 300 s max */
+        const int maxRows = budgetTicks / 2;           /* telemetry sampled every 2 ticks */
+        TelemetryRow *rows = (TelemetryRow *)calloc((size_t)maxRows, sizeof(TelemetryRow));
+        int rowCount = 0;
         int outOfOrder = 0;
         bool allFinite = true;
         int ticksRun = 0;
@@ -2251,25 +2255,62 @@ static void scenario_ai_roster_laps(void)
                 offTrackTicks++;
             if (game->derived.speedMps < 1.0f) stoppedTicks++;
             speedSumMps += game->derived.speedMps;
+
+            /* Sample the same telemetry the validation runner classifies, so the roster's
+             * per-car evidence comes from the SAME reducer rather than a second incompatible
+             * definition (issue #78 §7). */
+            if (ticksRun % 2 == 0 && rows != NULL && rowCount < maxRows) {
+                rows[rowCount++] = game_telemetry_row(game, 1);
+            }
         }
-        /* Per-car evidence, printed whether or not the checks pass: a car that fails to make
-         * the lap count has failed for a reason, and "slow" and "stuck against a barrier" are
-         * different findings that a bare lap count cannot tell apart. */
+
+        /* Classify with the same inputs the runner uses; a passing car must come out PASS. */
+        ValidationMetrics metrics;
+        validation_metrics_compute(rows, rowCount, &metrics);
+        ValidationClassification cls;
+        ClassificationInputs in;
+        memset(&in, 0, sizeof(in));
+        in.checkpointCount = game->trackDef.checkpointCount;
+        in.startCheckpointIndex = 0;
+        in.targetLaps = VALIDATION_RUN_LAPS;
+        in.tickBudget = budgetTicks;
+        in.ticksRun = ticksRun;
+        in.fixedDtS = FIXED_DT_S;
+        in.meaningfulProgressM = 10.0;
+        in.stallSpeedMps = 0.5;
+        in.stallDurationS = 3.0;
+        in.wrongWayHoldS = 1.5;
+        in.departureHoldS = 0.75;
+        in.mismatchHoldS = 1.0;
+        in.collisionSpeedMpsEps = 0.1;
+        in.spinSideslipRad = 1.48;
+        in.spinMinSpeedMps = 2.0;
+        in.spinMinDurationS = 0.25;
+        validation_classify(rows, rowCount, &metrics, &in, &cls);
+
+        /* Concise per-car line: a passing run carries its verdict; a failure names the primary
+         * reason and the first causal tick, which is what makes the run diagnosable (issue #78
+         * §7). */
         printf("    ai-roster-laps   %-10s laps %d  ticks %5d  mean %.1f m/s  off-track %.1f%%"
-               "  stopped %.1f%%  collisions %d\n",
+               "  stopped %.1f%%  collisions %d  primary %s  first-fault %llu\n",
                carId, game->progress.lap, ticksRun,
                (double)(ticksRun ? speedSumMps / (float)ticksRun : 0.0f),
                100.0 * (double)offTrackTicks / (double)(ticksRun ? ticksRun : 1),
-               100.0 * (double)stoppedTicks / (double)(ticksRun ? ticksRun : 1), collisions);
+               100.0 * (double)stoppedTicks / (double)(ticksRun ? ticksRun : 1), collisions,
+               failure_class_reason(cls.primary), (unsigned long long)cls.firstFaultTick);
         check(allFinite, "car '%s' simulation stayed finite", carId);
         check(game->progress.lap >= VALIDATION_RUN_LAPS,
               "car '%s' completed %d laps (got %d in %d ticks)", carId, VALIDATION_RUN_LAPS,
               game->progress.lap, ticksRun);
         check(outOfOrder == 0, "car '%s' crossed all gates in order (%d out-of-order)", carId,
               outOfOrder);
+        check(cls.primary == RUN_CLASS_PASS,
+              "car '%s' completed run classifies as pass (got %s)", carId,
+              failure_class_reason(cls.primary));
         check(memcmp(&game->controller.config.ai, &cfgAtStart, sizeof(cfgAtStart)) == 0,
               "car '%s' was driven with the unmodified shared AiDriverConfig", carId);
 
+        free(rows);
         track_free(&game->trackDef);
         free(game);
     }
@@ -3754,6 +3795,420 @@ static void scenario_launch_per_drivetrain(void)
     }
 }
 
+/* ------------------------------------------------------------------------------------- */
+/* Scenario: failure-classification — every #78 failure class, proven by construction       */
+/* ------------------------------------------------------------------------------------- */
+
+/* Fill a telemetry row with the fields the classifier reads; everything else stays zero. */
+static void cls_fill_row(TelemetryRow *r, int tick, float speedMps, float sideslipRad,
+                         int checkpointEvent, int lastCrossed, int expected, int beyondRunoff,
+                         int wrongWay, int routeSegment, int aiSegment, float furthestM,
+                         float lockoutS, int lapIndex)
+{
+    memset(r, 0, sizeof(*r));
+    r->tick = (uint64_t)tick;
+    r->timeS = (double)tick * FIXED_DT_S;
+    r->positionXM = 10.0f;
+    r->positionYM = 10.0f;
+    r->speedMps = speedMps;
+    r->bodySideslipRad = sideslipRad;
+    r->checkpointEvent = checkpointEvent;
+    r->lastCrossedIndex = lastCrossed;
+    r->checkpointIndex = expected;
+    r->beyondRunoff = beyondRunoff;
+    r->wrongWayFlag = wrongWay;
+    r->routeSegmentIndex = routeSegment;
+    r->aiSegment = aiSegment;
+    r->furthestProgressM = furthestM;
+    r->crashLockoutS = lockoutS;
+    r->lapIndex = lapIndex;
+}
+
+/* The same inputs the validation runner feeds the classifier. */
+static void cls_default_inputs(ClassificationInputs *in)
+{
+    memset(in, 0, sizeof(*in));
+    in->checkpointCount = 25;
+    in->startCheckpointIndex = 0;
+    in->targetLaps = 4;
+    in->tickBudget = 36000;
+    in->ticksRun = 36000; /* budget expired unless a test overrides */
+    in->fixedDtS = FIXED_DT_S;
+    in->meaningfulProgressM = 10.0;
+    in->stallSpeedMps = 0.5;
+    in->stallDurationS = 3.0;
+    in->wrongWayHoldS = 1.5;
+    in->departureHoldS = 0.75;
+    in->mismatchHoldS = 1.0;
+    in->collisionSpeedMpsEps = 0.1;
+    in->spinSideslipRad = 1.48;
+    in->spinMinSpeedMps = 2.0;
+    in->spinMinDurationS = 0.25;
+}
+
+/* Rows are sampled every 2nd tick (60 Hz), like the validation runner. */
+static int cls_tick(int i)
+{
+    return 2 * i;
+}
+
+static void scenario_failure_classification(void)
+{
+    ValidationClassification cls;
+    ClassificationInputs in;
+
+    /* 1. invalid_physics dominates every other verdict and names the bad row. */
+    {
+        TelemetryRow rows[3];
+        for (int i = 0; i < 3; i++) {
+            cls_fill_row(&rows[i], cls_tick(i), 10.0f, 0.0f, 1, i, i + 1, 0, 0, 5, 5,
+                         10.0f * (float)(i + 1), 0.0f, 0);
+        }
+        rows[1].positionXM = NAN;
+        cls_default_inputs(&in);
+        validation_classify(rows, 3, NULL, &in, &cls);
+        check(cls.primary == RUN_CLASS_INVALID_PHYSICS, "invalid_physics dominates (got %s)",
+              failure_class_reason(cls.primary));
+        check(cls.firstFaultTick == (uint64_t)cls_tick(1),
+              "invalid_physics first-fault tick is the bad row (%llu)",
+              (unsigned long long)cls.firstFaultTick);
+    }
+
+    /* 2/3. An out-of-order crossing is checkpoint_out_of_order when it is BEHIND the owed gate
+     * and checkpoint_skipped when it jumps AHEAD of it. */
+    {
+        TelemetryRow rows[3];
+        for (int i = 0; i < 3; i++) {
+            cls_fill_row(&rows[i], cls_tick(i), 10.0f, 0.0f, 2, 2, 5, 0, 0, 5, 5,
+                         10.0f * (float)(i + 1), 0.0f, 0);
+        }
+        cls_default_inputs(&in);
+        validation_classify(rows, 3, NULL, &in, &cls);
+        check(cls.primary == RUN_CLASS_CHECKPOINT_OUT_OF_ORDER,
+              "gate 2 while owing gate 5 is out_of_order (got %s)",
+              failure_class_reason(cls.primary));
+    }
+    {
+        TelemetryRow rows[3];
+        for (int i = 0; i < 3; i++) {
+            cls_fill_row(&rows[i], cls_tick(i), 10.0f, 0.0f, 2, 7, 5, 0, 0, 5, 5,
+                         10.0f * (float)(i + 1), 0.0f, 0);
+        }
+        cls_default_inputs(&in);
+        validation_classify(rows, 3, NULL, &in, &cls);
+        check(cls.primary == RUN_CLASS_CHECKPOINT_SKIPPED,
+              "gate 7 while owing gate 5 is a forward skip (got %s)",
+              failure_class_reason(cls.primary));
+        check(cls.contributingCount >= 1 &&
+                  cls.contributing[0].reason == RUN_CLASS_CHECKPOINT_SKIPPED,
+              "the skip is the first contributing event");
+    }
+
+    /* 4. slow_timeout: budget expired while the car is still making progress — distinct from a
+     * stall and from a missed gate. */
+    {
+        TelemetryRow rows[30];
+        for (int i = 0; i < 30; i++) {
+            cls_fill_row(&rows[i], cls_tick(i), 10.0f, 0.0f, 1, 1, 2, 0, 0, 5, 5,
+                         10.0f * (float)(i + 1), 0.0f, 0);
+        }
+        cls_default_inputs(&in);
+        validation_classify(rows, 30, NULL, &in, &cls);
+        check(cls.primary == RUN_CLASS_SLOW_TIMEOUT,
+              "budget expired while progressing is slow_timeout (got %s)",
+              failure_class_reason(cls.primary));
+        check(cls.contributingCount == 1 &&
+                  cls.contributing[0].reason == RUN_CLASS_SLOW_TIMEOUT,
+              "slow_timeout is the only contributing event");
+    }
+
+    /* 5/6. A sustained stop is stalled_on_track on the surface and stalled_off_track beyond it. */
+    {
+        TelemetryRow rows[200]; /* 200 rows at 60 Hz = 3.33 s > 3.0 s */
+        for (int i = 0; i < 200; i++) {
+            cls_fill_row(&rows[i], cls_tick(i), 0.0f, 0.0f, 0, -1, 1, 0, 0, 5, 5, 0.0f, 0.0f,
+                         0);
+        }
+        cls_default_inputs(&in);
+        validation_classify(rows, 200, NULL, &in, &cls);
+        check(cls.primary == RUN_CLASS_STALLED_ON_TRACK,
+              "stopped on the surface is stalled_on_track (got %s)",
+              failure_class_reason(cls.primary));
+    }
+    {
+        TelemetryRow rows[200];
+        for (int i = 0; i < 200; i++) {
+            cls_fill_row(&rows[i], cls_tick(i), 0.0f, 0.0f, 0, -1, 1, 1, 0, 5, 5, 0.0f, 0.0f,
+                         0);
+        }
+        cls_default_inputs(&in);
+        validation_classify(rows, 200, NULL, &in, &cls);
+        check(cls.primary == RUN_CLASS_STALLED_OFF_TRACK,
+              "stopped beyond the runoff is stalled_off_track (got %s)",
+              failure_class_reason(cls.primary));
+    }
+
+    /* 7. collision_stuck: a contact at meaningful speed precedes the immobility; the first-fault
+     * tick is the CONTACT, not the stop. The rising edge needs a row before it with no lockout
+     * (the detector watches prevLockout -> lockout), so the contact sits mid-run. */
+    {
+        TelemetryRow rows[205];
+        for (int i = 0; i < 4; i++) {
+            cls_fill_row(&rows[i], cls_tick(i), 5.0f, 0.0f, 0, -1, 1, 0, 0, 5, 5, 0.0f, 0.0f,
+                         0);
+        }
+        cls_fill_row(&rows[4], cls_tick(4), 5.0f, 0.0f, 0, -1, 1, 0, 0, 5, 5, 0.0f, 1.0f, 0);
+        for (int i = 5; i < 205; i++) {
+            cls_fill_row(&rows[i], cls_tick(i), 0.0f, 0.0f, 0, -1, 1, 0, 0, 5, 5, 0.0f, 1.0f,
+                         0);
+        }
+        cls_default_inputs(&in);
+        validation_classify(rows, 205, NULL, &in, &cls);
+        check(cls.primary == RUN_CLASS_COLLISION_STUCK,
+              "collision then immobility is collision_stuck (got %s)",
+              failure_class_reason(cls.primary));
+        check(cls.firstFaultTick == (uint64_t)cls_tick(4),
+              "collision_stuck first-fault is the contact tick (%llu)",
+              (unsigned long long)cls.firstFaultTick);
+    }
+
+    /* 8. spin_then_departure: a sustained spin precedes the route departure, and the first-fault
+     * tick is the SPIN onset. */
+    {
+        TelemetryRow rows[80];
+        for (int i = 0; i < 20; i++) {
+            cls_fill_row(&rows[i], cls_tick(i), 5.0f, 1.5f, 0, -1, 1, 0, 0, 5, 5, 0.0f, 0.0f,
+                         0);
+        }
+        for (int i = 20; i < 80; i++) {
+            cls_fill_row(&rows[i], cls_tick(i), 3.0f, 0.0f, 0, -1, 1, 1, 0, 5, 5, 0.0f, 0.0f,
+                         0);
+        }
+        cls_default_inputs(&in);
+        validation_classify(rows, 80, NULL, &in, &cls);
+        check(cls.primary == RUN_CLASS_SPIN_THEN_DEPARTURE,
+              "spin then departure is spin_then_departure (got %s)",
+              failure_class_reason(cls.primary));
+        check(cls.firstFaultTick == (uint64_t)cls_tick(0),
+              "spin_then_departure first-fault is the spin onset (%llu)",
+              (unsigned long long)cls.firstFaultTick);
+    }
+
+    /* 9. wrong_way: the latched flag sustained past the hold time. */
+    {
+        TelemetryRow rows[100]; /* 1.67 s > 1.5 s */
+        for (int i = 0; i < 100; i++) {
+            cls_fill_row(&rows[i], cls_tick(i), 8.0f, 0.0f, 0, -1, 1, 0, 1, 5, 5, 0.0f, 0.0f,
+                         0);
+        }
+        cls_default_inputs(&in);
+        validation_classify(rows, 100, NULL, &in, &cls);
+        check(cls.primary == RUN_CLASS_WRONG_WAY, "sustained wrong-way is wrong_way (got %s)",
+              failure_class_reason(cls.primary));
+    }
+
+    /* 10. route_departure: beyond the runoff without a preceding spin. */
+    {
+        TelemetryRow rows[60]; /* 1.0 s > 0.75 s */
+        for (int i = 0; i < 60; i++) {
+            cls_fill_row(&rows[i], cls_tick(i), 5.0f, 0.0f, 0, -1, 1, 1, 0, 5, 5, 0.0f, 0.0f,
+                         0);
+        }
+        cls_default_inputs(&in);
+        validation_classify(rows, 60, NULL, &in, &cls);
+        check(cls.primary == RUN_CLASS_ROUTE_DEPARTURE,
+              "beyond-runoff without a spin is route_departure (got %s)",
+              failure_class_reason(cls.primary));
+    }
+
+    /* 11. localization_lost: an invalid route segment sustained. */
+    {
+        TelemetryRow rows[60];
+        for (int i = 0; i < 60; i++) {
+            cls_fill_row(&rows[i], cls_tick(i), 5.0f, 0.0f, 0, -1, 1, 0, 0, -1, -1, 0.0f, 0.0f,
+                         0);
+        }
+        cls_default_inputs(&in);
+        validation_classify(rows, 60, NULL, &in, &cls);
+        check(cls.primary == RUN_CLASS_LOCALIZATION_LOST,
+              "invalid localization sustained is localization_lost (got %s)",
+              failure_class_reason(cls.primary));
+    }
+
+    /* 12. planner_localization_mismatch: the AI and route segments disagree sustained. */
+    {
+        TelemetryRow rows[70]; /* 1.17 s > 1.0 s */
+        for (int i = 0; i < 70; i++) {
+            cls_fill_row(&rows[i], cls_tick(i), 10.0f, 0.0f, 1, 1, 2, 0, 0, 7, 3,
+                         10.0f * (float)(i + 1), 0.0f, 0);
+        }
+        cls_default_inputs(&in);
+        validation_classify(rows, 70, NULL, &in, &cls);
+        check(cls.primary == RUN_CLASS_PLANNER_LOCALIZATION_MISMATCH,
+              "sustained AI/route disagreement is planner_localization_mismatch (got %s)",
+              failure_class_reason(cls.primary));
+    }
+
+    /* 13. A run that COMPLETED its target laps is a pass despite a transient disagreement. */
+    {
+        TelemetryRow rows[70];
+        for (int i = 0; i < 69; i++) {
+            cls_fill_row(&rows[i], cls_tick(i), 10.0f, 0.0f, 1, 1, 2, 0, 0, 7, 3,
+                         10.0f * (float)(i + 1), 0.0f, 0);
+        }
+        cls_fill_row(&rows[69], cls_tick(69), 10.0f, 0.0f, 1, 1, 2, 0, 0, 7, 3, 700.0f, 0.0f,
+                     4);
+        cls_default_inputs(&in);
+        validation_classify(rows, 70, NULL, &in, &cls);
+        check(cls.primary == RUN_CLASS_PASS,
+              "a completed run is pass despite a transient mismatch (got %s)",
+              failure_class_reason(cls.primary));
+        check(cls.firstFaultTick == 0 && cls.contributingCount == 0,
+              "a completed run clears the fault list");
+    }
+
+    /* 14. Missing-checkpoint accounting is correct after 0..3 completed laps and never negative
+     * (the runner's lap-aware formula: current lap's crossings = cursor distance from lap start,
+     * missed = gates - crossings, clamped). */
+    {
+        const int gates = 25;
+        const int start = 0;
+        for (int completed = 0; completed <= 3; completed++) {
+            for (int crossed = 1; crossed < gates; crossed++) {
+                const int cursor = start + completed * gates + crossed;
+                const int nextCheckpoint = cursor % gates;
+                const int crossedThisLap = (nextCheckpoint - start + gates) % gates;
+                int missed = gates - crossedThisLap;
+                if (missed < 0) missed = 0;
+                check(missed >= 0 && missed <= gates,
+                      "lap %d crossing %d: missed %d stays in [0,%d]", completed, crossed,
+                      missed, gates);
+                check(missed == gates - crossed,
+                      "lap %d crossing %d: missed is gates minus this lap's crossings "
+                      "(%d vs %d)",
+                      completed, crossed, missed, gates - crossed);
+            }
+        }
+    }
+
+    /* 15. The classification is a pure function: identical rows, identical verdict. */
+    {
+        TelemetryRow rows[100];
+        for (int i = 0; i < 100; i++) {
+            cls_fill_row(&rows[i], cls_tick(i), 0.0f, 0.0f, 0, -1, 1, 0, 0, 5, 5, 0.0f, 0.0f,
+                         0);
+        }
+        cls_default_inputs(&in);
+        ValidationClassification a, b;
+        validation_classify(rows, 100, NULL, &in, &a);
+        validation_classify(rows, 100, NULL, &in, &b);
+        check(a.primary == b.primary && a.firstFaultTick == b.firstFaultTick &&
+                  a.contributingCount == b.contributingCount &&
+                  a.lastCheckpointIndex == b.lastCheckpointIndex &&
+                  a.expectedCheckpointIndex == b.expectedCheckpointIndex &&
+                  a.furthestRouteDistanceM == b.furthestRouteDistanceM &&
+                  a.timeSinceProgressS == b.timeSinceProgressS,
+              "classification is deterministic across runs");
+    }
+}
+
+/* ------------------------------------------------------------------------------------- */
+/* Scenario: chicane-gates-dense — the 25-gate chicane accepts a legal lap, rejects the     */
+/* y=farY shortcut, and reports a forward skip                                             */
+/* ------------------------------------------------------------------------------------- */
+
+static void scenario_chicane_gates_dense(void)
+{
+    TrackDefinition track;
+    RacerProgress progress;
+    memset(&track, 0, sizeof(track));
+    memset(&progress, 0, sizeof(progress));
+    track_load_chicane(&track);
+    check(track.checkpointCount == 25, "the densified chicane carries 25 gates (got %d)",
+          track.checkpointCount);
+    track_reset_progress_at(&progress, &track, 0);
+
+    /* A legal lap: cross gates 1..24 in order, then gate 0 closes the lap. Each sweep runs
+     * from 2 m upstream of the gate to 2 m downstream, through the gate centre. */
+    {
+        int outOfOrder = 0;
+        for (int g = 1; g < 25; g++) {
+            const Checkpoint *c = &track.checkpoints[g];
+            const Vector2 a = { c->centerM.x - c->forwardUnit.x * 2.0f,
+                                c->centerM.y - c->forwardUnit.y * 2.0f };
+            const Vector2 b = { c->centerM.x + c->forwardUnit.x * 2.0f,
+                                c->centerM.y + c->forwardUnit.y * 2.0f };
+            const TrackCheckpointEvent ev = track_update_checkpoints(&track, &progress, a, b);
+            check(ev.crossed && !ev.outOfOrder, "gate %d crossed in order on a legal lap", g);
+            if (ev.outOfOrder) outOfOrder++;
+        }
+        const Checkpoint *c0 = &track.checkpoints[0];
+        const Vector2 a0 = { c0->centerM.x - c0->forwardUnit.x * 2.0f,
+                             c0->centerM.y - c0->forwardUnit.y * 2.0f };
+        const Vector2 b0 = { c0->centerM.x + c0->forwardUnit.x * 2.0f,
+                             c0->centerM.y + c0->forwardUnit.y * 2.0f };
+        const TrackCheckpointEvent ev = track_update_checkpoints(&track, &progress, a0, b0);
+        check(ev.lapCompleted, "gate 0 closes the lap on a legal lap");
+        check(outOfOrder == 0, "no out-of-order crossing on a legal lap");
+        check(progress.lap == 1, "one lap completed (got %d)", progress.lap);
+        check(!progress.lapInvalid, "a legal lap is not invalidated");
+    }
+
+    /* The shortcut: driving straight along y = farY crosses the entry-side gates but MISSES the
+     * chicane apex gates (13-15), then trips the exit side out of order — the layout's purpose
+     * (a shortcut is rejected loudly, not silently scored). */
+    {
+        RacerProgress p2;
+        memset(&p2, 0, sizeof(p2));
+        track_reset_progress_at(&p2, &track, 0);
+        const float y = 90.0f;
+        bool apexTouched = false;
+        int outOfOrder = 0;
+        for (int xi = 0; xi <= 25; xi++) {
+            const float x = 60.0f - 4.0f * (float)xi;
+            const TrackCheckpointEvent ev = track_update_checkpoints(
+                &track, &p2, (Vector2){ x + 2.0f, y }, (Vector2){ x - 2.0f, y });
+            if (ev.crossed && (ev.index == 13 || ev.index == 14 || ev.index == 15))
+                apexTouched = true;
+            if (ev.outOfOrder) outOfOrder++;
+        }
+        check(!apexTouched, "the shortcut never crosses the chicane apex gates (13-15)");
+        check(p2.lapInvalid, "the shortcut invalidates the lap");
+        check(outOfOrder > 0, "the shortcut trips an out-of-order crossing at the exit");
+        check(p2.lap == 0, "the shortcut closes no lap");
+    }
+
+    /* A forward skip on the real track: cross gate 5 while owing gate 3. */
+    {
+        RacerProgress p3;
+        memset(&p3, 0, sizeof(p3));
+        track_reset_progress_at(&p3, &track, 0);
+        for (int g = 1; g <= 2; g++) {
+            const Checkpoint *c = &track.checkpoints[g];
+            const Vector2 a = { c->centerM.x - c->forwardUnit.x * 2.0f,
+                                c->centerM.y - c->forwardUnit.y * 2.0f };
+            const Vector2 b = { c->centerM.x + c->forwardUnit.x * 2.0f,
+                                c->centerM.y + c->forwardUnit.y * 2.0f };
+            track_update_checkpoints(&track, &p3, a, b);
+        }
+        check(p3.nextCheckpoint == 3, "owed gate 3 after gates 1,2 (got %d)",
+              p3.nextCheckpoint);
+        const Checkpoint *c5 = &track.checkpoints[5];
+        const Vector2 a5 = { c5->centerM.x - c5->forwardUnit.x * 2.0f,
+                             c5->centerM.y - c5->forwardUnit.y * 2.0f };
+        const Vector2 b5 = { c5->centerM.x + c5->forwardUnit.x * 2.0f,
+                             c5->centerM.y + c5->forwardUnit.y * 2.0f };
+        const TrackCheckpointEvent ev = track_update_checkpoints(&track, &p3, a5, b5);
+        check(ev.outOfOrder, "gate 5 while owing gate 3 is out of order");
+        check(ev.index == 5, "the event names the gate actually crossed (got %d)", ev.index);
+        check(p3.lapInvalid, "the forward skip invalidates the lap");
+        check(p3.nextCheckpoint == 3, "the skip does not advance progress (got %d)",
+              p3.nextCheckpoint);
+    }
+
+    track_free(&track);
+}
+
 static const TestScenario kGameplayScenarios[] = {
     { "track-surface", "track geometry, init/free life-cycle, and per-point surface query",
       scenario_track_surface },
@@ -3797,6 +4252,12 @@ static const TestScenario kGameplayScenarios[] = {
     { "planned-line",
       "the driver's own path search is legal, checkpoint-valid, and faster than the centreline",
       scenario_planned_line },
+    { "failure-classification",
+      "every #78 failure class classifies correctly, by construction, on hand-built rows",
+      scenario_failure_classification },
+    { "chicane-gates-dense",
+      "the 25-gate chicane accepts a legal lap, rejects the y=farY shortcut, reports skips",
+      scenario_chicane_gates_dense },
     { "particle-pool", "init, spawn, round-robin wrap, update, and lifecycle",
       scenario_particle_pool },
     { "state-machine", "MENU/PLAYING/PAUSED/RESULTS transitions", scenario_state_machine },

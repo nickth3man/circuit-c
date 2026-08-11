@@ -134,7 +134,6 @@ void validation_classify(const TelemetryRow *rows, int count, const ValidationMe
     uint64_t firstCollisionTick = 0;
     double firstCollisionTimeS = 0.0;
     float prevLockout = 0.0f;
-    int prevCrossed = -1;
     double furthestProgressM = -1.0;
     uint64_t lastProgressTick = 0;
     double lastProgressTimeS = 0.0;
@@ -157,18 +156,26 @@ void validation_classify(const TelemetryRow *rows, int count, const ValidationMe
             lastProgressTimeS = t;
         }
 
-        /* Checkpoint events. checkpointEvent: 0 none, 1 in-order, 2 out-of-order, 3 lap-complete. */
+        /* Checkpoint events. checkpointEvent: 0 none, 1 in-order, 2 out-of-order, 3 lap-complete.
+         * An out-of-order crossing names the crossed gate in lastCrossedIndex while checkpointIndex
+         * still names the gate owed; crossing a gate AHEAD of the owed one is a forward skip
+         * (checkpoint_skipped), crossing one BEHIND or off-sequence is checkpoint_out_of_order. */
         if (r->checkpointEvent == 2) {
-            record_hit(&outOfOrder, tick, t);
+            const int crossed = r->lastCrossedIndex;
+            const int owed = r->checkpointIndex;
+            if (in->checkpointCount > 1 && crossed >= 0 && owed >= 0) {
+                const int forward =
+                    ((crossed - owed) % in->checkpointCount + in->checkpointCount) %
+                    in->checkpointCount;
+                if (forward > 0 && forward <= in->checkpointCount / 2) {
+                    record_hit(&skipped, tick, t);
+                } else {
+                    record_hit(&outOfOrder, tick, t);
+                }
+            } else {
+                record_hit(&outOfOrder, tick, t);
+            }
         }
-        /* A forward skip: at a crossing, lastCrossedIndex advanced by more than one gate. */
-        if ((r->checkpointEvent == 1 || r->checkpointEvent == 3) && in->checkpointCount > 1 &&
-            prevCrossed >= 0) {
-            int delta = r->lastCrossedIndex - prevCrossed;
-            if (r->lastCrossedIndex < prevCrossed) delta += in->checkpointCount; /* wrap */
-            if (delta > 1) record_hit(&skipped, tick, t);
-        }
-        if (r->lastCrossedIndex >= 0) prevCrossed = r->lastCrossedIndex;
 
         /* Collisions: rising edge of the crash lockout, above the contact-speed floor. */
         if (i > 0 && r->crashLockoutS > 0.0f && prevLockout <= 0.0f &&
