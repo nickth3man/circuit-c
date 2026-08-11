@@ -169,22 +169,23 @@ Multiple lanes may operate in parallel after #13, but dependencies within each l
 
 - [ ] [#15 — Model bounded camber and caster effects in the planar tire model](https://github.com/nickth3man/circuit-c/issues/15)
   - Depends on: #14
-  - BLOCKED on validation-AI robustness, not on its own dependencies. The work is complete on
-    the `feat/issue-15-16-camber-tire-dims` branch and passes its own physics checks, but
-    `ai-roster-laps` fails for awd_rally. That gate is chaotic on that car (see the #18 note):
-    any nonzero camber thrust coefficient — even 0.01 — tips awd_rally from four laps to one.
-    The coefficient was tested at 0.00–0.30; no stable value exists above zero. At zero the
-    param-audit rejects camber as inert. Land it after the AI can recover (#28), or after the
-    maintainers decide what that gate should assert for low-grip roster cars.
+  - BLOCKED on validation-AI robustness ([#77](https://github.com/nickth3man/circuit-c/issues/77)),
+    not on its own dependencies. The work is complete on the `feat/issue-15-16-camber-tire-dims`
+    branch and passes its own physics checks, but `ai-roster-laps` fails for awd_rally. That gate
+    is chaotic on that car (see the #18 note and #77 for the full coefficient scan): any nonzero
+    camber thrust coefficient — even 0.01 — tips awd_rally from four laps to one. The coefficient
+    was tested at 0.00–0.30; no stable value exists above zero. At zero the param-audit rejects
+    camber as inert. Land it after the AI can recover (#28), or after the maintainers decide what
+    that gate should assert for low-grip roster cars.
 
 ## Tire dimensions and transient-force lane
-
 - [ ] [#16 — Make tire width, radius, and pressure affect force generation consistently](https://github.com/nickth3man/circuit-c/issues/16)
   - Depends on: #12, #13
-  - BLOCKED on validation-AI robustness (same gate as #15). The tire dimension/pressure stiffness
-    modifiers are neutral for all roster cars (they run nominal 225 mm / 220 kPa), but the camber
-    thrust from #15 — which ships in the same branch — tips awd_rally. The width/pressure work
-    itself is complete and verified; it lands with #15 when that gate stabilises.
+  - BLOCKED on validation-AI robustness ([#77](https://github.com/nickth3man/circuit-c/issues/77),
+    same gate as #15). The tire dimension/pressure stiffness modifiers are neutral for all roster
+    cars (they run nominal 225 mm / 220 kPa), but the camber thrust from #15 — which ships in the
+    same branch — tips awd_rally. The width/pressure work itself is complete and verified; it
+    lands with #15 when that gate stabilises.
 
 - [ ] [#20 — Add longitudinal relaxation and aligning-moment diagnostics](https://github.com/nickth3man/circuit-c/issues/20)
   - Depends on: #13, #15, #16
@@ -204,12 +205,13 @@ Multiple lanes may operate in parallel after #13, but dependencies within each l
 
 - [ ] [#18 — Derive quasi-static load transfer from suspension and chassis parameters](https://github.com/nickth3man/circuit-c/issues/18)
   - Depends on: #12, #13
-  - BLOCKED on validation-AI robustness, not on its own dependencies. The work is complete on
-    the `wip/issue-18-suspension-load-transfer` branch and passes its own physics checks, but
-    `ai-roster-laps` fails for awd_rally and rwd_power. That gate is chaotic on those two cars:
-    moving one anti-roll bar by 0.016% swings awd_rally between one and three completed laps,
-    and both cars end the run stopped off-track, which is the stuck recovery #28 defers. Land
-    it after the AI can recover, or after the maintainers decide what that gate should assert.
+  - BLOCKED on validation-AI robustness ([#77](https://github.com/nickth3man/circuit-c/issues/77)),
+    not on its own dependencies. The work is complete on the `wip/issue-18-suspension-load-transfer`
+    branch and passes its own physics checks, but `ai-roster-laps` fails for awd_rally and
+    rwd_power. That gate is chaotic on those two cars: moving one anti-roll bar by 0.016% swings
+    awd_rally between one and three completed laps, and both cars end the run stopped off-track,
+    which is the stuck recovery #28 defers. Land it after the AI can recover, or after the
+    maintainers decide what that gate should assert.
 
 - [ ] [#19 — Add suspension travel, bump-stop, and wheel-unloading limits](https://github.com/nickth3man/circuit-c/issues/19)
   - Depends on: #18
