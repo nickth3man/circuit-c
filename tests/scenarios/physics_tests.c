@@ -430,6 +430,14 @@ static void scenario_run_report(void)
               "a no-run report states no gate was crossed");
         check(strstr(buf, "\"expected_checkpoint_index\": -1") != NULL,
               "a no-run report states no gate was owed");
+        check(strstr(buf, "\"classification\"") != NULL,
+              "run.json carries the classification block (schema 1.1.0)");
+        check(strstr(buf, "\"reason\": \"unclassified\"") != NULL,
+              "an unclassified run never serializes as a pass");
+        check(strstr(buf, "\"first_fault_tick\": 0") != NULL,
+              "an unclassified run carries no fault tick");
+        check(strstr(buf, "\"contributing\": []") != NULL,
+              "an unclassified run carries no contributing events");
     }
 
     /* A passing run reports PASS and a null failure_reason. */

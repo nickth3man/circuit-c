@@ -17,6 +17,8 @@
 #include <math.h>
 #include <string.h>
 
+#include "world/track.h" /* AI_PROGRESS_BIN_M, shared with the progress-bin stage */
+
 /* Per-class detection state held across the single pass. `tick`/`timeS` record the FIRST
  * occurrence once the class is committed; until then the interval is pending in onset*. */
 typedef struct {
@@ -39,21 +41,43 @@ static void record_hit(ClassHit *h, uint64_t tick, double timeS)
     h->timeS = timeS;
 }
 
-static void commit_if_sustained(ClassHit *h, Interval *iv, const TelemetryRow *row,
+static void commit_if_sustained(ClassHit *h, const Interval *iv, const TelemetryRow *row,
                                 double holdS)
 {
     /* Called when the condition just went false after being active, or from the end-of-run
-     * close with the row that ended the run. Commits the class if the interval met the hold. */
+     * close with the row that ended the run. Commits the class if the interval met the hold.
+     * The caller owns the state transition: this never mutates the interval, so the ivCopy
+     * dance the callers used to absorb a discarded write is gone (PR #80 review). */
     if (iv->active && row->timeS - iv->onsetTimeS >= holdS) {
         record_hit(h, iv->onsetTick, iv->onsetTimeS);
     }
-    iv->active = false;
 }
 
 static bool finite_row(const TelemetryRow *r)
 {
     return isfinite((double)r->positionXM) && isfinite((double)r->positionYM) &&
            isfinite((double)r->speedMps);
+}
+
+void validation_classification_inputs_default(ClassificationInputs *out)
+{
+    if (out == NULL) return;
+    memset(out, 0, sizeof(*out));
+    /* The single source of the threshold values: the validation runner, ai-roster-laps, and the
+     * by-construction scenario all call this, so a retune cannot leave the test quoting stale
+     * numbers (PR #80 review). meaningfulProgressM is the progress-bin interval itself, so it
+     * cannot drift from the bin the progress stage emits. */
+    out->meaningfulProgressM = (double)AI_PROGRESS_BIN_M;
+    out->stallSpeedMps = 0.5;        /* speed at/under which the car counts as stopped */
+    out->stallDurationS = 3.0;       /* stopped this long => stalled */
+    out->wrongWayHoldS = 1.5;        /* wrong-way this long => wrong_way */
+    out->departureHoldS = 0.75;      /* beyond-runoff this long => route_departure */
+    out->mismatchHoldS = 1.0;        /* AI/route segment mismatch this long */
+    out->collisionSpeedMpsEps = 0.1; /* contacts below this don't attribute a collision */
+    out->spinSideslipRad = 1.48;     /* |sideslip| above this is a spin attitude */
+    out->spinMinSpeedMps = 2.0;      /* ...only while still moving */
+    out->spinMinDurationS = 0.25;    /* ...that must persist this long */
+    out->progressRecencyS = 2.0; /* progress this recently at budget expiry => slow timeout */
 }
 
 const char *failure_class_reason(FailureClass c)
@@ -129,7 +153,10 @@ void validation_classify(const TelemetryRow *rows, int count, const ValidationMe
     Interval mismatchIv = { 0 }; /* AI/route segment disagreement sustained */
 
     bool hadSpin = false;       /* any spin committed this run (for spin_then_departure) */
+    bool haveSpinOnset = false; /* tick 0 is a valid onset, so presence needs its own flag */
     uint64_t spinOnsetTick = 0; /* onset of the first qualifying spin */
+    double spinOnsetTimeS =
+        0.0; /* the RECORDED onset time, never reconstructed from the tick */
     bool firstCollisionSeen = false;
     uint64_t firstCollisionTick = 0;
     double firstCollisionTimeS = 0.0;
@@ -139,9 +166,13 @@ void validation_classify(const TelemetryRow *rows, int count, const ValidationMe
      * at every lap close), so the run-wide maximum must reset when the rows move into a new
      * lap; otherwise a slow-but-moving car in lap 2+ can never beat lap 1's max and stops
      * looking like it is making progress (PR #80 review). meaningfulProgressM is the bin
-     * advance that counts: sub-bin creep is not progress. */
+     * advance that counts: sub-bin creep is not progress. haveProgressBase keeps the -1.0
+     * lap-reset sentinel OUT of the distance comparison: the first row of a lap establishes
+     * the base unconditionally, so the sentinel's magnitude cannot shift the effective
+     * threshold (PR #80 review). */
     int progressLap = -1;
     double furthestProgressM = -1.0;
+    bool haveProgressBase = false;
     uint64_t lastProgressTick = 0;
     double lastProgressTimeS = 0.0;
 
@@ -157,13 +188,17 @@ void validation_classify(const TelemetryRow *rows, int count, const ValidationMe
         }
 
         /* Forward progress bookkeeping, reset per lap and gated by the meaningful-progress
-         * threshold (e.g. one 10 m bin). */
+         * threshold (e.g. one 10 m bin). The first row of a lap establishes the base without
+         * needing to beat the -1.0 reset sentinel. */
         if (r->lapIndex != progressLap) {
             progressLap = r->lapIndex;
             furthestProgressM = -1.0;
+            haveProgressBase = false;
         }
-        if ((double)r->furthestProgressM >= furthestProgressM + in->meaningfulProgressM) {
+        if (!haveProgressBase ||
+            (double)r->furthestProgressM >= furthestProgressM + in->meaningfulProgressM) {
             furthestProgressM = (double)r->furthestProgressM;
+            haveProgressBase = true;
             lastProgressTick = tick;
             lastProgressTimeS = t;
         }
@@ -171,13 +206,12 @@ void validation_classify(const TelemetryRow *rows, int count, const ValidationMe
         /* Checkpoint events. checkpointEvent: 0 none, 1 in-order, 2 out-of-order, 3 lap-complete.
          * An out-of-order crossing's own gate index travels in checkpointCrossedIndex (an
          * out-of-order crossing never advances lastCrossedIndex, which still names the previous
-         * legal gate); the hand-built test rows predate that column, so fall back to
-         * lastCrossedIndex when it is absent. checkpointIndex still names the gate owed;
-         * crossing a gate AHEAD of the owed one is a forward skip (checkpoint_skipped),
-         * crossing one BEHIND or off-sequence is checkpoint_out_of_order. */
+         * legal gate; every producer writes -1 when there is no crossing, so a missing value
+         * cannot be read as gate 0). checkpointIndex still names the gate owed; crossing a gate
+         * AHEAD of the owed one is a forward skip (checkpoint_skipped), crossing one BEHIND or
+         * off-sequence is checkpoint_out_of_order. */
         if (r->checkpointEvent == 2) {
-            const int crossed = (r->checkpointCrossedIndex >= 0) ? r->checkpointCrossedIndex
-                                                                 : r->lastCrossedIndex;
+            const int crossed = r->checkpointCrossedIndex;
             const int owed = r->checkpointIndex;
             if (in->checkpointCount > 1 && crossed >= 0 && owed >= 0) {
                 const int forward =
@@ -215,8 +249,10 @@ void validation_classify(const TelemetryRow *rows, int count, const ValidationMe
             } else if (!cond && spinIv.active) {
                 if (t - spinIv.onsetTimeS >= in->spinMinDurationS) {
                     hadSpin = true;
-                    if (spinOnsetTick == 0) {
+                    if (!haveSpinOnset) {
+                        haveSpinOnset = true;
                         spinOnsetTick = spinIv.onsetTick;
+                        spinOnsetTimeS = spinIv.onsetTimeS;
                     }
                 }
                 spinIv.active = false;
@@ -234,8 +270,7 @@ void validation_classify(const TelemetryRow *rows, int count, const ValidationMe
                 stallIv.onsetTimeS = t;
                 stallOnsetOffTrack = (r->beyondRunoff == 1 || r->wheelsOffAsphalt >= 4);
             } else if (!stopped && stallIv.active) {
-                Interval ivCopy = stallIv;
-                commit_if_sustained(stallOnsetOffTrack ? &stalledOff : &stalledOn, &ivCopy, r,
+                commit_if_sustained(stallOnsetOffTrack ? &stalledOff : &stalledOn, &stallIv, r,
                                     in->stallDurationS);
                 stallIv.active = false;
             }
@@ -249,8 +284,7 @@ void validation_classify(const TelemetryRow *rows, int count, const ValidationMe
                 wrongWayIv.onsetTick = tick;
                 wrongWayIv.onsetTimeS = t;
             } else if (!cond && wrongWayIv.active) {
-                Interval ivCopy = wrongWayIv;
-                commit_if_sustained(&wrongWayHit, &ivCopy, r, in->wrongWayHoldS);
+                commit_if_sustained(&wrongWayHit, &wrongWayIv, r, in->wrongWayHoldS);
                 wrongWayIv.active = false;
             }
         }
@@ -263,13 +297,14 @@ void validation_classify(const TelemetryRow *rows, int count, const ValidationMe
                 departIv.onsetTick = tick;
                 departIv.onsetTimeS = t;
             } else if (!cond && departIv.active) {
-                Interval ivCopy = departIv;
-                commit_if_sustained(&routeDeparture, &ivCopy, r, in->departureHoldS);
+                commit_if_sustained(&routeDeparture, &departIv, r, in->departureHoldS);
                 departIv.active = false;
             }
         }
 
-        /* Localization lost: route segment invalid sustained. */
+        /* Localization lost: route segment invalid sustained. The hold deliberately reuses
+         * departureHoldS — there is no dedicated localization hold, so retuning departures
+         * retunes localization loss with it (PR #80 review). */
         {
             const bool cond = (r->routeSegmentIndex < 0);
             if (cond && !locLostIv.active) {
@@ -277,22 +312,24 @@ void validation_classify(const TelemetryRow *rows, int count, const ValidationMe
                 locLostIv.onsetTick = tick;
                 locLostIv.onsetTimeS = t;
             } else if (!cond && locLostIv.active) {
-                Interval ivCopy = locLostIv;
-                commit_if_sustained(&localizationLost, &ivCopy, r, in->departureHoldS);
+                commit_if_sustained(&localizationLost, &locLostIv, r, in->departureHoldS);
                 locLostIv.active = false;
             }
         }
 
-        /* Planner/localization mismatch: AI segment != route segment sustained (AI runs only). */
-        if (r->routeSegmentIndex >= 0) {
-            const bool cond = (r->aiSegment != r->routeSegmentIndex);
+        /* Planner/localization mismatch: AI segment != route segment sustained. Only meaningful
+         * on AI rows with a valid route segment; anything else RELEASES the interval rather
+         * than skipping it, so a localization loss cannot hold a stale mismatch open to
+         * end-of-run and win the earliest-tick primary selection (PR #80 review). */
+        {
+            const bool measurable = (r->aiPresent == 1 && r->routeSegmentIndex >= 0);
+            const bool cond = measurable && (r->aiSegment != r->routeSegmentIndex);
             if (cond && !mismatchIv.active) {
                 mismatchIv.active = true;
                 mismatchIv.onsetTick = tick;
                 mismatchIv.onsetTimeS = t;
             } else if (!cond && mismatchIv.active) {
-                Interval ivCopy = mismatchIv;
-                commit_if_sustained(&plannerMismatch, &ivCopy, r, in->mismatchHoldS);
+                commit_if_sustained(&plannerMismatch, &mismatchIv, r, in->mismatchHoldS);
                 mismatchIv.active = false;
             }
         }
@@ -303,40 +340,37 @@ void validation_classify(const TelemetryRow *rows, int count, const ValidationMe
         const TelemetryRow *last = &rows[count - 1];
         if (spinIv.active && last->timeS - spinIv.onsetTimeS >= in->spinMinDurationS) {
             hadSpin = true;
-            if (spinOnsetTick == 0) spinOnsetTick = spinIv.onsetTick;
+            if (!haveSpinOnset) {
+                haveSpinOnset = true;
+                spinOnsetTick = spinIv.onsetTick;
+                spinOnsetTimeS = spinIv.onsetTimeS;
+            }
         }
         if (stallIv.active) {
-            Interval ivCopy = stallIv;
-            commit_if_sustained(stallOnsetOffTrack ? &stalledOff : &stalledOn, &ivCopy, last,
+            commit_if_sustained(stallOnsetOffTrack ? &stalledOff : &stalledOn, &stallIv, last,
                                 in->stallDurationS);
         }
         if (wrongWayIv.active) {
-            Interval ivCopy = wrongWayIv;
-            commit_if_sustained(&wrongWayHit, &ivCopy, last, in->wrongWayHoldS);
+            commit_if_sustained(&wrongWayHit, &wrongWayIv, last, in->wrongWayHoldS);
         }
         if (departIv.active) {
-            Interval ivCopy = departIv;
-            commit_if_sustained(&routeDeparture, &ivCopy, last, in->departureHoldS);
+            commit_if_sustained(&routeDeparture, &departIv, last, in->departureHoldS);
         }
         if (locLostIv.active) {
-            Interval ivCopy = locLostIv;
-            commit_if_sustained(&localizationLost, &ivCopy, last, in->departureHoldS);
+            commit_if_sustained(&localizationLost, &locLostIv, last, in->departureHoldS);
         }
         if (mismatchIv.active) {
-            Interval ivCopy = mismatchIv;
-            commit_if_sustained(&plannerMismatch, &ivCopy, last, in->mismatchHoldS);
+            commit_if_sustained(&plannerMismatch, &mismatchIv, last, in->mismatchHoldS);
         }
     }
 
     /* Spin-then-departure: a committed departure PRECEDED BY a qualifying spin this run. The
      * contributing event carries the SPIN onset (the earliest causal tick), which is what makes
      * a spin-that-became-a-departure distinguishable from a plain departure. A departure that
-     * happened before any spin is not this class (PR #80 review). */
-    if (hadSpin && routeDeparture.detected && spinOnsetTick < routeDeparture.tick) {
-        record_hit(&spinThenDeparture, spinOnsetTick,
-                   (spinOnsetTick > 0 && in->fixedDtS > 0.0)
-                       ? (double)spinOnsetTick * in->fixedDtS
-                       : routeDeparture.timeS);
+     * happened before any spin is not this class, and a spin whose onset is tick 0 is still a
+     * real onset (haveSpinOnset, not tick != 0) (PR #80 review). */
+    if (haveSpinOnset && routeDeparture.detected && spinOnsetTick < routeDeparture.tick) {
+        record_hit(&spinThenDeparture, spinOnsetTick, spinOnsetTimeS);
     }
 
     /* Collision-stuck: a committed stall whose onset is AFTER a contact this run. A stall that
@@ -364,7 +398,7 @@ void validation_classify(const TelemetryRow *rows, int count, const ValidationMe
           wrongWayHit.detected || localizationLost.detected)) {
         const double runEndS = (count > 0) ? rows[count - 1].timeS : 0.0;
         const double since = runEndS - lastProgressTimeS;
-        if (since < 2.0) {
+        if (since < in->progressRecencyS) {
             record_hit(&slowTimeout, (uint64_t)in->ticksRun, runEndS);
         }
     }
@@ -387,13 +421,16 @@ void validation_classify(const TelemetryRow *rows, int count, const ValidationMe
         { RUN_CLASS_PLANNER_LOCALIZATION_MISMATCH, &plannerMismatch },
         { RUN_CLASS_SLOW_TIMEOUT, &slowTimeout },
     };
-    const int nhits = (int)(sizeof(hits) / sizeof(hits[0]));
+    /* A fixed-size array (sizeof is an integer constant expression, so this enum is not a VLA
+     * — C11 portable, no alloca on the stack frame) (PR #80 review). */
+    enum { DETECTED_CAP = (int)(sizeof(hits) / sizeof(hits[0])) };
+    const int nhits = DETECTED_CAP;
 
     /* Collect the detected classes, then append them to `contributing` in first-occurrence
      * (tick) order — the public contract — with the fixed hits[] order breaking ties so the
      * output is deterministic. The earliest ticks are kept when the run exceeds
      * CLASSIFICATION_MAX_CONTRIBUTING (PR #80 review). */
-    struct Detected detected[nhits];
+    struct Detected detected[DETECTED_CAP];
     int ndetected = 0;
     for (int i = 0; i < nhits; i++) {
         if (hits[i].hit->detected) detected[ndetected++] = hits[i];

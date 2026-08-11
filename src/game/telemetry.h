@@ -186,9 +186,11 @@ typedef struct {
     /* PR #80 review follow-up: an explicit AI-presence flag and the gate the most recent
      * checkpoint event actually crossed. An out-of-order crossing does NOT advance
      * progress->lastCrossedIndex (it names the previous legal gate), so the classifier needs
-     * the event's own index to tell a forward skip from a gate behind the owed one. Both stay
-     * zero/absent on rows without a crossing or an AI controller; appending keeps every
-     * earlier column in place and in order. */
+     * the event's own index to tell a forward skip from a gate behind the owed one. aiPresent
+     * stays 0 on rows without an AI controller; checkpointCrossedIndex is -1 whenever the row
+     * carries no crossing — a 0 is always a real gate index, so the classifier never has to
+     * guess what a missing value meant (PR #80 review). Appending keeps every earlier column
+     * in place and in order. */
     int aiPresent;              /* 1 iff an AI controller drove this row; 0 otherwise */
     int checkpointCrossedIndex; /* gate crossed by the last checkpoint event; -1 when none */
 } TelemetryRow;

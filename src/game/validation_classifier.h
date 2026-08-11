@@ -100,11 +100,23 @@ typedef struct {
     double spinSideslipRad;   /* |body sideslip| above this is a spin attitude */
     double spinMinSpeedMps;   /* ...only while still moving */
     double spinMinDurationS;  /* ...that must persist this long */
+    double progressRecencyS;  /* progress this recently at budget expiry => slow_timeout, not a
+                                stall (e.g. 2.0) */
 } ClassificationInputs;
+
+/*
+ * The shared threshold defaults, defined once so the validation runner, `ai-roster-laps`, and
+ * the by-construction scenario all classify with exactly the same numbers (PR #80 review).
+ * Only the per-run fields (checkpointCount, startCheckpointIndex, targetLaps, tickBudget,
+ * ticksRun, fixedDtS) are left to the caller after this returns.
+ */
+void validation_classification_inputs_default(ClassificationInputs *out);
 
 /*
  * Reduce `rows[0 .. count)` + `metrics` + `inputs` into `out`. Pure: allocates no persistent
  * state and touches nothing outside `out`. Safe on count <= 0 (writes a PASS classification).
+ * `metrics` is currently reserved: it stays in the signature as the classification input
+ * contract, but no reducer reads it yet (PR #80 review).
  *
  * Selection rule for `primary`: the run's headline reason is the class attached to the EARLIEST
  * causal event, with two adjustments — INVALID_PHYSICS always wins when present (no other verdict

@@ -44,9 +44,13 @@ int run_report_missed_checkpoints(const RacerProgress *progress, int checkpointC
      * lapStartCheckpoint, raw offset 0) is the state right after the last scored gate: every
      * scored gate is crossed, only the anchor crossing that closes the lap remains, so the
      * lap reads as fully crossed rather than as a fresh one (PR #80 review). */
-    const int raw =
-        (progress->nextCheckpoint - progress->lapStartCheckpoint + checkpointCount) %
-        checkpointCount;
+    const int delta = progress->nextCheckpoint - progress->lapStartCheckpoint;
+    /* Fully normalized modulo: if a caller passes a checkpointCount that does not belong to
+     * the progress state, delta can be negative enough that one addition does not fix it, and
+     * C integer % keeps the sign — the doc'd [0, checkpointCount) range would break. The
+     * double-modulo idiom matches validation_classifier.c's forward-offset computation
+     * (PR #80 review). */
+    const int raw = ((delta % checkpointCount) + checkpointCount) % checkpointCount;
     const int crossedThisLap = (raw == 0) ? checkpointCount : raw;
     const int stillOwed = checkpointCount - crossedThisLap;
     return (stillOwed > 0) ? stillOwed : 0;
@@ -158,7 +162,7 @@ bool run_report_write(const char *path, const RunReportInput *in)
                                                              : "unclassified");
     fprintf(file, ", \"first_fault_tick\": %" PRIu64 ", \"contributing\": [",
             in->firstFaultTick);
-    for (int i = 0; i < in->contributingCount && i < 8; i++) {
+    for (int i = 0; i < in->contributingCount && i < RUN_REPORT_MAX_CONTRIBUTING; i++) {
         fprintf(file, "%s", (i > 0) ? ", " : "");
         write_json_string(file,
                           in->contributingReasons[i] != NULL ? in->contributingReasons[i] : "");

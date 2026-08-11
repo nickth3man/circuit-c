@@ -1,11 +1,12 @@
 # Validation failure classification (issue #78)
 
 This document defines the failure taxonomy a validation run is classified into, the named
-off-track definitions, and how to read the evidence. Everything here is implemented twice and
-only twice: once in `src/game/validation_classifier.c` (the pure reducer) and once in the
-scenario that proves it by construction (`failure-classification` in
-`tests/scenarios/gameplay_tests.c`). The thresholds below are the exact values the validation
-runner (`src/platform/main.c`) feeds the classifier.
+off-track definitions, and how to read the evidence. The taxonomy is implemented once in
+`src/game/validation_classifier.c` (the pure reducer) and proven by construction by the
+`failure-classification` scenario in `tests/scenarios/gameplay_tests.c`. The thresholds are
+defined once, in `validation_classification_inputs_default()`, and the validation runner
+(`src/platform/main.c`), `ai-roster-laps`, and the by-construction scenario all call it — so
+the values below are the exact numbers every classifier consumer quotes (PR #80 review).
 
 ## Why
 
@@ -55,6 +56,7 @@ block carries the fine reason. The mapping from `reason` to `result.status`:
 | `stalled_on_track`, `stalled_off_track`, `collision_stuck`, `spin_then_departure` | `stalled` |
 | `slow_timeout` | `tick_budget_exceeded` |
 | `wrong_way`, `route_departure`, `localization_lost`, `planner_localization_mismatch` | `checkpoint_missed` (did not finish; the classification names why) |
+| any class except `invalid_physics` | `video_encode_failed`, when the video pipe or write failed — the encode failure is selected ahead of every classifier branch except `invalid_physics`, because the run produced no usable video regardless of why it failed (PR #80 review) |
 
 ## Primary-selection rule
 
@@ -64,8 +66,8 @@ attached to that tick, with two adjustments:
 1. `invalid_physics` always wins when a non-finite pose/speed appears — no other verdict is
    meaningful once the state is non-finite.
 2. `slow_timeout` only applies when the tick budget expired **and** the car was still making
-   forward progress (furthest bin advanced within the last 2 s). A stopped car at budget
-   expiry is a stall, not a slow timeout.
+   forward progress (furthest bin advanced within the last `progressRecencyS`, 2.0 s). A
+   stopped car at budget expiry is a stall, not a slow timeout.
 
 A run that completed its target laps is `pass`, even with transient
 planner/localization disagreement — the fault classes classify failures. The one exception is
@@ -80,8 +82,8 @@ All thresholds are from `ClassificationInputs` (the runner's values shown).
 |---|---|---|
 | `pass` | completed the target laps | — |
 | `invalid_physics` | any non-finite `position_x_m` / `position_y_m` / `speed_mps` | — |
-| `checkpoint_out_of_order` | an out-of-order crossing of a gate **behind** the owed one | `checkpointEvent == 2`, crossed < owed; crossed is the event's own gate index (`checkpoint_crossed_index`, falling back to `last_crossed_index` for older rows) |
-| `checkpoint_skipped` | an out-of-order crossing of a gate **ahead** of the owed one | `checkpointEvent == 2`, crossed > owed (≤ half lap forward) |
+| `checkpoint_out_of_order` | an out-of-order crossing of a gate **behind** the owed one | `checkpointEvent == 2`; modular forward distance from the owed gate exceeds half a lap: `(crossed − owed) mod count > count/2` (a gate behind by less than half a lap — e.g. crossed 1 while owing 20 on 25 gates — is actually a *skip*, because the forward distance is 6; plain `crossed < owed` is not the rule). crossed is the event's own gate index (`checkpoint_crossed_index`; an out-of-order event always carries it, `-1` when there is no crossing) |
+| `checkpoint_skipped` | an out-of-order crossing of a gate **ahead** of the owed one | `checkpointEvent == 2`; forward distance `(crossed − owed) mod count` in `(0, count/2]` — a gate up to half a lap ahead |
 | `collision_stuck` | a contact (lockout rising edge, approach speed ≥ 0.1 m/s) followed by a committed stall | `collisionSpeedMpsEps = 0.1` |
 | `spin_then_departure` | a sustained spin followed by a sustained route departure | spin: \|sideslip\| > 1.48 rad while speed > 2 m/s for ≥ 0.25 s; departure: beyond runoff ≥ 0.75 s |
 | `stalled_on_track` | stopped ≥ 3 s on the racing surface | `stallSpeedMps = 0.5`, `stallDurationS = 3.0`, `wheelsOffAsphalt < 4`, not beyond runoff |
@@ -90,7 +92,7 @@ All thresholds are from `ClassificationInputs` (the runner's values shown).
 | `route_departure` | beyond the runoff sustained, no preceding spin | `beyondRunoff == 1` ≥ 0.75 s |
 | `localization_lost` | route segment invalid sustained | `routeSegmentIndex < 0` ≥ 0.75 s |
 | `planner_localization_mismatch` | AI segment ≠ route segment sustained, AI runs only | `ai_present == 1` and `aiSegment != routeSegmentIndex` ≥ 1.0 s |
-| `slow_timeout` | budget expired while still progressing | `ticksRun >= tickBudget`, progress within last 2 s, no stall/spin/departure class; progress is per-lap (the furthest bin resets at each lap close) and counts only full-bin advances |
+| `slow_timeout` | budget expired while still progressing | `ticksRun >= tickBudget`, progress within the last `progressRecencyS` (2.0 s), no stall/spin/departure class; progress is per-lap (the furthest bin resets at each lap close) and counts only full-bin advances |
 
 ## Named off-track definitions
 

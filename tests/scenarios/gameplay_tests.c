@@ -2231,6 +2231,10 @@ static void scenario_ai_roster_laps(void)
         const int budgetTicks = REPLAY_CAPACITY_TICKS; /* 300 s max */
         const int maxRows = budgetTicks / 2;           /* telemetry sampled every 2 ticks */
         TelemetryRow *rows = (TelemetryRow *)calloc((size_t)maxRows, sizeof(TelemetryRow));
+        /* The PASS assertion below must not be able to succeed vacuously: with rows == NULL the
+         * classifier early-returns PASS on no rows, so the allocation itself is asserted
+         * (PR #80 review). */
+        check(rows != NULL, "car '%s' telemetry buffer allocated (%d rows)", carId, maxRows);
         int rowCount = 0;
         int outOfOrder = 0;
         bool allFinite = true;
@@ -2276,26 +2280,18 @@ static void scenario_ai_roster_laps(void)
 
         /* Classify with the same inputs the runner uses; a passing car must come out PASS. */
         ValidationMetrics metrics;
+        check(rowCount > 0, "car '%s' captured telemetry rows to classify (got %d)", carId,
+              rowCount);
         validation_metrics_compute(rows, rowCount, &metrics);
         ValidationClassification cls;
         ClassificationInputs in;
-        memset(&in, 0, sizeof(in));
+        validation_classification_inputs_default(&in);
         in.checkpointCount = game->trackDef.checkpointCount;
         in.startCheckpointIndex = 0;
         in.targetLaps = VALIDATION_RUN_LAPS;
         in.tickBudget = budgetTicks;
         in.ticksRun = ticksRun;
         in.fixedDtS = FIXED_DT_S;
-        in.meaningfulProgressM = 10.0;
-        in.stallSpeedMps = 0.5;
-        in.stallDurationS = 3.0;
-        in.wrongWayHoldS = 1.5;
-        in.departureHoldS = 0.75;
-        in.mismatchHoldS = 1.0;
-        in.collisionSpeedMpsEps = 0.1;
-        in.spinSideslipRad = 1.48;
-        in.spinMinSpeedMps = 2.0;
-        in.spinMinDurationS = 0.25;
         validation_classify(rows, rowCount, &metrics, &in, &cls);
 
         /* Concise per-car line: a passing run carries its verdict; a failure names the primary
@@ -3838,26 +3834,18 @@ static void cls_fill_row(TelemetryRow *r, int tick, float speedMps, float sidesl
     r->lapIndex = lapIndex;
 }
 
-/* The same inputs the validation runner feeds the classifier. */
+/* The same inputs the validation runner feeds the classifier: the threshold defaults come from
+ * the shared function, so a retune in validation_classifier.c cannot leave this scenario
+ * quoting stale numbers; only the per-run fields are local (PR #80 review). */
 static void cls_default_inputs(ClassificationInputs *in)
 {
-    memset(in, 0, sizeof(*in));
+    validation_classification_inputs_default(in);
     in->checkpointCount = 25;
     in->startCheckpointIndex = 0;
     in->targetLaps = 4;
     in->tickBudget = 36000;
     in->ticksRun = 36000; /* budget expired unless a test overrides */
     in->fixedDtS = FIXED_DT_S;
-    in->meaningfulProgressM = 10.0;
-    in->stallSpeedMps = 0.5;
-    in->stallDurationS = 3.0;
-    in->wrongWayHoldS = 1.5;
-    in->departureHoldS = 0.75;
-    in->mismatchHoldS = 1.0;
-    in->collisionSpeedMpsEps = 0.1;
-    in->spinSideslipRad = 1.48;
-    in->spinMinSpeedMps = 2.0;
-    in->spinMinDurationS = 0.25;
 }
 
 /* Rows are sampled every 2nd tick (60 Hz), like the validation runner. */
@@ -3870,6 +3858,24 @@ static void scenario_failure_classification(void)
 {
     ValidationClassification cls;
     ClassificationInputs in;
+
+    /* 0. Degenerate inputs reduce to the documented no-run state: PASS with the no-crossing
+     * sentinels and no fault evidence. The ai-roster-laps false-pass path exists precisely
+     * because this contract was untested (PR #80 review). */
+    {
+        ValidationClassification z;
+        cls_default_inputs(&in);
+        validation_classify(NULL, 0, NULL, &in, &z);
+        check(z.primary == RUN_CLASS_PASS && z.lastCheckpointIndex == -1 &&
+                  z.expectedCheckpointIndex == -1 && z.contributingCount == 0 &&
+                  z.firstFaultTick == 0,
+              "NULL rows reduce to the no-run PASS state");
+        TelemetryRow one;
+        cls_fill_row(&one, 0, 10.0f, 0.0f, 0, -1, 1, 0, 0, 5, 5, 10.0f, 0.0f, 0);
+        validation_classify(&one, 1, NULL, NULL, &z);
+        check(z.primary == RUN_CLASS_PASS && z.contributingCount == 0,
+              "NULL inputs reduce to the no-run PASS state");
+    }
 
     /* 1. invalid_physics dominates every other verdict and names the bad row. */
     {
@@ -3889,12 +3895,14 @@ static void scenario_failure_classification(void)
     }
 
     /* 2/3. An out-of-order crossing is checkpoint_out_of_order when it is BEHIND the owed gate
-     * and checkpoint_skipped when it jumps AHEAD of it. */
+     * and checkpoint_skipped when it jumps AHEAD of it. The rows carry the event's own crossed
+     * index (checkpointCrossedIndex), exactly as the runner's telemetry does. */
     {
         TelemetryRow rows[3];
         for (int i = 0; i < 3; i++) {
             cls_fill_row(&rows[i], cls_tick(i), 10.0f, 0.0f, 2, 2, 5, 0, 0, 5, 5,
                          10.0f * (float)(i + 1), 0.0f, 0);
+            rows[i].checkpointCrossedIndex = 2;
         }
         cls_default_inputs(&in);
         validation_classify(rows, 3, NULL, &in, &cls);
@@ -3907,6 +3915,7 @@ static void scenario_failure_classification(void)
         for (int i = 0; i < 3; i++) {
             cls_fill_row(&rows[i], cls_tick(i), 10.0f, 0.0f, 2, 7, 5, 0, 0, 5, 5,
                          10.0f * (float)(i + 1), 0.0f, 0);
+            rows[i].checkpointCrossedIndex = 7;
         }
         cls_default_inputs(&in);
         validation_classify(rows, 3, NULL, &in, &cls);
@@ -3916,6 +3925,33 @@ static void scenario_failure_classification(void)
         check(cls.contributingCount >= 1 &&
                   cls.contributing[0].reason == RUN_CLASS_CHECKPOINT_SKIPPED,
               "the skip is the first contributing event");
+    }
+
+    /* 3b. The skip/out-of-order split sits at forward == checkpointCount / 2: crossing 12
+     * while owing 0 (forward 12 == 25/2) is a skip; crossing 13 (forward 13) is out of order.
+     * An off-by-one there is exactly the kind of change these tests should catch (PR #80
+     * review). */
+    {
+        const struct {
+            int crossed;
+            FailureClass want;
+        } edge[] = {
+            { 12, RUN_CLASS_CHECKPOINT_SKIPPED },
+            { 13, RUN_CLASS_CHECKPOINT_OUT_OF_ORDER },
+        };
+        for (int k = 0; k < 2; k++) {
+            TelemetryRow rows[3];
+            for (int i = 0; i < 3; i++) {
+                cls_fill_row(&rows[i], cls_tick(i), 10.0f, 0.0f, 2, edge[k].crossed, 0, 0, 0, 5,
+                             5, 10.0f * (float)(i + 1), 0.0f, 0);
+                rows[i].checkpointCrossedIndex = edge[k].crossed;
+            }
+            cls_default_inputs(&in);
+            validation_classify(rows, 3, NULL, &in, &cls);
+            check(cls.primary == edge[k].want, "crossed %d owing 0 classifies as %s (got %s)",
+                  edge[k].crossed, failure_class_reason(edge[k].want),
+                  failure_class_reason(cls.primary));
+        }
     }
 
     /* 4. slow_timeout: budget expired while the car is still making progress — distinct from a
@@ -4049,12 +4085,15 @@ static void scenario_failure_classification(void)
               failure_class_reason(cls.primary));
     }
 
-    /* 12. planner_localization_mismatch: the AI and route segments disagree sustained. */
+    /* 12. planner_localization_mismatch: the AI and route segments disagree sustained. The
+     * fixture marks the rows AI-driven (aiPresent = 1) — without the marker the classifier
+     * must not compare a zero-filled aiSegment against the route (PR #80 review). */
     {
         TelemetryRow rows[70]; /* 1.17 s > 1.0 s */
         for (int i = 0; i < 70; i++) {
             cls_fill_row(&rows[i], cls_tick(i), 10.0f, 0.0f, 1, 1, 2, 0, 0, 7, 3,
                          10.0f * (float)(i + 1), 0.0f, 0);
+            rows[i].aiPresent = 1;
         }
         cls_default_inputs(&in);
         validation_classify(rows, 70, NULL, &in, &cls);
@@ -4063,15 +4102,34 @@ static void scenario_failure_classification(void)
               failure_class_reason(cls.primary));
     }
 
+    /* 12b. Non-AI rows never produce planner_localization_mismatch: aiPresent stays 0, so the
+     * zero-filled aiSegment must not be read as an AI decision (PR #80 review). The budget is
+     * not expired here so the verdict is a clean PASS with no contributing classes. */
+    {
+        TelemetryRow rows[70]; /* 1.17 s > 1.0 s; long enough to exceed the mismatch hold */
+        for (int i = 0; i < 70; i++) {
+            cls_fill_row(&rows[i], cls_tick(i), 10.0f, 0.0f, 1, 1, 2, 0, 0, 7, 3,
+                         10.0f * (float)(i + 1), 0.0f, 0);
+        }
+        cls_default_inputs(&in);
+        in.ticksRun = 0; /* the budget did not expire */
+        validation_classify(rows, 70, NULL, &in, &cls);
+        check(cls.primary == RUN_CLASS_PASS, "non-AI rows are not a planner mismatch (got %s)",
+              failure_class_reason(cls.primary));
+        check(cls.contributingCount == 0, "non-AI rows carry no contributing classes");
+    }
+
     /* 13. A run that COMPLETED its target laps is a pass despite a transient disagreement. */
     {
         TelemetryRow rows[70];
         for (int i = 0; i < 69; i++) {
             cls_fill_row(&rows[i], cls_tick(i), 10.0f, 0.0f, 1, 1, 2, 0, 0, 7, 3,
                          10.0f * (float)(i + 1), 0.0f, 0);
+            rows[i].aiPresent = 1;
         }
         cls_fill_row(&rows[69], cls_tick(69), 10.0f, 0.0f, 1, 1, 2, 0, 0, 7, 3, 700.0f, 0.0f,
                      4);
+        rows[69].aiPresent = 1;
         cls_default_inputs(&in);
         validation_classify(rows, 70, NULL, &in, &cls);
         check(cls.primary == RUN_CLASS_PASS,
@@ -4236,6 +4294,7 @@ static void scenario_chicane_gates_dense(void)
         track_reset_progress_at(&p2, &track, 0);
         const float y = 90.0f;
         bool apexTouched = false;
+        int entryCrossings = 0;
         int outOfOrder = 0;
         for (int xi = 0; xi <= 25; xi++) {
             const float x = 60.0f - 4.0f * (float)xi;
@@ -4243,8 +4302,15 @@ static void scenario_chicane_gates_dense(void)
                 &track, &p2, (Vector2){ x + 2.0f, y }, (Vector2){ x - 2.0f, y });
             if (ev.crossed && (ev.index == 13 || ev.index == 14 || ev.index == 15))
                 apexTouched = true;
+            if (ev.crossed) entryCrossings++;
             if (ev.outOfOrder) outOfOrder++;
         }
+        /* The negative apex assertion is only meaningful if the sweep actually reaches the
+         * track and crosses the entry-side gates; a future content change that moves the
+         * chicane out from under y = 90 must fail here loudly (PR #80 review). */
+        check(entryCrossings > 0,
+              "the shortcut sweep reaches the track and crosses gates (got %d)",
+              entryCrossings);
         check(!apexTouched, "the shortcut never crosses the chicane apex gates (13-15)");
         check(p2.lapInvalid, "the shortcut invalidates the lap");
         check(outOfOrder > 0, "the shortcut trips an out-of-order crossing at the exit");

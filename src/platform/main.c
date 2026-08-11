@@ -737,23 +737,15 @@ static int run_validate_lap(Game *game, const Options *options)
      * contributing events, and where it stopped and what it owed. */
     ValidationClassification classification;
     ClassificationInputs clsInputs;
-    memset(&clsInputs, 0, sizeof(clsInputs));
+    validation_classification_inputs_default(&clsInputs);
+    /* Per-run inputs only; the thresholds come from the shared defaults so the runner,
+     * ai-roster-laps, and the by-construction scenario cannot drift apart (PR #80 review). */
     clsInputs.checkpointCount = game->trackDef.checkpointCount;
     clsInputs.startCheckpointIndex = options->startCheckpoint;
     clsInputs.targetLaps = VALIDATION_RUN_LAPS;
     clsInputs.tickBudget = budgetTicks;
     clsInputs.ticksRun = ticksRun;
     clsInputs.fixedDtS = FIXED_DT_S;
-    clsInputs.meaningfulProgressM = 10.0; /* the 10 m diagnostic progress-bin interval */
-    clsInputs.stallSpeedMps = 0.5;        /* speed at/under which the car counts as stopped */
-    clsInputs.stallDurationS = 3.0;       /* stopped this long => stalled */
-    clsInputs.wrongWayHoldS = 1.5;        /* wrong-way this long => wrong_way */
-    clsInputs.departureHoldS = 0.75;      /* beyond-runoff this long => route_departure */
-    clsInputs.mismatchHoldS = 1.0;        /* AI/route segment mismatch this long */
-    clsInputs.collisionSpeedMpsEps = 0.1; /* contacts below this don't attribute a collision */
-    clsInputs.spinSideslipRad = 1.48;     /* |sideslip| above this is a spin attitude */
-    clsInputs.spinMinSpeedMps = 2.0;      /* ...only while still moving */
-    clsInputs.spinMinDurationS = 0.25;    /* ...that must persist this long */
     validation_classify(rowsBuffer, rowCount, &metrics, &clsInputs, &classification);
 
     /* Status selection, now driven by the classification so the unreachable branches are
@@ -836,7 +828,8 @@ static int run_validate_lap(Game *game, const Options *options)
     rep.classificationReason = failure_class_reason(classification.primary);
     rep.firstFaultTick = classification.firstFaultTick;
     rep.contributingCount = classification.contributingCount;
-    for (int i = 0; i < classification.contributingCount && i < 8; i++) {
+    for (int i = 0; i < classification.contributingCount && i < RUN_REPORT_MAX_CONTRIBUTING;
+         i++) {
         rep.contributingReasons[i] =
             failure_class_reason(classification.contributing[i].reason);
     }

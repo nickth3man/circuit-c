@@ -29,6 +29,10 @@ typedef enum {
     RUN_FAIL_SPEC_INVALID
 } RunStatus;
 
+/* Capacity of RunReportInput.contributingReasons, shared with the writer loop and the runner's
+ * copy loop so a change cannot silently truncate at one site (PR #80 review). */
+#define RUN_REPORT_MAX_CONTRIBUTING 8
+
 typedef struct {
     /* Identity. runId is caller-built (e.g. "20260807-143201-chicane_v1-rwd_grip"). */
     const char *runId;
@@ -72,12 +76,12 @@ typedef struct {
     const char
         *classificationReason; /* primary class token ("pass", "spin_then_departure", ...) */
     uint64_t firstFaultTick;   /* earliest causal-event tick; 0 if pass */
-    int contributingCount;     /* 0..8 classes detected, in first-occurrence order */
-    const char *contributingReasons[8]; /* their closed-set tokens */
-    int lastCheckpointIndex;            /* last gate crossed this run, -1 if none */
-    int expectedCheckpointIndex;        /* next gate owed at the end */
-    double furthestRouteDistanceM;      /* furthest lap-relative progress reached (m) */
-    double timeSinceProgressS;          /* run end minus last meaningful progress (s) */
+    int contributingCount;     /* 0..RUN_REPORT_MAX_CONTRIBUTING, in first-occurrence order */
+    const char *contributingReasons[RUN_REPORT_MAX_CONTRIBUTING]; /* their closed-set tokens */
+    int lastCheckpointIndex;       /* last gate crossed this run, -1 if none */
+    int expectedCheckpointIndex;   /* next gate owed at the end */
+    double furthestRouteDistanceM; /* furthest lap-relative progress reached (m) */
+    double timeSinceProgressS;     /* run end minus last meaningful progress (s) */
 
     /* Metrics block. May be NULL only when status is RUN_FAIL_SPEC_INVALID (no run happened). */
     const ValidationMetrics *metrics;
