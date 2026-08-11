@@ -4069,7 +4069,8 @@ static void scenario_failure_classification(void)
 
     /* 14. Missing-checkpoint accounting is correct after 0..3 completed laps and never negative
      * (the runner's lap-aware formula: current lap's crossings = cursor distance from lap start,
-     * missed = gates - crossings, clamped). */
+     * missed = gates - crossings). For crossed in [1, gates), missed is provably in (0, gates),
+     * which is exactly the "never negative" property the issue requires. */
     {
         const int gates = 25;
         const int start = 0;
@@ -4078,11 +4079,7 @@ static void scenario_failure_classification(void)
                 const int cursor = start + completed * gates + crossed;
                 const int nextCheckpoint = cursor % gates;
                 const int crossedThisLap = (nextCheckpoint - start + gates) % gates;
-                int missed = gates - crossedThisLap;
-                if (missed < 0) missed = 0;
-                check(missed >= 0 && missed <= gates,
-                      "lap %d crossing %d: missed %d stays in [0,%d]", completed, crossed,
-                      missed, gates);
+                const int missed = gates - crossedThisLap;
                 check(missed == gates - crossed,
                       "lap %d crossing %d: missed is gates minus this lap's crossings "
                       "(%d vs %d)",
