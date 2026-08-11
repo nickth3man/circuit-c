@@ -954,6 +954,25 @@ static void stage_tire_forces(PhysicsStep *step)
                 : 1.0f;
         derived->tireLoadSensitivityMuScale[i] = muScale;
 
+        /* Tire dimension/pressure stiffness modifiers (issue #16). Width scales lateral
+         * stiffness — a wider tire has a larger contact patch and stiffer cornering response.
+         * Pressure scales both lateral and longitudinal stiffness — higher inflation makes
+         * the carcass less compliant. The exponent model is derived from contact-patch
+         * mechanics: cornering stiffness ∝ sqrt(patch_area / patch_length) ∝ sqrt(width),
+         * and inflation pressure saturates rather than scaling linearly. At nominal width
+         * (225 mm) and pressure (220 kPa) both scales are 1.0, reproducing the baseline. */
+        const float sectionWidthMm =
+            front ? spec->tireSectionWidthFrontMm : spec->tireSectionWidthRearMm;
+        const float tirePressureKpa =
+            front ? spec->tirePressureFrontKpa : spec->tirePressureRearKpa;
+        const float widthScale =
+            powf(sectionWidthMm / TIRE_SECTION_WIDTH_MM, TIRE_WIDTH_STIFFNESS_EXP);
+        const float pressureScale =
+            powf(tirePressureKpa / TIRE_PRESSURE_KPA, TIRE_PRESSURE_STIFFNESS_EXP);
+
+        /* Surface-relative friction and stiffness. On asphalt the surface ratios equal 1.0
+         * and tireBScale is 1.0, so this block is a complete no-op for the surface factor.
+         * The width/pressure scales are independent of surface and multiply through here. */
         /* TODO(vehicle-audit #3): tire friction multiplies surface friction here, so a low
          * per-car tireMu reads as a permanent surface condition rather than a dry tire.
          * awd_rally's tireMu of 0.55-0.58 is wet-gravel grip baked into the rubber; real dry
@@ -966,14 +985,48 @@ static void stage_tire_forces(PhysicsStep *step)
         const float muLateralEff =
             lateralMuAxle * (s->muLateral / SURFACE_REFERENCE_MU_LAT) * muScale;
         const float muLongitudinalEff = spec->tireMuLongScale * s->muLongitudinal * muScale;
-        const float BlatEff = lateralB * s->tireBScale;
+        const float BlatEff = lateralB * widthScale * pressureScale * s->tireBScale;
+        const float BlongEff = spec->tireBLong * pressureScale;
 
-        /* Longitudinal B (spec->tireBLong) is NOT surface-scaled. */
-        derived->pureLongitudinalForceN[i] =
-            tire_longitudinal_force_n(wheel->slipRatio, wheel->normalLoadN, spec->tireBLong,
-                                      spec->tireCLong, muLongitudinalEff);
-        derived->pureLateralForceN[i] = tire_lateral_force_n(
-            wheel->slipAngleRad, wheel->normalLoadN, BlatEff, lateralC, muLateralEff);
+        derived->pureLongitudinalForceN[i] = tire_longitudinal_force_n(
+            wheel->slipRatio, wheel->normalLoadN, BlongEff, spec->tireCLong, muLongitudinalEff);
+        const float fySlipOnly = tire_lateral_force_n(wheel->slipAngleRad, wheel->normalLoadN,
+                                                      BlatEff, lateralC, muLateralEff);
+        derived->pureLateralForceN[i] = fySlipOnly;
+
+        /* Camber/caster thrust (issue #15). A cambered tire generates lateral force even at
+         * zero slip angle because the contact patch deforms asymmetrically. The reduced-order
+         * model folds camber into the slip angle as a Pacejka horizontal shift, so the effect
+         * naturally saturates near the friction limit (where the tire-curve slope → 0) without
+         * needing the combined-slip limiter to intervene separately.
+         *
+         * Effective camber combines static camber with the camber gain from caster and
+         * steering. Positive caster (steering axis tilted backward) causes both front wheels
+         * to tilt the same direction when steered: in a left turn their tops move left, so
+         * the outside (right) wheel gains negative SAE camber and generates thrust toward
+         * the turn centre. Rear wheels do not steer, so caster has no meaningful effect.
+         *
+         * The side_sign converts between the SAE camber convention (positive = outward lean)
+         * and the wheel-frame force direction (+y = left of the wheel heading): the left
+         * wheel's outward is +y, the right wheel's outward is -y. */
+        const float camberStatic = front ? spec->suspCamberFrontRad : spec->suspCamberRearRad;
+        const float casterRad = front ? spec->suspCasterFrontRad : spec->suspCasterRearRad;
+        const float sideSign = (wheel->localPositionM.y > 0.0f) ? 1.0f : -1.0f;
+        const float gammaCaster = sideSign * sinf(casterRad) * sinf(wheel->steerAngleRad);
+        const float gammaEff = camberStatic + gammaCaster;
+        derived->effectiveCamberRad[i] = gammaEff;
+        /* Convert camber to an equivalent slip-angle shift. At zero slip this produces
+         * F_camber = coeff * mu * gamma * Fz: the camber thrust scales with friction because
+         * it comes from the same rubber-road interface. This tapers to nothing near saturation
+         * because the tire-curve slope → 0 there, and it is naturally weaker on low-grip tires. */
+        const float slopeScale = fmaxf(BlatEff * lateralC, 1e-6f);
+        const float slipShift = sideSign * CAMBER_THRUST_COEFF * gammaEff / slopeScale;
+        if (isfinite(slipShift) && fabsf(slipShift) < 0.5f) {
+            derived->pureLateralForceN[i] =
+                tire_lateral_force_n(wheel->slipAngleRad - slipShift, wheel->normalLoadN,
+                                     BlatEff, lateralC, muLateralEff);
+        }
+        derived->camberThrustN[i] = derived->pureLateralForceN[i] - fySlipOnly;
 
         /* Tire relaxation: first-order lag on lateral force buildup. With
          * tireRelaxationLengthM at the default 0, fyRelaxed = fySteady (bit-identical). */

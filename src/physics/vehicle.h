@@ -294,6 +294,14 @@ typedef struct {
     float differentialTorqueNm[2];                 /* N*m; {T_RL, T_RR} post-redistribution  */
     Vector2 looseSurfaceDragBodyN;                 /* N; summed per-wheel loose-surface drag */
 
+    /* ---------------------------------------------------------------- Phase 5 diagnostics --
+     *
+     * Camber/caster (#15): effective camber per wheel and the resulting lateral force,
+     * separated from the slip-angle force. Recomputed every fixed update, never integrated,
+     * excluded from the state checksum. */
+    float effectiveCamberRad[WHEEL_COUNT]; /* rad; static + caster-induced, SAE convention */
+    float camberThrustN[WHEEL_COUNT];      /* N; camber-derived lateral force per wheel */
+
     /* Which solver stage first produced a non-finite state, as a PhysicsStage value, or 0 when
      * the last step was healthy. Diagnostic only: it is recomputed every step and, like the
      * rest of VehicleDerived, is excluded from the state checksum. physics_stage_name() turns
