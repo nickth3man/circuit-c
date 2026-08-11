@@ -148,6 +148,10 @@ void track_runtime_bind(TrackRuntime *runtime, const TrackDefinition *track)
 {
     if (runtime == NULL) return;
     runtime->definitionHash = track_geometry_hash(track);
+    /* Rebuild the collision world from the barriers; a definition whose world cannot be
+     * built must not race, and the caller sees the failure rather than a silent empty
+     * world. */
+    (void)collision_world_build_from_track(&runtime->collisionWorld, track);
 }
 
 bool track_runtime_definition_unchanged(const TrackRuntime *runtime,

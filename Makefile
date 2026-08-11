@@ -183,6 +183,7 @@ SHARED_SRCS := src/game/input.c src/core/math_utils.c src/dev/dev_scenario.c src
                src/game/telemetry.c src/game/ai_driver.c src/game/controller.c src/game/race_entrant.c src/game/race_session.c src/game/replay.c src/dev/dev_presets.c src/dev/dev_params.c src/dev/dev_replay.c \
                src/dev/failure_bundle.c \
                src/physics/surface.c src/physics/vehicle.c \
+               src/world/collision_world.c \
                src/core/json.c src/content/vehicle_manifest.c src/content/track_manifest.c src/content/roster_promotion.c src/content/vehicle_class.c
 # failure_bundle.c is SHARED, not DEV: --validate-lap writes a bundle from the platform layer,
 # which links SHARED_SRCS but not GAME_SRCS. Its own dependencies (dev_params, dev_replay,

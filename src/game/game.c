@@ -1030,8 +1030,14 @@ static void stage_progress(Game *game, const TickContext *ctx, float dt)
 
 /*
  * Stage 7 — collision.
- * Reads: the immutable track and the entrant's post-physics pose. Writes: the entrant's pose
- * and its crash lockout. Vehicle-to-vehicle contact is not resolved here yet (#26/#27).
+ * Reads: the immutable track's collision world and the entrant's post-physics pose. Writes:
+ * the entrant's pose, its crash lockout, and the world's per-tick contact feed. Vehicle-to-
+ * vehicle contact is not resolved here yet (#26/#27).
+ *
+ * The world is a rebuildable cache of definition geometry, so it is refreshed whenever the
+ * bound definition changed behind the session's back — headless tests load tracks directly
+ * (track_init / track_load_*) and never call track_runtime_bind. Refreshing is a pure
+ * function of the definition, so it cannot change the simulation.
  */
 static void stage_collision(Game *game, const TickContext *ctx, float dt)
 {
@@ -1043,12 +1049,25 @@ static void stage_collision(Game *game, const TickContext *ctx, float dt)
     }
 
     if (ctx->trackLoaded) {
-        const float oldLockout = game->crashLockoutTimerS;
-        collision_resolve_track(&game->spec, &game->vehicle, &game->renderState,
-                                &game->trackDef, &game->trackRuntime,
+        if (!track_runtime_definition_unchanged(&game->trackRuntime, &game->trackDef)) {
+            track_runtime_bind(&game->trackRuntime, &game->trackDef);
+        }
+        CollisionWorld *world = &game->trackRuntime.collisionWorld;
+        const CollisionBodyId bodyId =
+            (game->session.roster.count > 0) ? game->session.roster.entrants[0].id : 1u;
+        collision_resolve_track(world, bodyId, &game->spec, &game->vehicle, &game->renderState,
                                 &game->crashLockoutTimerS);
-        if (game->crashLockoutTimerS > oldLockout) {
-            audio_play_collision_thud();
+
+        /* Presentation consumes the physical contact feed (issue 26): a significant approach
+         * this tick earns one collision thud. The feed is rebuilt every tick and is never
+         * read back into the simulation — the lockout timer remains the authoritative
+         * entrant state. */
+        for (int i = 0; i < world->contactCount; i++) {
+            if (world->contacts[i].bodyId == bodyId &&
+                world->contacts[i].approachSpeedMps > COLLISION_LOCKOUT_THRESHOLD_MPS) {
+                audio_play_collision_thud();
+                break;
+            }
         }
     }
 }

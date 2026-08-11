@@ -274,6 +274,20 @@ static void scenario_collision_barrier(void)
 /* Scenario: collision-units — direct tests for collision_resolve_track              */
 /* ------------------------------------------------------------------------------------- */
 
+/* A CollisionWorld is ~180 KB of fixed storage. A scenario that holds several of them at
+ * once must heap-allocate rather than stack-allocate: the sanitizer build inflates frames
+ * with redzones and overflows a default 1 MB stack. */
+static CollisionWorld *alloc_collision_world(void)
+{
+    CollisionWorld *world = (CollisionWorld *)calloc(1, sizeof(CollisionWorld));
+    if (world == NULL) {
+        fprintf(stderr, "FATAL: could not allocate CollisionWorld (%zu bytes)\n",
+                sizeof(CollisionWorld));
+        exit(126);
+    }
+    return world;
+}
+
 static void scenario_collision_units(void)
 {
     VehicleSpec spec;
@@ -292,6 +306,11 @@ static void scenario_collision_units(void)
     TrackDefinition track;
     memset(&track, 0, sizeof(track));
     track_init(&track);
+    /* The collision world is the pipeline these tests exercise: the track's barriers become
+     * its static shapes, and every resolve below runs through the world's candidate query. */
+    CollisionWorld *world = alloc_collision_world();
+    check(collision_world_build_from_track(world, &track),
+          "the parking-lot barriers build into a collision world");
 
     /* 1. No collision: car dead centre. */
     {
@@ -302,7 +321,7 @@ static void scenario_collision_units(void)
         rs.prevPositionM = rs.currPositionM = state.positionM;
         rs.prevHeadingRad = rs.currHeadingRad = state.headingRad;
         float lockout = 0.0f;
-        int n = collision_resolve_track(&spec, &state, &rs, &track, NULL, &lockout);
+        int n = collision_resolve_track(world, 1u, &spec, &state, &rs, &lockout);
         check(n == 0, "no collision returns 0 (got %d)", n);
         check(lockout == 0.0f, "no collision leaves lockout at 0");
     }
@@ -320,7 +339,7 @@ static void scenario_collision_units(void)
         rs.prevHeadingRad = rs.currHeadingRad = state.headingRad;
         float lockout = 0.0f;
         const float yBefore = state.positionM.y;
-        int n = collision_resolve_track(&spec, &state, &rs, &track, NULL, &lockout);
+        int n = collision_resolve_track(world, 1u, &spec, &state, &rs, &lockout);
         check(n >= 1, "left barrier contact resolves (got %d)", n);
         check(state.positionM.y > yBefore,
               "penetration push moves CG up, away from barrier (y %.4f > %.4f)",
@@ -341,7 +360,7 @@ static void scenario_collision_units(void)
         rs.prevPositionM = rs.currPositionM = state.positionM;
         rs.prevHeadingRad = rs.currHeadingRad = state.headingRad;
         float lockout = 0.0f;
-        int n = collision_resolve_track(&spec, &state, &rs, &track, NULL, &lockout);
+        int n = collision_resolve_track(world, 1u, &spec, &state, &rs, &lockout);
         check(n >= 1, "separating contact still resolves penetration (got %d)", n);
         check(lockout == 0.0f, "separating contact does NOT set lockout");
         /* Velocity is unchanged because no impulse was applied (vn >= 0). */
@@ -361,7 +380,7 @@ static void scenario_collision_units(void)
         rs.prevHeadingRad = rs.currHeadingRad = state.headingRad;
         float lockout = 0.0f;
         const float yBefore = state.positionM.y;
-        int n = collision_resolve_track(&spec, &state, &rs, &track, NULL, &lockout);
+        int n = collision_resolve_track(world, 1u, &spec, &state, &rs, &lockout);
         check(n >= 1, "right barrier contact resolves (got %d)", n);
         check(state.positionM.y > yBefore, "right barrier pushes CG up (y %.4f > %.4f)",
               (double)state.positionM.y, (double)yBefore);
@@ -380,6 +399,9 @@ static void scenario_collision_units(void)
         corridor.nodes = corridorNodes;
         corridor.count = 4;
         corridor.offTrackSurfaceId = SURFACE_ASPHALT;
+        CollisionWorld *corridorWorld = alloc_collision_world();
+        check(collision_world_build_from_track(corridorWorld, &corridor),
+              "the corridor barriers build into a collision world");
 
         VehicleState state = { 0 };
         VehicleRenderState rs = { 0 };
@@ -390,10 +412,11 @@ static void scenario_collision_units(void)
         rs.prevPositionM = rs.currPositionM = state.positionM;
         rs.prevHeadingRad = rs.currHeadingRad = state.headingRad;
         float lockout = 0.0f;
-        int n = collision_resolve_track(&spec, &state, &rs, &corridor, NULL, &lockout);
+        int n = collision_resolve_track(corridorWorld, 1u, &spec, &state, &rs, &lockout);
         check(n >= 2, "narrow corridor: both walls contacted -> >= 2 (got %d)", n);
         check(isfinite(state.positionM.x) && isfinite(state.positionM.y),
               "multi-contact position stays finite");
+        free(corridorWorld);
     }
 
     /* 5. Lockout threshold: slow kiss does not trigger lockout. */
@@ -406,7 +429,7 @@ static void scenario_collision_units(void)
         rs.prevPositionM = rs.currPositionM = state.positionM;
         rs.prevHeadingRad = rs.currHeadingRad = state.headingRad;
         float lockout = 0.0f;
-        collision_resolve_track(&spec, &state, &rs, &track, NULL, &lockout);
+        collision_resolve_track(world, 1u, &spec, &state, &rs, &lockout);
         check(lockout == 0.0f, "slow kiss (< 2 m/s) does not set lockout");
     }
 
@@ -422,8 +445,8 @@ static void scenario_collision_units(void)
         r1.prevHeadingRad = r1.currHeadingRad = s1.headingRad;
         r2.prevHeadingRad = r2.currHeadingRad = s2.headingRad;
         float lo1 = 0, lo2 = 0;
-        collision_resolve_track(&spec, &s1, &r1, &track, NULL, &lo1);
-        collision_resolve_track(&spec, &s2, &r2, &track, NULL, &lo2);
+        collision_resolve_track(world, 1u, &spec, &s1, &r1, &lo1);
+        collision_resolve_track(world, 1u, &spec, &s2, &r2, &lo2);
         check(memcmp(&s1, &s2, sizeof(VehicleState)) == 0,
               "collision_resolve_track is deterministic across identical calls");
         check(lo1 == lo2, "lockout is deterministic");
@@ -440,7 +463,7 @@ static void scenario_collision_units(void)
         rs.prevPositionM = rs.currPositionM = state.positionM;
         rs.prevHeadingRad = rs.currHeadingRad = state.headingRad;
         float lockout = 0.0f;
-        collision_resolve_track(&spec, &state, &rs, &track, NULL, &lockout);
+        collision_resolve_track(world, 1u, &spec, &state, &rs, &lockout);
         check(isfinite(state.positionM.x) && isfinite(state.positionM.y),
               "position is finite after collision");
         check(isfinite(state.velocityLongitudinalMps) && isfinite(state.velocityLateralMps),
@@ -462,6 +485,9 @@ static void scenario_collision_units(void)
         vwTrack.nodes = vwNodes;
         vwTrack.count = 4;
         vwTrack.offTrackSurfaceId = SURFACE_ASPHALT;
+        CollisionWorld *vwWorld = alloc_collision_world();
+        check(collision_world_build_from_track(vwWorld, &vwTrack),
+              "the variable-width barriers build into a collision world");
 
         VehicleState state = { 0 };
         VehicleRenderState rs = { 0 };
@@ -471,8 +497,9 @@ static void scenario_collision_units(void)
         rs.prevPositionM = rs.currPositionM = state.positionM;
         rs.prevHeadingRad = rs.currHeadingRad = state.headingRad;
         float lockout = 0.0f;
-        int n = collision_resolve_track(&spec, &state, &rs, &vwTrack, NULL, &lockout);
+        int n = collision_resolve_track(vwWorld, 1u, &spec, &state, &rs, &lockout);
         check(n >= 1, "variable-width segment collides at the narrow end (per-node widths)");
+        free(vwWorld);
     }
 
     /* 9. NULL / degenerate inputs return 0. */
@@ -480,20 +507,761 @@ static void scenario_collision_units(void)
         VehicleState state = { 0 };
         VehicleRenderState rs = { 0 };
         float lockout = 0.0f;
-        check(collision_resolve_track(NULL, &state, &rs, &track, NULL, &lockout) == 0,
+        check(collision_resolve_track(NULL, 1u, &spec, &state, &rs, &lockout) == 0,
+              "NULL world returns 0");
+        check(collision_resolve_track(world, 1u, NULL, &state, &rs, &lockout) == 0,
               "NULL spec returns 0");
-        check(collision_resolve_track(&spec, NULL, &rs, &track, NULL, &lockout) == 0,
+        check(collision_resolve_track(world, 1u, &spec, NULL, &rs, &lockout) == 0,
               "NULL state returns 0");
-        check(collision_resolve_track(&spec, &state, &rs, NULL, NULL, &lockout) == 0,
-              "NULL track returns 0");
-        /* Track with too few nodes. */
+        /* A world with no shapes — nothing to collide with. */
+        CollisionWorld *empty = alloc_collision_world();
+        collision_world_init(empty);
+        check(collision_resolve_track(empty, 1u, &spec, &state, &rs, &lockout) == 0,
+              "empty world returns 0");
+        free(empty);
+        /* A track with too few nodes builds no barriers. */
         TrackDefinition tiny = { 0 };
         tiny.count = 1;
-        check(collision_resolve_track(&spec, &state, &rs, &tiny, NULL, &lockout) == 0,
-              "track with < 2 nodes returns 0");
+        CollisionWorld *tinyWorld = alloc_collision_world();
+        check(!collision_world_build_from_track(tinyWorld, &tiny),
+              "track with < 2 nodes builds no collision world");
+        check(collision_resolve_track(tinyWorld, 1u, &spec, &state, &rs, &lockout) == 0,
+              "world from < 2 node track returns 0");
+        free(tinyWorld);
     }
 
     track_free(&track);
+    free(world);
+}
+
+/* ------------------------------------------------------------------------------------- */
+/* Scenario: collision-world — the deterministic CollisionWorld contract                  */
+/* ------------------------------------------------------------------------------------- */
+
+/* The box: nodes CCW from (0,0), hw 4, runoff 6 -> barriers at +/-6 from the centreline.
+ * Closed loop, 4 edges -> 8 barrier shapes, ids in segment order (left then right per edge):
+ *   0 seg0 left  (y = +6),  1 seg0 right (y = -6)
+ *   2 seg1 left  (x = 26),  3 seg1 right (x = 14)
+ *   4 seg2 left  (y = 14),  5 seg2 right (y = 26)
+ *   6 seg3 left  (x = -6),  7 seg3 right (x = 6)   <- wait: seg3 runs (0,20)->(0,0), dir (0,-1)
+ */
+static void build_collision_box_track(TrackDefinition *track)
+{
+    memset(track, 0, sizeof(*track));
+    track->nodes = (TrackNode *)calloc(4, sizeof(TrackNode));
+    track->count = 4;
+    track->offTrackSurfaceId = SURFACE_GRASS;
+    track->runoffSurfaceId = SURFACE_GRASS;
+    track->routeClosed = true;
+    track->nodes[0] = (TrackNode){ { 0.0f, 0.0f }, 4.0f, SURFACE_ASPHALT, 6.0f };
+    track->nodes[1] = (TrackNode){ { 20.0f, 0.0f }, 4.0f, SURFACE_ASPHALT, 6.0f };
+    track->nodes[2] = (TrackNode){ { 20.0f, 20.0f }, 4.0f, SURFACE_ASPHALT, 6.0f };
+    track->nodes[3] = (TrackNode){ { 0.0f, 20.0f }, 4.0f, SURFACE_ASPHALT, 6.0f };
+}
+
+static void scenario_collision_world(void)
+{
+    VehicleSpec spec;
+    vehicle_spec_set_default(&spec);
+    spec.bodyHalfWidthM = 0.85f;
+    spec.collisionRestitution = 0.30f;
+    spec.collisionFriction = 0.50f;
+    spec.massKg = 1200.0f;
+    spec.yawInertiaKgM2 = 1500.0f;
+    vehicle_spec_refresh_derived(&spec);
+
+    /* ---- 1. Building the world: stable ids, canonical order, brute-mode at small sizes ---- */
+    TrackDefinition track;
+    build_collision_box_track(&track);
+    CollisionWorld *world = alloc_collision_world();
+    check(collision_world_build_from_track(world, &track), "box barriers build into a world");
+    check(world->shapeCount == 8, "4 edges x 2 sides = 8 shapes (got %d)", world->shapeCount);
+    check(!world->gridEnabled,
+          "small worlds stay on the brute scan below COLLISION_WORLD_GRID_MIN_SHAPES");
+    check(collision_world_add_static_segment(NULL, (Vector2){ 0, 0 }, (Vector2){ 1, 0 },
+                                             (Vector2){ 0, 1 }, 0x1u) == -1,
+          "NULL world rejects a segment");
+
+    /* Stable shape ids run in the order the swept pass resolves them: edge 0 left first. */
+    check(world->shapes[0].aM.x == 0.0f && world->shapes[0].aM.y == 6.0f &&
+              world->shapes[0].bM.x == 20.0f && world->shapes[0].bM.y == 6.0f,
+          "shape 0 is edge 0's left barrier at y = +6");
+    check(world->shapes[1].aM.y == -6.0f, "shape 1 is edge 0's right barrier at y = -6");
+    check(world->shapes[0].pushNormalM.y == -1.0f,
+          "ribbon left barrier pushes into the track (toward -y)");
+    check(world->shapes[0].layer == COLLISION_LAYER_STATIC_BARRIER,
+          "barrier shapes carry the static barrier layer");
+
+    /* Rebuilding from the same definition reproduces the same world bit for bit. */
+    {
+        CollisionWorld *again = alloc_collision_world();
+        check(collision_world_build_from_track(again, &track), "second build succeeds");
+        check(memcmp(&again->shapes, &world->shapes, sizeof(CollisionStaticShape) * 8) == 0,
+              "the shape array is a pure function of the definition");
+        free(again);
+    }
+
+    /* ---- 2. Authored objects share the query API, gated by collision layers ---- */
+    {
+        /* An authored barrier standing inside the box on its own layer (0x4: an object,
+         * not a track barrier). */
+        const CollisionShapeId objId = collision_world_add_static_segment(
+            world, (Vector2){ 10.0f, -3.0f }, (Vector2){ 10.0f, 3.0f }, (Vector2){ -1, 0 },
+            0x4u);
+        check(objId == 8, "the authored object takes the next stable id (got %d)", (int)objId);
+        check(collision_world_add_static_segment(world, (Vector2){ 0, 0 }, (Vector2){ 0, 0 },
+                                                 (Vector2){ 1, 0 }, 0x4u) == -1,
+              "zero-length authored segment rejected");
+        check(collision_world_add_static_segment(world, (Vector2){ 0, 0 }, (Vector2){ 1, 0 },
+                                                 (Vector2){ 2, 0 }, 0x4u) == -1,
+              "non-unit push normal rejected");
+        const float nan = NAN;
+        check(collision_world_add_static_segment(world, (Vector2){ 0, nan }, (Vector2){ 1, 0 },
+                                                 (Vector2){ 0, 1 }, 0x4u) == -1,
+              "non-finite authored segment rejected");
+
+        /* One query API answers for track barriers and authored objects alike. */
+        CollisionShapeId ids[16];
+        const int both = collision_world_query_static(
+            world, (Vector2){ 9.5f, -0.5f }, (Vector2){ 10.5f, 0.5f },
+            COLLISION_LAYER_STATIC_BARRIER | 0x4u, COLLISION_SHAPE_ID_NONE, ids, 16);
+        check(both == 1 && ids[0] == objId,
+              "authored object answers the same query the barriers answer (got %d ids)", both);
+        const int barriersOnly = collision_world_query_static(
+            world, (Vector2){ 9.5f, -0.5f }, (Vector2){ 10.5f, 0.5f },
+            COLLISION_LAYER_STATIC_BARRIER, COLLISION_SHAPE_ID_NONE, ids, 16);
+        check(barriersOnly == 0, "layer mask excludes the object from a barrier-only query");
+
+        /* A body whose mask excludes the object layer passes through it; adding the layer to
+         * the mask makes the same body stop. */
+        VehicleState state = { 0 };
+        VehicleRenderState rs = { 0 };
+        state.positionM = (Vector2){ 9.0f, 0.0f };
+        state.headingRad = 0.0f;
+        state.velocityLateralMps = -3.0f; /* moving -y, parallel to the object */
+        rs.prevPositionM = rs.currPositionM = state.positionM;
+        rs.prevHeadingRad = rs.currHeadingRad = state.headingRad;
+        float lockout = 0.0f;
+
+        CollisionWorld *objectWorld = alloc_collision_world();
+        collision_world_build_from_track(objectWorld, &track);
+        (void)collision_world_add_static_segment(objectWorld, (Vector2){ 10.0f, -3.0f },
+                                                 (Vector2){ 10.0f, 3.0f }, (Vector2){ -1, 0 },
+                                                 0x4u);
+        CollisionBody body;
+        memset(&body, 0, sizeof(body));
+        body.id = 1u;
+        body.layer = COLLISION_LAYER_VEHICLE_BODY;
+        body.mask = COLLISION_LAYER_STATIC_BARRIER; /* object layer NOT in the mask */
+        body.cgToFrontM = spec.cgToFrontM;
+        body.cgToRearM = spec.cgToRearM;
+        body.radiusM = spec.bodyHalfWidthM;
+        body.prevPosM = body.currPosM = state.positionM;
+        body.prevHdgRad = body.currHdgRad = state.headingRad;
+
+        collision_world_begin_tick(objectWorld);
+        check(collision_world_add_body(objectWorld, &body), "object body registered");
+        CollisionBodyContext ctx = { .id = 1u,
+                                     .spec = &spec,
+                                     .state = &state,
+                                     .renderState = &rs,
+                                     .crashLockoutTimerS = &lockout };
+        int n = collision_world_resolve_bodies(objectWorld, &ctx, 1);
+        check(n == 0, "mask without the object layer yields no contact (got %d)", n);
+
+        body.mask |= 0x4u;
+        collision_world_begin_tick(objectWorld);
+        check(collision_world_add_body(objectWorld, &body), "object body re-registered");
+        n = collision_world_resolve_bodies(objectWorld, &ctx, 1);
+        check(n >= 1, "mask including the object layer contacts the object (got %d)", n);
+        check(objectWorld->contactCount >= 1 && objectWorld->contacts[0].shapeId == 8u,
+              "the contact names the authored object's stable id");
+        check(objectWorld->contacts[0].normalM.x == -1.0f,
+              "the contact carries the object's push normal");
+        free(objectWorld);
+    }
+
+    /* ---- 3. Penetration recovery: overlapping at rest is pushed out, not accelerated ---- */
+    {
+        VehicleState state = { 0 };
+        VehicleRenderState rs = { 0 };
+        state.positionM = (Vector2){ 10.0f, 5.5f }; /* front circle 0.5 m into the y=6 wall */
+        state.headingRad = 0.0f;
+        rs.prevPositionM = rs.currPositionM = state.positionM;
+        rs.prevHeadingRad = rs.currHeadingRad = state.headingRad;
+        float lockout = 0.0f;
+        const int n = collision_resolve_track(world, 1u, &spec, &state, &rs, &lockout);
+        check(n >= 1, "overlap at rest resolves (got %d)", n);
+        check_near((double)state.positionM.y, 5.15, 1e-3,
+                   "penetration push moves the CG to exactly touching");
+        check_near((double)state.velocityLateralMps, 0.0, 0.0,
+                   "a resting overlap applies no impulse");
+        check(lockout == 0.0f, "a resting overlap sets no crash lockout");
+        check(world->contactCount >= 1 && world->contacts[0].approachSpeedMps == 0.0f,
+              "the contact feed records the resting touch with zero approach speed");
+    }
+
+    /* ---- 4. Barrier corner: contact at a segment endpoint resolves on the push normal ---- */
+    {
+        VehicleState state = { 0 };
+        VehicleRenderState rs = { 0 };
+        state.positionM = (Vector2){ -1.6f, 6.4f }; /* front circle near the (0,6) endpoint */
+        state.headingRad = 0.0f;
+        state.velocityLateralMps = 3.0f; /* +y: approaching the y=6 wall */
+        rs.prevPositionM = rs.currPositionM = state.positionM;
+        rs.prevHeadingRad = rs.currHeadingRad = state.headingRad;
+        float lockout = 0.0f;
+        const float yBefore = state.positionM.y;
+        const int n = collision_resolve_track(world, 1u, &spec, &state, &rs, &lockout);
+        check(n >= 1, "corner contact resolves (got %d)", n);
+        check(state.positionM.y < yBefore, "corner push moves the CG into the track");
+        check(state.velocityLateralMps < 3.0f, "corner impulse reduced the approach speed");
+        check(lockout > 0.0f, "a 3 m/s corner approach sets the crash lockout");
+        check(world->contactCount >= 1 && world->contacts[0].approachSpeedMps > 2.0f,
+              "the contact feed records the significant corner approach");
+    }
+
+    /* ---- 5. Multi-proxy ordering: bodies resolve in ascending id whatever the input order ---- */
+    {
+        CollisionWorld *multi = alloc_collision_world();
+        collision_world_build_from_track(multi, &track);
+
+        CollisionBody bodies[3];
+        memset(bodies, 0, sizeof(bodies));
+        const Vector2 poses[3] = { { 5.0f, 5.5f }, { 10.0f, 5.5f }, { 15.0f, 5.5f } };
+        const CollisionBodyId ids[3] = { 3u, 5u, 7u };
+        for (int i = 0; i < 3; i++) {
+            bodies[i].id = ids[i];
+            bodies[i].layer = COLLISION_LAYER_VEHICLE_BODY;
+            bodies[i].mask = COLLISION_LAYER_STATIC_BARRIER;
+            bodies[i].cgToFrontM = spec.cgToFrontM;
+            bodies[i].cgToRearM = spec.cgToRearM;
+            bodies[i].radiusM = spec.bodyHalfWidthM;
+            bodies[i].prevPosM = bodies[i].currPosM = poses[i];
+            bodies[i].prevHdgRad = bodies[i].currHdgRad = 0.0f;
+        }
+
+        /* Register 7, 3, 5 — the world sorts, the caller does not have to. */
+        collision_world_begin_tick(multi);
+        check(collision_world_add_body(multi, &bodies[2]), "body 7 registered");
+        check(collision_world_add_body(multi, &bodies[0]), "body 3 registered");
+        check(collision_world_add_body(multi, &bodies[1]), "body 5 registered");
+        check(collision_world_add_body(multi, &bodies[0]) == false,
+              "a duplicate id is rejected");
+        check(collision_world_find_body(multi, 3u) == 0 &&
+                  collision_world_find_body(multi, 5u) == 1 &&
+                  collision_world_find_body(multi, 7u) == 2,
+              "bodies are stored packed in ascending id order");
+
+        VehicleState states[3];
+        VehicleRenderState rs[3];
+        float lockouts[3] = { 0.0f, 0.0f, 0.0f };
+        CollisionBodyContext contexts[3];
+        for (int i = 0; i < 3; i++) {
+            memset(&states[i], 0, sizeof(states[i]));
+            memset(&rs[i], 0, sizeof(rs[i]));
+            states[i].positionM = poses[i];
+            states[i].velocityLateralMps = 5.0f; /* approaching the y=6 wall */
+            rs[i].prevPositionM = rs[i].currPositionM = poses[i];
+            contexts[i] = (CollisionBodyContext){ .id = ids[i],
+                                                  .spec = &spec,
+                                                  .state = &states[i],
+                                                  .renderState = &rs[i],
+                                                  .crashLockoutTimerS = &lockouts[i] };
+        }
+
+        /* Contexts handed over in a different order than the bodies are stored. */
+        CollisionBodyContext shuffled[3] = { contexts[2], contexts[0], contexts[1] };
+        const int total = collision_world_resolve_bodies(multi, shuffled, 3);
+        check(total >= 3,
+              "three bodies against the wall resolve at least three contacts "
+              "(got %d)",
+              total);
+
+        /* Contact order: ascending body id, shapes ascending within a body. */
+        bool idsAscending = true;
+        CollisionBodyId prevId = 0u;
+        for (int i = 0; i < multi->contactCount; i++) {
+            if (multi->contacts[i].bodyId < prevId) idsAscending = false;
+            prevId = multi->contacts[i].bodyId;
+        }
+        check(idsAscending, "contact feed is ordered by ascending body id");
+        check(multi->contacts[0].bodyId == 3u, "the first contact belongs to the lowest id");
+        for (int i = 1; i < multi->contactCount; i++) {
+            if (multi->contacts[i].bodyId == multi->contacts[i - 1].bodyId) {
+                check(multi->contacts[i].shapeId >= multi->contacts[i - 1].shapeId,
+                      "shapes are ascending within one body's contact run");
+            }
+        }
+
+        /* Isolation: each body's outcome equals an isolated single-body resolve. */
+        for (int i = 0; i < 3; i++) {
+            VehicleState soloState;
+            VehicleRenderState soloRs;
+            float soloLockout = 0.0f;
+            memset(&soloState, 0, sizeof(soloState));
+            memset(&soloRs, 0, sizeof(soloRs));
+            soloState.positionM = poses[i];
+            soloState.velocityLateralMps = 5.0f;
+            soloRs.prevPositionM = soloRs.currPositionM = poses[i];
+            CollisionWorld *solo = alloc_collision_world();
+            collision_world_build_from_track(solo, &track);
+            (void)collision_resolve_track(solo, ids[i], &spec, &soloState, &soloRs,
+                                          &soloLockout);
+            check(memcmp(&soloState, &states[i], sizeof(VehicleState)) == 0,
+                  "body %u resolves the same alone as in the multi-body pass", ids[i]);
+            check(soloLockout == lockouts[i], "body %u lockout matches the solo run", ids[i]);
+            free(solo);
+        }
+
+        /* Order independence: sorted contexts produce the same result as shuffled ones. */
+        {
+            VehicleState statesB[3];
+            VehicleRenderState rsB[3];
+            float lockoutsB[3] = { 0.0f, 0.0f, 0.0f };
+            CollisionBodyContext sorted[3];
+            for (int i = 0; i < 3; i++) {
+                memset(&statesB[i], 0, sizeof(statesB[i]));
+                memset(&rsB[i], 0, sizeof(rsB[i]));
+                statesB[i].positionM = poses[i];
+                statesB[i].velocityLateralMps = 5.0f;
+                rsB[i].prevPositionM = rsB[i].currPositionM = poses[i];
+                sorted[i] = (CollisionBodyContext){ .id = ids[i],
+                                                    .spec = &spec,
+                                                    .state = &statesB[i],
+                                                    .renderState = &rsB[i],
+                                                    .crashLockoutTimerS = &lockoutsB[i] };
+            }
+            collision_world_begin_tick(multi);
+            for (int i = 0; i < 3; i++) {
+                check(collision_world_add_body(multi, &bodies[i]), "body %u re-registered",
+                      ids[i]);
+            }
+            const int totalB = collision_world_resolve_bodies(multi, sorted, 3);
+            check(totalB == total, "sorted and shuffled context order resolve the same count");
+            for (int i = 0; i < 3; i++) {
+                check(memcmp(&statesB[i], &states[i], sizeof(VehicleState)) == 0,
+                      "body %u state is independent of context order", ids[i]);
+            }
+            check(multi->contactCount == totalB && multi->contacts[0].bodyId == 3u,
+                  "the contact feed after a sorted run matches the resolved count and "
+                  "order");
+        }
+
+        /* A registered body without a context is a contract violation, not a skip. */
+        collision_world_begin_tick(multi);
+        check(collision_world_add_body(multi, &bodies[0]), "body re-registered for the "
+                                                           "missing-context probe");
+        check(collision_world_resolve_bodies(multi, NULL, 0) == -1,
+              "missing context is reported as -1");
+        free(multi);
+    }
+
+    /* ---- 6. The tick feed is a per-tick buffer, cleared by begin_tick ---- */
+    {
+        const int before = world->contactCount;
+        check(before > 0, "precondition: the world holds contacts from earlier probes");
+        collision_world_begin_tick(world);
+        check(world->contactCount == 0 && world->bodyCount == 0,
+              "begin_tick clears the feed and the bodies for the next tick");
+    }
+
+    track_free(&track);
+    free(world);
+}
+
+/* ------------------------------------------------------------------------------------- */
+/* Scenario: collision-broadphase — grid vs brute-force parity and measured workloads     */
+/* ------------------------------------------------------------------------------------- */
+
+/* Deterministic LCG for the property tests: fixed seeds, no rand() (which is not portable
+ * across platforms). */
+static uint32_t s_broadphaseRngState;
+
+static uint32_t broadphase_rng_next(void)
+{
+    s_broadphaseRngState = s_broadphaseRngState * 1664525u + 1013904223u;
+    return s_broadphaseRngState;
+}
+
+static float broadphase_rng_unit(void)
+{
+    return (float)(broadphase_rng_next() & 0xFFFFu) / 65535.0f;
+}
+
+/* Independent brute-force candidate reference, implemented here rather than reusing the
+ * module's brute path, so the grid has to agree with a scan nobody shares code with. */
+static int reference_brute_query(const CollisionWorld *world, Vector2 minM, Vector2 maxM,
+                                 uint32_t layerMask, CollisionShapeId afterId,
+                                 CollisionShapeId *idsOut, int capacity)
+{
+    int count = 0;
+    for (CollisionShapeId id = 0; id < (CollisionShapeId)world->shapeCount; id++) {
+        if (afterId != COLLISION_SHAPE_ID_NONE && id <= afterId) continue;
+        if ((layerMask & world->shapes[id].layer) == 0u) continue;
+        if (!(world->shapes[id].minM.x <= maxM.x && world->shapes[id].maxM.x >= minM.x &&
+              world->shapes[id].minM.y <= maxM.y && world->shapes[id].maxM.y >= minM.y)) {
+            continue;
+        }
+        if (count < capacity) idsOut[count] = id;
+        count++;
+    }
+    if (count > capacity) count = capacity;
+    return count;
+}
+
+/* A closed ring route: constant segment length, like a real circuit's authored nodes. */
+static void build_ring_track(TrackDefinition *track, int nodeCount, float radiusM)
+{
+    memset(track, 0, sizeof(*track));
+    track->nodes = (TrackNode *)calloc((size_t)nodeCount, sizeof(TrackNode));
+    track->count = nodeCount;
+    track->offTrackSurfaceId = SURFACE_GRASS;
+    track->runoffSurfaceId = SURFACE_GRASS;
+    track->routeClosed = true;
+    for (int i = 0; i < nodeCount; i++) {
+        const float a = 6.28318530718f * (float)i / (float)nodeCount;
+        track->nodes[i] = (TrackNode){
+            { cosf(a) * radiusM, sinf(a) * radiusM }, 4.0f, SURFACE_ASPHALT, 6.0f
+        };
+    }
+}
+
+/* A narrow wiggly corridor: walls ~1 m apart, narrower than the capsule diameter, so poses
+ * penetrate deeply and the re-query path is stressed. */
+static void build_corridor_track(TrackDefinition *track, int nodeCount)
+{
+    memset(track, 0, sizeof(*track));
+    track->nodes = (TrackNode *)calloc((size_t)nodeCount, sizeof(TrackNode));
+    track->count = nodeCount;
+    track->offTrackSurfaceId = SURFACE_GRASS;
+    track->runoffSurfaceId = SURFACE_GRASS;
+    track->routeClosed = false;
+    for (int i = 0; i < nodeCount; i++) {
+        const float x = (float)i * 1.0f;
+        const float y = 100.0f + sinf((float)i * 0.7f) * 0.4f;
+        track->nodes[i] = (TrackNode){ { x, y }, 0.5f, SURFACE_ASPHALT, 0.0f };
+    }
+}
+
+static void scenario_collision_broadphase(void)
+{
+    VehicleSpec spec;
+    vehicle_spec_set_default(&spec);
+    spec.bodyHalfWidthM = 0.85f;
+    vehicle_spec_refresh_derived(&spec);
+
+    /* ---- 1. The grid is enabled exactly when the measured threshold justifies it ---- */
+    {
+        TrackDefinition lot;
+        memset(&lot, 0, sizeof(lot));
+        track_init(&lot);
+        CollisionWorld *lotWorld = alloc_collision_world();
+        collision_world_build_from_track(lotWorld, &lot);
+        /* The lot's closing node coincides with its first, so the last edge is zero-length
+         * and skipped: 5 nodes -> 4 distinct edges -> 8 shapes. The legacy narrowphase
+         * skipped that segment the same way. */
+        check(lotWorld->shapeCount == 8,
+              "parking lot: 4 distinct edges x 2 sides = 8 "
+              "shapes (got %d, count %d)",
+              lotWorld->shapeCount, lot.count);
+        check(!lotWorld->gridEnabled, "parking lot is below the grid threshold");
+        free(lotWorld);
+        track_free(&lot);
+
+        TrackDefinition ring;
+        build_ring_track(&ring, 512, 200.0f);
+        CollisionWorld *ringWorld = alloc_collision_world();
+        collision_world_build_from_track(ringWorld, &ring);
+        check(ringWorld->shapeCount == 1024, "ring of 512 nodes yields 1024 shapes");
+        check(ringWorld->gridEnabled,
+              "a circuit-scale world uses the grid (shape count %d >= %d)",
+              ringWorld->shapeCount, COLLISION_WORLD_GRID_MIN_SHAPES);
+        check(ringWorld->gridCols > 0 && ringWorld->gridRows > 0,
+              "the grid has a real cell layout (%d x %d)", ringWorld->gridCols,
+              ringWorld->gridRows);
+
+        /* ---- 2. Property: grid candidates == brute-force reference over fixed-seed queries ---- */
+        s_broadphaseRngState = 0xC0FFEEu;
+        CollisionShapeId gridIds[2048];
+        CollisionShapeId refIds[2048];
+        int mismatches = 0;
+        for (int q = 0; q < 2000; q++) {
+            /* Random query box inside the ring's extent (radius 200 -> box from -220..220). */
+            const float cx = (broadphase_rng_unit() - 0.5f) * 440.0f;
+            const float cy = (broadphase_rng_unit() - 0.5f) * 440.0f;
+            const float w = 1.0f + broadphase_rng_unit() * 8.0f;
+            const Vector2 minM = { cx - w, cy - w };
+            const Vector2 maxM = { cx + w, cy + w };
+            const CollisionShapeId afterId = (CollisionShapeId)(broadphase_rng_next() % 1024u);
+            const int g = collision_world_query_static(
+                ringWorld, minM, maxM, COLLISION_LAYER_STATIC_BARRIER, afterId, gridIds, 2048);
+            const int r = reference_brute_query(
+                ringWorld, minM, maxM, COLLISION_LAYER_STATIC_BARRIER, afterId, refIds, 2048);
+            if (g != r || memcmp(gridIds, refIds, (size_t)g * sizeof(CollisionShapeId)) != 0) {
+                mismatches++;
+            }
+        }
+        check(mismatches == 0, "grid and brute-force agree on all %d queries (%d mismatches)",
+              2000, mismatches);
+
+        /* The module's own brute path must agree with the independent reference too. */
+        ringWorld->gridEnabled = false;
+        int bruteMismatches = 0;
+        s_broadphaseRngState = 0xBEEFu;
+        for (int q = 0; q < 1000; q++) {
+            const float cx = (broadphase_rng_unit() - 0.5f) * 440.0f;
+            const float cy = (broadphase_rng_unit() - 0.5f) * 440.0f;
+            const float w = 1.0f + broadphase_rng_unit() * 8.0f;
+            const Vector2 minM = { cx - w, cy - w };
+            const Vector2 maxM = { cx + w, cy + w };
+            const int g = collision_world_query_static(ringWorld, minM, maxM,
+                                                       COLLISION_LAYER_STATIC_BARRIER,
+                                                       COLLISION_SHAPE_ID_NONE, gridIds, 2048);
+            const int r =
+                reference_brute_query(ringWorld, minM, maxM, COLLISION_LAYER_STATIC_BARRIER,
+                                      COLLISION_SHAPE_ID_NONE, refIds, 2048);
+            if (g != r || memcmp(gridIds, refIds, (size_t)g * sizeof(CollisionShapeId)) != 0) {
+                bruteMismatches++;
+            }
+        }
+        check(bruteMismatches == 0,
+              "module brute scan agrees with the reference (%d "
+              "mismatches over 1000)",
+              bruteMismatches);
+        free(ringWorld);
+        track_free(&ring);
+
+        /* ---- 3. Property: swept resolution via grid == via brute, pose by pose ---- */
+        TrackDefinition ring2;
+        build_ring_track(&ring2, 256, 150.0f);
+        CollisionWorld *gridWorld = alloc_collision_world();
+        collision_world_build_from_track(gridWorld, &ring2);
+        CollisionWorld *bruteWorld = alloc_collision_world();
+        collision_world_build_from_track(bruteWorld, &ring2);
+        bruteWorld->gridEnabled = false;
+
+        s_broadphaseRngState = 0xDECAFu;
+        int stateMismatches = 0;
+        int contactMismatches = 0;
+        for (int t = 0; t < 300; t++) {
+            VehicleState sA = { 0 }, sB = { 0 };
+            VehicleRenderState rA = { 0 }, rB = { 0 };
+            const float x = (broadphase_rng_unit() - 0.5f) * 300.0f;
+            const float y = (broadphase_rng_unit() - 0.5f) * 300.0f;
+            const float hdg = broadphase_rng_unit() * 6.28318530718f;
+            const float vx = (broadphase_rng_unit() - 0.5f) * 60.0f;
+            const float vy = (broadphase_rng_unit() - 0.5f) * 60.0f;
+            sA.positionM = sB.positionM = (Vector2){ x, y };
+            sA.headingRad = sB.headingRad = hdg;
+            sA.velocityLongitudinalMps = sB.velocityLongitudinalMps = vx;
+            sA.velocityLateralMps = sB.velocityLateralMps = vy;
+            sA.yawRateRadS = sB.yawRateRadS = (broadphase_rng_unit() - 0.5f) * 6.0f;
+            /* Half the probes sweep a whole tick of travel; half are static poses. */
+            const bool sweep = (t & 1) == 0;
+            if (sweep) {
+                const float dt = FIXED_DT_S;
+                rA.prevPositionM = rB.prevPositionM =
+                    (Vector2){ x - cosf(hdg) * vx * dt + sinf(hdg) * vy * dt,
+                               y - sinf(hdg) * vx * dt - cosf(hdg) * vy * dt };
+                rA.prevHeadingRad = rB.prevHeadingRad = hdg - 0.05f;
+            } else {
+                rA.prevPositionM = rB.prevPositionM = (Vector2){ x, y };
+                rA.prevHeadingRad = rB.prevHeadingRad = hdg;
+            }
+            rA.currPositionM = rB.currPositionM = (Vector2){ x, y };
+            rA.currHeadingRad = rB.currHeadingRad = hdg;
+
+            float lockA = 0.0f, lockB = 0.0f;
+            const int nA = collision_resolve_track(gridWorld, 1u, &spec, &sA, &rA, &lockA);
+            const int nB = collision_resolve_track(bruteWorld, 1u, &spec, &sB, &rB, &lockB);
+            if (nA != nB || memcmp(&sA, &sB, sizeof(VehicleState)) != 0 || lockA != lockB) {
+                stateMismatches++;
+            }
+            if (nA >= 0 && nB >= 0 &&
+                (gridWorld->contactCount != bruteWorld->contactCount ||
+                 gridWorld->contactsOverflowed != bruteWorld->contactsOverflowed)) {
+                contactMismatches++;
+            } else if (nA >= 0 && nB >= 0) {
+                for (int c = 0; c < gridWorld->contactCount; c++) {
+                    const CollisionContact *ca = &gridWorld->contacts[c];
+                    const CollisionContact *cb = &bruteWorld->contacts[c];
+                    if (ca->bodyId != cb->bodyId || ca->shapeId != cb->shapeId ||
+                        ca->pointM.x != cb->pointM.x || ca->pointM.y != cb->pointM.y ||
+                        ca->normalM.x != cb->normalM.x || ca->normalM.y != cb->normalM.y ||
+                        ca->approachSpeedMps != cb->approachSpeedMps) {
+                        contactMismatches++;
+                        break;
+                    }
+                }
+            }
+        }
+        check(stateMismatches == 0,
+              "grid and brute resolve every probe to the same vehicle state (%d mismatches "
+              "over 300)",
+              stateMismatches);
+        check(contactMismatches == 0,
+              "grid and brute produce the same contact feed (%d mismatches)",
+              contactMismatches);
+        free(gridWorld);
+        free(bruteWorld);
+        track_free(&ring2);
+
+        /* ---- 4. Adversarial geometry: a corridor narrower than the capsule ---- */
+        TrackDefinition corridor;
+        build_corridor_track(&corridor, 300);
+        CollisionWorld *cGrid = alloc_collision_world();
+        collision_world_build_from_track(cGrid, &corridor);
+        CollisionWorld *cBrute = alloc_collision_world();
+        collision_world_build_from_track(cBrute, &corridor);
+        cBrute->gridEnabled = false;
+
+        s_broadphaseRngState = 0xABADu;
+        int corridorMismatches = 0;
+        for (int t = 0; t < 200; t++) {
+            VehicleState sA = { 0 }, sB = { 0 };
+            VehicleRenderState rA = { 0 }, rB = { 0 };
+            const float x = broadphase_rng_unit() * 299.0f;
+            const float y = 100.0f + (broadphase_rng_unit() - 0.5f) * 1.0f;
+            const float hdg = (broadphase_rng_unit() - 0.5f) * 3.0f;
+            sA.positionM = sB.positionM = (Vector2){ x, y };
+            sA.headingRad = sB.headingRad = hdg;
+            sA.velocityLongitudinalMps = sB.velocityLongitudinalMps =
+                (broadphase_rng_unit() - 0.5f) * 30.0f;
+            sA.velocityLateralMps = sB.velocityLateralMps =
+                (broadphase_rng_unit() - 0.5f) * 30.0f;
+            rA.prevPositionM = rB.prevPositionM = (Vector2){ x, y };
+            rA.prevHeadingRad = rB.prevHeadingRad = hdg;
+            rA.currPositionM = rB.currPositionM = (Vector2){ x, y };
+            rA.currHeadingRad = rB.currHeadingRad = hdg;
+
+            float lockA = 0.0f, lockB = 0.0f;
+            (void)collision_resolve_track(cGrid, 1u, &spec, &sA, &rA, &lockA);
+            (void)collision_resolve_track(cBrute, 1u, &spec, &sB, &rB, &lockB);
+            if (memcmp(&sA, &sB, sizeof(VehicleState)) != 0 || lockA != lockB) {
+                corridorMismatches++;
+            }
+        }
+        check(corridorMismatches == 0,
+              "narrow-corridor probes agree between grid and brute (%d mismatches over 200)",
+              corridorMismatches);
+        free(cGrid);
+        free(cBrute);
+        track_free(&corridor);
+
+        /* ---- 5. Contact feed overflow is visible, never a dropped resolution ---- */
+        {
+            /* 1024 shapes whose segments all pass through the origin: one capsule at the
+             * origin overlaps every one of them, far past the 256-entry feed cap. */
+            CollisionWorld *dense = alloc_collision_world();
+            collision_world_init(dense);
+            for (int i = 0; i < 512; i++) {
+                const float a = 6.28318530718f * (float)i / 512.0f;
+                const Vector2 dir = { cosf(a), sinf(a) };
+                const Vector2 perp = { -sinf(a), cosf(a) };
+                const Vector2 aM = { dir.x * 5.0f, dir.y * 5.0f };
+                const Vector2 bM = { -dir.x * 5.0f, -dir.y * 5.0f };
+                (void)collision_world_add_static_segment(dense, aM, bM, perp, 0x1u);
+                (void)collision_world_add_static_segment(dense, aM, bM,
+                                                         (Vector2){ -perp.x, -perp.y }, 0x1u);
+            }
+            collision_world_finalize(dense);
+            check(dense->shapeCount == 1024, "dense world holds 1024 shapes");
+
+            VehicleState state = { 0 };
+            VehicleRenderState rs = { 0 };
+            state.positionM = (Vector2){ 0, 0 };
+            rs.prevPositionM = rs.currPositionM = state.positionM;
+            float lockout = 0.0f;
+            const int n = collision_resolve_track(dense, 1u, &spec, &state, &rs, &lockout);
+            check(n > COLLISION_WORLD_MAX_CONTACTS,
+                  "resolution keeps resolving past the feed cap (%d contacts)", n);
+            check(dense->contactCount == COLLISION_WORLD_MAX_CONTACTS,
+                  "the feed records up to its cap");
+            check(dense->contactsOverflowed, "overflow is flagged, not silent");
+            free(dense);
+        }
+    }
+
+    /* ---- 6. Benchmark: measured query cost at representative track/body counts ---- */
+    {
+        struct BenchCase {
+            const char *name;
+            int shapes;
+        };
+        const struct BenchCase cases[] = {
+            { "parking-lot (10)", 0 }, /* filled below from real tracks */
+            { "ring-128 (256)", 128 },
+            { "ring-512 (1024)", 512 },
+            { "ring-1024 (2048)", 1024 },
+        };
+        const int bodyCounts[] = { 1, 4, 8 };
+        const int iterations = 200;
+
+        printf("[collision-broadphase] benchmark: per-tick resolve, 6 substeps, %d "
+               "iterations (lower is better)\n",
+               iterations);
+        printf("  %-20s %-8s %-14s %-14s\n", "track", "bodies", "grid (us)", "brute (us)");
+        for (size_t ci = 0; ci < sizeof(cases) / sizeof(cases[0]); ci++) {
+            TrackDefinition track;
+            if (cases[ci].shapes == 0) {
+                memset(&track, 0, sizeof(track));
+                track_init(&track);
+            } else {
+                build_ring_track(&track, cases[ci].shapes, 200.0f);
+            }
+            for (size_t bi = 0; bi < sizeof(bodyCounts) / sizeof(bodyCounts[0]); bi++) {
+                CollisionWorld *grid = alloc_collision_world();
+                collision_world_build_from_track(grid, &track);
+                CollisionWorld *brute = alloc_collision_world();
+                collision_world_build_from_track(brute, &track);
+                brute->gridEnabled = false;
+
+                struct timespec t0, t1;
+                timespec_get(&t0, TIME_UTC);
+                for (int it = 0; it < iterations; it++) {
+                    for (int b = 0; b < bodyCounts[bi]; b++) {
+                        VehicleState st = { 0 };
+                        VehicleRenderState rs = { 0 };
+                        st.positionM = (Vector2){ (float)b * 0.5f - 100.0f, 0.0f };
+                        st.velocityLongitudinalMps = 30.0f;
+                        rs.prevPositionM = rs.currPositionM = st.positionM;
+                        float lockout = 0.0f;
+                        (void)collision_resolve_track(grid, (CollisionBodyId)(b + 1u), &spec,
+                                                      &st, &rs, &lockout);
+                    }
+                }
+                timespec_get(&t1, TIME_UTC);
+                const double gridUs = ((double)(t1.tv_sec - t0.tv_sec) * 1e6 +
+                                       (double)(t1.tv_nsec - t0.tv_nsec) / 1e3) /
+                                      (double)(iterations * bodyCounts[bi]);
+
+                timespec_get(&t0, TIME_UTC);
+                for (int it = 0; it < iterations; it++) {
+                    for (int b = 0; b < bodyCounts[bi]; b++) {
+                        VehicleState st = { 0 };
+                        VehicleRenderState rs = { 0 };
+                        st.positionM = (Vector2){ (float)b * 0.5f - 100.0f, 0.0f };
+                        st.velocityLongitudinalMps = 30.0f;
+                        rs.prevPositionM = rs.currPositionM = st.positionM;
+                        float lockout = 0.0f;
+                        (void)collision_resolve_track(brute, (CollisionBodyId)(b + 1u), &spec,
+                                                      &st, &rs, &lockout);
+                    }
+                }
+                timespec_get(&t1, TIME_UTC);
+                const double bruteUs = ((double)(t1.tv_sec - t0.tv_sec) * 1e6 +
+                                        (double)(t1.tv_nsec - t0.tv_nsec) / 1e3) /
+                                       (double)(iterations * bodyCounts[bi]);
+
+                printf("  %-20s %-8d %-14.1f %-14.1f\n", cases[ci].name, bodyCounts[bi], gridUs,
+                       bruteUs);
+                free(grid);
+                free(brute);
+            }
+            track_free(&track);
+        }
+    }
 }
 
 /* ------------------------------------------------------------------------------------- */
@@ -775,10 +1543,11 @@ static void scenario_progress_isolation(void)
     track.nodes[2] = (TrackNode){ { 10.0f, 10.0f }, 2.0f, SURFACE_ASPHALT, 0.0f };
     track.nodes[3] = (TrackNode){ { 0.0f, 10.0f }, 2.0f, SURFACE_ASPHALT, 0.0f };
     check(track_build_checkpoints_from_nodes(&track), "gates derive from the node ribbon");
-    /* Bind a runtime so the definition can be proved untouched at the end of the session. */
-    TrackRuntime runtime;
-    memset(&runtime, 0, sizeof(runtime));
-    track_runtime_bind(&runtime, &track);
+    /* Bind a runtime so the definition can be proved untouched at the end of the session.
+     * The runtime embeds the collision world (plain data, ~160 KB), so it lives on the heap
+     * rather than the scenario's stack frame. */
+    TrackRuntime *runtime = (TrackRuntime *)calloc(1, sizeof(TrackRuntime));
+    track_runtime_bind(runtime, &track);
     const uint32_t hashAtBind = track_geometry_hash(&track);
 
     RacerProgress alice;
@@ -833,9 +1602,10 @@ static void scenario_progress_isolation(void)
     /* --- The shared definition was never written --- */
     check(track_geometry_hash(&track) == hashAtBind,
           "the shared geometry hash is unchanged across the session (%08x)", hashAtBind);
-    check(track_runtime_definition_unchanged(&runtime, &track),
+    check(track_runtime_definition_unchanged(runtime, &track),
           "the runtime confirms its bound definition was not mutated");
 
+    free(runtime);
     track_free(&track);
 }
 
@@ -953,6 +1723,14 @@ static void scenario_chicane_track(void)
         vehicle_spec_set_default(&spec);
         vehicle_spec_refresh_derived(&spec);
 
+        /* The centreline probe drives the swept narrowphase through the collision world. */
+        CollisionWorld *world = alloc_collision_world();
+        check(collision_world_build_from_track(world, &track),
+              "the chicane barriers build into a collision world");
+        check(world->shapeCount == 2 * track.count,
+              "two barrier shapes per centreline edge (%d == 2 x %d)", world->shapeCount,
+              track.count);
+
         int contactNodes = 0;
         int firstContactAt = -1;
         for (int i = 0; i < track.count; i++) {
@@ -974,7 +1752,7 @@ static void scenario_chicane_track(void)
             renderState.currHeadingRad = headingRad;
 
             float lockoutS = 0.0f;
-            if (collision_resolve_track(&spec, &state, &renderState, &track, NULL, &lockoutS) >
+            if (collision_resolve_track(world, 1u, &spec, &state, &renderState, &lockoutS) >
                 0) {
                 contactNodes++;
                 if (firstContactAt < 0) firstContactAt = i;
@@ -984,6 +1762,7 @@ static void scenario_chicane_track(void)
               "a car on the centreline never touches a barrier: %d of %d nodes reported "
               "contact (first at index %d)",
               contactNodes, track.count, firstContactAt);
+        free(world);
     }
 
     /* --- The geometry hash is stable and shape-sensitive --- */
@@ -2966,6 +3745,14 @@ static const TestScenario kGameplayScenarios[] = {
     { "collision-units",
       "direct collision_resolve_track tests: count, push, impulse, multi-contact",
       scenario_collision_units },
+    { "collision-world",
+      "issue #26 world contract: stable ids, layers, authored objects, multi-proxy order, "
+      "penetration recovery, corners, contact feed",
+      scenario_collision_world },
+    { "collision-broadphase",
+      "issue #26 broadphase: grid-vs-brute property tests with fixed seeds, overflow flag, "
+      "measured query benchmark",
+      scenario_collision_broadphase },
     { "checkpoint-lap", "ordered gates, out-of-order detection, forward-only, and lap timing",
       scenario_checkpoint_lap },
     { "checkpoint-lap-sf",

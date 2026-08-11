@@ -116,6 +116,53 @@ static Vector2 lerp_vec(Vector2 a, Vector2 b, float t)
 {
     return (Vector2){ a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t };
 }
+
+/* AABB of the two capsule circles at one pose, used to query candidates. A circle's AABB
+ * contains any barrier segment that could penetrate it, and the swept pass re-queries after
+ * every contact, so a superset of exactly the penetrating shapes is always in hand. */
+static void capsule_aabb(const CollisionBody *body, Vector2 pos, float hdg, Vector2 *minMOut,
+                         Vector2 *maxMOut)
+{
+    const float r = body->radiusM;
+    const Vector2 bodyPts[2] = { { body->cgToFrontM, 0.0f }, { -body->cgToRearM, 0.0f } };
+    Vector2 minM = { INFINITY, INFINITY };
+    Vector2 maxM = { -INFINITY, -INFINITY };
+    for (int c = 0; c < 2; c++) {
+        const Vector2 w = world_from_body(bodyPts[c], pos, hdg);
+        minM.x = fminf(minM.x, w.x - r);
+        minM.y = fminf(minM.y, w.y - r);
+        maxM.x = fmaxf(maxM.x, w.x + r);
+        maxM.y = fmaxf(maxM.y, w.y + r);
+    }
+    *minMOut = minM;
+    *maxMOut = maxM;
+}
+
+/* ====================================================================================== */
+/*  Contact recording                                                                      */
+/* ====================================================================================== */
+
+/* Append one physical contact to the world's per-tick event feed. The feed is a bounded
+ * presentation buffer: when it fills, recording stops and the overflow flag is set, but the
+ * resolution that produced the contact has already happened and never depends on the feed. */
+static void record_contact(CollisionWorld *world, CollisionBodyId bodyId,
+                           CollisionShapeId shapeId, Vector2 pointM, Vector2 normalM,
+                           float approachSpeedMps)
+{
+    if (world == NULL) return;
+    if (world->contactCount < COLLISION_WORLD_MAX_CONTACTS) {
+        world->contacts[world->contactCount] =
+            (CollisionContact){ .bodyId = bodyId,
+                                .shapeId = shapeId,
+                                .pointM = pointM,
+                                .normalM = normalM,
+                                .approachSpeedMps = approachSpeedMps };
+        world->contactCount++;
+    } else {
+        world->contactsOverflowed = true;
+    }
+}
+
 /* ====================================================================================== */
 /*  Contact resolution helper                                                              */
 /* ====================================================================================== */
@@ -134,7 +181,8 @@ static bool resolve_circle_barrier(const VehicleSpec *spec, VehicleState *state,
                                    VehicleRenderState *renderState, Vector2 pos, float hdg,
                                    Vector2 contactPt, float distSq, Vector2 pushN,
                                    float radiusM, float rHalf, float muC, Vector2 *vCgWorld,
-                                   float *crashLockoutTimerS)
+                                   float *crashLockoutTimerS, CollisionWorld *world,
+                                   CollisionBodyId bodyId, CollisionShapeId shapeId)
 {
     const float dist = sqrtf(distSq);
     const float pen = radiusM - dist;
@@ -153,6 +201,8 @@ static bool resolve_circle_barrier(const VehicleSpec *spec, VehicleState *state,
 
     /* Normal velocity (positive = separating, negative = approaching). */
     const float vn = vContact.x * pushN.x + vContact.y * pushN.y;
+    /* The physical event: positive approach speed means the body was coming in. */
+    record_contact(world, bodyId, shapeId, contactPt, pushN, -vn);
     if (vn >= 0.0f) return true; /* separating: push only, no impulse needed */
 
     /* Tangential direction: rotate normal +90°. */
@@ -197,109 +247,85 @@ static bool resolve_circle_barrier(const VehicleSpec *spec, VehicleState *state,
 }
 
 /* ====================================================================================== */
-/*  Collision resolution — the main function                                               */
+/*  Swept narrowphase for one body                                                         */
 /* ====================================================================================== */
 
-int collision_resolve_track(const VehicleSpec *spec, VehicleState *state,
-                            VehicleRenderState *renderState, const TrackDefinition *track,
-                            const TrackRuntime *runtime, float *crashLockoutTimerS)
+/* Resolve one body's swept capsule against the world's static shapes.
+ *
+ * Per substep, the candidates are the shapes overlapping the capsule AABB at the substep
+ * pose, in ascending shape id order — the exact order the legacy loop walked every barrier
+ * in. After a contact pushes the body, the candidate list is re-queried at the new pose
+ * STRICTLY AHEAD of the pass cursor (afterId), so shapes already passed are never revisited
+ * and shapes that only now penetrate are found before their turn. That keeps the resolution
+ * sequence bit-identical to a single ascending brute-force pass while skipping shapes that
+ * cannot touch the body.
+ *
+ * As before, at the FIRST substep that finds penetration all currently-penetrating
+ * circle/barrier pairs are resolved in deterministic order, then the substep loop returns
+ * the contact count: once state is mutated the prev→curr interpolation is stale. */
+static int resolve_body_vs_static(CollisionWorld *world, const CollisionBody *body,
+                                  const VehicleSpec *spec, VehicleState *state,
+                                  VehicleRenderState *renderState, float *crashLockoutTimerS)
 {
-    (void)runtime; /* barriers are pure definition geometry today; see the header */
-
-    if (spec == NULL || state == NULL || renderState == NULL || track == NULL ||
-        track->nodes == NULL || track->count < 2) {
-        return 0;
-    }
-
-    const float radiusM = spec->bodyHalfWidthM;
+    const float radiusM = body->radiusM;
     const float radiusSq = radiusM * radiusM;
-    if (radiusM <= 0.0f) return 0;
-
     const float rHalf = spec->collisionRestitution;
     const float muC = spec->collisionFriction;
 
     /* Capsule circle body-frame positions. */
-    const Vector2 bFront = body_front_position(spec->cgToFrontM);
-    const Vector2 bRear = body_rear_position(spec->cgToRearM);
-
-    /* Start-of-tick and end-of-tick transforms. */
-    const Vector2 prevPos = renderState->prevPositionM;
-    const Vector2 currPos = renderState->currPositionM;
-    const float prevHdg = renderState->prevHeadingRad;
-    const float currHdg = renderState->currHeadingRad;
+    const Vector2 bFront = body_front_position(body->cgToFrontM);
+    const Vector2 bRear = body_rear_position(body->cgToRearM);
 
     /* World-frame CG velocity at start of tick. Mutable: each resolved contact updates it
      * so a subsequent contact in the same substep uses the corrected velocity. */
-    Vector2 vCgWorld =
-        world_velocity(state->velocityLongitudinalMps, state->velocityLateralMps, currHdg);
+    Vector2 vCgWorld = world_velocity(state->velocityLongitudinalMps, state->velocityLateralMps,
+                                      body->currHdgRad);
 
-    /* Substep sweep: small increments from prev→curr catch the earliest contact.
-     * At the FIRST substep that finds penetration, ALL currently-penetrating circle/barrier
-     * pairs are resolved in deterministic order (front-then-rear, left-then-right, per
-     * segment), then the function returns the total contact count. We do NOT continue to
-     * later substeps: once state is mutated the prev→curr interpolation is stale. */
     for (int sub = 0; sub < COLLISION_SUBSTEPS; sub++) {
         const float t = (float)sub / (float)COLLISION_SUBSTEPS;
-        Vector2 pos = lerp_vec(prevPos, currPos, t);
-        const float hdg = lerp_angle_simple(prevHdg, currHdg, t);
+        Vector2 pos = lerp_vec(body->prevPosM, body->currPosM, t);
+        const float hdg = lerp_angle_simple(body->prevHdgRad, body->currHdgRad, t);
         int contacts = 0;
 
-        const int n = track->count;
-        const int limit = track->routeClosed ? n : n - 1;
-        for (int i = 0; i < limit; i++) {
-            const int j = track->routeClosed ? (i + 1) % n : i + 1;
-            const TrackNode *ni = &track->nodes[i];
-            const TrackNode *nj = &track->nodes[j];
-            /* Segment direction and left perpendicular. */
-            const float segDx = nj->centerM.x - ni->centerM.x;
-            const float segDy = nj->centerM.y - ni->centerM.y;
-            const float segLen = sqrtf(segDx * segDx + segDy * segDy);
-            if (segLen < 1e-12f) continue;
-            const float invLen = 1.0f / segLen;
-            const Vector2 dir = { segDx * invLen, segDy * invLen };
-            const Vector2 perp = { -dir.y, dir.x };
+        Vector2 minM, maxM;
+        capsule_aabb(body, pos, hdg, &minM, &maxM);
+        int n = collision_world_query_static(world, minM, maxM, body->mask,
+                                             COLLISION_SHAPE_ID_NONE, world->queryScratch,
+                                             COLLISION_WORLD_MAX_STATIC_SHAPES);
+        int i = 0;
+        while (i < n) {
+            const CollisionShapeId id = world->queryScratch[i++];
+            const CollisionStaticShape *shape = &world->shapes[id];
+            bool resolvedAny = false;
 
-            /* Barriers stand at the RUNOFF edge, not the racing-surface edge, so a car can
-             * run wide onto the runoff and lose grip without instantly striking a wall. A
-             * node with no runoff band reports its racing half-width here, which is exactly
-             * where its barrier used to be. */
-            const float hwI = track_node_barrier_half_width(ni);
-            const float hwJ = track_node_barrier_half_width(nj);
-            const Vector2 barriers[2][2] = {
-                { /* left */ { ni->centerM.x + perp.x * hwI, ni->centerM.y + perp.y * hwI },
-                  { nj->centerM.x + perp.x * hwJ, nj->centerM.y + perp.y * hwJ } },
-                { /* right */ { ni->centerM.x - perp.x * hwI, ni->centerM.y - perp.y * hwI },
-                  { nj->centerM.x - perp.x * hwJ, nj->centerM.y - perp.y * hwJ } },
-            };
-            /* Push normal: for ribbon tracks, left barrier pushes right ({dir.y, -dir.x}),
-             * right barrier pushes left ({-dir.y, dir.x}).
-             * For parking lot perimeter, BOTH barriers push INWARD (perp). */
-            const Vector2 pushNs[2] = { track->isParkingLot ? perp : (Vector2){ dir.y, -dir.x },
-                                        track->isParkingLot ? perp
-                                                            : (Vector2){ -dir.y, dir.x } };
+            for (int circle = 0; circle < 2; circle++) {
+                const Vector2 bodyPt = (circle == 0) ? bFront : bRear;
+                const Vector2 circleWorld = world_from_body(bodyPt, pos, hdg);
 
-            for (int barrier = 0; barrier < 2; barrier++) {
-                const Vector2 bA = barriers[barrier][0];
-                const Vector2 bB = barriers[barrier][1];
-                const Vector2 pushN = pushNs[barrier];
+                float distSq;
+                const Vector2 contactPt =
+                    closest_point_and_dist_sq(circleWorld, shape->aM, shape->bM, &distSq);
 
-                for (int circle = 0; circle < 2; circle++) {
-                    const Vector2 bodyPt = (circle == 0) ? bFront : bRear;
-                    const Vector2 circleWorld = world_from_body(bodyPt, pos, hdg);
-
-                    float distSq;
-                    const Vector2 contactPt =
-                        closest_point_and_dist_sq(circleWorld, bA, bB, &distSq);
-
-                    if (distSq < radiusSq) {
-                        if (resolve_circle_barrier(spec, state, renderState, pos, hdg,
-                                                   contactPt, distSq, pushN, radiusM, rHalf,
-                                                   muC, &vCgWorld, crashLockoutTimerS)) {
-                            contacts++;
-                            pos = state->positionM;
-                        }
+                if (distSq < radiusSq) {
+                    if (resolve_circle_barrier(spec, state, renderState, pos, hdg, contactPt,
+                                               distSq, shape->pushNormalM, radiusM, rHalf, muC,
+                                               &vCgWorld, crashLockoutTimerS, world, body->id,
+                                               id)) {
+                        contacts++;
+                        resolvedAny = true;
+                        pos = state->positionM;
                     }
                 }
+            }
+
+            if (resolvedAny) {
+                /* The body moved: re-query strictly ahead of this shape's id at the new
+                 * pose and restart the pass there (single ascending visit, no revisits). */
+                capsule_aabb(body, pos, hdg, &minM, &maxM);
+                n = collision_world_query_static(world, minM, maxM, body->mask, id,
+                                                 world->queryScratch,
+                                                 COLLISION_WORLD_MAX_STATIC_SHAPES);
+                i = 0;
             }
         }
 
@@ -307,4 +333,74 @@ int collision_resolve_track(const VehicleSpec *spec, VehicleState *state,
     }
 
     return 0;
+}
+
+/* ====================================================================================== */
+/*  Ordered multi-body resolution                                                          */
+/* ====================================================================================== */
+
+int collision_world_resolve_bodies(CollisionWorld *world, CollisionBodyContext *contexts,
+                                   int contextCount)
+{
+    if (world == NULL || world->bodyCount == 0) return 0;
+    if (contexts == NULL && contextCount > 0) return -1;
+
+    int total = 0;
+    for (int b = 0; b < world->bodyCount; b++) {
+        const CollisionBody *body = &world->bodies[b];
+        CollisionBodyContext *ctx = NULL;
+        for (int c = 0; c < contextCount; c++) {
+            if (contexts[c].id == body->id) {
+                ctx = &contexts[c];
+                break;
+            }
+        }
+        /* Every registered body must have a response context; a missing one is a caller
+         * contract violation and is reported, not silently skipped. */
+        if (ctx == NULL) return -1;
+        if (ctx->spec == NULL || ctx->state == NULL || ctx->renderState == NULL) return -1;
+
+        const int n = resolve_body_vs_static(world, body, ctx->spec, ctx->state,
+                                             ctx->renderState, ctx->crashLockoutTimerS);
+        if (n < 0) return -1;
+        total += n;
+    }
+    return total;
+}
+
+/* ====================================================================================== */
+/*  One-entrant path                                                                       */
+/* ====================================================================================== */
+
+int collision_resolve_track(CollisionWorld *world, CollisionBodyId bodyId,
+                            const VehicleSpec *spec, VehicleState *state,
+                            VehicleRenderState *renderState, float *crashLockoutTimerS)
+{
+    if (world == NULL || spec == NULL || state == NULL || renderState == NULL) return 0;
+    if (!(spec->bodyHalfWidthM > 0.0f)) return 0;
+
+    collision_world_begin_tick(world);
+
+    CollisionBody body;
+    memset(&body, 0, sizeof(body));
+    body.id = bodyId;
+    body.layer = COLLISION_LAYER_VEHICLE_BODY;
+    body.mask = COLLISION_LAYER_STATIC_BARRIER;
+    body.cgToFrontM = spec->cgToFrontM;
+    body.cgToRearM = spec->cgToRearM;
+    body.radiusM = spec->bodyHalfWidthM;
+    body.prevPosM = renderState->prevPositionM;
+    body.currPosM = renderState->currPositionM;
+    body.prevHdgRad = renderState->prevHeadingRad;
+    body.currHdgRad = renderState->currHeadingRad;
+    if (!collision_world_add_body(world, &body)) return 0;
+
+    CollisionBodyContext ctx;
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.id = bodyId;
+    ctx.spec = spec;
+    ctx.state = state;
+    ctx.renderState = renderState;
+    ctx.crashLockoutTimerS = crashLockoutTimerS;
+    return collision_world_resolve_bodies(world, &ctx, 1);
 }
