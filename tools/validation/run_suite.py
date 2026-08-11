@@ -154,7 +154,9 @@ def main(argv: List[str] | None = None) -> int:
         # instead of being silently filtered out of the suite.
         cars = [c.strip() for c in args.cars.split(",") if c.strip()]
 
-    scenarios = [("chicane", 0), ("sprint", 3), ("technical", 3)]
+    # Start gate 8 = far-straight entry on the v2 25-gate layouts (was gate 3 under the v1
+    # 8-gate layout). chicane starts from gate 0 (start/finish) for the full out-lap+timed run.
+    scenarios = [("chicane", 0), ("sprint", 8), ("technical", 8)]
     cases = [(car_id, track, start) for track, start in scenarios for car_id in cars]
 
     stamp = time.strftime("%Y%m%d-%H%M%S")

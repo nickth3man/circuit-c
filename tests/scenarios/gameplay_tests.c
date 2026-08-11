@@ -1645,7 +1645,7 @@ static void scenario_chicane_track(void)
     check(track.nodes != NULL && track.count > 0, "the chicane allocates a centreline (%d)",
           track.count);
     check(!track.isParkingLot, "the chicane is a ribbon, not a parking lot");
-    check(strcmp(track.version, "chicane_v1") == 0, "the track carries its version (%s)",
+    check(strcmp(track.version, "chicane_v2") == 0, "the track carries its version (%s)",
           track.version);
 
     /* --- The loop actually closes ---
@@ -1678,7 +1678,8 @@ static void scenario_chicane_track(void)
     }
 
     /* --- Gates --- */
-    check(track.checkpointCount == 8, "eight required gates (got %d)", track.checkpointCount);
+    check(track.checkpointCount == 25, "twenty-five required gates (got %d)",
+          track.checkpointCount);
     for (int i = 0; i < track.checkpointCount; i++) {
         const Checkpoint *c = &track.checkpoints[i];
         const float mag =
@@ -1806,7 +1807,7 @@ static void scenario_chicane_track(void)
               "technical track keeps the sampled route (%d nodes)", technical.count);
         check(strcmp(technical.id, "technical") == 0, "technical track carries its id (%s)",
               technical.id);
-        check(strcmp(technical.version, "technical_v1") == 0,
+        check(strcmp(technical.version, "technical_v2") == 0,
               "technical track carries its version (%s)", technical.version);
         check(track_geometry_hash(&technical) != track_geometry_hash(&track),
               "technical geometry hash differs from chicane");
@@ -1821,8 +1822,9 @@ static void scenario_chicane_track(void)
         }
         check(narrowestHalfWidthM < 5.0f, "technical track narrows the racing surface (%.1f m)",
               (double)narrowestHalfWidthM);
-        check(technical.checkpointCount == 8,
-              "technical track preserves eight required gates (%d)", technical.checkpointCount);
+        check(technical.checkpointCount == 25,
+              "technical track preserves twenty-five required gates (%d)",
+              technical.checkpointCount);
 
         Vector2 startM = { 0.0f, 0.0f };
         float headingRad = 0.0f;
@@ -1858,7 +1860,7 @@ static void scenario_ai_lap(void)
     game_init(game);
 
     track_load_chicane(&game->trackDef);
-    check(game->trackDef.checkpointCount == 8, "the chicane loaded with its gates (%d)",
+    check(game->trackDef.checkpointCount == 25, "the chicane loaded with its gates (%d)",
           game->trackDef.checkpointCount);
     check(game_spawn_on_track(game), "the car was placed on the start line");
 
@@ -2305,7 +2307,7 @@ static float drive_planned_lap_s(int which, bool collapseCorridor, int *gatesTak
     Game *game = alloc_game();
     game_init(game);
     load_validation_track(which, &game->trackDef);
-    game_spawn_on_track_at(game, 3);
+    game_spawn_on_track_at(game, 8);
     game->autoTrans.enabled = true;
     game->autoTrans.forwardOnly = true;
     game->state = STATE_PLAYING;
@@ -2388,7 +2390,8 @@ static void scenario_planned_line(void)
               trackIds[which], (double)plannedLapS);
         check(centreLapS > 0.0f, "%s: the centreline control completed a timed lap (%.3f s)",
               trackIds[which], (double)centreLapS);
-        check(planGates == 16, "%s: the planned line took 16 ordered gates (got %d)",
+        check(planGates == 2 * 25,
+              "%s: the planned line took 50 ordered gates over 2 laps (got %d)",
               trackIds[which], planGates);
         check(planOutOfOrder == 0, "%s: the planned line crossed no gate out of order (%d)",
               trackIds[which], planOutOfOrder);

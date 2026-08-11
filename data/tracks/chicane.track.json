@@ -1,10 +1,10 @@
 {
   "schema": "circuit/track",
-  "version": 1,
+  "version": 2,
   "id": "chicane",
   "displayName": "Chicane Validation Circuit",
   "description": "the lap every car is validated against",
-  "contentVersion": "chicane_v1",
+  "contentVersion": "chicane_v2",
   "route": {
     "closed": true,
     "nodes": [
@@ -183,12 +183,29 @@
   "surfaces": { "offTrack": "grass", "runoff": "grass" },
   "checkpoints": [
       { "x": -60, "y": 0, "forwardX": 1, "forwardY": 0, "halfWidth": 10, "required": true },
+      { "x": -20, "y": 0, "forwardX": 1, "forwardY": 0, "halfWidth": 10, "required": true },
+      { "x": 20, "y": 0, "forwardX": 1, "forwardY": 0, "halfWidth": 10, "required": true },
+      { "x": 60, "y": 0, "forwardX": 1, "forwardY": 0, "halfWidth": 10, "required": true },
       { "x": 100, "y": 0, "forwardX": 1, "forwardY": 0, "halfWidth": 10, "required": true },
+      { "x": 131.819809, "y": 13.1801929, "forwardX": 0.707106829, "forwardY": 0.707106829, "halfWidth": 10, "required": true },
       { "x": 145, "y": 45, "forwardX": 0, "forwardY": 1, "halfWidth": 10, "required": true },
+      { "x": 131.819809, "y": 76.819809, "forwardX": -0.707106829, "forwardY": 0.707106829, "halfWidth": 10, "required": true },
       { "x": 100, "y": 90, "forwardX": -1, "forwardY": 0, "halfWidth": 10, "required": true },
+      { "x": 75, "y": 90, "forwardX": -1, "forwardY": 0, "halfWidth": 10, "required": true },
       { "x": 55, "y": 90, "forwardX": -1, "forwardY": 0, "halfWidth": 10, "required": true },
+      { "x": 44, "y": 92.8043976, "forwardX": -0.902304053, "forwardY": 0.431100309, "halfWidth": 10, "required": true },
+      { "x": 36, "y": 97.3722992, "forwardX": -0.847471595, "forwardY": 0.530840635, "halfWidth": 10, "required": true },
+      { "x": 28, "y": 102.18, "forwardX": -0.881474376, "forwardY": 0.472231895, "halfWidth": 10, "required": true },
       { "x": 15, "y": 106, "forwardX": -1, "forwardY": 0, "halfWidth": 10, "required": true },
+      { "x": 4, "y": 103.195602, "forwardX": -0.902303934, "forwardY": -0.431100309, "halfWidth": 10, "required": true },
+      { "x": -8, "y": 96.1324005, "forwardX": -0.853339911, "forwardY": -0.521354914, "halfWidth": 10, "required": true },
+      { "x": -16, "y": 91.9168015, "forwardX": -0.925881028, "forwardY": -0.377815306, "halfWidth": 10, "required": true },
       { "x": -25, "y": 90, "forwardX": -1, "forwardY": 0, "halfWidth": 10, "required": true },
-      { "x": -145, "y": 45, "forwardX": 0, "forwardY": -1, "halfWidth": 10, "required": true }
+      { "x": -60, "y": 90, "forwardX": -1, "forwardY": 0, "halfWidth": 10, "required": true },
+      { "x": -100, "y": 90, "forwardX": -1, "forwardY": 0, "halfWidth": 10, "required": true },
+      { "x": -131.819809, "y": 76.819809, "forwardX": -0.707106829, "forwardY": -0.707106829, "halfWidth": 10, "required": true },
+      { "x": -145, "y": 45, "forwardX": 0, "forwardY": -1, "halfWidth": 10, "required": true },
+      { "x": -131.819809, "y": 13.1801929, "forwardX": 0.707106829, "forwardY": -0.707106829, "halfWidth": 10, "required": true },
+      { "x": -100, "y": 0, "forwardX": 1, "forwardY": 0, "halfWidth": 10, "required": true }
   ]
 }
