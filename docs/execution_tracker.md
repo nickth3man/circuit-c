@@ -218,7 +218,7 @@ Multiple lanes may operate in parallel after #13, but dependencies within each l
 
 ## Collision lane
 
-- [ ] [#26 — Introduce a deterministic collision world and measured broadphase](https://github.com/nickth3man/circuit-c/issues/26)
+- [x] [#26 — Introduce a deterministic collision world and measured broadphase](https://github.com/nickth3man/circuit-c/issues/26)
   - Depends on: #10, #11
 
 - [ ] [#27 — Implement deterministic vehicle-to-vehicle contact response](https://github.com/nickth3man/circuit-c/issues/27)
