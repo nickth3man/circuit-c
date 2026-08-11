@@ -55,7 +55,7 @@ block carries the fine reason. The mapping from `reason` to `result.status`:
 | `checkpoint_out_of_order`, `checkpoint_skipped` | `checkpoint_out_of_order` |
 | `stalled_on_track`, `stalled_off_track`, `collision_stuck`, `spin_then_departure` | `stalled` |
 | `slow_timeout` | `tick_budget_exceeded` |
-| `wrong_way`, `route_departure`, `localization_lost`, `planner_localization_mismatch` | `checkpoint_missed` (did not finish; the classification names why) |
+| `wrong_way`, `route_departure`, `localization_lost`, `planner_localization_mismatch`, `unexplained` | `checkpoint_missed` (did not finish; the classification names why, or records that it cannot) |
 | any class except `invalid_physics` | `video_encode_failed`, when the video pipe or write failed — the encode failure is selected ahead of every classifier branch except `invalid_physics`, because the run produced no usable video regardless of why it failed (PR #80 review) |
 
 ## Primary-selection rule
@@ -68,6 +68,10 @@ attached to that tick, with two adjustments:
 2. `slow_timeout` only applies when the tick budget expired **and** the car was still making
    forward progress (furthest bin advanced within the last `progressRecencyS`, 2.0 s). A
    stopped car at budget expiry is a stall, not a slow timeout.
+3. A run that did **not** complete its target laps and matched no class at all is
+   `unexplained`, never `pass`. This is the catch-all, and the only class with no detector of
+   its own: it is reachable precisely when every reducer above declined the run. Degenerate
+   inputs (no rows, or no `inputs`) stay `pass` — there is no run to judge.
 
 A run that completed its target laps is `pass`, even with transient
 planner/localization disagreement — the fault classes classify failures. The one exception is
@@ -93,6 +97,15 @@ All thresholds are from `ClassificationInputs` (the runner's values shown).
 | `localization_lost` | route segment invalid sustained | `routeSegmentIndex < 0` ≥ 0.75 s |
 | `planner_localization_mismatch` | AI segment ≠ route segment sustained, AI runs only | `ai_present == 1` and `aiSegment != routeSegmentIndex` ≥ 1.0 s |
 | `slow_timeout` | budget expired while still progressing | `ticksRun >= tickBudget`, progress within the last `progressRecencyS` (2.0 s), no stall/spin/departure class; progress is per-lap (the furthest bin resets at each lap close) and counts only full-bin advances |
+| `unexplained` | did not finish, and no class above fits | no detector: selected when `rows[last].lapIndex < targetLaps` and nothing else was detected. `first_fault_tick` is anchored at `last_progress_tick` — there is no causal event, so the report points at the last moment the run was still going right |
+
+A run classified `unexplained` is a **gap in the table above, not a diagnosis**. It exists so
+that a failure mode nobody has anticipated reports as an unrecognised failure instead of
+falling through to `pass`, which is what it did before (`awd_rally` on `technical`: still
+rolling at ~2.6 m/s mean, no forward progress for the last ~225 s of its budget, so the stall
+detector never fires and `slow_timeout`'s recency test rejects it — reported `FAIL` with reason
+`pass`). The evidence fields carry enough state to identify what happened; when a mode recurs,
+promote it to a class with a detector of its own and it will stop landing here.
 
 ## Named off-track definitions
 

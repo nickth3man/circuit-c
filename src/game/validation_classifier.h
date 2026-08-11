@@ -42,7 +42,23 @@ typedef enum {
     RUN_CLASS_ROUTE_DEPARTURE,     /* left the route (beyond runoff) without a preceding spin */
     RUN_CLASS_LOCALIZATION_LOST,   /* route localization invalidated or jumped strands */
     RUN_CLASS_PLANNER_LOCALIZATION_MISMATCH, /* the AI segment disagreed with the route segment */
-    RUN_CLASS_SLOW_TIMEOUT /* the tick budget expired while still making forward progress */
+    RUN_CLASS_SLOW_TIMEOUT, /* the tick budget expired while still making forward progress */
+    /* The catch-all: the run did not complete its target laps and NO class above fits. It is
+     * deliberately last, and it is the only class with no detector of its own — every other
+     * class is chosen by earliest causal tick, so this one is reachable only when nothing was
+     * detected at all.
+     *
+     * Its purpose is that an UNRECOGNISED failure mode reports as unrecognised instead of as a
+     * pass. Before it existed, a run that never stalled, never departed, never spun and never
+     * crashed, but simply stopped getting anywhere, fell through every reducer and reported the
+     * token "pass" beside a FAIL status (observed on awd_rally/technical: still rolling at
+     * ~2.6 m/s mean, no forward progress for the last ~225 s of its budget, so the stall
+     * detector never fires and slow_timeout's progress-recency test rejects it).
+     *
+     * A run landing here is a gap in the set above, not a diagnosis. It carries the final-state
+     * evidence fields so the mode can be identified; if one recurs, it should be promoted to a
+     * class with a detector of its own. */
+    RUN_CLASS_UNEXPLAINED
 } FailureClass;
 
 /* A single contributing event: a class that was detected, the tick it first occurred, and the
@@ -57,7 +73,10 @@ typedef struct {
 
 typedef struct {
     FailureClass primary;    /* RUN_CLASS_PASS if the run succeeded */
-    uint64_t firstFaultTick; /* earliest causal-event tick; 0 if the run passed */
+    uint64_t firstFaultTick; /* earliest causal-event tick; 0 if the run passed. For
+                              * RUN_CLASS_UNEXPLAINED there is no causal event, so it is
+                              * anchored at the last tick that made forward progress — the last
+                              * moment the run was still going right. */
     double firstFaultTimeS;  /* simulation time at that tick */
 
     /* Every distinct failure class detected, in first-occurrence order (ties broken by the
@@ -124,6 +143,10 @@ void validation_classification_inputs_default(ClassificationInputs *out);
  * expired and the car was still progressing (a stopped car at budget expiry is a stall, not a
  * slow timeout). `firstFaultTick` is the earliest detected causal-event tick, never the budget
  * timeout unless nothing earlier happened.
+ *
+ * Finally, a run that did not complete its target laps and matched NO class is RUN_CLASS_UNEXPLAINED
+ * rather than RUN_CLASS_PASS: a failure the closed set cannot describe must still report as a
+ * failure. Degenerate inputs (no rows, or no `inputs`) remain PASS — there is no run to judge.
  */
 void validation_classify(const TelemetryRow *rows, int count, const ValidationMetrics *metrics,
                          const ClassificationInputs *inputs, ValidationClassification *out);

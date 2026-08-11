@@ -10,6 +10,7 @@ Usage:
     python tools/validation/run_suite.py --no-video
     python tools/validation/run_suite.py --cars rwd_grip,fwd_light
     python tools/validation/run_suite.py --exe build/dev/circuit.exe --out artifacts/validation
+    python tools/validation/run_suite.py --ai-mode v2 --no-video
 """
 
 from __future__ import annotations
@@ -87,6 +88,7 @@ def run_car_validation(
     start_checkpoint: int,
     no_video: bool,
     repo_root: str,
+    ai_mode: str,
 ) -> Dict[str, Any]:
     cmd = [
         exe_path,
@@ -97,6 +99,8 @@ def run_car_validation(
         track,
         "--start-checkpoint",
         str(start_checkpoint),
+        "--ai-mode",
+        ai_mode,
         "--output",
         case_dir,
     ]
@@ -134,6 +138,12 @@ def main(argv: List[str] | None = None) -> int:
     parser.add_argument("--out", default="artifacts/validation", help="root output directory")
     parser.add_argument("--cars", help="comma-separated car IDs filter")
     parser.add_argument("--no-video", action="store_true", help="disable MP4 video encoding")
+    parser.add_argument(
+        "--ai-mode",
+        choices=["legacy", "v2"],
+        default="legacy",
+        help="which AI driver architecture drives the suite (issue #79 A/B)",
+    )
     args = parser.parse_args(argv)
 
     repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -161,7 +171,8 @@ def main(argv: List[str] | None = None) -> int:
 
     stamp = time.strftime("%Y%m%d-%H%M%S")
     commit = get_commit(repo_root)
-    suite_id = f"{stamp}-track-suite_v2-{commit}"
+    # The AI mode is part of the suite id so an A/B pair does not collide in artifacts/validation.
+    suite_id = f"{stamp}-track-suite_v2-{commit}-ai_{args.ai_mode}"
 
     out_root = os.path.join(repo_root, args.out) if not os.path.isabs(args.out) else args.out
     suite_dir = os.path.join(out_root, suite_id)
@@ -187,6 +198,7 @@ def main(argv: List[str] | None = None) -> int:
             start_checkpoint,
             args.no_video,
             repo_root,
+            args.ai_mode,
         )
         status = run_data.get("result", {}).get("status", "FAIL")
         reason = run_data.get("result", {}).get("failure_reason")
@@ -235,6 +247,7 @@ def main(argv: List[str] | None = None) -> int:
     suite_summary = {
         "schema_version": "1.0.0",
         "suite_id": suite_id,
+        "ai_mode": args.ai_mode,
         "scenarios": [{"track": track, "start_checkpoint": start} for track, start in scenarios],
         "commit": commit,
         "total": len(cases),

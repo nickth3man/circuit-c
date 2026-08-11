@@ -3972,6 +3972,44 @@ static void scenario_failure_classification(void)
               "slow_timeout is the only contributing event");
     }
 
+    /* 4b. The catch-all. The contrast with slow_timeout above: the budget expired while the car
+     * was still MOVING but had long since stopped PROGRESSING, so no stall fires (speed is over
+     * the threshold), no departure/spin/wrong-way fires, and slow_timeout's progress-recency
+     * test rejects it. Nothing in the closed set describes it. That must report as a failure,
+     * not as "pass" beside a FAIL status — the awd_rally/technical case (#79). */
+    {
+        TelemetryRow rows[400]; /* 400 rows at 60 Hz = 6.65 s */
+        for (int i = 0; i < 400; i++) {
+            /* Progress advances for the first 100 rows, then stops dead while the car keeps
+             * rolling at 10 m/s: moving, but going nowhere. */
+            const float furthestM = (i < 100) ? 10.0f * (float)(i + 1) : 1000.0f;
+            cls_fill_row(&rows[i], cls_tick(i), 10.0f, 0.0f, 0, 5, 6, 0, 0, 5, 5, furthestM,
+                         0.0f, 1);
+        }
+        cls_default_inputs(&in);
+        validation_classify(rows, 400, NULL, &in, &cls);
+        check(cls.primary == RUN_CLASS_UNEXPLAINED,
+              "an incomplete run matching no class is unexplained, never pass (got %s)",
+              failure_class_reason(cls.primary));
+        check(strcmp(failure_class_reason(cls.primary), "unexplained") == 0,
+              "the catch-all's token is 'unexplained'");
+        check(
+            cls.contributingCount == 1 && cls.contributing[0].reason == RUN_CLASS_UNEXPLAINED,
+            "unexplained is its own sole contributing event, so primary is always one of them");
+        check(
+            cls.firstFaultTick == cls.lastProgressTick,
+            "unexplained anchors the fault at the last tick that made progress (%llu vs %llu)",
+            (unsigned long long)cls.firstFaultTick, (unsigned long long)cls.lastProgressTick);
+
+        /* The same rows on a run that DID complete its laps stay a pass: the catch-all must not
+         * turn a clean finish into a failure. */
+        for (int i = 0; i < 400; i++) rows[i].lapIndex = in.targetLaps;
+        validation_classify(rows, 400, NULL, &in, &cls);
+        check(cls.primary == RUN_CLASS_PASS && cls.contributingCount == 0,
+              "a completed run with no detected class is still a pass (got %s)",
+              failure_class_reason(cls.primary));
+    }
+
     /* 5/6. A sustained stop is stalled_on_track on the surface and stalled_off_track beyond it. */
     {
         TelemetryRow rows[200]; /* 200 rows at 60 Hz = 3.33 s > 3.0 s */
@@ -4103,8 +4141,12 @@ static void scenario_failure_classification(void)
     }
 
     /* 12b. Non-AI rows never produce planner_localization_mismatch: aiPresent stays 0, so the
-     * zero-filled aiSegment must not be read as an AI decision (PR #80 review). The budget is
-     * not expired here so the verdict is a clean PASS with no contributing classes. */
+     * zero-filled aiSegment must not be read as an AI decision (PR #80 review).
+     *
+     * These rows never complete their laps, so the verdict is the catch-all rather than a pass
+     * — this case previously asserted RUN_CLASS_PASS, which was the "FAIL with reason pass"
+     * fallthrough itself (#79). What it is really testing is unchanged and asserted directly
+     * below: the mismatch reducer stays silent without aiPresent. */
     {
         TelemetryRow rows[70]; /* 1.17 s > 1.0 s; long enough to exceed the mismatch hold */
         for (int i = 0; i < 70; i++) {
@@ -4114,9 +4156,16 @@ static void scenario_failure_classification(void)
         cls_default_inputs(&in);
         in.ticksRun = 0; /* the budget did not expire */
         validation_classify(rows, 70, NULL, &in, &cls);
-        check(cls.primary == RUN_CLASS_PASS, "non-AI rows are not a planner mismatch (got %s)",
+        check(cls.primary != RUN_CLASS_PLANNER_LOCALIZATION_MISMATCH,
+              "non-AI rows are not a planner mismatch (got %s)",
               failure_class_reason(cls.primary));
-        check(cls.contributingCount == 0, "non-AI rows carry no contributing classes");
+        for (int i = 0; i < cls.contributingCount; i++) {
+            check(cls.contributing[i].reason != RUN_CLASS_PLANNER_LOCALIZATION_MISMATCH,
+                  "non-AI rows never contribute a planner mismatch");
+        }
+        check(cls.primary == RUN_CLASS_UNEXPLAINED,
+              "an incomplete run with no detected class is the catch-all (got %s)",
+              failure_class_reason(cls.primary));
     }
 
     /* 13. A run that COMPLETED its target laps is a pass despite a transient disagreement. */

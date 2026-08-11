@@ -96,6 +96,7 @@ const char *failure_class_reason(FailureClass c)
         case RUN_CLASS_LOCALIZATION_LOST: return "localization_lost";
         case RUN_CLASS_PLANNER_LOCALIZATION_MISMATCH: return "planner_localization_mismatch";
         case RUN_CLASS_SLOW_TIMEOUT: return "slow_timeout";
+        case RUN_CLASS_UNEXPLAINED: return "unexplained";
     }
     return "unknown";
 }
@@ -117,6 +118,7 @@ const char *failure_class_label(FailureClass c)
         case RUN_CLASS_PLANNER_LOCALIZATION_MISMATCH:
             return "planner disagreed with route localization";
         case RUN_CLASS_SLOW_TIMEOUT: return "tick budget expired while still progressing";
+        case RUN_CLASS_UNEXPLAINED: return "did not finish, no known failure class fits";
     }
     return "unknown";
 }
@@ -489,6 +491,25 @@ void validation_classify(const TelemetryRow *rows, int count, const ValidationMe
         earliestTick = 0;
         earliestTimeS = 0.0;
         out->contributingCount = 0;
+    }
+    /* The catch-all, and the mirror image of the rule above: a run that did NOT complete its
+     * target laps is a failure even when every reducer above declined it, so it must not report
+     * the token "pass" beside a FAIL status. Reaching here means no class was detected at all
+     * (any detection sets `primary`), so `contributingCount` is 0 and this becomes the sole
+     * contributing event — keeping the invariant that `primary` is always one of them.
+     *
+     * There is no causal event to point at, so the fault is anchored at the last tick that made
+     * forward progress: the last moment the run was still going right, which is where a reader
+     * diagnosing an unrecognised mode needs to start looking. */
+    else if (primary == RUN_CLASS_PASS && rows[count - 1].lapIndex < in->targetLaps) {
+        primary = RUN_CLASS_UNEXPLAINED;
+        earliestTick = lastProgressTick;
+        earliestTimeS = lastProgressTimeS;
+        haveEarliest = true;
+        out->contributing[0].reason = RUN_CLASS_UNEXPLAINED;
+        out->contributing[0].tick = lastProgressTick;
+        out->contributing[0].timeS = lastProgressTimeS;
+        out->contributingCount = 1;
     }
 
     out->primary = primary;
