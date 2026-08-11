@@ -309,8 +309,12 @@ Multiple lanes may operate in parallel after #13, but dependencies within each l
 
 These tasks may run in parallel once their dependencies are complete.
 
-- [ ] [#44 — Build a multi-car determinism, replay, checksum, and regression matrix](https://github.com/nickth3man/circuit-c/issues/44)
+- [x] [#44 — Build a multi-car determinism, replay, checksum, and regression matrix](https://github.com/nickth3man/circuit-c/issues/44)
   - Depends on: #9, #10, #11, #27, #38
+  - Multi-entrant simulation loop in the fixed update (every roster entrant runs the gated
+    pipeline; collision resolves all bodies + pairs in one pass; single-car path
+    byte-identical). Per-entrant checksums + `game_divergence_report` naming tick/entrant/
+    field. 4-entrant AI determinism scenario (3000 ticks, identical per-tick checksums).
 
 - [ ] [#45 — Establish fixed-step performance budgets and multi-car scale benchmarks](https://github.com/nickth3man/circuit-c/issues/45)
   - Depends on: #10, #26, #39
