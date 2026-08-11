@@ -272,6 +272,19 @@ typedef struct {
     float raceDistanceM;
     bool wrongWay;        /* latched by the hysteresis below, not by this tick's angle */
     float wrongWayTimerS; /* [0, ROUTE_WRONG_WAY_HOLD_S]; the hysteresis integrator */
+
+    /*
+     * Non-scoring progress bins (issue #78 §2). DIAGNOSTIC ONLY: derived from
+     * location.longitudinalM at a fixed interval, they record where the car reached and how long
+     * since it last made meaningful forward progress. They MUST NOT mutate nextCheckpoint, lap
+     * validity, sector timing, classification, replay authority, or the rolling checksum —
+     * docs/SIMULATION_OWNERSHIP.md classifies them as recomputed diagnostics and they are
+     * deliberately excluded from hash_entrant(). A failure classifier reads them to tell a slow
+     * but moving car from a stationary one.
+     */
+    float progressBinM; /* current lap-relative bin (longitudinalM mod lap length, binned) */
+    float furthestProgressMLap; /* furthest bin reached in the current lap */
+    uint64_t lastProgressTick;  /* sim tick at which furthestProgressMLap last advanced */
 } RacerProgress;
 
 /*
