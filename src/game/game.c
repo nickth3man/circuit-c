@@ -1373,6 +1373,13 @@ GAME_API TelemetryRow game_telemetry_row(const Game *game, int substepCount)
     row.lapIndex = game->progress.lap;
     row.lapState = (game->progress.lap < 1) ? 0 : 1;
     row.checkpointEvent = encode_checkpoint_event(&game->pendingTelemetryCheckpointEvent);
+    /* The event's own gate index: an out-of-order crossing never advances
+     * progress->lastCrossedIndex, so this is the only place the actually-crossed gate is
+     * available to the classifier. -1 when nothing was crossed. */
+    row.checkpointCrossedIndex = -1;
+    if (game->pendingTelemetryCheckpointEvent.crossed) {
+        row.checkpointCrossedIndex = game->pendingTelemetryCheckpointEvent.index;
+    }
     /* Consume the 60 Hz telemetry event latch so it is sampled exactly once into CSV/metrics. */
     ((Game *)game)->pendingTelemetryCheckpointEvent.crossed = false;
     row.crashLockoutS = game->crashLockoutTimerS;
@@ -1409,15 +1416,24 @@ GAME_API TelemetryRow game_telemetry_row(const Game *game, int substepCount)
         row.routeHeadingErrorRad = loc->headingErrorRad;
         row.routeConfidence = loc->confidence;
         row.onRouteFlag = loc->onRoute ? 1 : 0;
-        const float dx = game->vehicle.positionM.x - loc->pointM.x;
-        const float dy = game->vehicle.positionM.y - loc->pointM.y;
-        row.routeDepartureDistM = sqrtf(dx * dx + dy * dy);
+        /* Leave distance is only meaningful while localization is valid: an invalid RouteLocation
+         * has a zeroed pointM (origin), so the raw projection would report distance to the
+         * origin. Report 0 instead, the "no closest centreline point" sentinel. */
+        row.routeDepartureDistM = 0.0f;
+        if (loc->valid) {
+            const float dx = game->vehicle.positionM.x - loc->pointM.x;
+            const float dy = game->vehicle.positionM.y - loc->pointM.y;
+            row.routeDepartureDistM = sqrtf(dx * dx + dy * dy);
+        }
         row.wheelsOffAsphalt =
             (int)(game->vehicle.wheels[WHEEL_FRONT_LEFT].surfaceId != SURFACE_ASPHALT) +
             (int)(game->vehicle.wheels[WHEEL_FRONT_RIGHT].surfaceId != SURFACE_ASPHALT) +
             (int)(game->vehicle.wheels[WHEEL_REAR_LEFT].surfaceId != SURFACE_ASPHALT) +
             (int)(game->vehicle.wheels[WHEEL_REAR_RIGHT].surfaceId != SURFACE_ASPHALT);
-        row.beyondRunoff = (loc->confidence <= 0.0f) ? 1 : 0;
+        /* Zero confidence means "at/past the barrier" only when localization is actually
+         * tracking the route; an invalid localization (no route loaded, continuity lost)
+         * also carries confidence 0 but is not a barrier crossing. */
+        row.beyondRunoff = (loc->valid && loc->confidence <= 0.0f) ? 1 : 0;
         row.progressBinM = game->progress.progressBinM;
         row.furthestProgressM = game->progress.furthestProgressMLap;
         row.lastCrossedIndex = game->progress.lastCrossedIndex;
@@ -1427,6 +1443,9 @@ GAME_API TelemetryRow game_telemetry_row(const Game *game, int substepCount)
         row.lapTimerSCol = game->progress.lapTimerS;
         row.wrongWayFlag = game->progress.wrongWay ? 1 : 0;
     }
+    /* AI decision telemetry stays zero on non-AI runs; aiPresent is the explicit marker the
+     * classifier requires before it may compare an AI decision against the route segment. */
+    row.aiPresent = (game->controller.kind == CONTROLLER_KIND_AI) ? 1 : 0;
     if (game->controller.kind == CONTROLLER_KIND_AI) {
         const AiDriverState *ai = &game->controller.memory.ai;
         row.aiSegment = ai->nearestSegment;

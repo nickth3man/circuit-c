@@ -36,6 +36,22 @@ const char *run_failure_reason(RunStatus s)
     return "unknown";
 }
 
+int run_report_missed_checkpoints(const RacerProgress *progress, int checkpointCount)
+{
+    if (progress == NULL || checkpointCount <= 0) return 0;
+    /* Crossings in the current lap, anchor included: nextCheckpoint is lapStartCheckpoint+1 on
+     * a fresh lap, so the raw offset already counts the anchor. The wrap (nextCheckpoint ==
+     * lapStartCheckpoint, raw offset 0) is the state right after the last scored gate: every
+     * scored gate is crossed, only the anchor crossing that closes the lap remains, so the
+     * lap reads as fully crossed rather than as a fresh one (PR #80 review). */
+    const int raw =
+        (progress->nextCheckpoint - progress->lapStartCheckpoint + checkpointCount) %
+        checkpointCount;
+    const int crossedThisLap = (raw == 0) ? checkpointCount : raw;
+    const int stillOwed = checkpointCount - crossedThisLap;
+    return (stillOwed > 0) ? stillOwed : 0;
+}
+
 /* Minimal JSON string escaping, byte-for-byte the same rule as failure_bundle.c's helper so the
  * two writers cannot disagree about what a safe string is. */
 static void write_json_string(FILE *out, const char *text)
@@ -134,10 +150,12 @@ bool run_report_write(const char *path, const RunReportInput *in)
 
     /* Failure classification (issue #78 §5/§6). The coarse result.status stays the closed-set
      * verdict; this block carries the fine-grained primary reason, the first causal tick, the
-     * contributing events, and where the run stopped and what it owed. */
+     * contributing events, and where the run stopped and what it owed. A NULL reason means no
+     * classifier ran (pre-run failures such as an invalid car/spec or an ffmpeg start error):
+     * that is reported as "unclassified", never as a pass (PR #80 review). */
     fprintf(file, "  \"classification\": { \"reason\": ");
-    write_json_string(file,
-                      in->classificationReason != NULL ? in->classificationReason : "pass");
+    write_json_string(file, in->classificationReason != NULL ? in->classificationReason
+                                                             : "unclassified");
     fprintf(file, ", \"first_fault_tick\": %" PRIu64 ", \"contributing\": [",
             in->firstFaultTick);
     for (int i = 0; i < in->contributingCount && i < 8; i++) {

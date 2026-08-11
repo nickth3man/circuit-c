@@ -182,6 +182,15 @@ typedef struct {
     float aiGripCut;        /* throttle surrendered to traction management */
     int aiPlanBaseNode;     /* centreline node the plan window starts at */
     int aiPlanLayerCount;   /* plan layers currently held */
+
+    /* PR #80 review follow-up: an explicit AI-presence flag and the gate the most recent
+     * checkpoint event actually crossed. An out-of-order crossing does NOT advance
+     * progress->lastCrossedIndex (it names the previous legal gate), so the classifier needs
+     * the event's own index to tell a forward skip from a gate behind the owed one. Both stay
+     * zero/absent on rows without a crossing or an AI controller; appending keeps every
+     * earlier column in place and in order. */
+    int aiPresent;              /* 1 iff an AI controller drove this row; 0 otherwise */
+    int checkpointCrossedIndex; /* gate crossed by the last checkpoint event; -1 when none */
 } TelemetryRow;
 
 typedef struct {

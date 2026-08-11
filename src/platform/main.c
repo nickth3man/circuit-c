@@ -521,6 +521,10 @@ static int run_validate_lap(Game *game, const Options *options)
         rep.runId = "invalid_car";
         rep.carId = carId;
         rep.status = RUN_FAIL_SPEC_INVALID;
+        /* No validation run happened: checkpoint sentinels must say so rather than claiming
+         * gate 0 was crossed (PR #80 review). */
+        rep.lastCheckpointIndex = -1;
+        rep.expectedCheckpointIndex = -1;
         run_report_write(jsonPath, &rep);
         return 2;
     }
@@ -533,6 +537,10 @@ static int run_validate_lap(Game *game, const Options *options)
         rep.runId = "invalid_spec";
         rep.carId = carId;
         rep.status = RUN_FAIL_SPEC_INVALID;
+        /* No validation run happened: checkpoint sentinels must say so rather than claiming
+         * gate 0 was crossed (PR #80 review). */
+        rep.lastCheckpointIndex = -1;
+        rep.expectedCheckpointIndex = -1;
         run_report_write(jsonPath, &rep);
         return 2;
     }
@@ -555,6 +563,10 @@ static int run_validate_lap(Game *game, const Options *options)
             rep.runId = "ffmpeg_failed";
             rep.carId = carId;
             rep.status = RUN_FAIL_VIDEO_ENCODE_FAILED;
+            /* No validation run happened: checkpoint sentinels must say so rather than claiming
+             * gate 0 was crossed (PR #80 review). */
+            rep.lastCheckpointIndex = -1;
+            rep.expectedCheckpointIndex = -1;
             run_report_write(jsonPath, &rep);
             return 3;
         }
@@ -749,7 +761,11 @@ static int run_validate_lap(Game *game, const Options *options)
      * stuck, and RUN_FAIL_TICK_BUDGET_EXCEEDED fires only when the budget expired while the car
      * was still progressing — a stopped car at budget expiry is a stall, not a slow timeout. */
     RunStatus status = RUN_PASS;
-    if (!allFinite) {
+    if (!allFinite || classification.primary == RUN_CLASS_INVALID_PHYSICS) {
+        /* The loop only checks position X/Y; a non-finite speed (or a row the loop never saw)
+         * is caught by the classifier's finite_row, which maps to the same coarse verdict
+         * (docs/VALIDATION_FAILURES.md). PR #80 review: the classifier branch was missing, so a
+         * non-finite speed fell through to checkpoint_missed. */
         status = RUN_FAIL_INVALID_STATE;
     } else if (writeFailed || (pipe != NULL && ffmpegStatus != 0)) {
         status = RUN_FAIL_VIDEO_ENCODE_FAILED;
@@ -806,17 +822,14 @@ static int run_validate_lap(Game *game, const Options *options)
     rep.ticksRun = ticksRun;
     rep.status = status;
     rep.checkpointsPassed = metrics.checkpointsPassed;
-    /* Lap-aware missing-checkpoint accounting (issue #78 §5): count what the CURRENT incomplete
-     * lap still owed, never checkpointCount minus the whole run's crossings (which goes negative
-     * after one completed lap). Clamped so it can never report a negative miss. */
+    /* Lap-aware missing-checkpoint accounting (issue #78 §5): count what the CURRENT
+     * incomplete lap still owed, never checkpointCount minus the whole run's crossings (which
+     * goes negative after one completed lap). Extracted into
+     * run_report_missed_checkpoints() so the accounting test drives the same function the
+     * runner reports with (PR #80 review). */
     {
-        const int count = game->trackDef.checkpointCount;
-        const int crossedThisLap =
-            (count > 0)
-                ? ((game->progress.nextCheckpoint - game->progress.lapStartCheckpoint + count) %
-                   count)
-                : 0;
-        const int stillOwed = (count > crossedThisLap) ? (count - crossedThisLap) : 0;
+        const int stillOwed =
+            run_report_missed_checkpoints(&game->progress, game->trackDef.checkpointCount);
         rep.checkpointsMissed = (status == RUN_PASS) ? 0 : stillOwed;
     }
     rep.outOfOrderEvents = outOfOrder;
@@ -858,9 +871,13 @@ static int run_validate_lap(Game *game, const Options *options)
         bundle.replay = &game->replay;
         bundle.spec = &game->spec;
         /* The first-fault tick must point at the earliest detected causal event, not at the
-         * final budget timeout (issue #78 §6). The classifier's tick is authoritative; the
-         * local firstFaultTick (non-finite/out-of-order) and the sim tick are fallbacks. */
-        if (classification.firstFaultTick != 0) {
+         * final budget timeout (issue #78 §6). The classifier's tick is the telemetry-row
+         * (30 Hz) sample the event first showed up in; the local firstFaultTick is the exact
+         * 60 Hz tick captured in the fixed-tick loop for out-of-order/non-finite events, which
+         * can be up to one sample earlier. Either may be the earliest for a given run, so take
+         * the earlier nonzero value; the sim tick is the last-resort fallback (PR #80 review). */
+        if (classification.firstFaultTick != 0 &&
+            (firstFaultTick == 0 || classification.firstFaultTick < firstFaultTick)) {
             bundle.failingTick = classification.firstFaultTick;
         } else if (firstFaultTick != 0) {
             bundle.failingTick = firstFaultTick;

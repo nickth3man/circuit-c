@@ -134,6 +134,13 @@ void validation_classify(const TelemetryRow *rows, int count, const ValidationMe
     uint64_t firstCollisionTick = 0;
     double firstCollisionTimeS = 0.0;
     float prevLockout = 0.0f;
+    bool stallOnsetOffTrack = false; /* off-track state at the current stall interval's onset */
+    /* Forward-progress bookkeeping. furthestProgressM is PER-LAP (the progress stage resets it
+     * at every lap close), so the run-wide maximum must reset when the rows move into a new
+     * lap; otherwise a slow-but-moving car in lap 2+ can never beat lap 1's max and stops
+     * looking like it is making progress (PR #80 review). meaningfulProgressM is the bin
+     * advance that counts: sub-bin creep is not progress. */
+    int progressLap = -1;
     double furthestProgressM = -1.0;
     uint64_t lastProgressTick = 0;
     double lastProgressTimeS = 0.0;
@@ -149,19 +156,28 @@ void validation_classify(const TelemetryRow *rows, int count, const ValidationMe
             break;
         }
 
-        /* Forward progress bookkeeping. */
-        if ((double)r->furthestProgressM > furthestProgressM) {
+        /* Forward progress bookkeeping, reset per lap and gated by the meaningful-progress
+         * threshold (e.g. one 10 m bin). */
+        if (r->lapIndex != progressLap) {
+            progressLap = r->lapIndex;
+            furthestProgressM = -1.0;
+        }
+        if ((double)r->furthestProgressM >= furthestProgressM + in->meaningfulProgressM) {
             furthestProgressM = (double)r->furthestProgressM;
             lastProgressTick = tick;
             lastProgressTimeS = t;
         }
 
         /* Checkpoint events. checkpointEvent: 0 none, 1 in-order, 2 out-of-order, 3 lap-complete.
-         * An out-of-order crossing names the crossed gate in lastCrossedIndex while checkpointIndex
-         * still names the gate owed; crossing a gate AHEAD of the owed one is a forward skip
-         * (checkpoint_skipped), crossing one BEHIND or off-sequence is checkpoint_out_of_order. */
+         * An out-of-order crossing's own gate index travels in checkpointCrossedIndex (an
+         * out-of-order crossing never advances lastCrossedIndex, which still names the previous
+         * legal gate); the hand-built test rows predate that column, so fall back to
+         * lastCrossedIndex when it is absent. checkpointIndex still names the gate owed;
+         * crossing a gate AHEAD of the owed one is a forward skip (checkpoint_skipped),
+         * crossing one BEHIND or off-sequence is checkpoint_out_of_order. */
         if (r->checkpointEvent == 2) {
-            const int crossed = r->lastCrossedIndex;
+            const int crossed = (r->checkpointCrossedIndex >= 0) ? r->checkpointCrossedIndex
+                                                                 : r->lastCrossedIndex;
             const int owed = r->checkpointIndex;
             if (in->checkpointCount > 1 && crossed >= 0 && owed >= 0) {
                 const int forward =
@@ -207,18 +223,19 @@ void validation_classify(const TelemetryRow *rows, int count, const ValidationMe
             }
         }
 
-        /* Stopped (sustained), split by surface at the onset. */
+        /* Stopped (sustained), split by the surface that held AT THE ONSET. The release row's
+         * surface is irrelevant: a car that stops on asphalt and is pushed off while stopped
+         * still stalled on track (PR #80 review). */
         {
             const bool stopped = (double)r->speedMps <= in->stallSpeedMps;
             if (stopped && !stallIv.active) {
                 stallIv.active = true;
                 stallIv.onsetTick = tick;
                 stallIv.onsetTimeS = t;
+                stallOnsetOffTrack = (r->beyondRunoff == 1 || r->wheelsOffAsphalt >= 4);
             } else if (!stopped && stallIv.active) {
                 Interval ivCopy = stallIv;
-                /* Commit to the surface class that held at the onset. */
-                const bool off = (r->beyondRunoff == 1 || r->wheelsOffAsphalt >= 4);
-                commit_if_sustained(off ? &stalledOff : &stalledOn, &ivCopy, r,
+                commit_if_sustained(stallOnsetOffTrack ? &stalledOff : &stalledOn, &ivCopy, r,
                                     in->stallDurationS);
                 stallIv.active = false;
             }
@@ -290,8 +307,7 @@ void validation_classify(const TelemetryRow *rows, int count, const ValidationMe
         }
         if (stallIv.active) {
             Interval ivCopy = stallIv;
-            const bool off = (last->beyondRunoff == 1 || last->wheelsOffAsphalt >= 4);
-            commit_if_sustained(off ? &stalledOff : &stalledOn, &ivCopy, last,
+            commit_if_sustained(stallOnsetOffTrack ? &stalledOff : &stalledOn, &ivCopy, last,
                                 in->stallDurationS);
         }
         if (wrongWayIv.active) {
@@ -312,19 +328,33 @@ void validation_classify(const TelemetryRow *rows, int count, const ValidationMe
         }
     }
 
-    /* Spin-then-departure: a committed departure preceded by a qualifying spin this run. The
+    /* Spin-then-departure: a committed departure PRECEDED BY a qualifying spin this run. The
      * contributing event carries the SPIN onset (the earliest causal tick), which is what makes
-     * a spin-that-became-a-departure distinguishable from a plain departure. */
-    if (hadSpin && routeDeparture.detected) {
+     * a spin-that-became-a-departure distinguishable from a plain departure. A departure that
+     * happened before any spin is not this class (PR #80 review). */
+    if (hadSpin && routeDeparture.detected && spinOnsetTick < routeDeparture.tick) {
         record_hit(&spinThenDeparture, spinOnsetTick,
                    (spinOnsetTick > 0 && in->fixedDtS > 0.0)
                        ? (double)spinOnsetTick * in->fixedDtS
                        : routeDeparture.timeS);
     }
 
-    /* Collision-stuck: a committed stall preceded by a contact this run. */
-    if (firstCollisionSeen && (stalledOn.detected || stalledOff.detected)) {
-        record_hit(&collisionStuck, firstCollisionTick, firstCollisionTimeS);
+    /* Collision-stuck: a committed stall whose onset is AFTER a contact this run. A stall that
+     * began before the collision was not caused by it (PR #80 review). */
+    {
+        bool haveStallTick = false;
+        uint64_t stallTick = 0;
+        if (stalledOn.detected) {
+            haveStallTick = true;
+            stallTick = stalledOn.tick;
+        }
+        if (stalledOff.detected && (!haveStallTick || stalledOff.tick < stallTick)) {
+            haveStallTick = true;
+            stallTick = stalledOff.tick;
+        }
+        if (firstCollisionSeen && haveStallTick && firstCollisionTick < stallTick) {
+            record_hit(&collisionStuck, firstCollisionTick, firstCollisionTimeS);
+        }
     }
 
     /* Slow timeout: budget expired while still progressing, with no stall/spin/departure/wrong-way
@@ -340,7 +370,7 @@ void validation_classify(const TelemetryRow *rows, int count, const ValidationMe
     }
 
     /* Assemble contributing in first-occurrence order and pick the primary. */
-    struct {
+    struct Detected {
         FailureClass cls;
         const ClassHit *hit;
     } hits[] = {
@@ -359,18 +389,38 @@ void validation_classify(const TelemetryRow *rows, int count, const ValidationMe
     };
     const int nhits = (int)(sizeof(hits) / sizeof(hits[0]));
 
+    /* Collect the detected classes, then append them to `contributing` in first-occurrence
+     * (tick) order — the public contract — with the fixed hits[] order breaking ties so the
+     * output is deterministic. The earliest ticks are kept when the run exceeds
+     * CLASSIFICATION_MAX_CONTRIBUTING (PR #80 review). */
+    struct Detected detected[nhits];
+    int ndetected = 0;
+    for (int i = 0; i < nhits; i++) {
+        if (hits[i].hit->detected) detected[ndetected++] = hits[i];
+    }
+    for (int i = 1; i < ndetected; i++) {
+        const struct Detected key = detected[i];
+        int j = i - 1;
+        while (j >= 0 && detected[j].hit->tick > key.hit->tick) {
+            detected[j + 1] = detected[j];
+            j--;
+        }
+        detected[j + 1] = key;
+    }
+    for (int i = 0; i < ndetected && out->contributingCount < CLASSIFICATION_MAX_CONTRIBUTING;
+         i++) {
+        out->contributing[out->contributingCount].reason = detected[i].cls;
+        out->contributing[out->contributingCount].tick = detected[i].hit->tick;
+        out->contributing[out->contributingCount].timeS = detected[i].hit->timeS;
+        out->contributingCount++;
+    }
+
     FailureClass primary = RUN_CLASS_PASS;
     uint64_t earliestTick = 0;
     double earliestTimeS = 0.0;
     bool haveEarliest = false;
     for (int i = 0; i < nhits; i++) {
         if (!hits[i].hit->detected) continue;
-        if (out->contributingCount < CLASSIFICATION_MAX_CONTRIBUTING) {
-            out->contributing[out->contributingCount].reason = hits[i].cls;
-            out->contributing[out->contributingCount].tick = hits[i].hit->tick;
-            out->contributing[out->contributingCount].timeS = hits[i].hit->timeS;
-            out->contributingCount++;
-        }
         /* INVALID_PHYSICS forces the headline; otherwise earliest causal tick wins. */
         if (hits[i].cls == RUN_CLASS_INVALID_PHYSICS) {
             primary = RUN_CLASS_INVALID_PHYSICS;
@@ -380,7 +430,7 @@ void validation_classify(const TelemetryRow *rows, int count, const ValidationMe
             break;
         }
         /* Earliest causal tick wins. Ties resolve to the first in hits[] order, which is fixed
- * by severity, so the pick is deterministic without a separate ranking call. */
+         * by severity, so the pick is deterministic without a separate ranking call. */
         if (!haveEarliest || hits[i].hit->tick < earliestTick) {
             primary = hits[i].cls;
             earliestTick = hits[i].hit->tick;
@@ -393,8 +443,10 @@ void validation_classify(const TelemetryRow *rows, int count, const ValidationMe
     /* A run that completed its target laps is a PASS regardless of transient events. The fault
      * classes classify FAILURES, and a completed run can carry a transient planner/localization
      * disagreement (the knife-edge awd_rally slides but still makes every gate) that is not a
-     * failure. Clear the headline and the contributing list; keep the evidence fields. */
-    if (count > 0 && rows[count - 1].lapIndex >= in->targetLaps) {
+     * failure. Clear the headline and the contributing list; keep the evidence fields. The one
+     * verdict that survives completion is INVALID_PHYSICS: a non-finite state is a failure no
+     * matter where it appeared (PR #80 review). */
+    if (!invalidPhysics.detected && count > 0 && rows[count - 1].lapIndex >= in->targetLaps) {
         primary = RUN_CLASS_PASS;
         haveEarliest = false;
         earliestTick = 0;

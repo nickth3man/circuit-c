@@ -35,6 +35,7 @@
 #include "game/game.h"
 #include "game/validation_classifier.h"
 #include "game/validation_metrics.h"
+#include "game/run_report.h"
 #include "game/input.h"
 #include "core/math_utils.h"
 #include "game/particle.h"
@@ -2264,6 +2265,15 @@ static void scenario_ai_roster_laps(void)
             }
         }
 
+        /* The runner captures a final row when the loop ends on a crossing, because the
+         * lap-closing tick is only sampled on even ticks and the loop stops the moment the
+         * target laps are reached. Without this capture a lap closed on an odd tick would
+         * leave the last sampled row one lap short and the classifier would misjudge the run
+         * (PR #80 review). */
+        if (game->lastCheckpointEvent.crossed && rows != NULL && rowCount < maxRows) {
+            rows[rowCount++] = game_telemetry_row(game, 1);
+        }
+
         /* Classify with the same inputs the runner uses; a passing car must come out PASS. */
         ValidationMetrics metrics;
         validation_metrics_compute(rows, rowCount, &metrics);
@@ -3815,6 +3825,10 @@ static void cls_fill_row(TelemetryRow *r, int tick, float speedMps, float sidesl
     r->checkpointEvent = checkpointEvent;
     r->lastCrossedIndex = lastCrossed;
     r->checkpointIndex = expected;
+    /* Hand-built rows predate the checkpoint_crossed_index telemetry column; -1 makes the
+     * classifier fall back to lastCrossedIndex exactly as it did before (a zero here would be
+     * read as "gate 0 was the crossing"). */
+    r->checkpointCrossedIndex = -1;
     r->beyondRunoff = beyondRunoff;
     r->wrongWayFlag = wrongWay;
     r->routeSegmentIndex = routeSegment;
@@ -4067,25 +4081,87 @@ static void scenario_failure_classification(void)
               "a completed run clears the fault list");
     }
 
-    /* 14. Missing-checkpoint accounting is correct after 0..3 completed laps and never negative
-     * (the runner's lap-aware formula: current lap's crossings = cursor distance from lap start,
-     * missed = gates - crossings). For crossed in [1, gates), missed is provably in (0, gates),
-     * which is exactly the "never negative" property the issue requires. */
+    /* 14. Missing-checkpoint accounting is lap-aware and never negative (the runner's
+     * formula, extracted as run_report_missed_checkpoints() so this test exercises the SAME
+     * function the runner reports with). Drive the REAL progress machine for 0..3 completed
+     * laps plus 0..24 scored crossings of the current lap, count the crossings the machine
+     * actually emitted, and check the formula's answer against that independent count. The
+     * old block re-derived `missed` from its own arithmetic, so it could never fail and
+     * validated nothing about the runner (PR #80 review). */
     {
         const int gates = 25;
-        const int start = 0;
+        TrackDefinition t;
+        memset(&t, 0, sizeof(t));
+        track_load_chicane(&t);
+        check(t.checkpointCount == gates, "precondition: the chicane carries %d gates (got %d)",
+              gates, t.checkpointCount);
+
         for (int completed = 0; completed <= 3; completed++) {
-            for (int crossed = 1; crossed < gates; crossed++) {
-                const int cursor = start + completed * gates + crossed;
-                const int nextCheckpoint = cursor % gates;
-                const int crossedThisLap = (nextCheckpoint - start + gates) % gates;
-                const int missed = gates - crossedThisLap;
-                check(missed == gates - crossed,
-                      "lap %d crossing %d: missed is gates minus this lap's crossings "
-                      "(%d vs %d)",
-                      completed, crossed, missed, gates - crossed);
+            for (int crossed = 0; crossed < gates; crossed++) {
+                RacerProgress p;
+                memset(&p, 0, sizeof(p));
+                track_reset_progress_at(&p, &t, 0);
+                int crossingsThisLap = 0;
+
+                /* completed full laps: sweep scored gates 1..24, then gate 0 closes the lap. */
+                for (int lap = 0; lap < completed; lap++) {
+                    for (int g = 1; g < gates; g++) {
+                        const Checkpoint *c = &t.checkpoints[g];
+                        const Vector2 a = { c->centerM.x - c->forwardUnit.x * 2.0f,
+                                            c->centerM.y - c->forwardUnit.y * 2.0f };
+                        const Vector2 b = { c->centerM.x + c->forwardUnit.x * 2.0f,
+                                            c->centerM.y + c->forwardUnit.y * 2.0f };
+                        const TrackCheckpointEvent ev = track_update_checkpoints(&t, &p, a, b);
+                        check(ev.crossed && !ev.outOfOrder, "lap %d: gate %d crosses in order",
+                              lap, g);
+                    }
+                    {
+                        const Checkpoint *c0 = &t.checkpoints[0];
+                        const Vector2 a0 = { c0->centerM.x - c0->forwardUnit.x * 2.0f,
+                                             c0->centerM.y - c0->forwardUnit.y * 2.0f };
+                        const Vector2 b0 = { c0->centerM.x + c0->forwardUnit.x * 2.0f,
+                                             c0->centerM.y + c0->forwardUnit.y * 2.0f };
+                        const TrackCheckpointEvent ev =
+                            track_update_checkpoints(&t, &p, a0, b0);
+                        check(ev.lapCompleted, "lap %d closes at gate 0", lap);
+                    }
+                    check(p.lap == lap + 1, "lap counter advances to %d (got %d)", lap + 1,
+                          p.lap);
+                }
+
+                /* crossed scored gates of the current (incomplete) lap. */
+                for (int g = 1; g <= crossed; g++) {
+                    const Checkpoint *c = &t.checkpoints[g];
+                    const Vector2 a = { c->centerM.x - c->forwardUnit.x * 2.0f,
+                                        c->centerM.y - c->forwardUnit.y * 2.0f };
+                    const Vector2 b = { c->centerM.x + c->forwardUnit.x * 2.0f,
+                                        c->centerM.y + c->forwardUnit.y * 2.0f };
+                    const TrackCheckpointEvent ev = track_update_checkpoints(&t, &p, a, b);
+                    check(ev.crossed && !ev.outOfOrder, "current lap: gate %d crosses in order",
+                          g);
+                    crossingsThisLap++;
+                }
+                check(p.lap == completed, "state holds %d completed laps (got %d)", completed,
+                      p.lap);
+                check(p.nextCheckpoint == (crossed + 1) % gates,
+                      "next owed gate is %d after %d crossings (got %d)", (crossed + 1) % gates,
+                      crossed, p.nextCheckpoint);
+
+                /* The runner's formula, computed from the real state. */
+                const int missed = run_report_missed_checkpoints(&p, gates);
+                /* Independent expectation from the machine's event count: the scored gates
+                 * 1..24 still owed. The start/finish gate is the lap anchor (never scored), and
+                 * once every scored gate is crossed (the wrap) nothing is missed. */
+                const int expectedMissed = (gates - 1) - crossingsThisLap;
+                check(missed == expectedMissed,
+                      "lap %d, %d crossings: missed is the scored gates still owed (%d vs %d)",
+                      completed, crossed, missed, expectedMissed);
+                check(missed >= 0 && missed < gates,
+                      "missed is never negative and bounded (%d, lap %d, crossings %d)", missed,
+                      completed, crossed);
             }
         }
+        track_free(&t);
     }
 
     /* 15. The classification is a pure function: identical rows, identical verdict. */

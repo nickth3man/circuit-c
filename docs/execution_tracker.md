@@ -32,7 +32,7 @@ If work is in progress, append `— IN PROGRESS` to its line.
 
 ## Cross-cutting validation tooling
 
-- [x] [#78 — Make AI lap-validation failures diagnosable with denser route coverage and first-fault telemetry](https://github.com/nickth3man/circuit-c/issues/78)
+- [ ] [#78 — Make AI lap-validation failures diagnosable with denser route coverage and first-fault telemetry](https://github.com/nickth3man/circuit-c/issues/78) — IN PROGRESS
   - Denser chicane route coverage (8 → 25 required gates, v2 track versions), non-scoring 10 m
     progress bins, route + AI decision telemetry (append-only), an explicit failure classifier
     with a primary reason, the earliest causal tick, and contributing events, lap-aware

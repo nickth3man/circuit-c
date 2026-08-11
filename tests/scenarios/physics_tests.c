@@ -390,6 +390,10 @@ static void scenario_run_report(void)
     in.metrics = &m;
     in.hasVideo = true;
     in.hasReplay = true;
+    /* No-run sentinels: this fixture predates the classification block; the checkpoint fields
+     * must serialize as "nothing crossed" rather than a zeroed gate 0 (PR #80 review). */
+    in.lastCheckpointIndex = -1;
+    in.expectedCheckpointIndex = -1;
 
     /* Injected failure: one checkpoint was missed. */
     in.status = RUN_FAIL_CHECKPOINT_MISSED;
@@ -422,6 +426,10 @@ static void scenario_run_report(void)
               "the injected failure reason is present");
         check(strstr(buf, "\"checkpoints_missed\": 1") != NULL,
               "the missed-checkpoint count is present");
+        check(strstr(buf, "\"last_checkpoint_index\": -1") != NULL,
+              "a no-run report states no gate was crossed");
+        check(strstr(buf, "\"expected_checkpoint_index\": -1") != NULL,
+              "a no-run report states no gate was owed");
     }
 
     /* A passing run reports PASS and a null failure_reason. */

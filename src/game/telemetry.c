@@ -43,7 +43,8 @@
     "wrong_way_flag,"                                                                         \
     "ai_segment,ai_cross_track_m,ai_target_speed_mps,ai_lookahead_rad,"                       \
     "ai_binding_curv_1pm,ai_binding_dist_m,ai_pedal_axis,ai_steer_axis,ai_grip_cut,"          \
-    "ai_plan_base_node,ai_plan_layer_count"
+    "ai_plan_base_node,ai_plan_layer_count,"                                                  \
+    "ai_present,checkpoint_crossed_index"
 
 const char *telemetry_header(void)
 {
@@ -137,7 +138,7 @@ bool telemetry_write_row(TelemetryWriter *writer, const TelemetryRow *row)
         ".6f,%.6f,%d,%d,%d,%d,%d,%d,%d,%d,%.6f,%.6f,%d,"
         "%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,"
         "%d,%.6f,%.6f,%.6f,%.6f,%.6f,%d,%.6f,%d,%d,%.6f,%.6f,"
-        "%d,%d,%d,%d,%.6f,%d,%d,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%d,%d\n",
+        "%d,%d,%d,%d,%.6f,%d,%d,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%d,%d,%d,%d\n",
         row->tick, row->timeS, (double)row->positionXM, (double)row->positionYM,
         (double)row->headingRad, (double)row->velocityLongitudinalMps,
         (double)row->velocityLateralMps, (double)row->speedMps, (double)row->yawRateRadS,
@@ -179,7 +180,7 @@ bool telemetry_write_row(TelemetryWriter *writer, const TelemetryRow *row)
         (double)row->aiTargetSpeedMps, (double)row->aiLookaheadRad,
         (double)row->aiBindingCurv1pm, (double)row->aiBindingDistM, (double)row->aiPedalAxis,
         (double)row->aiSteerAxis, (double)row->aiGripCut, row->aiPlanBaseNode,
-        row->aiPlanLayerCount);
+        row->aiPlanLayerCount, row->aiPresent, row->checkpointCrossedIndex);
     if (written < 0) {
         fprintf(stderr, "TELEMETRY: write failed after %ld rows\n", writer->rowCount);
         writer->failed = true;

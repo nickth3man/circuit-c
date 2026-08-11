@@ -30,13 +30,16 @@ Every validation run writes a `classification` block (run schema 1.1.0):
 }
 ```
 
-- `reason` — the primary class (below), or `"pass"`.
+- `reason` — the primary class (below), `"pass"`, or `"unclassified"` when no classifier ran
+  (pre-run failures such as an invalid car/spec or an ffmpeg start error).
 - `first_fault_tick` — the **earliest detected causal event**, never the final budget timeout
   unless nothing earlier happened. For `collision_stuck` it is the contact; for
   `spin_then_departure` it is the spin onset.
-- `contributing` — every class detected, in first-occurrence order.
+- `contributing` — the classes detected, in first-occurrence order (ties broken by the fixed
+  severity order), truncated to the 8 earliest — a run that detects more classes keeps the
+  causal head of the sequence.
 - `last_checkpoint_index` / `expected_checkpoint_index` — the last gate crossed and the next
-  one owed at the end.
+  one owed at the end; `-1` when no validation run happened.
 - `furthest_route_distance_m` — the furthest lap-relative progress reached (from the 10 m
   diagnostic progress bins).
 - `time_since_progress_s` — how long before run end the furthest bin last advanced; a large
@@ -64,8 +67,10 @@ attached to that tick, with two adjustments:
    forward progress (furthest bin advanced within the last 2 s). A stopped car at budget
    expiry is a stall, not a slow timeout.
 
-A run that completed its target laps is always `pass`, even with transient
-planner/localization disagreement — the fault classes classify failures.
+A run that completed its target laps is `pass`, even with transient
+planner/localization disagreement — the fault classes classify failures. The one exception is
+`invalid_physics`: a non-finite pose/speed is a failure no matter where it appeared, so a
+completed run never erases it.
 
 ## The classes
 
@@ -75,7 +80,7 @@ All thresholds are from `ClassificationInputs` (the runner's values shown).
 |---|---|---|
 | `pass` | completed the target laps | — |
 | `invalid_physics` | any non-finite `position_x_m` / `position_y_m` / `speed_mps` | — |
-| `checkpoint_out_of_order` | an out-of-order crossing of a gate **behind** the owed one | `checkpointEvent == 2`, crossed < owed |
+| `checkpoint_out_of_order` | an out-of-order crossing of a gate **behind** the owed one | `checkpointEvent == 2`, crossed < owed; crossed is the event's own gate index (`checkpoint_crossed_index`, falling back to `last_crossed_index` for older rows) |
 | `checkpoint_skipped` | an out-of-order crossing of a gate **ahead** of the owed one | `checkpointEvent == 2`, crossed > owed (≤ half lap forward) |
 | `collision_stuck` | a contact (lockout rising edge, approach speed ≥ 0.1 m/s) followed by a committed stall | `collisionSpeedMpsEps = 0.1` |
 | `spin_then_departure` | a sustained spin followed by a sustained route departure | spin: \|sideslip\| > 1.48 rad while speed > 2 m/s for ≥ 0.25 s; departure: beyond runoff ≥ 0.75 s |
@@ -84,8 +89,8 @@ All thresholds are from `ClassificationInputs` (the runner's values shown).
 | `wrong_way` | the latched wrong-way flag sustained | `wrongWayFlag == 1` ≥ 1.5 s |
 | `route_departure` | beyond the runoff sustained, no preceding spin | `beyondRunoff == 1` ≥ 0.75 s |
 | `localization_lost` | route segment invalid sustained | `routeSegmentIndex < 0` ≥ 0.75 s |
-| `planner_localization_mismatch` | AI segment ≠ route segment sustained | `aiSegment != routeSegmentIndex` ≥ 1.0 s |
-| `slow_timeout` | budget expired while still progressing | `ticksRun >= tickBudget`, progress within last 2 s, no stall/spin/departure class |
+| `planner_localization_mismatch` | AI segment ≠ route segment sustained, AI runs only | `ai_present == 1` and `aiSegment != routeSegmentIndex` ≥ 1.0 s |
+| `slow_timeout` | budget expired while still progressing | `ticksRun >= tickBudget`, progress within last 2 s, no stall/spin/departure class; progress is per-lap (the furthest bin resets at each lap close) and counts only full-bin advances |
 
 ## Named off-track definitions
 
@@ -97,8 +102,8 @@ telemetry columns and as classifier inputs) so a report is explicit about which 
 | car centre on the racing surface | `on_route_flag` | `RouteLocation.onRoute`: distance to the closest centreline point within the segment's racing half-width |
 | all wheels on the racing surface | `on_track` (Phase 5) | all four `surface_id`s are asphalt |
 | N wheels off the racing surface | `wheels_off_asphalt` | count of the four wheels not on asphalt (0..4) |
-| at or beyond the barrier | `beyond_runoff` | `routeConfidence <= 0` (barrier stands at the runoff edge) |
-| leave distance | `route_departure_dist_m` | \|pose − closest centreline point\| |
+| at or beyond the barrier | `beyond_runoff` | valid localization and `routeConfidence <= 0` (barrier stands at the runoff edge); an invalid localization is not a barrier crossing |
+| leave distance | `route_departure_dist_m` | \|pose − closest centreline point\|; 0 when localization is invalid (no closest point) |
 
 `ai-roster-laps`, the telemetry CSV, run.json, and the failure bundle all consume these same
 definitions; nothing recomputes a private "off track" from a different signal.

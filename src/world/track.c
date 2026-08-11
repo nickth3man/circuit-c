@@ -340,6 +340,17 @@ static float chicane_offset_at(float u)
 }
 
 /*
+ * World-space centreline point on the far straight at x: (x, farY + offset(u)). Same u as
+ * chicane_far_forward(), so a gate's centre and its forward are derived from the same authored
+ * geometry and can never drift apart (PR #80 review).
+ */
+static Vector2 chicane_far_point(float x)
+{
+    const float u = (CHICANE_ENTRY_X_M - x) / CHICANE_SPAN_M;
+    return (Vector2){ x, CHICANE_FAR_STRAIGHT_Y_M + chicane_offset_at(u) };
+}
+
+/*
  * Unit forward (travel direction) at world x on the far straight, where the chicane displaces
  * the centreline vertically by offset(u), u = (ENTRY_X - x) / SPAN. Travel is -X, so the
  * tangent for an infinitesimal step in -X is (-1, -dy/dx) normalized, where dy/dx is the
@@ -485,22 +496,23 @@ void track_load_chicane(TrackDefinition *track)
           { -1.0f, 0.0f },
           GATE_HALF_WIDTH_M,
           true }, /* 10: chicane entry */
-        /* Chicane direction changes: forwards are set from chicane_far_forward() below so they
-         * are exactly unit and exactly tangent to the authored centreline. The placeholder
-         * (-1, 0) is overwritten for each gate by its centre x. */
-        { { 44.0f, 92.8044f }, { -1.0f, 0.0f }, GATE_HALF_WIDTH_M, true }, /* 11: climbing */
-        { { 36.0f, 97.3723f }, { -1.0f, 0.0f }, GATE_HALF_WIDTH_M, true }, /* 12: climbing */
-        { { 28.0f, 102.1800f },
+        /* Chicane direction changes: centres and forwards are derived from the same authored
+         * geometry the centreline was built from (chicane_far_point / chicane_far_forward
+         * below), so a change to the constants cannot leave a gate floating off the route.
+         * The y in the table is a placeholder (-1) overwritten by the derived centre. */
+        { { 44.0f, -1.0f }, { -1.0f, 0.0f }, GATE_HALF_WIDTH_M, true }, /* 11: climbing */
+        { { 36.0f, -1.0f }, { -1.0f, 0.0f }, GATE_HALF_WIDTH_M, true }, /* 12: climbing */
+        { { 28.0f, -1.0f },
           { -1.0f, 0.0f },
           GATE_HALF_WIDTH_M,
           true }, /* 13: approaching apex */
         { { chicaneApexX, farY + CHICANE_OFFSET_M },
           { -1.0f, 0.0f },
           GATE_HALF_WIDTH_M,
-          true },                                                           /* 14: apex */
-        { { 4.0f, 103.1956f }, { -1.0f, 0.0f }, GATE_HALF_WIDTH_M, true },  /* 15: descending */
-        { { -8.0f, 96.1324f }, { -1.0f, 0.0f }, GATE_HALF_WIDTH_M, true },  /* 16: descending */
-        { { -16.0f, 91.9168f }, { -1.0f, 0.0f }, GATE_HALF_WIDTH_M, true }, /* 17: exiting */
+          true },                                                        /* 14: apex */
+        { { 4.0f, -1.0f }, { -1.0f, 0.0f }, GATE_HALF_WIDTH_M, true },   /* 15: descending */
+        { { -8.0f, -1.0f }, { -1.0f, 0.0f }, GATE_HALF_WIDTH_M, true },  /* 16: descending */
+        { { -16.0f, -1.0f }, { -1.0f, 0.0f }, GATE_HALF_WIDTH_M, true }, /* 17: exiting */
         { { CHICANE_ENTRY_X_M - CHICANE_SPAN_M, farY },
           { -1.0f, 0.0f },
           GATE_HALF_WIDTH_M,
@@ -529,14 +541,20 @@ void track_load_chicane(TrackDefinition *track)
     memcpy(track->checkpoints, gates, sizeof(gates));
 
     /* The chicane tangent gates (11, 12, 13, 15, 16, 17) sit on direction changes; their
-     * forwards are the local route tangent, derived from the same geometry the centreline was
-     * built from. Done after the copy because C initializers cannot call functions. */
-    track->checkpoints[11].forwardUnit = chicane_far_forward(44.0f);
-    track->checkpoints[12].forwardUnit = chicane_far_forward(36.0f);
-    track->checkpoints[13].forwardUnit = chicane_far_forward(28.0f);
-    track->checkpoints[15].forwardUnit = chicane_far_forward(4.0f);
-    track->checkpoints[16].forwardUnit = chicane_far_forward(-8.0f);
-    track->checkpoints[17].forwardUnit = chicane_far_forward(-16.0f);
+     * centres and forwards are derived from the same geometry the centreline was built from.
+     * Done after the copy because C initializers cannot call functions. */
+    track->checkpoints[11].centerM = chicane_far_point(track->checkpoints[11].centerM.x);
+    track->checkpoints[12].centerM = chicane_far_point(track->checkpoints[12].centerM.x);
+    track->checkpoints[13].centerM = chicane_far_point(track->checkpoints[13].centerM.x);
+    track->checkpoints[15].centerM = chicane_far_point(track->checkpoints[15].centerM.x);
+    track->checkpoints[16].centerM = chicane_far_point(track->checkpoints[16].centerM.x);
+    track->checkpoints[17].centerM = chicane_far_point(track->checkpoints[17].centerM.x);
+    track->checkpoints[11].forwardUnit = chicane_far_forward(track->checkpoints[11].centerM.x);
+    track->checkpoints[12].forwardUnit = chicane_far_forward(track->checkpoints[12].centerM.x);
+    track->checkpoints[13].forwardUnit = chicane_far_forward(track->checkpoints[13].centerM.x);
+    track->checkpoints[15].forwardUnit = chicane_far_forward(track->checkpoints[15].centerM.x);
+    track->checkpoints[16].forwardUnit = chicane_far_forward(track->checkpoints[16].centerM.x);
+    track->checkpoints[17].forwardUnit = chicane_far_forward(track->checkpoints[17].centerM.x);
 }
 void track_load_sprint(TrackDefinition *track)
 {

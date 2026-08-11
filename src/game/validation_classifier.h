@@ -60,9 +60,12 @@ typedef struct {
     uint64_t firstFaultTick; /* earliest causal-event tick; 0 if the run passed */
     double firstFaultTimeS;  /* simulation time at that tick */
 
-    /* Every distinct failure class detected, in first-occurrence order. `primary` is one of
-     * these (the one selected as the headline). A spin-then-departure, for instance, lists both
-     * the spin and the departure though only one is primary. */
+    /* Every distinct failure class detected, in first-occurrence order (ties broken by the
+     * fixed severity order), truncated to CLASSIFICATION_MAX_CONTRIBUTING: a run that detects
+     * more classes keeps only the EARLIEST ones, so the bounded report never drops the causal
+     * head of the sequence. `primary` is one of these (the one selected as the headline). A
+     * spin-then-departure, for instance, lists both the spin and the departure though only one
+     * is primary. */
     ContributingEvent contributing[CLASSIFICATION_MAX_CONTRIBUTING];
     int contributingCount;
 
