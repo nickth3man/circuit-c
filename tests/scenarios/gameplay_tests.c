@@ -1001,6 +1001,98 @@ static void scenario_multi_car_determinism(void)
 }
 
 /* ------------------------------------------------------------------------------------- */
+/* Scenario: performance-budget — multi-car fixed-step headroom (issue #45)               */
+/* ------------------------------------------------------------------------------------- */
+
+/* Timing-gated behind CIRCUIT_PERF_BENCH (like collision-broadphase's CIRCUIT_COLLISION_BENCH)
+ * so the default suite stays deterministic: a wall-clock budget can only be meaningfully
+ * asserted on a controlled run, not in every CI invocation.
+ *
+ * Reference hardware for the printed numbers: the developer machine this project verifies
+ * on (AMD Ryzen 5 7600X, Windows 11, UCRT64 release build). The budget asserted here is the
+ * 120 Hz fixed-step ceiling (8333 us/tick) with headroom: the 8-entrant field must stay under
+ * 75% of the budget. There are no allocations in the fixed loop by construction — every
+ * per-tick buffer lives inside Game — so the contact-growth bound is the allocation proxy. */
+static Game *build_perf_game(int aiCount)
+{
+    Game *game = alloc_game();
+    game_init(game);
+    track_load_chicane(&game->trackDef);
+    game_spawn_on_track(game);
+    for (int i = 0; i < aiCount; i++) {
+        const RaceEntrantSpawn spawn = { .controllerKind = CONTROLLER_KIND_AI, .gridSlot = -1 };
+        if (!race_roster_spawn(&game->session.roster, &spawn, NULL)) {
+            free(game);
+            return NULL;
+        }
+    }
+    for (int i = 1; i < game->session.roster.count; i++) {
+        RaceEntrant *entrant = &game->session.roster.entrants[i];
+        entrant->instance.vehicle.positionM = (Vector2){ -6.0f * (float)i, 0.0f };
+        entrant->instance.renderState.prevPositionM = entrant->instance.vehicle.positionM;
+        entrant->instance.renderState.currPositionM = entrant->instance.vehicle.positionM;
+    }
+    game->state = STATE_PLAYING;
+    RaceRules rules;
+    race_rules_set_default(&rules);
+    rules.targetLaps = 4;
+    race_session_start(&game->session, &rules);
+    return game;
+}
+
+static void scenario_performance_budget(void)
+{
+    if (getenv("CIRCUIT_PERF_BENCH") == NULL) return;
+
+    const int ticks = 6000;
+    const int fields[] = { 1, 4, 8 };
+    const double budgetUs = 1000000.0 / (double)FIXED_HZ; /* 8333 us per tick at 120 Hz */
+
+    printf("[performance-budget] reference hardware: developer machine (Ryzen 5 7600X, "
+           "UCRT64 release)\n");
+    printf("  %-6s %-12s %-14s %-10s\n", "cars", "us/tick", "contacts", "headroom");
+    for (size_t f = 0; f < sizeof(fields) / sizeof(fields[0]); f++) {
+        Game *game = build_perf_game(fields[f] - 1);
+        check(game != NULL, "performance-budget: %d-car field built", fields[f]);
+        if (game == NULL) continue;
+
+        struct timespec t0, t1;
+        timespec_get(&t0, TIME_UTC);
+        int contacts = 0;
+        for (int t = 0; t < ticks; t++) {
+            game_fixed_update(game, FIXED_DT_S);
+            contacts += game->trackRuntime.collisionWorld.contactCount;
+        }
+        timespec_get(&t1, TIME_UTC);
+        const double usPerTick =
+            ((double)(t1.tv_sec - t0.tv_sec) * 1e6 + (double)(t1.tv_nsec - t0.tv_nsec) / 1e3) /
+            (double)ticks;
+
+        printf("  %-6d %-12.1f %-14d %-10.1f%%\n", fields[f], usPerTick, contacts,
+               100.0 * (1.0 - usPerTick / budgetUs));
+        check(usPerTick < budgetUs * 0.75,
+              "%d-car field sustains 120 Hz with >= 25%% headroom (%.1f us < %.1f us)",
+              fields[f], usPerTick, budgetUs * 0.75);
+        check(contacts < ticks,
+              "%d-car field contact events stay bounded (got %d over %d ticks)", fields[f],
+              contacts, ticks);
+
+        /* Every entrant actually moved; a vacuous benchmark proves nothing. */
+        float maxDist = 0.0f;
+        for (int i = 0; i < game->session.roster.count; i++) {
+            const float dx = game->session.roster.entrants[i].instance.vehicle.positionM.x;
+            const float dy = game->session.roster.entrants[i].instance.vehicle.positionM.y;
+            const float d = sqrtf(dx * dx + dy * dy);
+            if (d > maxDist) maxDist = d;
+        }
+        check(maxDist > 10.0f, "%d-car field raced (furthest %.1f m)", fields[f],
+              (double)maxDist);
+
+        free(game);
+    }
+}
+
+/* ------------------------------------------------------------------------------------- */
 /* Scenario: collision-world — the deterministic CollisionWorld contract                  */
 /* ------------------------------------------------------------------------------------- */
 
@@ -4888,6 +4980,9 @@ static const TestScenario kGameplayScenarios[] = {
     { "multi-car-determinism",
       "issue #44: per-tick checksum parity, per-entrant hashes, first-divergence reporting",
       scenario_multi_car_determinism },
+    { "performance-budget",
+      "issue #45: multi-car fixed-step headroom (CIRCUIT_PERF_BENCH env gates the timing)",
+      scenario_performance_budget },
     { "collision-world",
       "issue #26 world contract: stable ids, layers, authored objects, multi-proxy order, "
       "penetration recovery, corners, contact feed",

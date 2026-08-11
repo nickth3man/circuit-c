@@ -277,7 +277,7 @@ REGRESSION_SCENARIOS := skidpad step-steer transition lift-off \
         benchmark ci compile-commands format format-check format-py lint-py lint analyze fuzz \
         validate-hotreload compare-rgba measure-rotation record tidy tidy-changed tidy-run \
         clean clean-telemetry clean-artifacts dirs windows-only cards inspect visual-diagnose \
-        print-source-groups print-source-group
+        benchmark-multi print-source-groups print-source-group
 
 all: dev
 
@@ -386,6 +386,12 @@ scenario: tests
 
 benchmark: tests
 	./$(EXE_TESTS) --benchmark 240000
+
+# Multi-car fixed-step headroom benchmark (issue #45): 1/4/8-car fields on the chicane,
+# asserting the 120 Hz budget with headroom. Gated by the CIRCUIT_PERF_BENCH env var so the
+# default test suite stays timing-deterministic.
+benchmark-multi: tests
+	CIRCUIT_PERF_BENCH=1 ./$(EXE_TESTS) --scenario performance-budget
 
 # ------------------------------------------------------------------- telemetry tooling --
 
