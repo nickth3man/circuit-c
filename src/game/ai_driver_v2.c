@@ -35,20 +35,39 @@
  * 4-lap run with no worse off-track/collisions than the baseline driver; the full roster and
  * the other tracks follow in the issue's later sessions.
  *
- * PHASE-1 STATUS (landed 2026-08-11, --ai-mode v2, chicane): awd_rally PASSES 4 laps with
- * off-track ~1.2% vs baseline 10.9% and 0 collisions vs 1, at ~55 s/lap vs baseline 49 s.
- * fwd_hot and fwd_light also pass. awd_gt, rwd_grip and rwd_power fail with collision_stuck /
- * understeer-at-speed: the plan's corner limit lets the higher-grip cars carry ~24 m/s into
- * the 180-degree curves, the tracking error grows past the runoff, and the barrier ends the
- * run. Next-session starting points, in order: (1) the tracking-error speed penalty — an
- * off-line car is on a tighter path than the sampled plan, so shed target speed with
- * |crossTrackError| (prototyped and reverted this session rather than shipped untested);
- * (2) the full-path forward pass, which the per-tick reachable-preview formulation could not
- * use (it pinned the target to the current speed and the car crawled — observed and
- * reverted); (3) per-corner ellipse margin review once the error penalty keeps the cars on
- * the line. Known-good gains this session: D-filter tau 0.06 s (was 0.12), feedforward gain
- * 0.45 (was 0.85); signed (not absolute) curvature in the feedforward was the difference
- * between barrier-pinning and lapping.
+ * PHASE-2 STATUS (2026-08-11, --ai-mode v2): the whole roster completes chicane and sprint,
+ * and 17 of the 18 suite cases pass against the baseline driver's 15. Per track, 6/6 chicane
+ * (0.0% off-track and 0 collisions on every car, where the baseline shows 14.5% and 1
+ * collision on awd_rally), 6/6 sprint (the baseline fails rwd_power and awd_rally with
+ * planner_localization_mismatch), 5/6 technical. The one failure — awd_rally on technical —
+ * fails IDENTICALLY on the baseline driver: both stall at checkpoint 23 with no collision and
+ * no spin, so it is the pre-existing stuck case (#77/#28), not an architecture regression.
+ * v2 is still slower than the baseline everywhere (awd_rally chicane ~60 s/lap vs 49 s).
+ *
+ * Phase 1 had blamed the awd_gt/rwd_grip/rwd_power chicane failures on understeer at ~24 m/s
+ * and the sampled plan's corner limit. The telemetry says otherwise, and the recorded next
+ * step (a tracking-error speed penalty) would not have touched them: at the moment the run
+ * came apart the cross-track error was 0.03 m. What actually happened is that the slide
+ * monitor false-positived on a corner APPROACH — yawErr = yawRate - speed*kappaHere compares
+ * the car's current rotation against the plan's curvature a node AHEAD, so a straight, stable
+ * car at 37.8 m/s nearing a kappa=0.0211 corner reads -0.766 rad/s and trips the 0.50
+ * threshold on geometry alone — and the hold branch then froze the WHOLE pedal axis, braking
+ * included, for hundreds of ticks while the profile asked for 12.5 m/s at an actual 37 (awd_gt
+ * ticks 8312-8554; rwd_grip froze at pedal 0.03 for 226 ticks, rwd_power at 0.54 for 994).
+ * Letting a braking demand through the hold is the whole of the Phase-2 change.
+ *
+ * Next steps, in order: (1) the slide monitor still false-positives on every corner approach
+ * at speed — the reference yaw rate should be taken at the car rather than a node ahead, and
+ * the yaw branch arguably needs sideslip corroboration, since counter-steer plus throttle hold
+ * is an OVERSTEER remedy and oversteer is what sideslip identifies; a monitor that is latched
+ * most of the lap is also the first suspect for v2's lap-time deficit. (2) the full-path
+ * forward pass, which the per-tick reachable-preview formulation could not use (it pinned the
+ * target to the current speed and the car crawled — observed and reverted). (3) the
+ * tracking-error speed penalty is NOT currently shipped and no longer has a failing case
+ * driving it — chicane is at 0.0% off-track — so it should wait for one. Known-good gains from
+ * Phase 1: D-filter tau 0.06 s (was 0.12), feedforward gain 0.45 (was 0.85); signed (not
+ * absolute) curvature in the feedforward was the difference between barrier-pinning and
+ * lapping.
  *
  * Everything read is geometry the track publishes, grip the car publishes about itself, or
  * feelable state (sideslip, yaw rate, friction usage) — no force or torque internals. Nothing
@@ -316,9 +335,17 @@ void ai_driver_update_v2(const AiDriverConfig *cfg, AiDriverState *state,
     /* --- Traction: slow backstop, plus throttle HOLD while sliding. --- */
     float pedalDemand;
     if (state->slideActive) {
-        /* Hold the pedal exactly where it is: a chop unloads the rear and snaps the knife-edge
-         * AWD (#79). The counter-steer below is the only intervention. */
-        pedalDemand = state->pedalAxis;
+        /* Hold the THROTTLE where it is: a chop unloads the rear and snaps the knife-edge AWD
+         * (#79). But a hold must never outrank braking for the road ahead. Holding the whole
+         * pedal axis is what pinned awd_gt, rwd_grip and rwd_power into the chicane barrier:
+         * the monitor latched on a corner approach, the pedal froze mid-throttle for hundreds
+         * of ticks, and the car arrived at ~37 m/s with the profile asking for ~13 (observed,
+         * awd_gt tick 8312-8554). So a braking demand passes through — rate-limited like any
+         * other, which is what stops it being a chop — and only throttle is held steady. */
+        const float speedErrorMps = targetSpeedMps - speedMps;
+        pedalDemand = (speedErrorMps < -cfg->speedDeadbandMps)
+                          ? -clampf(-cfg->speedGainP * speedErrorMps, 0.0f, 1.0f)
+                          : state->pedalAxis;
         steerAngleRad += clampf(-AI_V2_CS_YAW_GAIN * yawErrRadS -
                                     AI_V2_CS_BETA_GAIN * derived->bodySideslipRad,
                                 -AI_V2_CS_MAX, AI_V2_CS_MAX);
