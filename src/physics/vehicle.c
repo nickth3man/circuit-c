@@ -81,6 +81,15 @@ void vehicle_spec_refresh_derived(VehicleSpec *spec)
         momentZ += masses[i] * zs[i];
     }
     spec->massKg = massKg;
+    /* TODO(vehicle-audit #4): the authored mass-particle positions set the F/R balance, and one
+     * shipped car is off for its class. awd_rally resolves to 40% front / 60% rear (its chassis
+     * particle sits 0.38 m behind the midpoint) — a rear-engine 911 balance, not a front-engine
+     * AWD rally car (real Impreza/Evo are ~55-60% front). Review per-car massChassisX/massFuelX. */
+    /* TODO(vehicle-audit #9): cgHeightM is the raw mass-particle Z average, and two shipped cars
+     * read unrealistically low: awd_gt and rwd_grip derive 0.28 m on a 1.37 m-tall body —
+     * mid-engine/dry-sump territory for cars the data describes as front-engined. Real road cars
+     * sit ~0.45-0.55 m; the low CG flattens load transfer and likely why those two are the
+     * "stable" reference cars. Review per-particle massZ values. */
     if (massKg > 0.0f) {
         const float xCg = momentX / massKg;
         const float zCg = momentZ / massKg;
@@ -235,6 +244,11 @@ void vehicle_spec_set_default(VehicleSpec *spec)
     spec->differentialPreloadNm = DIFFERENTIAL_PRELOAD_NM;
     spec->rollStiffnessFrontFraction = ROLL_STIFFNESS_FRONT_FRACTION;
     spec->lateralLoadTransferEnabled = true;
+    /* TODO(vehicle-audit #6): four of six shipped cars share identical gear1-5 (3.55/2.05/1.38/
+     * 1.0/0.82); only fwd_light and the final drive differ. Real gearing is matched to each
+     * engine's torque band, so a 66 hp city car and a 537 hp muscle car sharing ratios is a
+     * placeholder, not a tuned gearbox. Re-author per-engine ratios when #23 (powertrain) lands. */
+
     {
         const float ratios[MAX_GEARS] = GEAR_RATIOS;
         memcpy(spec->gearRatios, ratios, sizeof(ratios));
