@@ -227,8 +227,11 @@ Multiple lanes may operate in parallel after #13, but dependencies within each l
     per step). Manifests re-authored with per-car bar pairs; rwd_power joined awd_rally in the
     stress set (wip evidence); baselines re-recorded. Verified: 164 scenarios.
 
-- [ ] [#19 — Add suspension travel, bump-stop, and wheel-unloading limits](https://github.com/nickth3man/circuit-c/issues/19)
+- [x] [#19 — Add suspension travel, bump-stop, and wheel-unloading limits](https://github.com/nickth3man/circuit-c/issues/19)
   - Depends on: #18
+  - Per-wheel compression from the elastic share; progressive bump-stop stiffening (one-tick
+    lag, checksummed fractions); droop limit + wheelContact from the load floor. Verified:
+    165 scenarios.
 
 ## Powertrain lane
 
