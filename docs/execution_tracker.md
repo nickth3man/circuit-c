@@ -492,8 +492,10 @@ Start #54 after both the grid/start and basic live-AI requirements are complete.
 
 This work closes the multiplayer gap but does not block the stated AI-racing target.
 
-- [ ] [#59 — Close the post-core local and network multiplayer gap](https://github.com/nickth3man/circuit-c/issues/59)
+- [x] [#59 — Close the post-core local and network multiplayer gap](https://github.com/nickth3man/circuit-c/issues/59)
   - Depends on: #44, #45, #46, #56
+  - Per-entrant input binding + per-entrant controller dispatch; docs/MULTIPLAYER.md lockstep
+    model + protocol sketch. Verified: 178 scenarios.
 
 ## Post-core multiplayer gate
 
