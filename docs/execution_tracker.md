@@ -306,8 +306,11 @@ Multiple lanes may operate in parallel after #13, but dependencies within each l
     `track_road_frame_derive()` + physics consumption (grade gravity, bank force, crest/dip
     load scaling, kerb compression). Verified: 166 scenarios.
 
-- [ ] [#41 — Add deterministic weather, wetness, time, and environmental presentation state](https://github.com/nickth3man/circuit-c/issues/41)
+- [x] [#41 — Add deterministic weather, wetness, time, and environmental presentation state](https://github.com/nickth3man/circuit-c/issues/41)
   - Depends on: #21, #40
+  - RaceEnvironment (precipitation, temps, per-surface wetness; presentation-only time/region
+    excluded from the checksum), rain/drain/temp evolution, wetness → grip + tire cooling via
+    the road frame. Dry default = identity. Verified: 167 scenarios.
 
 - [ ] [#42 — Build the track authoring, validation, conversion, and preview workflow](https://github.com/nickth3man/circuit-c/issues/42)
   - Depends on: #35, #37, #41
