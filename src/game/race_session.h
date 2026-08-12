@@ -91,6 +91,8 @@ typedef struct {
      * and a session event. Default false: no trace changes. */
     bool stuckRecoveryEnabled;
     float stuckRecoveryDelayS;
+    float falseStartPenaltyS; /* added to finish time when an entrant jumps the start (#49) */
+    float falseStartSpeedMps; /* speed above which a held car is flagged for a jump (0 = off) */
 } RaceRules;
 
 typedef enum {
@@ -130,6 +132,7 @@ typedef enum {
     RACE_EVENT_SECTOR_COMPLETED,  /* value is the sector index just crossed */
     RACE_EVENT_ENTRANT_FINISHED,  /* value is the finishing position awarded */
     RACE_EVENT_STUCK_RECOVERED,   /* value is the running penalty count for that entrant */
+    RACE_EVENT_FALSE_START,       /* value is the penalty seconds x100 (rounded) */
     RACE_EVENT_KIND_COUNT
 } RaceEventKind;
 
@@ -261,6 +264,23 @@ void race_session_begin_tick(RaceSession *session, float dt);
  * clock twice.
  */
 void race_session_update_rules(RaceSession *session);
+
+/*
+ * Place every occupied entrant on its validated grid slot (issue #49). Each entrant is reset to
+ * a clean vehicle state and positioned at the staggered grid pose for its slot, so no two cars
+ * overlap and nobody carries hidden drivetrain state into the launch. Call after
+ * race_session_start() has built the grid. Returns false when any entrant's slot has no pose.
+ */
+bool race_session_place_grid(RaceSession *session, const TrackDefinition *track);
+
+/*
+ * Record a jump start (issue #49): adds the configured penalty to the entrant's accumulated
+ * penalty time and logs a FALSE_START event. Idempotent per entrant per session — a second
+ * report for the same entrant is ignored, so a held car that creeps for several ticks is
+ * penalized once.
+ */
+void race_session_record_false_start(RaceSession *session, const RaceRules *rules,
+                                     EntrantId entrantId);
 
 /* True once the session has reached a phase from which it will not simulate again. */
 bool race_session_is_over(const RaceSession *session);

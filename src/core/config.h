@@ -394,6 +394,10 @@
 #define STUCK_RECOVERY_PENALTY_S 3.0f /* s; time penalty added per recovery */
 #define STUCK_RECOVERY_CLEAR_RADIUS_M 4.0f /* m; min distance to other entrants at spawn */
 #define STUCK_SPEED_MPS 0.5f               /* m/s; below this an entrant counts as stalled */
+/* False-start / jump detection (issue #49). A car held on the grid that exceeds this speed
+ * before green is flagged; the penalty is added to its finish time at classification. */
+#define FALSE_START_SPEED_MPS 0.5f /* m/s; above this while held = a jump */
+#define FALSE_START_PENALTY_S 2.0f /* s; time penalty added per jump */
 /* Fuel model (issue #24). */
 #define FUEL_DENSITY_KG_PER_L 0.75f     /* kg per litre (gasoline) */
 #define FUEL_STARVATION_RESERVE_KG 0.5f /* kg; drive torque fades linearly below this */

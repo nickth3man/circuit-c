@@ -382,8 +382,10 @@ Several lanes can begin in parallel after the phase foundations are complete.
 
 ## Session configuration and start lane
 
-- [ ] [#48 — Build the player-facing car, track, and session configuration flow](https://github.com/nickth3man/circuit-c/issues/48)
+- [x] [#48 — Build the player-facing car, track, and session configuration flow](https://github.com/nickth3man/circuit-c/issues/48)
   - Depends on: #11, #32, #43, #47
+  - SessionConfig (validated bundle, deterministic serialize/deserialize) + game_configure_session()
+    (grid rebuild, assists, rules freeze). Verified: 170 scenarios.
 
 - [ ] [#49 — Implement grid placement, countdown, start lights, and false starts](https://github.com/nickth3man/circuit-c/issues/49)
   - Depends on: #11, #37, #48

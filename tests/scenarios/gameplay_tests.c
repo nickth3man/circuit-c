@@ -1588,6 +1588,114 @@ static void scenario_session_config(void)
         free(game);
     }
 }
+
+/* Issue #49: grid placement, countdown, and false-start detection. */
+static void scenario_grid_countdown(void)
+{
+    /* ---- 1. Grid placement: staggered, non-overlapping poses. ---- */
+    {
+        SessionConfig cfg;
+        session_config_set_default(&cfg);
+        cfg.mode = RACE_MODE_RACE;
+        cfg.aiCount = 3;
+        cfg.targetLaps = 2;
+        cfg.countdownS = 3.0f;
+        Game *game = alloc_game();
+        char why[256] = "";
+        check(game_configure_session(game, &cfg, why, sizeof(why)),
+              "race session with countdown launches (%s)", why);
+        check(game->session.phase == RACE_PHASE_COUNTDOWN,
+              "session holds the grid in countdown (%d)", (int)game->session.phase);
+        const int n = game->session.roster.count;
+        check(n == 4, "four entrants on the grid (%d)", n);
+        bool distinct = true;
+        for (int i = 0; i < n && distinct; i++) {
+            const Vector2 pi = game->session.roster.entrants[i].instance.vehicle.positionM;
+            for (int j = i + 1; j < n; j++) {
+                const Vector2 pj = game->session.roster.entrants[j].instance.vehicle.positionM;
+                const float dx = pi.x - pj.x;
+                const float dy = pi.y - pj.y;
+                if (dx * dx + dy * dy < 16.0f) distinct = false;
+            }
+        }
+        check(distinct, "grid poses are staggered and non-overlapping");
+        free(game);
+    }
+
+    /* ---- 2. Countdown releases on a deterministic tick boundary. ---- */
+    {
+        SessionConfig cfg;
+        session_config_set_default(&cfg);
+        cfg.mode = RACE_MODE_RACE;
+        cfg.aiCount = 2;
+        cfg.targetLaps = 1;
+        cfg.countdownS = 1.0f;
+        Game *game = alloc_game();
+        char why[256] = "";
+        check(game_configure_session(game, &cfg, why, sizeof(why)), "countdown race launches");
+        check(game->session.countdownTicksRemaining > 0, "countdown armed");
+        int ticks = 0;
+        while (game->session.phase == RACE_PHASE_COUNTDOWN && ticks < 5000) {
+            game_fixed_update(game, FIXED_DT_S);
+            ticks++;
+        }
+        check(game->session.phase == RACE_PHASE_RUNNING,
+              "session reaches green after %d countdown ticks", ticks);
+        free(game);
+    }
+
+    /* ---- 3. False-start detection: a car that creeps during countdown is penalized. ---- */
+    {
+        SessionConfig cfg;
+        session_config_set_default(&cfg);
+        cfg.mode = RACE_MODE_RACE;
+        cfg.aiCount = 1;
+        cfg.targetLaps = 1;
+        cfg.countdownS = 2.0f;
+        Game *game = alloc_game();
+        char why[256] = "";
+        check(game_configure_session(game, &cfg, why, sizeof(why)),
+              "false-start race launches");
+        check(game->session.rules.falseStartSpeedMps > 0.0f, "false-start detection is armed");
+        game->session.roster.entrants[1].instance.vehicle.velocityLongitudinalMps =
+            game->session.rules.falseStartSpeedMps + 2.0f;
+        game_fixed_update(game, FIXED_DT_S);
+        check(game->session.roster.entrants[1].result.falseStarted,
+              "the creeping entrant is flagged for a false start");
+        check(game->session.roster.entrants[1].result.penaltyTimeS > 0.0f,
+              "false start added a time penalty");
+        const float penaltyAfterOne = game->session.roster.entrants[1].result.penaltyTimeS;
+        game->session.roster.entrants[1].instance.vehicle.velocityLongitudinalMps =
+            game->session.rules.falseStartSpeedMps + 5.0f;
+        game_fixed_update(game, FIXED_DT_S);
+        check(game->session.roster.entrants[1].result.penaltyTimeS == penaltyAfterOne,
+              "false-start penalty is recorded once (idempotent)");
+        free(game);
+    }
+
+    /* ---- 4. Multi-car launch stability: no blow-up after green. ---- */
+    {
+        SessionConfig cfg;
+        session_config_set_default(&cfg);
+        cfg.mode = RACE_MODE_RACE;
+        cfg.aiCount = 5;
+        cfg.targetLaps = 1;
+        cfg.countdownS = 1.0f;
+        Game *game = alloc_game();
+        char why[256] = "";
+        check(game_configure_session(game, &cfg, why, sizeof(why)), "6-car grid launches");
+        for (int t = 0; t < 600; t++) game_fixed_update(game, FIXED_DT_S);
+        bool allFinite = true;
+        for (int i = 0; i < game->session.roster.count; i++) {
+            const VehicleState *v = &game->session.roster.entrants[i].instance.vehicle;
+            if (!isfinite(v->positionM.x) || !isfinite(v->positionM.y) ||
+                !isfinite(v->velocityLongitudinalMps))
+                allFinite = false;
+        }
+        check(allFinite, "6-car launch stays finite through green and beyond");
+        free(game);
+    }
+}
 static void scenario_timing_records(void)
 {
     /* ---- 1. Crossing fraction: a gate crossed mid-tick reports the sub-tick position. ---- */
@@ -5647,6 +5755,10 @@ static const TestScenario kGameplayScenarios[] = {
       "issue #48: validated SessionConfig, deterministic serialization, time trial + AI race "
       "launch",
       scenario_session_config },
+    { "grid-countdown",
+      "issue #49: staggered grid placement, countdown tick boundary, false-start detection, "
+      "multi-car launch stability",
+      scenario_grid_countdown },
     { "collision-world",
       "issue #26 world contract: stable ids, layers, authored objects, multi-proxy order, "
       "penetration recovery, corners, contact feed",

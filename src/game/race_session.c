@@ -22,6 +22,8 @@ void race_rules_set_default(RaceRules *rules)
     rules->damageMode = DAMAGE_OFF;
     rules->stuckRecoveryEnabled = false;
     rules->stuckRecoveryDelayS = STUCK_RECOVERY_DELAY_S;
+    rules->falseStartPenaltyS = FALSE_START_PENALTY_S;
+    rules->falseStartSpeedMps = FALSE_START_SPEED_MPS;
 }
 
 void race_environment_set_default(RaceEnvironment *env)
@@ -295,4 +297,41 @@ void race_session_update_rules(RaceSession *session)
     } else {
         set_phase(session, RACE_PHASE_FINISHING);
     }
+}
+
+bool race_session_place_grid(RaceSession *session, const TrackDefinition *track)
+{
+    if (session == NULL || track == NULL) return false;
+    for (int i = 0; i < session->roster.count; i++) {
+        RaceEntrant *entrant = &session->roster.entrants[i];
+        Vector2 pos = { 0.0f, 0.0f };
+        float heading = 0.0f;
+        const int slot = (entrant->gridSlot >= 0) ? entrant->gridSlot : i;
+        if (!track_grid_pose_at(track, slot, &pos, &heading)) return false;
+        vehicle_instance_reset(&entrant->instance);
+        controller_reset(&entrant->controller);
+        entrant->instance.vehicle.positionM = pos;
+        entrant->instance.vehicle.headingRad = heading;
+        entrant->instance.renderState.prevPositionM = pos;
+        entrant->instance.renderState.currPositionM = pos;
+        entrant->instance.renderState.prevHeadingRad = heading;
+        entrant->instance.renderState.currHeadingRad = heading;
+        track_reset_progress_at(&entrant->progress, track, 0);
+        entrant->result.falseStarted = false;
+    }
+    return true;
+}
+
+void race_session_record_false_start(RaceSession *session, const RaceRules *rules,
+                                     EntrantId entrantId)
+{
+    if (session == NULL || entrantId == RACE_ENTRANT_ID_NONE) return;
+    RaceEntrant *entrant = race_roster_find(&session->roster, entrantId);
+    if (entrant == NULL || entrant->result.falseStarted) return;
+    entrant->result.falseStarted = true;
+    float penalty = 0.0f;
+    if (rules != NULL) penalty = rules->falseStartPenaltyS;
+    if (penalty > 0.0f) entrant->result.penaltyTimeS += penalty;
+    race_session_log_event(session, RACE_EVENT_FALSE_START, entrantId,
+                           (int32_t)(penalty * 100.0f + 0.5f));
 }

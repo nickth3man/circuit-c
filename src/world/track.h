@@ -428,6 +428,14 @@ bool track_start_pose(const TrackDefinition *track, Vector2 *positionM, float *h
 /* Start pose at an arbitrary checkpoint, facing that gate's forward direction. */
 bool track_start_pose_at(const TrackDefinition *track, int checkpointIndex, Vector2 *positionM,
                          float *headingRad);
+/*
+ * A staggered grid slot pose (issue #49). Slot 0 sits on the start/finish line; each subsequent
+ * slot steps backwards along the forward direction in rows of two, alternating left/right, so
+ * no two cars overlap. The geometry is a pure function of (track, slot), so the grid is
+ * deterministic for a given starting order.
+ */
+bool track_grid_pose_at(const TrackDefinition *track, int slot, Vector2 *positionM,
+                        float *headingRad);
 
 /* FNV-1a over the node and checkpoint arrays. Two tracks with the same hash have the same
  * shape, so a run's metadata can prove which geometry produced it even if `version` was not

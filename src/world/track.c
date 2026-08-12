@@ -1000,6 +1000,31 @@ bool track_start_pose(const TrackDefinition *track, Vector2 *positionM, float *h
     return track_start_pose_at(track, 0, positionM, headingRad);
 }
 
+bool track_grid_pose_at(const TrackDefinition *track, int slot, Vector2 *positionM,
+                        float *headingRad)
+{
+    if (track == NULL || slot < 0) return false;
+    Vector2 base = { 0.0f, 0.0f };
+    float heading = 0.0f;
+    if (!track_start_pose_at(track, 0, &base, &heading)) return false;
+    const float fx = cosf(heading);
+    const float fy = sinf(heading);
+    const float lx = -fy;
+    const float ly = fx;
+    const float rowSpacingM = 7.0f;
+    const float lateralM = 3.0f;
+    const int row = slot / 2;
+    const int column = slot % 2;
+    const float back = -(float)row * rowSpacingM;
+    const float side = (column == 0) ? -lateralM : lateralM;
+    if (positionM != NULL) {
+        positionM->x = base.x + fx * back + lx * side;
+        positionM->y = base.y + fy * back + ly * side;
+    }
+    if (headingRad != NULL) *headingRad = heading;
+    return true;
+}
+
 static uint32_t hash_f32(uint32_t h, float value)
 {
     uint32_t bits;

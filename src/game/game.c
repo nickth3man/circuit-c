@@ -91,6 +91,7 @@ static uint32_t hash_entrant(uint32_t h, const RaceEntrant *entrant)
     h = hash_f32(h, entrant->result.finishTimeS);
     h = hash_f32(h, entrant->result.penaltyTimeS);
     h = hash_u32(h, entrant->result.stalledTicks);
+    h = hash_u32(h, entrant->result.falseStarted ? 1u : 0u);
 
     const VehicleSetup *setup = &entrant->setup;
     h = hash_f32(h, setup->tirePressureFrontKpa);
@@ -568,7 +569,7 @@ GAME_API bool game_configure_session(Game *game, const SessionConfig *cfg, char 
     race_session_start(&game->session, &rules);
     game->state = STATE_PLAYING;
 
-    return game_spawn_on_track(game);
+    return race_session_place_grid(&game->session, &game->trackDef);
 }
 
 GAME_API bool game_spawn_on_track(Game *game)
@@ -1669,6 +1670,24 @@ static void stage_rules(Game *game)
 }
 
 /*
+ * Stage 8a — false-start detection (issue #49). Runs only during COUNTDOWN: a car held on the
+ * grid that exceeds the configured speed threshold is flagged once, penalized, and logged.
+ */
+static void stage_false_start(Game *game)
+{
+    if (game->session.phase != RACE_PHASE_COUNTDOWN) return;
+    const RaceRules *rules = &game->session.rules;
+    if (rules->falseStartSpeedMps <= 0.0f) return;
+    for (int i = 0; i < game->session.roster.count; i++) {
+        const RaceEntrant *entrant = &game->session.roster.entrants[i];
+        if (entrant->result.falseStarted) continue;
+        if (entrant->instance.derived.speedMps > rules->falseStartSpeedMps) {
+            race_session_record_false_start(&game->session, rules, entrant->id);
+        }
+    }
+}
+
+/*
  * Stage 8b — deterministic stuck recovery (issue #28).
  * Reads: each entrant's speed/progress and the frozen rules. Writes: the entrant's pose,
  * velocity, penalty, stall counter, and a session event.
@@ -1861,6 +1880,7 @@ GAME_API void game_fixed_update(Game *game, float dt)
         race_environment_update(&game->session.environment, dt);
         accumulate_damage(game);
         stage_rules(game);
+        stage_false_start(game);
         stage_stuck_recovery(game);
         stage_presentation(game, dt);
     }

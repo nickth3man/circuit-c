@@ -71,6 +71,7 @@ typedef struct {
     /* Consecutive fixed ticks the entrant has been stalled (issue #28 recovery detection).
      * Part of authoritative state because it decides when the recovery fires. */
     uint32_t stalledTicks;
+    bool falseStarted; /* one-shot: a jump start has already been recorded for this entrant */
 } EntrantResult;
 
 /*
