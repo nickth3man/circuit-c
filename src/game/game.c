@@ -1094,7 +1094,7 @@ static void stage_physics(Game *game, TickContext *ctx, float dt)
         }
     }
     physics_fixed_update(&game->spec, &game->vehicle, &game->derived, &game->renderState,
-                         &ctx->applied, dt);
+                         game->tireState, &ctx->applied, dt);
     CIRCUIT_ZONE_END(physics);
 }
 
@@ -1212,8 +1212,8 @@ static void simulate_extra_entrant(Game *game, RaceEntrant *entrant, const TickC
         }
     }
     physics_fixed_update(&entrant->instance.spec, &entrant->instance.vehicle,
-                         &entrant->instance.derived, &entrant->instance.renderState, &applied,
-                         dt);
+                         &entrant->instance.derived, &entrant->instance.renderState,
+                         entrant->instance.tireState, &applied, dt);
 
     if (ctx->trackLoaded) {
         const TrackProgressEvent pev =

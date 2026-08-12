@@ -1022,7 +1022,7 @@ static void scenario_accel_filter(void)
         state.velocityLateralMps = 0.0f;
         state.yawRateRadS = 0.0f;
         set_rolling_wheels(&spec, &state, 10.0f);
-        physics_fixed_update(&spec, &state, &derived, &renderState, &input, FIXED_DT_S);
+        physics_fixed_update(&spec, &state, &derived, &renderState, NULL, &input, FIXED_DT_S);
         const float straightAx = derived.solvedLongAccelMps2;
         check_near((double)straightAx, (double)(derived.totalBodyForceN.x / spec.massKg), 0.0,
                    "solved acceleration is exactly totalBodyForceX / mass");
@@ -1035,7 +1035,7 @@ static void scenario_accel_filter(void)
         rotating.velocityLateralMps = 2.0f;
         rotating.yawRateRadS = 0.5f;
         set_rolling_wheels(&spec, &rotating, 10.0f);
-        physics_fixed_update(&spec, &rotating, &rotatingDerived, &rotatingRender, &input,
+        physics_fixed_update(&spec, &rotating, &rotatingDerived, &rotatingRender, NULL, &input,
                              FIXED_DT_S);
 
         /* dvx_dt carries r*vy = 0.5 * 2.0 = 1.0 m/s^2. The stored value must not. */
@@ -1723,7 +1723,7 @@ static void scenario_solver_stages(void)
 
         PhysicsStep step;
         check(physics_step_init(&step, &game->spec, &game->vehicle, &game->derived,
-                                &game->renderState, &controls, FIXED_DT_S),
+                                &game->renderState, NULL, &controls, FIXED_DT_S),
               "a step initialises from a valid vehicle");
         check(step.completedStage == PHYSICS_STAGE_NONE,
               "and starts having completed nothing (got %d)", (int)step.completedStage);
@@ -1772,7 +1772,7 @@ static void scenario_solver_stages(void)
 
         PhysicsStep step;
         (void)physics_step_init(&step, &game->spec, &game->vehicle, &game->derived,
-                                &game->renderState, &controls, FIXED_DT_S);
+                                &game->renderState, NULL, &controls, FIXED_DT_S);
 
         const Vector2 renderCurrBefore = game->renderState.currPositionM;
         physics_step_run(&step, PHYSICS_STAGE_BEGIN);
@@ -1857,10 +1857,10 @@ static void scenario_solver_stages(void)
         controls.brake = 0.1f;
 
         for (int i = 0; i < 240; i++) {
-            physics_fixed_update(&a->spec, &a->vehicle, &a->derived, &a->renderState, &controls,
-                                 FIXED_DT_S);
-            physics_fixed_update(&b->spec, &b->vehicle, &b->derived, &b->renderState, &controls,
-                                 FIXED_DT_S);
+            physics_fixed_update(&a->spec, &a->vehicle, &a->derived, &a->renderState, NULL,
+                                 &controls, FIXED_DT_S);
+            physics_fixed_update(&b->spec, &b->vehicle, &b->derived, &b->renderState, NULL,
+                                 &controls, FIXED_DT_S);
         }
         check(memcmp(&a->vehicle, &b->vehicle, sizeof(VehicleState)) == 0,
               "240 steps from one starting state reproduce byte-identical vehicle state");
@@ -1898,7 +1898,7 @@ static void scenario_solver_stages(void)
             poisoned->vehicle.filteredLongAccelMps2 = 1.0e38f;
             PhysicsStep bad;
             (void)physics_step_init(&bad, &poisoned->spec, &poisoned->vehicle,
-                                    &poisoned->derived, &poisoned->renderState, &controls,
+                                    &poisoned->derived, &poisoned->renderState, NULL, &controls,
                                     FIXED_DT_S);
             physics_step_run(&bad, PHYSICS_STAGE_COUNT - 1);
             check(!physics_state_is_valid(&poisoned->spec, &poisoned->vehicle,
@@ -1914,7 +1914,7 @@ static void scenario_solver_stages(void)
          * them, is not aborted by a failure this scenario caused on purpose. */
         const VehicleState before = game->vehicle;
         physics_fixed_update(&game->spec, &game->vehicle, &game->derived, &game->renderState,
-                             &controls, FIXED_DT_S);
+                             NULL, &controls, FIXED_DT_S);
 
         check(memcmp(&game->vehicle, &before, sizeof(VehicleState)) == 0,
               "a step that goes non-finite rolls the vehicle back to where it started");
@@ -1926,7 +1926,7 @@ static void scenario_solver_stages(void)
         game->vehicle.prevLongAccelMps2 = 0.0f;
         game->vehicle.filteredLongAccelMps2 = 0.0f;
         physics_fixed_update(&game->spec, &game->vehicle, &game->derived, &game->renderState,
-                             &controls, FIXED_DT_S);
+                             NULL, &controls, FIXED_DT_S);
         check(game->derived.solverFailedStage == (int)PHYSICS_STAGE_NONE,
               "a healthy step clears the failure report (got %s)",
               physics_stage_name((PhysicsStage)game->derived.solverFailedStage));
@@ -2511,7 +2511,7 @@ static void scenario_steering_sign(void)
     controller_output_zero(&input);
     input.steer = 0.5f;
     for (int i = 0; i < 30; i++) {
-        physics_fixed_update(&spec, &state, &derived, &renderState, &input, FIXED_DT_S);
+        physics_fixed_update(&spec, &state, &derived, &renderState, NULL, &input, FIXED_DT_S);
     }
     check(state.frontRoadWheelAngleRad > 0.0f, "left input produces positive road-wheel angle");
     check(derived.frontLateralForceN > 0.0f,
@@ -2554,8 +2554,8 @@ static void scenario_lever_arm(void)
     ControllerOutput input;
     controller_output_zero(&input);
     input.steer = 0.3f;
-    physics_fixed_update(&a, &sa, &da, &ra, &input, FIXED_DT_S);
-    physics_fixed_update(&b, &sb, &db, &rb, &input, FIXED_DT_S);
+    physics_fixed_update(&a, &sa, &da, &ra, NULL, &input, FIXED_DT_S);
+    physics_fixed_update(&b, &sb, &db, &rb, NULL, &input, FIXED_DT_S);
     check(fabsf(da.totalYawTorqueNm - db.totalYawTorqueNm) > 1.0f,
           "lever-arm changes measurably alter yaw torque");
     check(fabsf(sa.yawRateRadS - sb.yawRateRadS) > 1e-6f,
@@ -2572,10 +2572,10 @@ static void scenario_integration(void)
     ControllerOutput input;
     controller_output_zero(&input);
     input.throttle = 1.0f;
-    physics_fixed_update(&spec, &state, &derived, &renderState, &input, FIXED_DT_S);
+    physics_fixed_update(&spec, &state, &derived, &renderState, NULL, &input, FIXED_DT_S);
     check_near(state.velocityLongitudinalMps, 0.0, 1e-7,
                "the first launch tick spins the driven wheels before tire force develops");
-    physics_fixed_update(&spec, &state, &derived, &renderState, &input, FIXED_DT_S);
+    physics_fixed_update(&spec, &state, &derived, &renderState, NULL, &input, FIXED_DT_S);
     check(state.velocityLongitudinalMps > 0.0f,
           "the next tick accelerates from drivetrain-generated wheel slip");
     check_near(state.positionM.x, state.velocityLongitudinalMps * FIXED_DT_S, 1e-6,
@@ -2585,7 +2585,7 @@ static void scenario_integration(void)
     state.yawRateRadS = 1.0f;
     state.velocityLongitudinalMps = 0.0f;
     input.throttle = 0.0f;
-    physics_fixed_update(&spec, &state, &derived, &renderState, &input, FIXED_DT_S);
+    physics_fixed_update(&spec, &state, &derived, &renderState, NULL, &input, FIXED_DT_S);
     check(state.headingRad >= -CIRCUIT_PI && state.headingRad < CIRCUIT_PI,
           "integrated heading remains wrapped");
 }
@@ -2802,7 +2802,15 @@ static uint32_t param_audit_drive_signature(const VehicleSpec *spec, bool *allFi
     VehicleState state;
     VehicleDerived derived;
     VehicleRenderState renderState;
+    VehicleTireState tireState[WHEEL_COUNT];
     vehicle_state_reset(spec, &state, &derived, &renderState);
+    for (int w = 0; w < WHEEL_COUNT; w++) {
+        const bool front = w <= WHEEL_FRONT_RIGHT;
+        tireState[w].pressureKpa =
+            front ? spec->tirePressureFrontKpa : spec->tirePressureRearKpa;
+        tireState[w].temperatureC = TIRE_AMBIENT_TEMP_C;
+        tireState[w].wear = 0.0f;
+    }
 
     ControllerOutput input;
     controller_output_zero(&input);
@@ -2829,7 +2837,8 @@ static uint32_t param_audit_drive_signature(const VehicleSpec *spec, bool *allFi
             input.throttle = 1.0f;
             input.steer = 0.0f;
         }
-        physics_fixed_update(spec, &state, &derived, &renderState, &input, FIXED_DT_S);
+        physics_fixed_update(spec, &state, &derived, &renderState, tireState, &input,
+                             FIXED_DT_S);
     }
 
     if (allFiniteOut != NULL) {
@@ -2877,7 +2886,7 @@ static uint32_t param_audit_collide_signature(const VehicleSpec *spec,
         return 0u;
     }
     for (int tick = 0; tick < PARAM_AUDIT_COLLIDE_TICKS; tick++) {
-        physics_fixed_update(spec, &state, &derived, &renderState, &input, FIXED_DT_S);
+        physics_fixed_update(spec, &state, &derived, &renderState, NULL, &input, FIXED_DT_S);
         contacts += collision_resolve_track(&world, 1u, spec, &state, &renderState,
                                             &crashLockoutTimerS);
     }
@@ -3955,11 +3964,13 @@ static void scenario_drivetrain_layout(void)
         input.steer = 0.20f;
         input.throttle = 0.15f;
         for (int i = 0; i < 120; i++)
-            physics_fixed_update(&spec, &state, &derived, &renderState, &input, FIXED_DT_S);
+            physics_fixed_update(&spec, &state, &derived, &renderState, NULL, &input,
+                                 FIXED_DT_S);
 
         input.throttle = 1.0f;
         for (int i = 0; i < 180; i++) {
-            physics_fixed_update(&spec, &state, &derived, &renderState, &input, FIXED_DT_S);
+            physics_fixed_update(&spec, &state, &derived, &renderState, NULL, &input,
+                                 FIXED_DT_S);
             rearSlipRatio[layout] =
                 fmaxf(rearSlipRatio[layout], state.wheels[WHEEL_REAR_LEFT].slipRatio);
             frontSlipRatio[layout] =
@@ -4010,7 +4021,8 @@ static void scenario_drivetrain_layout(void)
         input.steer = 0.20f;
         input.throttle = 0.15f;
         for (int i = 0; i < 180; i++)
-            physics_fixed_update(&spec, &state, &derived, &renderState, &input, FIXED_DT_S);
+            physics_fixed_update(&spec, &state, &derived, &renderState, NULL, &input,
+                                 FIXED_DT_S);
 
         check(fabsf(state.yawRateRadS) > 0.01f,
               "FWD LOCKED: turning steps are accepted, no validation rollback (yaw %.4f rad/s)",
@@ -4252,12 +4264,105 @@ static void scenario_vehicle_instance_isolation(void)
     free(defaultGame);
 }
 
+/*
+ * tire-thermal — issue #21: bulk carcass temperature/pressure model.
+ *
+ * With tireThermalEnabled=1 the tires heat from slip/rolling work, cool toward ambient, and
+ * live pressure tracks temperature; the grip multiplier is 1.0 at the optimal temperature and
+ * falls off away from it. With the default 0 the model is off and temperature stays at
+ * ambient (bit-identical baseline).
+ */
+static void scenario_tire_thermal(void)
+{
+    /* ---- 1. Enabled: slip work heats the driven wheels above ambient. ---- */
+    {
+        Game *game = alloc_game();
+        game_init(game);
+        game->spec.tireThermalEnabled = 1.0f;
+
+        /* Launch script: full throttle from rest spins the rear wheels (wheelspin slip
+         * generates heat). */
+        game->input.throttle = 1.0f;
+        game->input.steer = 0.0f;
+        for (int i = 0; i < 600; i++) game_fixed_update(game, FIXED_DT_S);
+
+        const float frontTemp = game->vehicleInstance.tireState[WHEEL_FRONT_LEFT].temperatureC;
+        const float rearTemp = game->vehicleInstance.tireState[WHEEL_REAR_LEFT].temperatureC;
+        check(frontTemp > TIRE_AMBIENT_TEMP_C - 0.5f,
+              "front tire temperature stays at or above ambient (%.1f C)", (double)frontTemp);
+        check(rearTemp > TIRE_AMBIENT_TEMP_C,
+              "wheelspin heated the driven rear tire above ambient (%.1f C)", (double)rearTemp);
+
+        /* Live pressure follows the ideal-gas linearisation exactly: p = nominal * (1 +
+         * k*(T - T_optimal)), clamped at the floor. */
+        {
+            const VehicleTireState *ts = &game->vehicleInstance.tireState[WHEEL_REAR_LEFT];
+            const float expected =
+                game->spec.tirePressureRearKpa *
+                (1.0f + TIRE_PRESSURE_TEMP_COEFF * (ts->temperatureC - TIRE_OPTIMAL_TEMP_C));
+            const float clamped =
+                expected < TIRE_MIN_PRESSURE_KPA ? TIRE_MIN_PRESSURE_KPA : expected;
+            check_near((double)ts->pressureKpa, (double)clamped, 0.01,
+                       "live pressure matches the ideal-gas linearisation");
+            check(ts->pressureKpa >= TIRE_MIN_PRESSURE_KPA,
+                  "live pressure stays above the floor");
+        }
+
+        /* The grip multiplier is a bounded diagnostic, finite and in range. */
+        const float m = game->derived.tireTemperatureGripMultiplier[WHEEL_REAR_LEFT];
+        check(isfinite(m) && m >= TIRE_TEMP_MIN_MULT && m <= TIRE_TEMP_MAX_MULT,
+              "temperature grip multiplier stays bounded (%.3f)", (double)m);
+
+        /* ---- 2. Cooling: coast with no throttle -> temperature falls back toward ambient. */
+        const float hotRear = rearTemp;
+        game->input.throttle = 0.0f;
+        game->input.brake = 0.0f;
+        game->input.handbrake = 0.0f;
+        for (int i = 0; i < 1200; i++) game_fixed_update(game, FIXED_DT_S);
+        const float cooledRear = game->vehicleInstance.tireState[WHEEL_REAR_LEFT].temperatureC;
+        check(cooledRear < hotRear, "coasting cools the rear tire (%.1f < %.1f C)",
+              (double)cooledRear, (double)hotRear);
+
+        /* Long run stays finite with sane pressure. */
+        for (int i = 0; i < 3000; i++) game_fixed_update(game, FIXED_DT_S);
+        bool sane = true;
+        for (int w = 0; w < WHEEL_COUNT; w++) {
+            const VehicleTireState *ts = &game->vehicleInstance.tireState[w];
+            if (!isfinite(ts->temperatureC) || !isfinite(ts->pressureKpa) ||
+                ts->pressureKpa < TIRE_MIN_PRESSURE_KPA || ts->temperatureC < TIRE_MIN_TEMP_C ||
+                ts->temperatureC > TIRE_MAX_TEMP_C)
+                sane = false;
+        }
+        check(sane, "5000+ tick thermal run stays finite with bounded pressure/temperature");
+        free(game);
+    }
+
+    /* ---- 3. Disabled default: temperature never moves off ambient. ---- */
+    {
+        Game *game = alloc_game();
+        game_init(game);
+        check(game->spec.tireThermalEnabled == 0.0f, "thermal model defaults to off");
+        game->input.throttle = 1.0f;
+        for (int i = 0; i < 600; i++) game_fixed_update(game, FIXED_DT_S);
+        for (int w = 0; w < WHEEL_COUNT; w++) {
+            check_near((double)game->vehicleInstance.tireState[w].temperatureC,
+                       (double)TIRE_AMBIENT_TEMP_C, 1e-6,
+                       "disabled model: tire temperature pinned at ambient");
+            check_near((double)game->derived.tireTemperatureGripMultiplier[w], 1.0, 1e-6,
+                       "disabled model: grip multiplier pinned at 1.0");
+        }
+        free(game);
+    }
+}
+
 static const TestScenario kPhysicsScenarios[] = {
     { "telemetry", "CSV writer: stable header, row count, failure handling",
       scenario_telemetry },
     { "vehicle", "canonical structures, steering, contact velocity, render",
       scenario_vehicle_units },
     { "tire", "nonlinear curves, slip ratio, and combined-friction ellipse", scenario_tire },
+    { "tire-thermal", "issue #21: bulk temperature/pressure model heats, cools, stays bounded",
+      scenario_tire_thermal },
     { "solver-stages",
       "staged solver: prefix runs, stage contracts, rollback and failure report",
       scenario_solver_stages },

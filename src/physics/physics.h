@@ -115,6 +115,7 @@ typedef enum {
     PHYSICS_STAGE_WHEEL_KINEMATICS, /* contact velocities, slip angles, slip ratios */
     PHYSICS_STAGE_NORMAL_LOADS,     /* acceleration filters, axle loads, per-wheel Fz */
     PHYSICS_STAGE_TIRE_FORCES,      /* pure forces, relaxation lag, combined-friction limit */
+    PHYSICS_STAGE_TIRE_THERMAL,     /* bulk carcass temperature + live pressure (#21) */
     PHYSICS_STAGE_RESISTANCE,       /* aero drag, rolling resistance, low-speed brake guard */
     PHYSICS_STAGE_ACCUMULATE,       /* body-frame force sum and yaw moment */
     PHYSICS_STAGE_INTEGRATE_BODY,   /* derivatives, blend, integrate pose and velocity */
@@ -141,6 +142,10 @@ typedef struct {
     VehicleState *state;
     VehicleDerived *derived;
     VehicleRenderState *renderState;
+    /* Per-wheel bulk tire state (#21). NULL means the thermal model is off regardless of the
+     * spec switch; when present AND spec->tireThermalEnabled > 0 the thermal stage evolves
+     * it and tire forces consume live pressure/temperature. */
+    VehicleTireState *tireState;
     ControllerOutput input;
     float dt;
 
@@ -167,7 +172,7 @@ typedef struct {
  */
 bool physics_step_init(PhysicsStep *step, const VehicleSpec *spec, VehicleState *state,
                        VehicleDerived *derived, VehicleRenderState *renderState,
-                       const ControllerOutput *input, float dt);
+                       VehicleTireState *tireState, const ControllerOutput *input, float dt);
 
 /*
  * Run stages up to and including `throughStage`, continuing from wherever the step last got
@@ -190,7 +195,7 @@ void physics_step_run(PhysicsStep *step, PhysicsStage throughStage);
  * for a consistency or bounds reason that no single stage owns.
  */
 void physics_fixed_update(const VehicleSpec *spec, VehicleState *state, VehicleDerived *derived,
-                          VehicleRenderState *renderState, const ControllerOutput *input,
-                          float dt);
+                          VehicleRenderState *renderState, VehicleTireState *tireState,
+                          const ControllerOutput *input, float dt);
 
 #endif /* CIRCUIT_PHYSICS_H */

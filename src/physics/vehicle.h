@@ -152,6 +152,11 @@ typedef struct {
     float rollStiffnessFrontFraction;
     float tireRelaxationLengthM;
     float tireLongRelaxationLengthM;
+    /* 0/1 master switch for the bulk tire thermal model (#21). 0 (default) keeps the
+     * temperature/pressure dynamics off and reproduces the baseline exactly; 1 evolves
+     * per-wheel temperature from slip/rolling heat and maps temperature + live pressure to
+     * bounded grip/stiffness effects. */
+    float tireThermalEnabled;
     float tireLoadRefPerWheelN;
 
     float maxRoadWheelAngleRad;
@@ -305,6 +310,7 @@ typedef struct {
     float aligningMomentNm
         [WHEEL_COUNT];                /* N*m; self-aligning moment from pneumatic trail (#20) */
     float camberThrustN[WHEEL_COUNT]; /* N; camber-derived lateral force per wheel */
+    float tireTemperatureGripMultiplier[WHEEL_COUNT]; /* dimensionless; 1.0 when thermal off */
 
     /* Which solver stage first produced a non-finite state, as a PhysicsStage value, or 0 when
      * the last step was healthy. Diagnostic only: it is recomputed every step and, like the

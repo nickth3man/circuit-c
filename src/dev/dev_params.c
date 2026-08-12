@@ -313,6 +313,9 @@ static const DevParameter g_params[] = {
       TIRE_LONG_RELAXATION_LENGTH_M, 0.0f, 1.0f, 0.01f, false, false, 2,
       DEV_CLASS_PHYSICS_INPUT, DEV_OWNER_DEFINITION,
       "Longitudinal force relaxation length (#20). 0 disables." },
+    { "tire.thermal_enabled", "Tires", "", SPEC_OFFSET(tireThermalEnabled), 0.0f, 0.0f, 1.0f,
+      1.0f, false, false, 2, DEV_CLASS_PHYSICS_INPUT, DEV_OWNER_DEFINITION,
+      "Bulk tire temperature/pressure model master switch (#21). 0 = off, baseline exact." },
     { "tire.load_sensitivity_k", "Tires", "", SPEC_OFFSET(tireLoadSensitivityK),
       TIRE_LOAD_SENSITIVITY_K, 0.0f, 0.05f, 0.001f, false, false, 2, DEV_CLASS_PHYSICS_INPUT,
       DEV_OWNER_DEFINITION, "Load sensitivity exponent." },
@@ -679,7 +682,8 @@ static float normalize_discrete_value(const DevParameter *param, float value)
     if (param == NULL) return value;
     if (strcmp(param->name, "body.side_window_count") == 0 ||
         strcmp(param->name, "body.cabin_rows") == 0 ||
-        strcmp(param->name, "body.roof_type") == 0) {
+        strcmp(param->name, "body.roof_type") == 0 ||
+        strcmp(param->name, "tire.thermal_enabled") == 0) {
         return roundf(value);
     }
     if (strcmp(param->name, "body.door_count") == 0) {

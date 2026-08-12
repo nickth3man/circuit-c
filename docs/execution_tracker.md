@@ -203,6 +203,8 @@ Multiple lanes may operate in parallel after #13, but dependencies within each l
 
 - [ ] [#21 — Add deterministic tire temperature and pressure state](https://github.com/nickth3man/circuit-c/issues/21)
   - Depends on: #8, #16, #20
+  - VehicleTireState (pressureKpa/temperatureC/wear) already exists in VehicleInstance and is
+    checksummed; #21 adds the thermal/pressure dynamics that evolve it.
 
 - [ ] [#22 — Add tire wear, grip degradation, and deterministic service hooks](https://github.com/nickth3man/circuit-c/issues/22)
   - Depends on: #11, #21

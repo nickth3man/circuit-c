@@ -239,6 +239,7 @@ void vehicle_spec_set_default(VehicleSpec *spec)
     spec->tireLoadSensitivityK = TIRE_LOAD_SENSITIVITY_K;
     spec->tireRelaxationLengthM = TIRE_RELAXATION_LENGTH_M;
     spec->tireLongRelaxationLengthM = TIRE_LONG_RELAXATION_LENGTH_M;
+    spec->tireThermalEnabled = 0.0f; /* off: bit-identical baseline (#21) */
     spec->ackermannPercent = ACKERMANN_PERCENT;
     spec->differentialMode = (float)DIFFERENTIAL_MODE_DEFAULT;
     spec->differentialBiasRatio = DIFFERENTIAL_BIAS_RATIO;
@@ -384,6 +385,7 @@ bool vehicle_spec_is_valid(const VehicleSpec *spec)
     if (!(isfinite(spec->tireLongRelaxationLengthM) &&
           spec->tireLongRelaxationLengthM >= 0.0f && spec->tireLongRelaxationLengthM <= 1.0f))
         return false;
+    if (spec->tireThermalEnabled != 0.0f && spec->tireThermalEnabled != 1.0f) return false;
     if (!(isfinite(spec->tireLoadSensitivityK) && spec->tireLoadSensitivityK >= 0.0f &&
           spec->tireLoadSensitivityK <= 0.05f))
         return false;
@@ -592,6 +594,7 @@ static uint32_t vehicle_content_hash(const VehicleSpec *spec)
     HASH_FLOAT(rollStiffnessFrontFraction);
     HASH_FLOAT(tireRelaxationLengthM);
     HASH_FLOAT(tireLongRelaxationLengthM);
+    HASH_FLOAT(tireThermalEnabled);
     HASH_FLOAT(tireLoadRefPerWheelN);
     HASH_FLOAT(maxRoadWheelAngleRad);
     HASH_FLOAT(maxSteerRateRadS);

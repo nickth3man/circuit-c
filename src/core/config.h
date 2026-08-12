@@ -343,11 +343,29 @@
 #define TIRE_LOAD_REF_PER_WHEEL_N (VEH_MASS_KG * GRAVITY_MPS2 * 0.25f)
 #define TIRE_RELAXATION_LENGTH_M 0.30f     /* m; realistic 0.20..0.50. 0 disables */
 #define TIRE_LONG_RELAXATION_LENGTH_M 0.0f /* m; 0 disables longitudinal relaxation (#20) */
-#define ACKERMANN_PERCENT 1.00f            /* dimensionless; 0=parallel, 1=true Ackermann */
-#define DIFFERENTIAL_MODE_DEFAULT 2        /* 0=LOCKED, 1=OPEN, 2=LSD */
-#define DIFFERENTIAL_BIAS_RATIO 2.0f       /* dimensionless; LSD slower/faster cap */
-#define DIFFERENTIAL_PRELOAD_NM 60.0f      /* N*m; LSD clutch preload */
-#define DIFF_OMEGA_EPSILON_RAD_S 1.0e-3f   /* rad/s; LSD omega-difference deadband */
+/* Reduced-order bulk tire thermal model (#21). Master switch is VehicleSpec.tireThermalEnabled
+ * (default 0 = disabled, bit-identical baseline); when enabled the constants below shape the
+ * dynamics. Equilibrium: ambient == optimal -> multiplier 1.0 and zero net heat. */
+#define TIRE_AMBIENT_TEMP_C 20.0f             /* C; initial/ambient temperature */
+#define TIRE_OPTIMAL_TEMP_C 100.0f            /* C; grip-multiplier peak */
+#define TIRE_TEMP_BAND_C 40.0f                /* C; falloff width (Gaussian sigma) */
+#define TIRE_TEMP_FALLOFF 0.35f               /* dimensionless; grip loss at one sigma */
+#define TIRE_TEMP_MIN_MULT 0.50f              /* dimensionless; cold/hot floor */
+#define TIRE_TEMP_MAX_MULT 1.15f              /* dimensionless; warm ceiling */
+#define TIRE_HEAT_SLIP_GAIN 0.002f            /* fraction of slip power into carcass heat */
+#define TIRE_HEAT_ROLLING_GAIN 0.001f         /* fraction of rolling loss into carcass heat */
+#define TIRE_COOLING_RATE_PER_S 0.05f         /* 1/s; convection coefficient at rest */
+#define TIRE_COOLING_SPEED_FACTOR 0.08f       /* s/m; extra convection per m/s of road speed */
+#define TIRE_THERMAL_CAPACITY_J_PER_C 9000.0f /* J/C; bulk carcass heat capacity */
+#define TIRE_PRESSURE_TEMP_COEFF 0.004f       /* 1/C; live pressure = nominal * (1 + k*dT) */
+#define TIRE_MIN_TEMP_C -20.0f                /* C; clamp */
+#define TIRE_MAX_TEMP_C 200.0f                /* C; clamp */
+#define TIRE_MIN_PRESSURE_KPA 50.0f           /* kPa; clamp (never negative or flat) */
+#define ACKERMANN_PERCENT 1.00f               /* dimensionless; 0=parallel, 1=true Ackermann */
+#define DIFFERENTIAL_MODE_DEFAULT 2           /* 0=LOCKED, 1=OPEN, 2=LSD */
+#define DIFFERENTIAL_BIAS_RATIO 2.0f          /* dimensionless; LSD slower/faster cap */
+#define DIFFERENTIAL_PRELOAD_NM 60.0f         /* N*m; LSD clutch preload */
+#define DIFF_OMEGA_EPSILON_RAD_S 1.0e-3f      /* rad/s; LSD omega-difference deadband */
 #define ROLL_STIFFNESS_FRONT_FRACTION \
     0.50f                              /* dimensionless 0..1; front axle roll-moment share */
 #define SURFACE_REFERENCE_MU_LAT 1.30f /* asphalt lateral mu; tireMuLat* are absolute vs this */

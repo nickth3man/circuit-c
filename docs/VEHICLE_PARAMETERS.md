@@ -153,6 +153,7 @@ validation.
 | `tire.long.mu_scale` | `physics` | `definition` | 1 | — | 0.3 .. 2 | 0.01 | advanced | — | Longitudinal friction scale. |
 | `tire.relaxation_length` | `physics` | `definition` | 0.3 | m | 0 .. 1 | 0.01 | expert | — | Lateral force relaxation length. |
 | `tire.long_relaxation_length` | `physics` | `definition` | 0 | m | 0 .. 1 | 0.01 | expert | — | Longitudinal force relaxation length (#20). 0 disables. |
+| `tire.thermal_enabled` | `physics` | `definition` | 0 | — | 0 .. 1 | 1 | expert | — | Bulk tire temperature/pressure model master switch (#21). 0 = off, baseline exact. |
 | `tire.load_sensitivity_k` | `physics` | `definition` | 0.02 | — | 0 .. 0.05 | 0.001 | expert | — | Load sensitivity exponent. |
 | `tire.load_ref_per_wheel` | `derived` | `derived` | 2942 | N | 500 .. 15000 | 10 | expert | — | Reference load = m*g/4 (derived). |
 

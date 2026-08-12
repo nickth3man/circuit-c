@@ -646,6 +646,7 @@ const char *physics_stage_name(PhysicsStage stage)
         case PHYSICS_STAGE_WHEEL_KINEMATICS: return "wheel-kinematics";
         case PHYSICS_STAGE_NORMAL_LOADS: return "normal-loads";
         case PHYSICS_STAGE_TIRE_FORCES: return "tire-forces";
+        case PHYSICS_STAGE_TIRE_THERMAL: return "tire-thermal";
         case PHYSICS_STAGE_RESISTANCE: return "resistance";
         case PHYSICS_STAGE_ACCUMULATE: return "accumulate";
         case PHYSICS_STAGE_INTEGRATE_BODY: return "integrate-body";
@@ -657,7 +658,7 @@ const char *physics_stage_name(PhysicsStage stage)
 
 bool physics_step_init(PhysicsStep *step, const VehicleSpec *spec, VehicleState *state,
                        VehicleDerived *derived, VehicleRenderState *renderState,
-                       const ControllerOutput *input, float dt)
+                       VehicleTireState *tireState, const ControllerOutput *input, float dt)
 {
     if (step == NULL) return false;
     memset(step, 0, sizeof(*step));
@@ -669,6 +670,7 @@ bool physics_step_init(PhysicsStep *step, const VehicleSpec *spec, VehicleState 
     step->state = state;
     step->derived = derived;
     step->renderState = renderState;
+    step->tireState = tireState;
     step->input = *input; /* copied: the step's demands cannot change halfway through it */
     step->dt = dt;
     step->completedStage = PHYSICS_STAGE_NONE;
@@ -964,12 +966,31 @@ static void stage_tire_forces(PhysicsStep *step)
          * (225 mm) and pressure (220 kPa) both scales are 1.0, reproducing the baseline. */
         const float sectionWidthMm =
             front ? spec->tireSectionWidthFrontMm : spec->tireSectionWidthRearMm;
-        const float tirePressureKpa =
+        /* Live pressure when the thermal model is active (#21); otherwise the authored
+         * nominal pressure, which is what keeps the baseline bit-identical. */
+        const float nominalPressureKpa =
             front ? spec->tirePressureFrontKpa : spec->tirePressureRearKpa;
+        const float tirePressureKpa =
+            (step->tireState != NULL && spec->tireThermalEnabled > 0.0f)
+                ? step->tireState[i].pressureKpa
+                : nominalPressureKpa;
         const float widthScale =
             powf(sectionWidthMm / TIRE_SECTION_WIDTH_MM, TIRE_WIDTH_STIFFNESS_EXP);
         const float pressureScale =
             powf(tirePressureKpa / TIRE_PRESSURE_KPA, TIRE_PRESSURE_STIFFNESS_EXP);
+
+        /* Bulk temperature grip multiplier (#21): Gaussian falloff around the optimal
+         * temperature, 1.0 exactly at the optimum and when the thermal model is off. */
+        float tempMult = 1.0f;
+        if (step->tireState != NULL && spec->tireThermalEnabled > 0.0f) {
+            const float d =
+                (step->tireState[i].temperatureC - TIRE_OPTIMAL_TEMP_C) / TIRE_TEMP_BAND_C;
+            float m = 1.0f - TIRE_TEMP_FALLOFF * d * d;
+            if (m < TIRE_TEMP_MIN_MULT) m = TIRE_TEMP_MIN_MULT;
+            if (m > TIRE_TEMP_MAX_MULT) m = TIRE_TEMP_MAX_MULT;
+            tempMult = m;
+        }
+        derived->tireTemperatureGripMultiplier[i] = tempMult;
 
         /* Surface-relative friction and stiffness. On asphalt the surface ratios equal 1.0
          * and tireBScale is 1.0, so this block is a complete no-op for the surface factor.
@@ -984,8 +1005,9 @@ static void stage_tire_forces(PhysicsStep *step)
          * tireBScale is 1.0, so this block is a complete no-op. */
         const SurfaceSpec *s = Surface_Get(wheel->surfaceId);
         const float muLateralEff =
-            lateralMuAxle * (s->muLateral / SURFACE_REFERENCE_MU_LAT) * muScale;
-        const float muLongitudinalEff = spec->tireMuLongScale * s->muLongitudinal * muScale;
+            lateralMuAxle * (s->muLateral / SURFACE_REFERENCE_MU_LAT) * muScale * tempMult;
+        const float muLongitudinalEff =
+            spec->tireMuLongScale * s->muLongitudinal * muScale * tempMult;
         const float BlatEff = lateralB * widthScale * pressureScale * s->tireBScale;
         const float BlongEff = spec->tireBLong * pressureScale;
 
@@ -1075,6 +1097,62 @@ static void stage_tire_forces(PhysicsStep *step)
         tire_apply_combined_limit(fxRelaxed, fyRelaxed, muLongitudinalEff * wheel->normalLoadN,
                                   muLateralEff * wheel->normalLoadN, &wheel->forceLongitudinalN,
                                   &wheel->forceLateralN, &wheel->frictionUsage);
+    }
+}
+
+/*
+ * Stage: tire thermal (issue #21).
+ * Reads: this step's tire forces/slips, wheel speeds and loads. Writes: per-wheel bulk
+ * temperature and live pressure in step->tireState.
+ *
+ * Reduced-order bulk model: slip work (|Fx*slipRatio| + |Fy*slipAngle|) and rolling
+ * deformation heat the carcass; convection to ambient cools it, with more airflow at speed.
+ * Live pressure follows the ideal-gas law linearisation: p = p_nominal * (1 + k*(T - T_ref)).
+ * Bounded by hard clamps so long runs cannot diverge or produce negative pressure. The stage
+ * is a no-op unless BOTH step->tireState is present AND spec->tireThermalEnabled > 0; the
+ * default keeps the model off and the baseline bit-identical.
+ */
+static void stage_tire_thermal(PhysicsStep *step)
+{
+    if (step->tireState == NULL || step->spec->tireThermalEnabled <= 0.0f) return;
+    const VehicleSpec *spec = step->spec;
+    const VehicleState *state = step->state;
+    const VehicleDerived *derived = step->derived;
+    const float dt = step->dt;
+    const float speedMps = derived->speedMps;
+
+    for (int i = 0; i < WHEEL_COUNT; i++) {
+        const WheelState *wheel = &state->wheels[i];
+        VehicleTireState *ts = &step->tireState[i];
+        const bool front = i <= WHEEL_FRONT_RIGHT;
+        const float nominalKpa = front ? spec->tirePressureFrontKpa : spec->tirePressureRearKpa;
+
+        /* Heating: slip work (signed slip, work is absolute) plus rolling deformation loss
+         * (proportional to load * speed, using the surface's rolling coefficient). */
+        const float slipPowerW = fabsf(wheel->forceLongitudinalN * wheel->slipRatio) +
+                                 fabsf(wheel->forceLateralN * wheel->slipAngleRad);
+        const float rollingPowerW =
+            Surface_Get(wheel->surfaceId)->rollingResistanceCoefficient * wheel->normalLoadN *
+            fmaxf(fabsf(derived->wheelContactVelocityBodyMps[i].x), 0.0f);
+        const float heatW =
+            slipPowerW * TIRE_HEAT_SLIP_GAIN + rollingPowerW * TIRE_HEAT_ROLLING_GAIN;
+
+        /* Cooling: convection to ambient, stronger with road speed. */
+        const float coolingW =
+            TIRE_COOLING_RATE_PER_S * (1.0f + TIRE_COOLING_SPEED_FACTOR * speedMps) *
+            (ts->temperatureC - TIRE_AMBIENT_TEMP_C) * TIRE_THERMAL_CAPACITY_J_PER_C;
+
+        float tempC =
+            ts->temperatureC + (heatW - coolingW) * dt / TIRE_THERMAL_CAPACITY_J_PER_C;
+        if (tempC < TIRE_MIN_TEMP_C) tempC = TIRE_MIN_TEMP_C;
+        if (tempC > TIRE_MAX_TEMP_C) tempC = TIRE_MAX_TEMP_C;
+        ts->temperatureC = tempC;
+
+        /* Live pressure from the bulk temperature; clamped positive. */
+        float pressureKpa =
+            nominalKpa * (1.0f + TIRE_PRESSURE_TEMP_COEFF * (tempC - TIRE_OPTIMAL_TEMP_C));
+        if (pressureKpa < TIRE_MIN_PRESSURE_KPA) pressureKpa = TIRE_MIN_PRESSURE_KPA;
+        ts->pressureKpa = pressureKpa;
     }
 }
 
@@ -1451,6 +1529,7 @@ void physics_step_run(PhysicsStep *step, PhysicsStage throughStage)
             case PHYSICS_STAGE_WHEEL_KINEMATICS: stage_wheel_kinematics(step); break;
             case PHYSICS_STAGE_NORMAL_LOADS: stage_normal_loads(step); break;
             case PHYSICS_STAGE_TIRE_FORCES: stage_tire_forces(step); break;
+            case PHYSICS_STAGE_TIRE_THERMAL: stage_tire_thermal(step); break;
             case PHYSICS_STAGE_RESISTANCE: stage_resistance(step); break;
             case PHYSICS_STAGE_ACCUMULATE: stage_accumulate(step); break;
             case PHYSICS_STAGE_INTEGRATE_BODY: stage_integrate_body(step); break;
@@ -1513,8 +1592,8 @@ static PhysicsStage diagnose_failing_stage(const PhysicsStep *failed)
     VehicleState state = failed->lastGoodState;
     VehicleDerived derived = failed->lastGoodDerived;
     VehicleRenderState renderState = failed->lastGoodRenderState;
-    if (!physics_step_init(&probe, failed->spec, &state, &derived, &renderState, &failed->input,
-                           failed->dt))
+    if (!physics_step_init(&probe, failed->spec, &state, &derived, &renderState,
+                           failed->tireState, &failed->input, failed->dt))
         return PHYSICS_STAGE_NONE;
 
     for (PhysicsStage s = PHYSICS_STAGE_BEGIN; s < PHYSICS_STAGE_COUNT;
@@ -1526,11 +1605,12 @@ static PhysicsStage diagnose_failing_stage(const PhysicsStep *failed)
 }
 
 void physics_fixed_update(const VehicleSpec *spec, VehicleState *state, VehicleDerived *derived,
-                          VehicleRenderState *renderState, const ControllerOutput *input,
-                          float dt)
+                          VehicleRenderState *renderState, VehicleTireState *tireState,
+                          const ControllerOutput *input, float dt)
 {
     PhysicsStep step;
-    if (!physics_step_init(&step, spec, state, derived, renderState, input, dt)) return;
+    if (!physics_step_init(&step, spec, state, derived, renderState, tireState, input, dt))
+        return;
 
     physics_step_run(&step, PHYSICS_STAGE_COUNT - 1);
 
