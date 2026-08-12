@@ -149,6 +149,10 @@ typedef struct {
     /* Collision damage scalar in [0,1] (#28). NULL (or 0) applies no damage effects; when
      * present and > 0 the solver degrades engine output, aero, and grip. */
     float *damage;
+    /* Live fuel mass in kg (#24). NULL (or spec->fuelEnabled == 0) keeps fuel pinned; when
+     * present and enabled the powertrain stage consumes fuel from engine work and starves
+     * drive torque near empty. */
+    float *fuelKg;
     ControllerOutput input;
     float dt;
 
@@ -175,7 +179,7 @@ typedef struct {
  */
 bool physics_step_init(PhysicsStep *step, const VehicleSpec *spec, VehicleState *state,
                        VehicleDerived *derived, VehicleRenderState *renderState,
-                       VehicleTireState *tireState, float *damage,
+                       VehicleTireState *tireState, float *damage, float *fuelKg,
                        const ControllerOutput *input, float dt);
 
 /*
@@ -200,6 +204,7 @@ void physics_step_run(PhysicsStep *step, PhysicsStage throughStage);
  */
 void physics_fixed_update(const VehicleSpec *spec, VehicleState *state, VehicleDerived *derived,
                           VehicleRenderState *renderState, VehicleTireState *tireState,
-                          float *damage, const ControllerOutput *input, float dt);
+                          float *damage, float *fuelKg, const ControllerOutput *input,
+                          float dt);
 
 #endif /* CIRCUIT_PHYSICS_H */

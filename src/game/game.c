@@ -1118,8 +1118,12 @@ static void stage_physics(Game *game, TickContext *ctx, float dt)
      * modes keep contact physics identical. */
     float *damagePtr =
         (game->session.rules.damageMode == DAMAGE_MECHANICAL) ? &game->damage : NULL;
+    /* Live fuel feeds the solver only when the fuel model is enabled (#24); the mass/CG
+     * derivation runs BEFORE the step so this tick's physics sees the new mass. */
+    float *fuelPtr = (game->spec.fuelEnabled > 0.0f) ? &game->fuelKg : NULL;
+    if (fuelPtr != NULL) vehicle_spec_set_fuel_mass(&game->spec, game->fuelKg);
     physics_fixed_update(&game->spec, &game->vehicle, &game->derived, &game->renderState,
-                         game->tireState, damagePtr, &ctx->applied, dt);
+                         game->tireState, damagePtr, fuelPtr, &ctx->applied, dt);
     CIRCUIT_ZONE_END(physics);
 }
 
@@ -1239,9 +1243,14 @@ static void simulate_extra_entrant(Game *game, RaceEntrant *entrant, const TickC
     float *damagePtr = (game->session.rules.damageMode == DAMAGE_MECHANICAL)
                            ? &entrant->instance.damage
                            : NULL;
+    float *fuelPtr =
+        (entrant->instance.spec.fuelEnabled > 0.0f) ? &entrant->instance.fuelKg : NULL;
+    if (fuelPtr != NULL) {
+        vehicle_spec_set_fuel_mass(&entrant->instance.spec, entrant->instance.fuelKg);
+    }
     physics_fixed_update(&entrant->instance.spec, &entrant->instance.vehicle,
                          &entrant->instance.derived, &entrant->instance.renderState,
-                         entrant->instance.tireState, damagePtr, &applied, dt);
+                         entrant->instance.tireState, damagePtr, fuelPtr, &applied, dt);
 
     if (ctx->trackLoaded) {
         const TrackProgressEvent pev =

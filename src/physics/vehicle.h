@@ -167,6 +167,12 @@ typedef struct {
     float engineInertiaKgM2; /* kg*m^2; 0 = kinematic engine (baseline), >0 = dynamic (#23) */
     float maxClutchTorqueNm; /* N*m; clutch torque capacity while slipping */
     float shiftDurationS;    /* s; total phased-shift window (cut, swap, engage) */
+    /* Fuel model (#24). 0 (default) pins fuelKg at its initial load and keeps the baseline
+     * exact; 1 consumes fuel proportional to engine work and feeds the live fuel mass back
+     * into mass/CG/inertia via vehicle_spec_set_fuel_mass(). */
+    float fuelEnabled;
+    float fuelTankCapacityL;          /* litres; upper bound for service/refuel operations */
+    float fuelConsumptionRateKgPerWS; /* kg per joule of engine work (BSFC-derived) */
     float tireLoadRefPerWheelN;
 
     float maxRoadWheelAngleRad;
@@ -449,6 +455,12 @@ void vehicle_instance_reset(VehicleInstance *instance);
  * every wheel's wear to 0; when `replace` is false only pressure/temperature are restored to
  * their cold nominal/ambient values. Never touches the vehicle pose or any other state. */
 void vehicle_tire_service(VehicleInstance *instance, bool replace);
+/* Recompute the spec's mass/CG/yaw-inertia from its mass particles with the fuel particle
+ * set to `fuelKg` (issue #24). Deterministic; leaves every other spec field untouched. */
+void vehicle_spec_set_fuel_mass(VehicleSpec *spec, float fuelKg);
+/* Deterministic refuel service hook (#24, consumed by future pit rules): adds up to `litres`
+ * (converted at fuelDensityKgPerL) without exceeding the tank capacity. */
+void vehicle_refuel(VehicleInstance *instance, float litres);
 bool vehicle_instance_init(VehicleInstance *instance, const VehicleDefinition *definition,
                            const VehicleSetup *setup);
 

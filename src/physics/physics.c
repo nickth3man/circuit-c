@@ -664,7 +664,7 @@ const char *physics_stage_name(PhysicsStage stage)
 
 bool physics_step_init(PhysicsStep *step, const VehicleSpec *spec, VehicleState *state,
                        VehicleDerived *derived, VehicleRenderState *renderState,
-                       VehicleTireState *tireState, float *damage,
+                       VehicleTireState *tireState, float *damage, float *fuelKg,
                        const ControllerOutput *input, float dt)
 {
     if (step == NULL) return false;
@@ -679,6 +679,7 @@ bool physics_step_init(PhysicsStep *step, const VehicleSpec *spec, VehicleState 
     step->renderState = renderState;
     step->tireState = tireState;
     step->damage = damage;
+    step->fuelKg = fuelKg;
     step->input = *input; /* copied: the step's demands cannot change halfway through it */
     step->dt = dt;
     step->completedStage = PHYSICS_STAGE_NONE;
@@ -803,6 +804,27 @@ static void stage_powertrain(PhysicsStep *step)
     } else {
         state->engineRpm = drivetrain_engine_rpm(spec, state->selectedGear, drivenOmegaRadS);
     }
+    /* Fuel consumption (issue #24): bounded by engine work, monotonic, never negative;
+     * drive torque fades to zero as the tank starves. Disabled when fuelKg is absent or the
+     * spec switch is off. */
+    if (step->fuelKg != NULL && spec->fuelEnabled > 0.0f) {
+        float fuelKg = *step->fuelKg;
+        if (fuelKg > 0.0f) {
+            const float enginePowerW =
+                step->torques.engineTorqueNm * (state->engineRpm * CIRCUIT_TWO_PI / 60.0f);
+            fuelKg -= fmaxf(enginePowerW, 0.0f) * step->dt * spec->fuelConsumptionRateKgPerWS;
+            if (fuelKg < 0.0f) fuelKg = 0.0f;
+            *step->fuelKg = fuelKg;
+        }
+        float starveScale = 1.0f;
+        if (fuelKg < FUEL_STARVATION_RESERVE_KG) {
+            starveScale = clampf(fuelKg / FUEL_STARVATION_RESERVE_KG, 0.0f, 1.0f);
+        }
+        for (int i = 0; i < WHEEL_COUNT; i++) {
+            step->torques.driveTorqueNm[i] *= starveScale;
+        }
+    }
+
     /* Mechanical damage: degraded engine output (issue #28). */
     if (step->damage != NULL && *step->damage > 0.0f) {
         const float d = *step->damage > 1.0f ? 1.0f : *step->damage;
@@ -1668,7 +1690,8 @@ static PhysicsStage diagnose_failing_stage(const PhysicsStep *failed)
     VehicleDerived derived = failed->lastGoodDerived;
     VehicleRenderState renderState = failed->lastGoodRenderState;
     if (!physics_step_init(&probe, failed->spec, &state, &derived, &renderState,
-                           failed->tireState, failed->damage, &failed->input, failed->dt))
+                           failed->tireState, failed->damage, failed->fuelKg, &failed->input,
+                           failed->dt))
         return PHYSICS_STAGE_NONE;
 
     for (PhysicsStage s = PHYSICS_STAGE_BEGIN; s < PHYSICS_STAGE_COUNT;
@@ -1681,11 +1704,11 @@ static PhysicsStage diagnose_failing_stage(const PhysicsStep *failed)
 
 void physics_fixed_update(const VehicleSpec *spec, VehicleState *state, VehicleDerived *derived,
                           VehicleRenderState *renderState, VehicleTireState *tireState,
-                          float *damage, const ControllerOutput *input, float dt)
+                          float *damage, float *fuelKg, const ControllerOutput *input, float dt)
 {
     PhysicsStep step;
-    if (!physics_step_init(&step, spec, state, derived, renderState, tireState, damage, input,
-                           dt))
+    if (!physics_step_init(&step, spec, state, derived, renderState, tireState, damage, fuelKg,
+                           input, dt))
         return;
 
     physics_step_run(&step, PHYSICS_STAGE_COUNT - 1);

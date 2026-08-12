@@ -379,11 +379,14 @@
 #define STUCK_RECOVERY_PENALTY_S 3.0f /* s; time penalty added per recovery */
 #define STUCK_RECOVERY_CLEAR_RADIUS_M 4.0f /* m; min distance to other entrants at spawn */
 #define STUCK_SPEED_MPS 0.5f               /* m/s; below this an entrant counts as stalled */
-#define ACKERMANN_PERCENT 1.00f            /* dimensionless; 0=parallel, 1=true Ackermann */
-#define DIFFERENTIAL_MODE_DEFAULT 2        /* 0=LOCKED, 1=OPEN, 2=LSD */
-#define DIFFERENTIAL_BIAS_RATIO 2.0f       /* dimensionless; LSD slower/faster cap */
-#define DIFFERENTIAL_PRELOAD_NM 60.0f      /* N*m; LSD clutch preload */
-#define DIFF_OMEGA_EPSILON_RAD_S 1.0e-3f   /* rad/s; LSD omega-difference deadband */
+/* Fuel model (issue #24). */
+#define FUEL_DENSITY_KG_PER_L 0.75f      /* kg per litre (gasoline) */
+#define FUEL_STARVATION_RESERVE_KG 0.5f  /* kg; drive torque fades linearly below this */
+#define ACKERMANN_PERCENT 1.00f          /* dimensionless; 0=parallel, 1=true Ackermann */
+#define DIFFERENTIAL_MODE_DEFAULT 2      /* 0=LOCKED, 1=OPEN, 2=LSD */
+#define DIFFERENTIAL_BIAS_RATIO 2.0f     /* dimensionless; LSD slower/faster cap */
+#define DIFFERENTIAL_PRELOAD_NM 60.0f    /* N*m; LSD clutch preload */
+#define DIFF_OMEGA_EPSILON_RAD_S 1.0e-3f /* rad/s; LSD omega-difference deadband */
 #define ROLL_STIFFNESS_FRONT_FRACTION \
     0.50f                              /* dimensionless 0..1; front axle roll-moment share */
 #define SURFACE_REFERENCE_MU_LAT 1.30f /* asphalt lateral mu; tireMuLat* are absolute vs this */

@@ -439,6 +439,15 @@ static const DevParameter g_params[] = {
     { "drive.shift_duration", "Drivetrain", "s", SPEC_OFFSET(shiftDurationS), 0.2f, 0.02f, 2.0f,
       0.01f, false, false, 2, DEV_CLASS_PHYSICS_INPUT, DEV_OWNER_DEFINITION,
       "Phased shift window: cut, swap, engage (#23)." },
+    { "drive.fuel_enabled", "Drivetrain", "", SPEC_OFFSET(fuelEnabled), 0.0f, 0.0f, 1.0f, 1.0f,
+      false, false, 2, DEV_CLASS_PHYSICS_INPUT, DEV_OWNER_DEFINITION,
+      "Fuel consumption and dynamic mass model (#24). 0 = off, baseline exact." },
+    { "drive.fuel_tank_capacity", "Drivetrain", "L", SPEC_OFFSET(fuelTankCapacityL), 60.0f,
+      1.0f, 500.0f, 1.0f, false, false, 2, DEV_CLASS_PHYSICS_INPUT, DEV_OWNER_DEFINITION,
+      "Fuel tank capacity (#24)." },
+    { "drive.fuel_rate", "Drivetrain", "kg/J", SPEC_OFFSET(fuelConsumptionRateKgPerWS), 2.5e-8f,
+      0.0f, 1e-4f, 1e-9f, false, false, 2, DEV_CLASS_PHYSICS_INPUT, DEV_OWNER_DEFINITION,
+      "Fuel per joule of engine work (#24)." },
     { "drive.diff_mode", "Drivetrain", "", SPEC_OFFSET(differentialMode),
       (float)DIFFERENTIAL_MODE_DEFAULT, 0.0f, 2.0f, 1.0f, false, false, 1,
       DEV_CLASS_PHYSICS_INPUT, DEV_OWNER_SETUP, "0=locked 1=open 2=LSD." },
@@ -696,7 +705,8 @@ static float normalize_discrete_value(const DevParameter *param, float value)
         strcmp(param->name, "body.cabin_rows") == 0 ||
         strcmp(param->name, "body.roof_type") == 0 ||
         strcmp(param->name, "tire.thermal_enabled") == 0 ||
-        strcmp(param->name, "tire.wear_enabled") == 0) {
+        strcmp(param->name, "tire.wear_enabled") == 0 ||
+        strcmp(param->name, "drive.fuel_enabled") == 0) {
         return roundf(value);
     }
     if (strcmp(param->name, "body.door_count") == 0) {

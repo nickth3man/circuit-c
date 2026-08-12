@@ -203,6 +203,9 @@ validation.
 | `drive.engine_inertia` | `physics` | `definition` | 0 | kg*m^2 | 0 .. 10 | 0.1 | expert | — | Dynamic engine inertia (#23). 0 = kinematic engine, baseline exact. |
 | `drive.max_clutch_torque` | `physics` | `definition` | 400 | N*m | 50 .. 5000 | 10 | expert | — | Clutch torque capacity while slipping (#23). |
 | `drive.shift_duration` | `physics` | `definition` | 0.2 | s | 0.02 .. 2 | 0.01 | expert | — | Phased shift window: cut, swap, engage (#23). |
+| `drive.fuel_enabled` | `physics` | `definition` | 0 | — | 0 .. 1 | 1 | expert | — | Fuel consumption and dynamic mass model (#24). 0 = off, baseline exact. |
+| `drive.fuel_tank_capacity` | `physics` | `definition` | 60 | L | 1 .. 500 | 1 | expert | — | Fuel tank capacity (#24). |
+| `drive.fuel_rate` | `physics` | `definition` | 2.5e-08 | kg/J | 0 .. 0.0001 | 1e-09 | expert | — | Fuel per joule of engine work (#24). |
 | `drive.diff_mode` | `physics` | `setup` | 2 | — | 0 .. 2 | 1 | advanced | — | 0=locked 1=open 2=LSD. |
 | `drive.diff_bias_ratio` | `physics` | `setup` | 2 | — | 1 .. 5 | 0.1 | expert | — | LSD bias ratio. |
 | `drive.diff_preload` | `physics` | `setup` | 60 | N*m | 0 .. 400 | 5 | expert | — | LSD preload. |

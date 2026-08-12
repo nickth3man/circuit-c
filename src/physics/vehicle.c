@@ -55,17 +55,11 @@ float vehicle_effective_drag_coefficient(const VehicleSpec *spec)
     return spec->dragCoefficient * factor;
 }
 
-void vehicle_spec_refresh_derived(VehicleSpec *spec)
+/* Stage 2 — mass particles -> mass, CG, yaw inertia, with the fuel particle set to
+ * `fuelKg` (issue #24: the live fuel mass replaces the authored one). */
+static void derive_mass_particles(VehicleSpec *spec, float fuelKg)
 {
-    if (spec == NULL) return;
-
-    /* Stage 1 — dimensions -------------------------------------------------------------- */
-    spec->lengthOverallM = spec->wheelbaseM + spec->frontOverhangM + spec->rearOverhangM;
-    spec->bodyHalfWidthM = 0.5f * spec->widthOverallM;
-    spec->frontalAreaM2 = spec->widthOverallM * spec->heightOverallM * VEH_FRONTAL_AREA_FILL;
-
-    /* Stage 2 — mass particles → mass, CG, yaw inertia ----------------------------------- */
-    const float masses[5] = { spec->massEngineKg, spec->massGearboxKg, spec->massFuelKg,
+    const float masses[5] = { spec->massEngineKg, spec->massGearboxKg, fuelKg,
                               spec->massDriverKg, spec->massChassisKg };
     const float xs[5] = { spec->massEngineXM, spec->massGearboxXM, spec->massFuelXM,
                           spec->massDriverXM, spec->massChassisXM };
@@ -81,15 +75,7 @@ void vehicle_spec_refresh_derived(VehicleSpec *spec)
         momentZ += masses[i] * zs[i];
     }
     spec->massKg = massKg;
-    /* TODO(vehicle-audit #4): the authored mass-particle positions set the F/R balance, and one
-     * shipped car is off for its class. awd_rally resolves to 40% front / 60% rear (its chassis
-     * particle sits 0.38 m behind the midpoint) — a rear-engine 911 balance, not a front-engine
-     * AWD rally car (real Impreza/Evo are ~55-60% front). Review per-car massChassisX/massFuelX. */
-    /* TODO(vehicle-audit #9): cgHeightM is the raw mass-particle Z average, and two shipped cars
-     * read unrealistically low: awd_gt and rwd_grip derive 0.28 m on a 1.37 m-tall body —
-     * mid-engine/dry-sump territory for cars the data describes as front-engined. Real road cars
-     * sit ~0.45-0.55 m; the low CG flattens load transfer and likely why those two are the
-     * "stable" reference cars. Review per-particle massZ values. */
+
     if (massKg > 0.0f) {
         const float xCg = momentX / massKg;
         const float zCg = momentZ / massKg;
@@ -106,6 +92,44 @@ void vehicle_spec_refresh_derived(VehicleSpec *spec)
         izz += massKg * yawRadiusM * yawRadiusM;
         spec->yawInertiaKgM2 = izz;
     }
+}
+
+void vehicle_spec_set_fuel_mass(VehicleSpec *spec, float fuelKg)
+{
+    if (spec == NULL || !isfinite(fuelKg) || fuelKg < 0.0f) return;
+    derive_mass_particles(spec, fuelKg);
+}
+
+void vehicle_refuel(VehicleInstance *instance, float litres)
+{
+    if (instance == NULL || !isfinite(litres) || litres <= 0.0f) return;
+    const float density = FUEL_DENSITY_KG_PER_L;
+    const float capacityKg = instance->spec.fuelTankCapacityL * density;
+    float fuelKg = instance->fuelKg + litres * density;
+    if (fuelKg > capacityKg) fuelKg = capacityKg;
+    instance->fuelKg = fuelKg;
+}
+
+void vehicle_spec_refresh_derived(VehicleSpec *spec)
+{
+    if (spec == NULL) return;
+
+    /* Stage 1 — dimensions -------------------------------------------------------------- */
+    spec->lengthOverallM = spec->wheelbaseM + spec->frontOverhangM + spec->rearOverhangM;
+    spec->bodyHalfWidthM = 0.5f * spec->widthOverallM;
+    spec->frontalAreaM2 = spec->widthOverallM * spec->heightOverallM * VEH_FRONTAL_AREA_FILL;
+
+    /* Stage 2 — mass particles → mass, CG, yaw inertia ----------------------------------- */
+    derive_mass_particles(spec, spec->massFuelKg);
+    /* TODO(vehicle-audit #4): the authored mass-particle positions set the F/R balance, and one
+     * shipped car is off for its class. awd_rally resolves to 40% front / 60% rear (its chassis
+     * particle sits 0.38 m behind the midpoint) — a rear-engine 911 balance, not a front-engine
+     * AWD rally car (real Impreza/Evo are ~55-60% front). Review per-car massChassisX/massFuelX. */
+    /* TODO(vehicle-audit #9): cgHeightM is the raw mass-particle Z average, and two shipped cars
+     * read unrealistically low: awd_gt and rwd_grip derive 0.28 m on a 1.37 m-tall body —
+     * mid-engine/dry-sump territory for cars the data describes as front-engined. Real road cars
+     * sit ~0.45-0.55 m; the low CG flattens load transfer and likely why those two are the
+     * "stable" reference cars. Review per-particle massZ values. */
 
     /* Stage 3 — tires → radii, inertia, relaxation, load reference ----------------------- */
     const float unloadedF = tire_unloaded_radius_m(
@@ -116,8 +140,8 @@ void vehicle_spec_refresh_derived(VehicleSpec *spec)
     spec->wheelRadiusRearM = unloadedR * TIRE_LOAD_RADIUS_FACTOR;
     spec->wheelRadiusM = spec->wheelRadiusRearM;
 
-    if (massKg > 0.0f) {
-        spec->tireLoadRefPerWheelN = massKg * GRAVITY_MPS2 * 0.25f;
+    if (spec->massKg > 0.0f) {
+        spec->tireLoadRefPerWheelN = spec->massKg * GRAVITY_MPS2 * 0.25f;
     }
 
     /* Wheel inertia, tire relaxation, roll stiffness, and max brake torque stay primary
@@ -244,6 +268,9 @@ void vehicle_spec_set_default(VehicleSpec *spec)
     spec->engineInertiaKgM2 = 0.0f;  /* 0 = kinematic engine, bit-identical baseline (#23) */
     spec->maxClutchTorqueNm = 400.0f;
     spec->shiftDurationS = 0.20f;
+    spec->fuelEnabled = 0.0f; /* off: fuel pinned, bit-identical baseline (#24) */
+    spec->fuelTankCapacityL = 60.0f;
+    spec->fuelConsumptionRateKgPerWS = 2.5e-8f; /* ~0.25 kg per kWh, BSFC-typical */
     spec->ackermannPercent = ACKERMANN_PERCENT;
     spec->differentialMode = (float)DIFFERENTIAL_MODE_DEFAULT;
     spec->differentialBiasRatio = DIFFERENTIAL_BIAS_RATIO;
@@ -399,6 +426,14 @@ bool vehicle_spec_is_valid(const VehicleSpec *spec)
         return false;
     if (!(isfinite(spec->shiftDurationS) && spec->shiftDurationS > 0.0f &&
           spec->shiftDurationS <= 2.0f))
+        return false;
+    if (spec->fuelEnabled != 0.0f && spec->fuelEnabled != 1.0f) return false;
+    if (!(isfinite(spec->fuelTankCapacityL) && spec->fuelTankCapacityL > 0.0f &&
+          spec->fuelTankCapacityL <= 500.0f))
+        return false;
+    if (!(isfinite(spec->fuelConsumptionRateKgPerWS) &&
+          spec->fuelConsumptionRateKgPerWS >= 0.0f &&
+          spec->fuelConsumptionRateKgPerWS <= 1e-4f))
         return false;
     if (!(isfinite(spec->tireLoadSensitivityK) && spec->tireLoadSensitivityK >= 0.0f &&
           spec->tireLoadSensitivityK <= 0.05f))
@@ -613,6 +648,9 @@ static uint32_t vehicle_content_hash(const VehicleSpec *spec)
     HASH_FLOAT(engineInertiaKgM2);
     HASH_FLOAT(maxClutchTorqueNm);
     HASH_FLOAT(shiftDurationS);
+    HASH_FLOAT(fuelEnabled);
+    HASH_FLOAT(fuelTankCapacityL);
+    HASH_FLOAT(fuelConsumptionRateKgPerWS);
     HASH_FLOAT(tireLoadRefPerWheelN);
     HASH_FLOAT(maxRoadWheelAngleRad);
     HASH_FLOAT(maxSteerRateRadS);

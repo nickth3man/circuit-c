@@ -1022,7 +1022,7 @@ static void scenario_accel_filter(void)
         state.velocityLateralMps = 0.0f;
         state.yawRateRadS = 0.0f;
         set_rolling_wheels(&spec, &state, 10.0f);
-        physics_fixed_update(&spec, &state, &derived, &renderState, NULL, NULL, &input,
+        physics_fixed_update(&spec, &state, &derived, &renderState, NULL, NULL, NULL, &input,
                              FIXED_DT_S);
         const float straightAx = derived.solvedLongAccelMps2;
         check_near((double)straightAx, (double)(derived.totalBodyForceN.x / spec.massKg), 0.0,
@@ -1037,7 +1037,7 @@ static void scenario_accel_filter(void)
         rotating.yawRateRadS = 0.5f;
         set_rolling_wheels(&spec, &rotating, 10.0f);
         physics_fixed_update(&spec, &rotating, &rotatingDerived, &rotatingRender, NULL, NULL,
-                             &input, FIXED_DT_S);
+                             NULL, &input, FIXED_DT_S);
 
         /* dvx_dt carries r*vy = 0.5 * 2.0 = 1.0 m/s^2. The stored value must not. */
         const float transportTermMps2 = rotating.yawRateRadS * 2.0f;
@@ -1724,7 +1724,7 @@ static void scenario_solver_stages(void)
 
         PhysicsStep step;
         check(physics_step_init(&step, &game->spec, &game->vehicle, &game->derived,
-                                &game->renderState, NULL, NULL, &controls, FIXED_DT_S),
+                                &game->renderState, NULL, NULL, NULL, &controls, FIXED_DT_S),
               "a step initialises from a valid vehicle");
         check(step.completedStage == PHYSICS_STAGE_NONE,
               "and starts having completed nothing (got %d)", (int)step.completedStage);
@@ -1773,7 +1773,7 @@ static void scenario_solver_stages(void)
 
         PhysicsStep step;
         (void)physics_step_init(&step, &game->spec, &game->vehicle, &game->derived,
-                                &game->renderState, NULL, NULL, &controls, FIXED_DT_S);
+                                &game->renderState, NULL, NULL, NULL, &controls, FIXED_DT_S);
 
         const Vector2 renderCurrBefore = game->renderState.currPositionM;
         physics_step_run(&step, PHYSICS_STAGE_BEGIN);
@@ -1859,9 +1859,9 @@ static void scenario_solver_stages(void)
 
         for (int i = 0; i < 240; i++) {
             physics_fixed_update(&a->spec, &a->vehicle, &a->derived, &a->renderState, NULL,
-                                 NULL, &controls, FIXED_DT_S);
+                                 NULL, NULL, &controls, FIXED_DT_S);
             physics_fixed_update(&b->spec, &b->vehicle, &b->derived, &b->renderState, NULL,
-                                 NULL, &controls, FIXED_DT_S);
+                                 NULL, NULL, &controls, FIXED_DT_S);
         }
         check(memcmp(&a->vehicle, &b->vehicle, sizeof(VehicleState)) == 0,
               "240 steps from one starting state reproduce byte-identical vehicle state");
@@ -1900,7 +1900,7 @@ static void scenario_solver_stages(void)
             PhysicsStep bad;
             (void)physics_step_init(&bad, &poisoned->spec, &poisoned->vehicle,
                                     &poisoned->derived, &poisoned->renderState, NULL, NULL,
-                                    &controls, FIXED_DT_S);
+                                    NULL, &controls, FIXED_DT_S);
             physics_step_run(&bad, PHYSICS_STAGE_COUNT - 1);
             check(!physics_state_is_valid(&poisoned->spec, &poisoned->vehicle,
                                           &poisoned->derived),
@@ -1915,7 +1915,7 @@ static void scenario_solver_stages(void)
          * them, is not aborted by a failure this scenario caused on purpose. */
         const VehicleState before = game->vehicle;
         physics_fixed_update(&game->spec, &game->vehicle, &game->derived, &game->renderState,
-                             NULL, NULL, &controls, FIXED_DT_S);
+                             NULL, NULL, NULL, &controls, FIXED_DT_S);
 
         check(memcmp(&game->vehicle, &before, sizeof(VehicleState)) == 0,
               "a step that goes non-finite rolls the vehicle back to where it started");
@@ -1927,7 +1927,7 @@ static void scenario_solver_stages(void)
         game->vehicle.prevLongAccelMps2 = 0.0f;
         game->vehicle.filteredLongAccelMps2 = 0.0f;
         physics_fixed_update(&game->spec, &game->vehicle, &game->derived, &game->renderState,
-                             NULL, NULL, &controls, FIXED_DT_S);
+                             NULL, NULL, NULL, &controls, FIXED_DT_S);
         check(game->derived.solverFailedStage == (int)PHYSICS_STAGE_NONE,
               "a healthy step clears the failure report (got %s)",
               physics_stage_name((PhysicsStage)game->derived.solverFailedStage));
@@ -2512,7 +2512,7 @@ static void scenario_steering_sign(void)
     controller_output_zero(&input);
     input.steer = 0.5f;
     for (int i = 0; i < 30; i++) {
-        physics_fixed_update(&spec, &state, &derived, &renderState, NULL, NULL, &input,
+        physics_fixed_update(&spec, &state, &derived, &renderState, NULL, NULL, NULL, &input,
                              FIXED_DT_S);
     }
     check(state.frontRoadWheelAngleRad > 0.0f, "left input produces positive road-wheel angle");
@@ -2556,8 +2556,8 @@ static void scenario_lever_arm(void)
     ControllerOutput input;
     controller_output_zero(&input);
     input.steer = 0.3f;
-    physics_fixed_update(&a, &sa, &da, &ra, NULL, NULL, &input, FIXED_DT_S);
-    physics_fixed_update(&b, &sb, &db, &rb, NULL, NULL, &input, FIXED_DT_S);
+    physics_fixed_update(&a, &sa, &da, &ra, NULL, NULL, NULL, &input, FIXED_DT_S);
+    physics_fixed_update(&b, &sb, &db, &rb, NULL, NULL, NULL, &input, FIXED_DT_S);
     check(fabsf(da.totalYawTorqueNm - db.totalYawTorqueNm) > 1.0f,
           "lever-arm changes measurably alter yaw torque");
     check(fabsf(sa.yawRateRadS - sb.yawRateRadS) > 1e-6f,
@@ -2574,10 +2574,12 @@ static void scenario_integration(void)
     ControllerOutput input;
     controller_output_zero(&input);
     input.throttle = 1.0f;
-    physics_fixed_update(&spec, &state, &derived, &renderState, NULL, NULL, &input, FIXED_DT_S);
+    physics_fixed_update(&spec, &state, &derived, &renderState, NULL, NULL, NULL, &input,
+                         FIXED_DT_S);
     check_near(state.velocityLongitudinalMps, 0.0, 1e-7,
                "the first launch tick spins the driven wheels before tire force develops");
-    physics_fixed_update(&spec, &state, &derived, &renderState, NULL, NULL, &input, FIXED_DT_S);
+    physics_fixed_update(&spec, &state, &derived, &renderState, NULL, NULL, NULL, &input,
+                         FIXED_DT_S);
     check(state.velocityLongitudinalMps > 0.0f,
           "the next tick accelerates from drivetrain-generated wheel slip");
     check_near(state.positionM.x, state.velocityLongitudinalMps * FIXED_DT_S, 1e-6,
@@ -2587,7 +2589,8 @@ static void scenario_integration(void)
     state.yawRateRadS = 1.0f;
     state.velocityLongitudinalMps = 0.0f;
     input.throttle = 0.0f;
-    physics_fixed_update(&spec, &state, &derived, &renderState, NULL, NULL, &input, FIXED_DT_S);
+    physics_fixed_update(&spec, &state, &derived, &renderState, NULL, NULL, NULL, &input,
+                         FIXED_DT_S);
     check(state.headingRad >= -CIRCUIT_PI && state.headingRad < CIRCUIT_PI,
           "integrated heading remains wrapped");
 }
@@ -2805,6 +2808,7 @@ static uint32_t param_audit_drive_signature(const VehicleSpec *spec, bool *allFi
     VehicleDerived derived;
     VehicleRenderState renderState;
     VehicleTireState tireState[WHEEL_COUNT];
+    float fuelKg = spec->massFuelKg;
     vehicle_state_reset(spec, &state, &derived, &renderState);
     for (int w = 0; w < WHEEL_COUNT; w++) {
         const bool front = w <= WHEEL_FRONT_RIGHT;
@@ -2816,6 +2820,10 @@ static uint32_t param_audit_drive_signature(const VehicleSpec *spec, bool *allFi
 
     ControllerOutput input;
     controller_output_zero(&input);
+
+    /* The fuel model mutates the entrant spec's mass/CG each tick (issue #24), so the audit
+     * works on a mutable copy and re-derives the mass from the live fuel before each step. */
+    VehicleSpec working = *spec;
 
     for (int tick = 0; tick < PARAM_AUDIT_DRIVE_TICKS; tick++) {
         if (tick < 450) {
@@ -2847,8 +2855,11 @@ static uint32_t param_audit_drive_signature(const VehicleSpec *spec, bool *allFi
             input.throttle = 1.0f;
             input.steer = 0.0f;
         }
-        physics_fixed_update(spec, &state, &derived, &renderState, tireState, NULL, &input,
-                             FIXED_DT_S);
+        if (working.fuelEnabled > 0.0f) {
+            vehicle_spec_set_fuel_mass(&working, fuelKg);
+        }
+        physics_fixed_update(&working, &state, &derived, &renderState, tireState, NULL, &fuelKg,
+                             &input, FIXED_DT_S);
     }
 
     if (allFiniteOut != NULL) {
@@ -2896,7 +2907,7 @@ static uint32_t param_audit_collide_signature(const VehicleSpec *spec,
         return 0u;
     }
     for (int tick = 0; tick < PARAM_AUDIT_COLLIDE_TICKS; tick++) {
-        physics_fixed_update(spec, &state, &derived, &renderState, NULL, NULL, &input,
+        physics_fixed_update(spec, &state, &derived, &renderState, NULL, NULL, NULL, &input,
                              FIXED_DT_S);
         contacts += collision_resolve_track(&world, 1u, spec, &state, &renderState,
                                             &crashLockoutTimerS);
@@ -3142,12 +3153,15 @@ static void param_audit_check_effect(const VehicleSpec *defaults, const TrackDef
             continue;
         }
         if (param->classification == DEV_CLASS_PHYSICS_INPUT && !changed) {
-            /* The dynamic-engine clutch/duration fields (#23) are coupled to engine_inertia:
-             * they only move the car once the dynamic engine is on. param_audit_check_
-             * dynamic_engine() proves them across the coupled extremes, so the one-field
-             * perturb is exempted rather than reported. */
+            /* The dynamic-engine clutch/duration fields (#23) are coupled to engine_inertia,
+             * and the fuel capacity/rate fields (#24) are coupled to fuel_enabled: they only
+             * move the car once their master switch is on. The dedicated coupled probes
+             * prove them across the coupled extremes, so the one-field perturb is exempted
+             * rather than reported. */
             if (strcmp(param->name, "drive.max_clutch_torque") == 0 ||
-                strcmp(param->name, "drive.shift_duration") == 0)
+                strcmp(param->name, "drive.shift_duration") == 0 ||
+                strcmp(param->name, "drive.fuel_tank_capacity") == 0 ||
+                strcmp(param->name, "drive.fuel_rate") == 0)
                 continue;
             check(false, "'%s' is classified physics but changed nothing", param->name);
             unproven++;
@@ -3298,6 +3312,42 @@ static void param_audit_check_dynamic_engine(const VehicleSpec *defaults)
           "long shift duration changes the trajectory");
 }
 
+/* The fuel triplet (#24) is coupled: tank capacity and rate only matter once fuel_enabled is
+ * on. This probe enables the fuel model and compares drive trajectories across the extremes,
+ * like the dynamic-engine probe does for the powertrain triplet. */
+static void param_audit_check_fuel(const VehicleSpec *defaults)
+{
+    VehicleSpec off = *defaults;
+    off.fuelEnabled = 0.0f;
+    const uint32_t offSig = param_audit_drive_signature(&off, NULL);
+
+    VehicleSpec on = *defaults;
+    on.fuelEnabled = 1.0f;
+    on.fuelConsumptionRateKgPerWS = 1e-5f; /* fast enough to burn visibly in the run */
+    const uint32_t onSig = param_audit_drive_signature(&on, NULL);
+    check(onSig != offSig, "fuel model changes the drive trajectory vs disabled");
+
+    VehicleSpec thirsty = on;
+    thirsty.fuelConsumptionRateKgPerWS = 5e-5f;
+    check(param_audit_drive_signature(&thirsty, NULL) != onSig,
+          "fuel rate changes the trajectory");
+
+    /* Tank capacity is a refueling bound (issue #24), not a trajectory input: it only bites
+     * through the service hook. Prove it bounds the service. */
+    {
+        VehicleInstance inst;
+        memset(&inst, 0, sizeof(inst));
+        inst.spec = on;
+        inst.fuelKg = 0.0f;
+        vehicle_refuel(&inst, 999.0f); /* far beyond any capacity */
+        const float capacityKg = on.fuelTankCapacityL * FUEL_DENSITY_KG_PER_L;
+        check(inst.fuelKg <= capacityKg + 1e-3f,
+              "refuel respects tank capacity (%.2f <= %.2f kg)", (double)inst.fuelKg,
+              (double)capacityKg);
+        check(inst.fuelKg > 0.0f, "refuel actually adds fuel (%.2f kg)", (double)inst.fuelKg);
+    }
+}
+
 static void scenario_param_audit(void)
 {
     VehicleSpec defaults;
@@ -3313,6 +3363,7 @@ static void scenario_param_audit(void)
     param_audit_check_effect(&defaults, &track);
     param_audit_check_typed_fields(&defaults, &track);
     param_audit_check_dynamic_engine(&defaults);
+    param_audit_check_fuel(&defaults);
     param_audit_check_document();
 
     track_free(&track);
@@ -4014,13 +4065,13 @@ static void scenario_drivetrain_layout(void)
         input.steer = 0.20f;
         input.throttle = 0.15f;
         for (int i = 0; i < 120; i++)
-            physics_fixed_update(&spec, &state, &derived, &renderState, NULL, NULL, &input,
-                                 FIXED_DT_S);
+            physics_fixed_update(&spec, &state, &derived, &renderState, NULL, NULL, NULL,
+                                 &input, FIXED_DT_S);
 
         input.throttle = 1.0f;
         for (int i = 0; i < 180; i++) {
-            physics_fixed_update(&spec, &state, &derived, &renderState, NULL, NULL, &input,
-                                 FIXED_DT_S);
+            physics_fixed_update(&spec, &state, &derived, &renderState, NULL, NULL, NULL,
+                                 &input, FIXED_DT_S);
             rearSlipRatio[layout] =
                 fmaxf(rearSlipRatio[layout], state.wheels[WHEEL_REAR_LEFT].slipRatio);
             frontSlipRatio[layout] =
@@ -4071,8 +4122,8 @@ static void scenario_drivetrain_layout(void)
         input.steer = 0.20f;
         input.throttle = 0.15f;
         for (int i = 0; i < 180; i++)
-            physics_fixed_update(&spec, &state, &derived, &renderState, NULL, NULL, &input,
-                                 FIXED_DT_S);
+            physics_fixed_update(&spec, &state, &derived, &renderState, NULL, NULL, NULL,
+                                 &input, FIXED_DT_S);
 
         check(fabsf(state.yawRateRadS) > 0.01f,
               "FWD LOCKED: turning steps are accepted, no validation rollback (yaw %.4f rad/s)",
@@ -4606,6 +4657,131 @@ static void scenario_dynamic_engine(void)
     }
 }
 
+/*
+ * fuel-model — issue #24: consumption from engine work, dynamic mass/CG, starvation, refuel.
+ *
+ * The fuel model (fuelEnabled=1) burns fuel proportional to engine work, feeds the live fuel
+ * mass back into mass/CG/inertia, and fades drive torque as the tank starves. Disabled
+ * (default) pins fuel and keeps the baseline exact.
+ */
+static void scenario_fuel_model(void)
+{
+    /* ---- 1. Disabled: fuel pinned, mass unchanged. ---- */
+    {
+        Game *game = alloc_game();
+        game_init(game);
+        check(game->spec.fuelEnabled == 0.0f, "fuel model defaults to off");
+        game->input.throttle = 1.0f;
+        for (int i = 0; i < 600; i++) game_fixed_update(game, FIXED_DT_S);
+        check_near((double)game->vehicleInstance.fuelKg, (double)game->spec.massFuelKg, 1e-6,
+                   "disabled model: fuel pinned at the initial load");
+        free(game);
+    }
+
+    /* ---- 2. Enabled: fuel burns monotonically under load and never goes negative. ---- */
+    {
+        Game *game = alloc_game();
+        game_init(game);
+        game->spec.fuelEnabled = 1.0f;
+        game->spec.fuelConsumptionRateKgPerWS = 2.0e-6f; /* burn visibly */
+        const float initial = game->vehicleInstance.fuelKg;
+        const float initialMass = game->spec.massKg;
+        game->input.throttle = 1.0f;
+        float last = initial;
+        bool monotonic = true;
+        for (int i = 0; i < 1800; i++) {
+            game_fixed_update(game, FIXED_DT_S);
+            const float fuel = game->vehicleInstance.fuelKg;
+            if (fuel > last + 1e-6f) monotonic = false;
+            last = fuel;
+        }
+        check(last < initial, "fuel decreased under full load (%.2f -> %.2f kg)",
+              (double)initial, (double)last);
+        check(monotonic, "fuel consumption is monotonic");
+        check(last >= 0.0f, "fuel never goes negative");
+
+        /* Mass follows the fuel: the car is lighter now. */
+        check(game->spec.massKg < initialMass - 1.0f,
+              "mass tracks the live fuel load (%.1f -> %.1f kg)", (double)initialMass,
+              (double)game->spec.massKg);
+        free(game);
+    }
+
+    /* ---- 3. Full load burns faster than idle. ---- */
+    {
+        Game *idle = alloc_game();
+        game_init(idle);
+        idle->spec.fuelEnabled = 1.0f;
+        idle->spec.fuelConsumptionRateKgPerWS = 2.0e-6f;
+        for (int i = 0; i < 1200; i++) game_fixed_update(idle, FIXED_DT_S);
+        const float idleFuel = idle->vehicleInstance.fuelKg;
+
+        Game *load = alloc_game();
+        game_init(load);
+        load->spec.fuelEnabled = 1.0f;
+        load->spec.fuelConsumptionRateKgPerWS = 2.0e-6f;
+        load->input.throttle = 1.0f;
+        for (int i = 0; i < 1200; i++) game_fixed_update(load, FIXED_DT_S);
+        const float loadFuel = load->vehicleInstance.fuelKg;
+
+        check(loadFuel < idleFuel, "full load burns more than idle (%.2f < %.2f kg)",
+              (double)loadFuel, (double)idleFuel);
+        free(idle);
+        free(load);
+    }
+
+    /* ---- 4. Starvation: a nearly-empty tank fades drive torque and the car cannot pull. ---- */
+    {
+        Game *game = alloc_game();
+        game_init(game);
+        game->spec.fuelEnabled = 1.0f;
+        game->spec.fuelConsumptionRateKgPerWS = 0.0f; /* no burn; start starved instead */
+        game->vehicleInstance.fuelKg = 0.0f;          /* empty tank: zero drive torque */
+        game->input.throttle = 1.0f;
+        for (int i = 0; i < 600; i++) game_fixed_update(game, FIXED_DT_S);
+        check(game->derived.speedMps < 0.5f,
+              "an empty tank produces no drive (%.2f m/s after 5 s of full throttle)",
+              (double)game->derived.speedMps);
+        free(game);
+    }
+
+    /* ---- 5. Refuel service respects capacity. ---- */
+    {
+        Game *game = alloc_game();
+        game_init(game);
+        game->vehicleInstance.fuelKg = 0.0f;
+        vehicle_refuel(&game->vehicleInstance, 10.0f);
+        check_near((double)game->vehicleInstance.fuelKg,
+                   (double)(10.0f * FUEL_DENSITY_KG_PER_L), 1e-4,
+                   "refuel adds the requested litres");
+        vehicle_refuel(&game->vehicleInstance, 999.0f);
+        check(game->vehicleInstance.fuelKg <=
+                  game->spec.fuelTankCapacityL * FUEL_DENSITY_KG_PER_L + 1e-3f,
+              "refuel cannot exceed capacity");
+        free(game);
+    }
+
+    /* ---- 6. Determinism: identical fuel runs reproduce. ---- */
+    {
+        Game *a = alloc_game();
+        Game *b = alloc_game();
+        game_init(a);
+        game_init(b);
+        a->spec.fuelEnabled = b->spec.fuelEnabled = 1.0f;
+        a->spec.fuelConsumptionRateKgPerWS = b->spec.fuelConsumptionRateKgPerWS = 2.0e-6f;
+        a->input.throttle = b->input.throttle = 1.0f;
+        bool same = true;
+        for (int i = 0; i < 900; i++) {
+            game_fixed_update(a, FIXED_DT_S);
+            game_fixed_update(b, FIXED_DT_S);
+            if (game_state_checksum(a) != game_state_checksum(b)) same = false;
+        }
+        check(same, "fuel-model runs are deterministic over 900 ticks");
+        free(a);
+        free(b);
+    }
+}
+
 static const TestScenario kPhysicsScenarios[] = {
     { "telemetry", "CSV writer: stable header, row count, failure handling",
       scenario_telemetry },
@@ -4619,6 +4795,9 @@ static const TestScenario kPhysicsScenarios[] = {
     { "dynamic-engine",
       "issue #23: inertia free-rev, clutch launch, phased shift, engine braking, determinism",
       scenario_dynamic_engine },
+    { "fuel-model",
+      "issue #24: consumption from engine work, dynamic mass, starvation, refuel, determinism",
+      scenario_fuel_model },
     { "solver-stages",
       "staged solver: prefix runs, stage contracts, rollback and failure report",
       scenario_solver_stages },
