@@ -93,6 +93,8 @@ typedef struct {
     float stuckRecoveryDelayS;
     float falseStartPenaltyS; /* added to finish time when an entrant jumps the start (#49) */
     float falseStartSpeedMps; /* speed above which a held car is flagged for a jump (0 = off) */
+    float
+        finishingWindowS; /* race: seconds after the first finisher before DNF'ing the rest (#54) */
 } RaceRules;
 
 typedef enum {
@@ -168,6 +170,8 @@ typedef struct {
     float finishTimeS; /* session clock when this entrant finished; 0 when it did not */
     float lastLapTimeS;
     bool finished;
+    float bestLapTimeS; /* this entrant's best valid lap across the session (#54) */
+    float gapToLeaderS; /* time behind the leader at classification (0 for the winner) (#54) */
 } RaceResultRow;
 
 /* Filled once, when the session reaches RACE_PHASE_CLASSIFIED. */
@@ -175,6 +179,8 @@ typedef struct {
     RaceResultRow rows[RACE_MAX_ENTRANTS];
     int count;
     bool valid;
+    float fastestLapTimeS;         /* the fastest valid lap across the field (0 = none) (#54) */
+    EntrantId fastestLapEntrantId; /* who set it (NONE = no valid lap) (#54) */
 } RaceResults;
 
 typedef struct {
@@ -202,6 +208,8 @@ typedef struct {
     int countdownTicksRemaining;
 
     int classifiedCount; /* finishing positions awarded so far */
+    float
+        firstFinisherClockS; /* session clock when the first entrant finished (0 = none yet) (#54) */
     RaceEventLog events;
     RaceResults results;
 
@@ -281,6 +289,20 @@ bool race_session_place_grid(RaceSession *session, const TrackDefinition *track)
  */
 void race_session_record_false_start(RaceSession *session, const RaceRules *rules,
                                      EntrantId entrantId);
+
+/*
+ * Authoritative live running order (issue #54). Fills `entrantIndices` with roster indices
+ * sorted by race distance (descending), tie-broken by ascending EntrantId. Finished entrants
+ * sort ahead of active ones. Returns the number of indices written (min(count, maxCount)).
+ * This is the one source of truth for "who is P1" — the HUD reads it and computes nothing.
+ */
+int race_session_live_order(const RaceSession *session, int *entrantIndices, int maxCount);
+
+/*
+ * The fastest valid lap across the field so far (issue #54). Writes 0 / RACE_ENTRANT_ID_NONE
+ * when no entrant has recorded a valid lap. Read-only; updated inside the rules stage.
+ */
+float race_session_fastest_lap(const RaceSession *session, EntrantId *outEntrantId);
 
 /* True once the session has reached a phase from which it will not simulate again. */
 bool race_session_is_over(const RaceSession *session);

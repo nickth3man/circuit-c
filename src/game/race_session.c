@@ -24,6 +24,7 @@ void race_rules_set_default(RaceRules *rules)
     rules->stuckRecoveryDelayS = STUCK_RECOVERY_DELAY_S;
     rules->falseStartPenaltyS = FALSE_START_PENALTY_S;
     rules->falseStartSpeedMps = FALSE_START_SPEED_MPS;
+    rules->finishingWindowS = RACE_FINISHING_WINDOW_S;
 }
 
 void race_environment_set_default(RaceEnvironment *env)
@@ -205,20 +206,25 @@ static bool every_entrant_finished(const RaceSession *session)
 static void capture_results(RaceSession *session)
 {
     RaceResults *results = &session->results;
-    memset(results, 0, sizeof(*results));
+    float winnerTimeS = 0.0f;
 
     for (int position = 1; position <= session->roster.count; position++) {
         for (int i = 0; i < session->roster.count; i++) {
             const RaceEntrant *entrant = &session->roster.entrants[i];
             if (!entrant->result.finished || entrant->result.finishPosition != position)
                 continue;
-            results->rows[results->count++] =
-                (RaceResultRow){ .entrantId = entrant->id,
-                                 .finishPosition = entrant->result.finishPosition,
-                                 .lapsCompleted = entrant->progress.lap,
-                                 .finishTimeS = entrant->result.finishTimeS,
-                                 .lastLapTimeS = entrant->progress.lastLapTimeS,
-                                 .finished = true };
+            results->rows[results->count++] = (RaceResultRow){
+                .entrantId = entrant->id,
+                .finishPosition = entrant->result.finishPosition,
+                .lapsCompleted = entrant->progress.lap,
+                .finishTimeS = entrant->result.finishTimeS,
+                .lastLapTimeS = entrant->progress.lastLapTimeS,
+                .bestLapTimeS = entrant->progress.bestLapTimeS,
+                .gapToLeaderS =
+                    (position == 1) ? 0.0f : (entrant->result.finishTimeS - winnerTimeS),
+                .finished = true
+            };
+            if (position == 1) winnerTimeS = entrant->result.finishTimeS;
         }
     }
     for (int i = 0; i < session->roster.count; i++) {
@@ -230,8 +236,10 @@ static void capture_results(RaceSession *session)
                              .lapsCompleted = entrant->progress.lap,
                              .finishTimeS = 0.0f,
                              .lastLapTimeS = entrant->progress.lastLapTimeS,
+                             .bestLapTimeS = entrant->progress.bestLapTimeS,
                              .finished = false };
     }
+    results->fastestLapTimeS = race_session_fastest_lap(session, &results->fastestLapEntrantId);
     results->valid = true;
 }
 
@@ -278,8 +286,8 @@ void race_session_update_rules(RaceSession *session)
 
         entrant->result.finished = true;
         entrant->result.finishPosition = ++session->classifiedCount;
-        /* Recovery penalties (issue #28) land on the entrant's classified time. */
         entrant->result.finishTimeS = session->clockS + entrant->result.penaltyTimeS;
+        if (session->classifiedCount == 1) session->firstFinisherClockS = session->clockS;
         race_session_log_event(session, RACE_EVENT_ENTRANT_FINISHED, entrant->id,
                                entrant->result.finishPosition);
     }
@@ -289,9 +297,26 @@ void race_session_update_rules(RaceSession *session)
     /* The mode's whole job: a time trial ends with the first finisher, a race waits for the
      * field. Neither reads a global, and adding a third mode adds a case here and nowhere
      * else. */
+    const bool allDone = every_entrant_finished(session);
+    const bool windowExpired =
+        (session->rules.finishingWindowS > 0.0f &&
+         session->clockS - session->firstFinisherClockS > session->rules.finishingWindowS);
     const bool classified =
-        (session->rules.mode == RACE_MODE_TIME_TRIAL) ? true : every_entrant_finished(session);
+        (session->rules.mode == RACE_MODE_TIME_TRIAL) ? true : (allDone || windowExpired);
     if (classified) {
+        /* Finishing window closed: award remaining active entrants their live-order positions
+         * as DNF, so a stuck or lapped car still gets a deterministic result. */
+        if (!allDone) {
+            int order[RACE_MAX_ENTRANTS];
+            const int n = race_session_live_order(session, order, RACE_MAX_ENTRANTS);
+            for (int k = 0; k < n; k++) {
+                RaceEntrant *e = &session->roster.entrants[order[k]];
+                if (e->result.finished) continue;
+                e->result.finished = true;
+                e->result.finishPosition = ++session->classifiedCount;
+                e->result.finishTimeS = 0.0f; /* DNF: no finish time */
+            }
+        }
         capture_results(session);
         set_phase(session, RACE_PHASE_CLASSIFIED);
     } else {
@@ -334,4 +359,53 @@ void race_session_record_false_start(RaceSession *session, const RaceRules *rule
     if (penalty > 0.0f) entrant->result.penaltyTimeS += penalty;
     race_session_log_event(session, RACE_EVENT_FALSE_START, entrantId,
                            (int32_t)(penalty * 100.0f + 0.5f));
+}
+
+int race_session_live_order(const RaceSession *session, int *entrantIndices, int maxCount)
+{
+    if (session == NULL || entrantIndices == NULL || maxCount <= 0) return 0;
+    const int n = session->roster.count;
+    int order[RACE_MAX_ENTRANTS];
+    for (int i = 0; i < n; i++) order[i] = i;
+    /* Insertion sort by race distance descending; finished entrants first; tie-break ascending
+     * EntrantId (which is roster storage order — ascending id). Stable and small-N. */
+    for (int i = 1; i < n; i++) {
+        const int key = order[i];
+        int j = i - 1;
+        while (j >= 0) {
+            const RaceEntrant *a = &session->roster.entrants[order[j]];
+            const RaceEntrant *b = &session->roster.entrants[key];
+            const float da = a->progress.raceDistanceM;
+            const float db = b->progress.raceDistanceM;
+            const bool aAhead = a->result.finished || (da > db);
+            const bool tie = (da == db);
+            if (aAhead && !tie) break;
+            order[j + 1] = order[j];
+            j--;
+        }
+        order[j + 1] = key;
+    }
+    const int written = (n < maxCount) ? n : maxCount;
+    for (int i = 0; i < written; i++) entrantIndices[i] = order[i];
+    return written;
+}
+
+float race_session_fastest_lap(const RaceSession *session, EntrantId *outEntrantId)
+{
+    if (session == NULL) {
+        if (outEntrantId != NULL) *outEntrantId = RACE_ENTRANT_ID_NONE;
+        return 0.0f;
+    }
+    float best = 0.0f;
+    EntrantId bestId = RACE_ENTRANT_ID_NONE;
+    for (int i = 0; i < session->roster.count; i++) {
+        const RaceEntrant *e = &session->roster.entrants[i];
+        const float t = e->progress.bestLapTimeS;
+        if (t > 0.0f && (best == 0.0f || t < best)) {
+            best = t;
+            bestId = e->id;
+        }
+    }
+    if (outEntrantId != NULL) *outEntrantId = bestId;
+    return best;
 }

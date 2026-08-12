@@ -1696,6 +1696,122 @@ static void scenario_grid_countdown(void)
         free(game);
     }
 }
+
+/* Issue #54: multi-entrant race order, finish, classification, fastest lap. */
+static void scenario_race_classification(void)
+{
+    /* ---- 1. Live order reflects race distance, not grid position. ---- */
+    {
+        SessionConfig cfg;
+        session_config_set_default(&cfg);
+        cfg.mode = RACE_MODE_RACE;
+        cfg.aiCount = 3;
+        cfg.targetLaps = 10; /* long enough that nobody finishes */
+        Game *game = alloc_game();
+        char why[256] = "";
+        check(game_configure_session(game, &cfg, why, sizeof(why)),
+              "race launches for live-order test (%s)", why);
+        /* Run enough ticks for positions to spread. */
+        for (int t = 0; t < 1800; t++) game_fixed_update(game, FIXED_DT_S);
+        int order[RACE_MAX_ENTRANTS];
+        const int n = race_session_live_order(&game->session, order, RACE_MAX_ENTRANTS);
+        check(n == 4, "live order covers all entrants (%d)", n);
+        /* P1 has the most raceDistanceM. */
+        float p1Dist = game->session.roster.entrants[order[0]].progress.raceDistanceM;
+        bool ordered = true;
+        for (int i = 1; i < n; i++) {
+            const float di = game->session.roster.entrants[order[i]].progress.raceDistanceM;
+            if (di > p1Dist + 0.001f) ordered = false;
+        }
+        check(ordered, "live order is by race distance (P1 has the most)");
+        free(game);
+    }
+
+    /* ---- 2. Finishing window: the first finisher classifies, others get DNF positions. ---- */
+    {
+        SessionConfig cfg;
+        session_config_set_default(&cfg);
+        cfg.mode = RACE_MODE_RACE;
+        cfg.aiCount = 3;
+        cfg.targetLaps = 2;
+        cfg.countdownS = 0.0f;
+        cfg.stuckRecoveryEnabled = true;
+        Game *game = alloc_game();
+        char why[256] = "";
+        check(game_configure_session(game, &cfg, why, sizeof(why)), "race launches (%s)", why);
+        /* Make the player AI-driven too, so no car sits blocking the grid. */
+        game->controller.kind = CONTROLLER_KIND_AI;
+        /* Shorten the finishing window so the test doesn't take 30s. */
+        game->session.rules.finishingWindowS = 5.0f;
+        /* Run until classified (one car finishes, the other DNFs after the window). */
+        int ticks = 0;
+        while (!race_session_is_over(&game->session) && ticks < 40000) {
+            game_fixed_update(game, FIXED_DT_S);
+            ticks++;
+        }
+        check(race_session_is_over(&game->session), "session classifies within %d ticks",
+              ticks);
+        check(game->session.results.count == 4, "all entrants in results (%d)",
+              game->session.results.count);
+        /* The winner has position 1; the DNF has a position too (from live order). */
+        int finishedCount = 0;
+        for (int i = 0; i < game->session.results.count; i++) {
+            if (game->session.results.rows[i].finished) finishedCount++;
+        }
+        check(finishedCount >= 1, "at least one finisher in results (%d)", finishedCount);
+        free(game);
+    }
+
+    /* ---- 3. Fastest lap tracked across the field. ---- */
+    {
+        SessionConfig cfg;
+        session_config_set_default(&cfg);
+        cfg.mode = RACE_MODE_TIME_TRIAL;
+        cfg.targetLaps = 3;
+        Game *game = alloc_game();
+        char why[256] = "";
+        check(game_configure_session(game, &cfg, why, sizeof(why)),
+              "time trial launches for fastest-lap test (%s)", why);
+        game->controller.kind = CONTROLLER_KIND_AI;
+        int ticks = 0;
+        while (!race_session_is_over(&game->session) && ticks < 30000) {
+            game_fixed_update(game, FIXED_DT_S);
+            ticks++;
+        }
+        EntrantId fastId = RACE_ENTRANT_ID_NONE;
+        const float fast = race_session_fastest_lap(&game->session, &fastId);
+        check(fast > 0.0f, "fastest lap recorded (%.2f s)", (double)fast);
+        check(fastId != RACE_ENTRANT_ID_NONE, "fastest lap has an entrant id");
+        free(game);
+    }
+
+    /* ---- 4. Results snapshot is immutable after classification. ---- */
+    {
+        SessionConfig cfg;
+        session_config_set_default(&cfg);
+        cfg.mode = RACE_MODE_TIME_TRIAL;
+        cfg.targetLaps = 1;
+        Game *game = alloc_game();
+        char why[256] = "";
+        check(game_configure_session(game, &cfg, why, sizeof(why)), "time trial launches");
+        game->controller.kind = CONTROLLER_KIND_AI;
+        int ticks = 0;
+        while (!race_session_is_over(&game->session) && ticks < 30000) {
+            game_fixed_update(game, FIXED_DT_S);
+            ticks++;
+        }
+        check(game->session.results.valid, "results valid at classification");
+        const int savedCount = game->session.results.count;
+        const float savedFastest = game->session.results.fastestLapTimeS;
+        /* Run more ticks after classification — results must not change. */
+        for (int t = 0; t < 600; t++) game_fixed_update(game, FIXED_DT_S);
+        check(game->session.results.count == savedCount,
+              "results count frozen after classified");
+        check(game->session.results.fastestLapTimeS == savedFastest,
+              "fastest lap frozen after classified");
+        free(game);
+    }
+}
 static void scenario_timing_records(void)
 {
     /* ---- 1. Crossing fraction: a gate crossed mid-tick reports the sub-tick position. ---- */
@@ -3334,10 +3450,10 @@ static void scenario_ai_lap(void)
      * square wave — >0.5 swings on half of all frames — which no physical pedal can make. */
     const float pedalCeilingPerTick =
         fmaxf(cfg.pedalPressRatePerS, cfg.pedalReleaseRatePerS) * FIXED_DT_S;
-    check(
-        maxThrottleStep <= pedalCeilingPerTick + 1.0e-4f,
-        "throttle never moves faster than the pedal can travel (max %.4f per tick, limit %.4f)",
-        (double)maxThrottleStep, (double)pedalCeilingPerTick);
+    check(maxThrottleStep <= pedalCeilingPerTick + 1.0e-4f,
+          "throttle never moves faster than the pedal can travel (max %.4f per tick, limit "
+          "%.4f)",
+          (double)maxThrottleStep, (double)pedalCeilingPerTick);
     check((double)throttleReversals / ((double)ticksRun * (double)FIXED_DT_S) < 8.0,
           "the throttle does not chatter (%.2f direction reversals per second)",
           (double)throttleReversals / ((double)ticksRun * (double)FIXED_DT_S));
@@ -3482,10 +3598,10 @@ static void scenario_ai_no_privilege(void)
         if (repeat->stateChecksum != checksums[t]) mismatches++;
     }
 
-    check(
-        mismatches == 0,
-        "AI driver has no side channels: %d / %d ticks match replay checksum byte-identically",
-        runTicks - mismatches, runTicks);
+    check(mismatches == 0,
+          "AI driver has no side channels: %d / %d ticks match replay checksum "
+          "byte-identically",
+          runTicks - mismatches, runTicks);
 
     free(checksums);
     track_free(&repeat->trackDef);
@@ -4025,7 +4141,8 @@ static void scenario_race_session(void)
                   "ordered by finishing position");
             check(field->results.rows[0].entrantId == field->roster.entrants[1].id &&
                       field->results.rows[2].entrantId == field->roster.entrants[0].id,
-                  "and the order is the order they finished, not the order they are stored in");
+                  "and the order is the order they finished, not the order they are stored "
+                  "in");
             check(session_event_count(field, RACE_EVENT_ENTRANT_FINISHED) == 3,
                   "one finish event per entrant (got %d)",
                   session_event_count(field, RACE_EVENT_ENTRANT_FINISHED));
@@ -4114,7 +4231,8 @@ static void scenario_race_session(void)
         Game *game = alloc_game();
         game_init(game);
         check(game->session.phase == RACE_PHASE_RUNNING && game->state == STATE_PLAYING,
-              "game_init() leaves a running session on the playing screen (phase %d, state %d)",
+              "game_init() leaves a running session on the playing screen (phase %d, state "
+              "%d)",
               (int)game->session.phase, (int)game->state);
 
         for (int i = 0; i < 30; i++) game_fixed_update(game, FIXED_DT_S);
@@ -4144,9 +4262,9 @@ static void scenario_race_session(void)
         check(game->progress.lapTimerS == lapTimerBefore,
               "and the lap timer with it (%.6f vs %.6f)", (double)game->progress.lapTimerS,
               (double)lapTimerBefore);
-        check(
-            game->sim.tick > sessionTickBefore,
-            "while the application tick keeps counting, because it times the app not the race");
+        check(game->sim.tick > sessionTickBefore,
+              "while the application tick keeps counting, because it times the app not the "
+              "race");
 
         game->input.pausePressed = true;
         game_fixed_update(game, FIXED_DT_S);
@@ -4249,14 +4367,15 @@ static void scenario_race_session(void)
         game_fixed_update(game, FIXED_DT_S);
 
         check(game->session.tick == 1u,
-              "the first playback tick rewinds the session rather than continuing the live one "
+              "the first playback tick rewinds the session rather than continuing the live "
+              "one "
               "(got %llu)",
               (unsigned long long)game->session.tick);
         check_near((double)game->session.clockS, (double)FIXED_DT_S, 1e-6,
                    "and its race clock restarts from zero");
-        check(
-            game->sim.tick == simTickBefore + 1u,
-            "while the application tick keeps counting, because it times the app not the race");
+        check(game->sim.tick == simTickBefore + 1u,
+              "while the application tick keeps counting, because it times the app not the "
+              "race");
         check(race_session_is_simulating(&game->session),
               "so a replay always begins in a phase that actually simulates");
 
@@ -5314,13 +5433,13 @@ static void scenario_failure_classification(void)
               failure_class_reason(cls.primary));
         check(strcmp(failure_class_reason(cls.primary), "unexplained") == 0,
               "the catch-all's token is 'unexplained'");
-        check(
-            cls.contributingCount == 1 && cls.contributing[0].reason == RUN_CLASS_UNEXPLAINED,
-            "unexplained is its own sole contributing event, so primary is always one of them");
-        check(
-            cls.firstFaultTick == cls.lastProgressTick,
-            "unexplained anchors the fault at the last tick that made progress (%llu vs %llu)",
-            (unsigned long long)cls.firstFaultTick, (unsigned long long)cls.lastProgressTick);
+        check(cls.contributingCount == 1 && cls.contributing[0].reason == RUN_CLASS_UNEXPLAINED,
+              "unexplained is its own sole contributing event, so primary is always one of "
+              "them");
+        check(cls.firstFaultTick == cls.lastProgressTick,
+              "unexplained anchors the fault at the last tick that made progress (%llu vs "
+              "%llu)",
+              (unsigned long long)cls.firstFaultTick, (unsigned long long)cls.lastProgressTick);
 
         /* The same rows on a run that DID complete its laps stay a pass: the catch-all must not
          * turn a clean finish into a failure. */
@@ -5582,7 +5701,8 @@ static void scenario_failure_classification(void)
                  * once every scored gate is crossed (the wrap) nothing is missed. */
                 const int expectedMissed = (gates - 1) - crossingsThisLap;
                 check(missed == expectedMissed,
-                      "lap %d, %d crossings: missed is the scored gates still owed (%d vs %d)",
+                      "lap %d, %d crossings: missed is the scored gates still owed (%d vs "
+                      "%d)",
                       completed, crossed, missed, expectedMissed);
                 check(missed >= 0 && missed < gates,
                       "missed is never negative and bounded (%d, lap %d, crossings %d)", missed,
@@ -5731,7 +5851,8 @@ static const TestScenario kGameplayScenarios[] = {
       "direct collision_resolve_track tests: count, push, impulse, multi-contact",
       scenario_collision_units },
     { "vehicle-collision",
-      "issue #27 two-body impulses: momentum, order independence, resting, tunneling, pileup",
+      "issue #27 two-body impulses: momentum, order independence, resting, tunneling, "
+      "pileup",
       scenario_vehicle_collision },
     { "multi-car-determinism",
       "issue #44: per-tick checksum parity, per-entrant hashes, first-divergence reporting",
@@ -5740,7 +5861,8 @@ static const TestScenario kGameplayScenarios[] = {
       "issue #45: multi-car fixed-step headroom (CIRCUIT_PERF_BENCH env gates the timing)",
       scenario_performance_budget },
     { "session-ai",
-      "issue #52: AI eligibility, per-controller isolation, session lap/finish, track decls",
+      "issue #52: AI eligibility, per-controller isolation, session lap/finish, track "
+      "decls",
       scenario_session_ai },
     { "damage-recovery",
       "issue #28: damage modes, bounded monotonic damage, solver effects, stuck recovery",
@@ -5752,13 +5874,19 @@ static const TestScenario kGameplayScenarios[] = {
       "issue #43: the shipped grandprix circuit loads, validates, and the AI laps it",
       scenario_grandprix_coverage },
     { "session-config",
-      "issue #48: validated SessionConfig, deterministic serialization, time trial + AI race "
+      "issue #48: validated SessionConfig, deterministic serialization, time trial + AI "
+      "race "
       "launch",
       scenario_session_config },
     { "grid-countdown",
-      "issue #49: staggered grid placement, countdown tick boundary, false-start detection, "
+      "issue #49: staggered grid placement, countdown tick boundary, false-start "
+      "detection, "
       "multi-car launch stability",
       scenario_grid_countdown },
+    { "race-classification",
+      "issue #54: live order, finishing window, DNF classification, fastest lap, immutable "
+      "results snapshot",
+      scenario_race_classification },
     { "collision-world",
       "issue #26 world contract: stable ids, layers, authored objects, multi-proxy order, "
       "penetration recovery, corners, contact feed",
@@ -5788,7 +5916,8 @@ static const TestScenario kGameplayScenarios[] = {
     { "ai-roster-laps", "uniform AiDriverConfig completes the full run on all 6 roster cars",
       scenario_ai_roster_laps },
     { "planned-line",
-      "the driver's own path search is legal, checkpoint-valid, and faster than the centreline",
+      "the driver's own path search is legal, checkpoint-valid, and faster than the "
+      "centreline",
       scenario_planned_line },
     { "failure-classification",
       "every #78 failure class classifies correctly, by construction, on hand-built rows",
