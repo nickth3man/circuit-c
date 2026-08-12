@@ -92,6 +92,7 @@ static uint32_t hash_entrant(uint32_t h, const RaceEntrant *entrant)
     h = hash_f32(h, entrant->result.penaltyTimeS);
     h = hash_u32(h, entrant->result.stalledTicks);
     h = hash_u32(h, entrant->result.falseStarted ? 1u : 0u);
+    h = hash_u32(h, entrant->result.offTrackTicks);
 
     const VehicleSetup *setup = &entrant->setup;
     h = hash_f32(h, setup->tirePressureFrontKpa);
@@ -262,6 +263,7 @@ GAME_API uint32_t game_state_checksum(const Game *game)
     h = hash_u32(h, (uint32_t)session->countdownTicksRemaining);
     h = hash_u32(h, (uint32_t)session->classifiedCount);
     h = hash_u32(h, session->events.totalAppended);
+    h = hash_u32(h, session->penalties.totalAppended);
     /* Physical environment (issue #41): precipitation, temperatures, and per-surface
      * wetness are authoritative (they change grip); presentation-only fields (time of day,
      * region) are deliberately excluded. */
@@ -1688,6 +1690,45 @@ static void stage_false_start(Game *game)
 }
 
 /*
+ * Stage 8a2 — track-limits and wrong-way penalties (issue #55). Runs during RUNNING: counts
+ * consecutive off-track ticks per entrant and escalates from warning to time penalty. Disabled
+ * by default (rules.trackLimitsEnabled): no trace changes. Also flags persistent wrong-way.
+ */
+static void stage_penalties(Game *game)
+{
+    if (game->session.phase != RACE_PHASE_RUNNING) return;
+    const RaceRules *rules = &game->session.rules;
+    for (int i = 0; i < game->session.roster.count; i++) {
+        RaceEntrant *entrant = &game->session.roster.entrants[i];
+        if (entrant->result.finished) continue;
+
+        if (rules->trackLimitsEnabled && !entrant->progress.location.onRoute) {
+            entrant->result.offTrackTicks++;
+            if (entrant->result.offTrackTicks == (uint32_t)TRACK_LIMITS_PENALTY_TICKS) {
+                race_session_add_penalty(&game->session, PENALTY_RULE_TRACK_LIMITS,
+                                         PENALTY_CONSEQUENCE_TIME, entrant->id,
+                                         TRACK_LIMITS_PENALTY_S,
+                                         (int32_t)entrant->result.offTrackTicks);
+            }
+        } else {
+            entrant->result.offTrackTicks = 0;
+        }
+
+        /* Wrong-way: a single warning per continuous excursion. */
+        if (entrant->progress.wrongWay && entrant->result.offTrackTicks == 0) {
+            /* Use offTrackTicks as a general "alerted" counter for wrong-way too: 0 means not
+             * yet alerted this excursion. Set it to 1 to mark alerted. */
+            entrant->result.offTrackTicks = 1;
+            race_session_add_penalty(&game->session, PENALTY_RULE_WRONG_WAY,
+                                     PENALTY_CONSEQUENCE_WARNING, entrant->id, 0.0f, 0);
+        } else if (!entrant->progress.wrongWay && entrant->result.offTrackTicks == 1 &&
+                   !rules->trackLimitsEnabled) {
+            entrant->result.offTrackTicks = 0;
+        }
+    }
+}
+
+/*
  * Stage 8b — deterministic stuck recovery (issue #28).
  * Reads: each entrant's speed/progress and the frozen rules. Writes: the entrant's pose,
  * velocity, penalty, stall counter, and a session event.
@@ -1881,6 +1922,7 @@ GAME_API void game_fixed_update(Game *game, float dt)
         accumulate_damage(game);
         stage_rules(game);
         stage_false_start(game);
+        stage_penalties(game);
         stage_stuck_recovery(game);
         stage_presentation(game, dt);
     }

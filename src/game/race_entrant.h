@@ -72,6 +72,7 @@ typedef struct {
      * Part of authoritative state because it decides when the recovery fires. */
     uint32_t stalledTicks;
     bool falseStarted; /* one-shot: a jump start has already been recorded for this entrant */
+    uint32_t offTrackTicks; /* consecutive ticks beyond the racing surface (#55) */
 } EntrantResult;
 
 /*

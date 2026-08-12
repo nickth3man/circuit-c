@@ -1812,6 +1812,81 @@ static void scenario_race_classification(void)
         free(game);
     }
 }
+
+/* Issue #55: track limits, wrong-way, and penalty rules. */
+static void scenario_penalty_rules(void)
+{
+    /* ---- 1. Disabled by default: no penalties, no classification effect. ---- */
+    {
+        SessionConfig cfg;
+        session_config_set_default(&cfg);
+        cfg.targetLaps = 1;
+        Game *game = alloc_game();
+        char why[256] = "";
+        check(game_configure_session(game, &cfg, why, sizeof(why)), "time trial launches");
+        game->controller.kind = CONTROLLER_KIND_AI;
+        for (int t = 0; t < 600; t++) game_fixed_update(game, FIXED_DT_S);
+        check(game->session.penalties.totalAppended == 0u,
+              "no penalties when track limits disabled (%u)",
+              game->session.penalties.totalAppended);
+        free(game);
+    }
+
+    /* ---- 2. Track-limits: off-track beyond threshold produces a time penalty. ---- */
+    {
+        SessionConfig cfg;
+        session_config_set_default(&cfg);
+        cfg.targetLaps = 10; /* long enough that nobody finishes */
+        Game *game = alloc_game();
+        char why[256] = "";
+        check(game_configure_session(game, &cfg, why, sizeof(why)), "time trial launches");
+        game->controller.kind = CONTROLLER_KIND_AI;
+        game->session.rules.trackLimitsEnabled = true;
+        /* Force the car off-track by teleporting it beyond the racing surface, then run. */
+        game->vehicle.positionM.y += 30.0f;
+        game->renderState.currPositionM = game->vehicle.positionM;
+        game->renderState.prevPositionM = game->vehicle.positionM;
+        for (int t = 0; t < TRACK_LIMITS_PENALTY_TICKS + 60; t++)
+            game_fixed_update(game, FIXED_DT_S);
+        check(game->session.penalties.totalAppended > 0u,
+              "track-limits penalty recorded (%u penalties)",
+              game->session.penalties.totalAppended);
+        /* The penalty added time to the entrant's result. */
+        check(game->session.roster.entrants[0].result.penaltyTimeS > 0.0f,
+              "track-limits penalty added time (%.2f s)",
+              (double)game->session.roster.entrants[0].result.penaltyTimeS);
+        free(game);
+    }
+
+    /* ---- 3. Penalty API: add_penalty records evidence and consequence. ---- */
+    {
+        SessionConfig cfg;
+        session_config_set_default(&cfg);
+        cfg.mode = RACE_MODE_RACE;
+        cfg.aiCount = 1;
+        cfg.targetLaps = 10;
+        Game *game = alloc_game();
+        char why[256] = "";
+        check(game_configure_session(game, &cfg, why, sizeof(why)), "race launches");
+        const EntrantId e1 = game->session.roster.entrants[1].id;
+        check(race_session_add_penalty(&game->session, PENALTY_RULE_AVOIDABLE_CONTACT,
+                                       PENALTY_CONSEQUENCE_TIME, e1, 5.0f, 42),
+              "contact penalty added");
+        check(game->session.penalties.totalAppended == 1u, "one penalty in the log");
+        check(game->session.roster.entrants[1].result.penaltyTimeS == 5.0f,
+              "time penalty applied immediately (%.2f)",
+              (double)game->session.roster.entrants[1].result.penaltyTimeS);
+        check(race_session_pending_penalties(&game->session, e1) == 0,
+              "time penalty is served immediately (0 pending)");
+        /* Lap-invalidating penalty. */
+        check(race_session_add_penalty(&game->session, PENALTY_RULE_CUT,
+                                       PENALTY_CONSEQUENCE_LAP_INVALID, e1, 0.0f, 7),
+              "cut penalty added");
+        check(game->session.roster.entrants[1].progress.lapInvalid,
+              "cut penalty invalidated the lap");
+        free(game);
+    }
+}
 static void scenario_timing_records(void)
 {
     /* ---- 1. Crossing fraction: a gate crossed mid-tick reports the sub-tick position. ---- */
@@ -5887,6 +5962,10 @@ static const TestScenario kGameplayScenarios[] = {
       "issue #54: live order, finishing window, DNF classification, fastest lap, immutable "
       "results snapshot",
       scenario_race_classification },
+    { "penalty-rules",
+      "issue #55: track-limits, penalty model (rule/consequence/evidence/lifecycle), "
+      "default-off",
+      scenario_penalty_rules },
     { "collision-world",
       "issue #26 world contract: stable ids, layers, authored objects, multi-proxy order, "
       "penetration recovery, corners, contact feed",

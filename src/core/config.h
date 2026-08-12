@@ -401,6 +401,10 @@
 /* Finishing window (issue #54): seconds after the first finisher in a race before remaining
  * entrants are classified as DNF at their current position. 0 means wait for everyone. */
 #define RACE_FINISHING_WINDOW_S 30.0f
+/* Track-limits enforcement (issue #55): consecutive off-track ticks before a time penalty. */
+#define TRACK_LIMITS_WARN_TICKS 60     /* ticks off-track before a warning (1 s at 60 Hz) */
+#define TRACK_LIMITS_PENALTY_TICKS 180 /* ticks before a time penalty (3 s) */
+#define TRACK_LIMITS_PENALTY_S 1.0f    /* seconds added per track-limits penalty */
 /* Fuel model (issue #24). */
 #define FUEL_DENSITY_KG_PER_L 0.75f     /* kg per litre (gasoline) */
 #define FUEL_STARVATION_RESERVE_KG 0.5f /* kg; drive torque fades linearly below this */

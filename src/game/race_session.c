@@ -409,3 +409,54 @@ float race_session_fastest_lap(const RaceSession *session, EntrantId *outEntrant
     if (outEntrantId != NULL) *outEntrantId = bestId;
     return best;
 }
+
+bool race_session_add_penalty(RaceSession *session, RacePenaltyRule rule,
+                              RacePenaltyConsequence consequence, EntrantId entrantId,
+                              float penaltySeconds, int32_t evidence)
+{
+    if (session == NULL || rule < 0 || rule >= PENALTY_RULE_COUNT || consequence < 0 ||
+        consequence >= PENALTY_CONSEQUENCE_COUNT)
+        return false;
+    RaceEntrant *entrant = race_roster_find(&session->roster, entrantId);
+    if (entrant == NULL) return false;
+
+    RacePenaltyLog *log = &session->penalties;
+    RacePenalty *p = &log->items[log->head];
+    p->rule = rule;
+    p->consequence = consequence;
+    p->entrantId = entrantId;
+    p->tick = session->tick;
+    p->timeS = session->clockS;
+    p->penaltySeconds = penaltySeconds;
+    p->evidence = evidence;
+    p->served = false;
+    log->head = (log->head + 1) % RACE_PENALTY_CAPACITY;
+    if (log->count < RACE_PENALTY_CAPACITY) log->count++;
+    log->totalAppended++;
+
+    /* Apply the consequence immediately. */
+    if (consequence == PENALTY_CONSEQUENCE_TIME && penaltySeconds > 0.0f) {
+        entrant->result.penaltyTimeS += penaltySeconds;
+        p->served = true;
+    } else if (consequence == PENALTY_CONSEQUENCE_LAP_INVALID) {
+        entrant->progress.lapInvalid = true;
+        entrant->progress.lastLapInvalidReason = 1;
+        p->served = true;
+    }
+    return true;
+}
+
+int race_session_pending_penalties(const RaceSession *session, EntrantId entrantId)
+{
+    if (session == NULL) return 0;
+    int pending = 0;
+    for (int i = 0; i < session->penalties.count; i++) {
+        const int idx =
+            (session->penalties.head + RACE_PENALTY_CAPACITY - session->penalties.count + i) %
+            RACE_PENALTY_CAPACITY;
+        if (!session->penalties.items[idx].served &&
+            session->penalties.items[idx].entrantId == entrantId)
+            pending++;
+    }
+    return pending;
+}

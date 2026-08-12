@@ -95,6 +95,7 @@ typedef struct {
     float falseStartSpeedMps; /* speed above which a held car is flagged for a jump (0 = off) */
     float
         finishingWindowS; /* race: seconds after the first finisher before DNF'ing the rest (#54) */
+    bool trackLimitsEnabled; /* when true, off-track entries produce steward penalties (#55) */
 } RaceRules;
 
 typedef enum {
@@ -162,6 +163,47 @@ typedef struct {
     uint32_t totalAppended;
 } RaceEventLog;
 
+/* ---- Penalty system (issue #55) ---- */
+
+typedef enum {
+    PENALTY_RULE_TRACK_LIMITS = 0,  /* all four wheels beyond the racing surface */
+    PENALTY_RULE_CUT,               /* gained position by leaving and rejoining ahead */
+    PENALTY_RULE_WRONG_WAY,         /* driving against the route direction */
+    PENALTY_RULE_FALSE_START,       /* moved before green (#49) */
+    PENALTY_RULE_AVOIDABLE_CONTACT, /* contact deemed the entrant's fault */
+    PENALTY_RULE_PIT_SPEED,         /* exceeded the pit-lane speed limit */
+    PENALTY_RULE_COUNT
+} RacePenaltyRule;
+
+typedef enum {
+    PENALTY_CONSEQUENCE_WARNING = 0,
+    PENALTY_CONSEQUENCE_TIME,        /* seconds added to finish time */
+    PENALTY_CONSEQUENCE_LAP_INVALID, /* this lap does not count for records */
+    PENALTY_CONSEQUENCE_COUNT
+} RacePenaltyConsequence;
+
+/* One steward decision. Evidence fields are rule-specific (e.g. off-track ticks for track
+ * limits, speed for pit speeding). `served` flips when the consequence has been applied. */
+typedef struct {
+    RacePenaltyRule rule;
+    RacePenaltyConsequence consequence;
+    EntrantId entrantId;
+    uint64_t tick;
+    float timeS;
+    float penaltySeconds; /* >0 for time penalties */
+    int32_t evidence;     /* rule-specific (e.g. consecutive off-track ticks) */
+    bool served;
+} RacePenalty;
+
+#define RACE_PENALTY_CAPACITY 64
+
+typedef struct {
+    RacePenalty items[RACE_PENALTY_CAPACITY];
+    int head;
+    int count;
+    uint32_t totalAppended;
+} RacePenaltyLog;
+
 /* One entrant's line in the results, ordered by finishing position. */
 typedef struct {
     EntrantId entrantId;
@@ -175,6 +217,7 @@ typedef struct {
 } RaceResultRow;
 
 /* Filled once, when the session reaches RACE_PHASE_CLASSIFIED. */
+
 typedef struct {
     RaceResultRow rows[RACE_MAX_ENTRANTS];
     int count;
@@ -212,7 +255,7 @@ typedef struct {
         firstFinisherClockS; /* session clock when the first entrant finished (0 = none yet) (#54) */
     RaceEventLog events;
     RaceResults results;
-
+    RacePenaltyLog penalties;
     /* Deterministic session environment (issue #41): wetness, temperatures, precipitation.
      * Physical fields are authoritative (checksummed); presentation fields are excluded. */
     RaceEnvironment environment;
@@ -306,5 +349,18 @@ float race_session_fastest_lap(const RaceSession *session, EntrantId *outEntrant
 
 /* True once the session has reached a phase from which it will not simulate again. */
 bool race_session_is_over(const RaceSession *session);
+
+/*
+ * Record a steward penalty (issue #55). Appends to the penalty log and, for time consequences,
+ * adds the penalty seconds to the entrant's accumulated result penalty immediately. For lap-
+ * invalidating consequences, sets the entrant's current lap invalid flag. Returns false when the
+ * entrant is not found or the rule/consequence are out of range.
+ */
+bool race_session_add_penalty(RaceSession *session, RacePenaltyRule rule,
+                              RacePenaltyConsequence consequence, EntrantId entrantId,
+                              float penaltySeconds, int32_t evidence);
+
+/* How many unserved penalties an entrant has (issue #55). */
+int race_session_pending_penalties(const RaceSession *session, EntrantId entrantId);
 
 #endif /* CIRCUIT_RACE_SESSION_H */
