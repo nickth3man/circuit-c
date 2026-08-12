@@ -992,6 +992,17 @@ static void stage_tire_forces(PhysicsStep *step)
         }
         derived->tireTemperatureGripMultiplier[i] = tempMult;
 
+        /* Wear grip degradation (#22): continuous power-law loss to a bounded floor at
+         * complete wear; 1.0 when the model is off. */
+        float wearMult = 1.0f;
+        if (step->tireState != NULL && spec->tireWearEnabled > 0.0f) {
+            wearMult = 1.0f - TIRE_WEAR_FULL_DEGRADE *
+                                  powf(step->tireState[i].wear, TIRE_WEAR_DEGRADE_EXP);
+            if (wearMult < 1.0f - TIRE_WEAR_FULL_DEGRADE)
+                wearMult = 1.0f - TIRE_WEAR_FULL_DEGRADE;
+        }
+        derived->tireWearGripMultiplier[i] = wearMult;
+
         /* Surface-relative friction and stiffness. On asphalt the surface ratios equal 1.0
          * and tireBScale is 1.0, so this block is a complete no-op for the surface factor.
          * The width/pressure scales are independent of surface and multiply through here. */
@@ -1004,10 +1015,10 @@ static void stage_tire_forces(PhysicsStep *step)
         /* Surface-relative friction and stiffness. On asphalt the surface ratios equal 1.0 and
          * tireBScale is 1.0, so this block is a complete no-op. */
         const SurfaceSpec *s = Surface_Get(wheel->surfaceId);
-        const float muLateralEff =
-            lateralMuAxle * (s->muLateral / SURFACE_REFERENCE_MU_LAT) * muScale * tempMult;
+        const float muLateralEff = lateralMuAxle * (s->muLateral / SURFACE_REFERENCE_MU_LAT) *
+                                   muScale * tempMult * wearMult;
         const float muLongitudinalEff =
-            spec->tireMuLongScale * s->muLongitudinal * muScale * tempMult;
+            spec->tireMuLongScale * s->muLongitudinal * muScale * tempMult * wearMult;
         const float BlatEff = lateralB * widthScale * pressureScale * s->tireBScale;
         const float BlongEff = spec->tireBLong * pressureScale;
 
@@ -1114,7 +1125,7 @@ static void stage_tire_forces(PhysicsStep *step)
  */
 static void stage_tire_thermal(PhysicsStep *step)
 {
-    if (step->tireState == NULL || step->spec->tireThermalEnabled <= 0.0f) return;
+    if (step->tireState == NULL) return;
     const VehicleSpec *spec = step->spec;
     const VehicleState *state = step->state;
     const VehicleDerived *derived = step->derived;
@@ -1131,28 +1142,45 @@ static void stage_tire_thermal(PhysicsStep *step)
          * (proportional to load * speed, using the surface's rolling coefficient). */
         const float slipPowerW = fabsf(wheel->forceLongitudinalN * wheel->slipRatio) +
                                  fabsf(wheel->forceLateralN * wheel->slipAngleRad);
-        const float rollingPowerW =
-            Surface_Get(wheel->surfaceId)->rollingResistanceCoefficient * wheel->normalLoadN *
-            fmaxf(fabsf(derived->wheelContactVelocityBodyMps[i].x), 0.0f);
-        const float heatW =
-            slipPowerW * TIRE_HEAT_SLIP_GAIN + rollingPowerW * TIRE_HEAT_ROLLING_GAIN;
+        if (spec->tireThermalEnabled > 0.0f) {
+            const float rollingPowerW =
+                Surface_Get(wheel->surfaceId)->rollingResistanceCoefficient *
+                wheel->normalLoadN *
+                fmaxf(fabsf(derived->wheelContactVelocityBodyMps[i].x), 0.0f);
+            const float heatW =
+                slipPowerW * TIRE_HEAT_SLIP_GAIN + rollingPowerW * TIRE_HEAT_ROLLING_GAIN;
 
-        /* Cooling: convection to ambient, stronger with road speed. */
-        const float coolingW =
-            TIRE_COOLING_RATE_PER_S * (1.0f + TIRE_COOLING_SPEED_FACTOR * speedMps) *
-            (ts->temperatureC - TIRE_AMBIENT_TEMP_C) * TIRE_THERMAL_CAPACITY_J_PER_C;
+            /* Cooling: convection to ambient, stronger with road speed. */
+            const float coolingW =
+                TIRE_COOLING_RATE_PER_S * (1.0f + TIRE_COOLING_SPEED_FACTOR * speedMps) *
+                (ts->temperatureC - TIRE_AMBIENT_TEMP_C) * TIRE_THERMAL_CAPACITY_J_PER_C;
 
-        float tempC =
-            ts->temperatureC + (heatW - coolingW) * dt / TIRE_THERMAL_CAPACITY_J_PER_C;
-        if (tempC < TIRE_MIN_TEMP_C) tempC = TIRE_MIN_TEMP_C;
-        if (tempC > TIRE_MAX_TEMP_C) tempC = TIRE_MAX_TEMP_C;
-        ts->temperatureC = tempC;
+            float tempC =
+                ts->temperatureC + (heatW - coolingW) * dt / TIRE_THERMAL_CAPACITY_J_PER_C;
+            if (tempC < TIRE_MIN_TEMP_C) tempC = TIRE_MIN_TEMP_C;
+            if (tempC > TIRE_MAX_TEMP_C) tempC = TIRE_MAX_TEMP_C;
+            ts->temperatureC = tempC;
 
-        /* Live pressure from the bulk temperature; clamped positive. */
-        float pressureKpa =
-            nominalKpa * (1.0f + TIRE_PRESSURE_TEMP_COEFF * (tempC - TIRE_OPTIMAL_TEMP_C));
-        if (pressureKpa < TIRE_MIN_PRESSURE_KPA) pressureKpa = TIRE_MIN_PRESSURE_KPA;
-        ts->pressureKpa = pressureKpa;
+            /* Live pressure from the bulk temperature; clamped positive. */
+            float pressureKpa =
+                nominalKpa * (1.0f + TIRE_PRESSURE_TEMP_COEFF * (tempC - TIRE_OPTIMAL_TEMP_C));
+            if (pressureKpa < TIRE_MIN_PRESSURE_KPA) pressureKpa = TIRE_MIN_PRESSURE_KPA;
+            ts->pressureKpa = pressureKpa;
+        }
+
+        /* Tire wear (issue #22): monotonic accumulation from slip energy, boosted while the
+         * wheel is locked, with a surface-abrasion factor. Only ever grows inside this stage;
+         * the only reset is an explicit service/replace call. */
+        if (spec->tireWearEnabled > 0.0f) {
+            const float abrasion =
+                Surface_Get(wheel->surfaceId)->rollingResistanceCoefficient >= 0.02f ? 1.6f
+                                                                                     : 1.0f;
+            const float lockMult = wheel->locked ? TIRE_WEAR_LOCKUP_MULT : 1.0f;
+            const float wearPerS = slipPowerW * TIRE_WEAR_SLIP_GAIN * lockMult * abrasion;
+            float wear = ts->wear + wearPerS * dt;
+            if (wear > 1.0f) wear = 1.0f;
+            ts->wear = wear;
+        }
     }
 }
 

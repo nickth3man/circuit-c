@@ -361,11 +361,18 @@
 #define TIRE_MIN_TEMP_C -20.0f                /* C; clamp */
 #define TIRE_MAX_TEMP_C 200.0f                /* C; clamp */
 #define TIRE_MIN_PRESSURE_KPA 50.0f           /* kPa; clamp (never negative or flat) */
-#define ACKERMANN_PERCENT 1.00f               /* dimensionless; 0=parallel, 1=true Ackermann */
-#define DIFFERENTIAL_MODE_DEFAULT 2           /* 0=LOCKED, 1=OPEN, 2=LSD */
-#define DIFFERENTIAL_BIAS_RATIO 2.0f          /* dimensionless; LSD slower/faster cap */
-#define DIFFERENTIAL_PRELOAD_NM 60.0f         /* N*m; LSD clutch preload */
-#define DIFF_OMEGA_EPSILON_RAD_S 1.0e-3f      /* rad/s; LSD omega-difference deadband */
+/* Tire wear model (#22). Master switch is VehicleSpec.tireWearEnabled (default 0 = disabled,
+ * bit-identical baseline). Wear accumulates monotonically from slip energy and surface
+ * abrasion; grip degrades continuously to a bounded floor. */
+#define TIRE_WEAR_SLIP_GAIN 2.0e-6f   /* 1/J; wear per joule of slip work */
+#define TIRE_WEAR_LOCKUP_MULT 4.0f    /* dimensionless; extra wear when the wheel is locked */
+#define TIRE_WEAR_FULL_DEGRADE 0.30f  /* dimensionless; grip loss at 100% wear */
+#define TIRE_WEAR_DEGRADE_EXP 1.5f    /* dimensionless; degradation curve exponent */
+#define ACKERMANN_PERCENT 1.00f       /* dimensionless; 0=parallel, 1=true Ackermann */
+#define DIFFERENTIAL_MODE_DEFAULT 2   /* 0=LOCKED, 1=OPEN, 2=LSD */
+#define DIFFERENTIAL_BIAS_RATIO 2.0f  /* dimensionless; LSD slower/faster cap */
+#define DIFFERENTIAL_PRELOAD_NM 60.0f /* N*m; LSD clutch preload */
+#define DIFF_OMEGA_EPSILON_RAD_S 1.0e-3f /* rad/s; LSD omega-difference deadband */
 #define ROLL_STIFFNESS_FRONT_FRACTION \
     0.50f                              /* dimensionless 0..1; front axle roll-moment share */
 #define SURFACE_REFERENCE_MU_LAT 1.30f /* asphalt lateral mu; tireMuLat* are absolute vs this */

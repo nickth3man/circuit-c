@@ -240,6 +240,7 @@ void vehicle_spec_set_default(VehicleSpec *spec)
     spec->tireRelaxationLengthM = TIRE_RELAXATION_LENGTH_M;
     spec->tireLongRelaxationLengthM = TIRE_LONG_RELAXATION_LENGTH_M;
     spec->tireThermalEnabled = 0.0f; /* off: bit-identical baseline (#21) */
+    spec->tireWearEnabled = 0.0f;    /* off: bit-identical baseline (#22) */
     spec->ackermannPercent = ACKERMANN_PERCENT;
     spec->differentialMode = (float)DIFFERENTIAL_MODE_DEFAULT;
     spec->differentialBiasRatio = DIFFERENTIAL_BIAS_RATIO;
@@ -386,6 +387,7 @@ bool vehicle_spec_is_valid(const VehicleSpec *spec)
           spec->tireLongRelaxationLengthM >= 0.0f && spec->tireLongRelaxationLengthM <= 1.0f))
         return false;
     if (spec->tireThermalEnabled != 0.0f && spec->tireThermalEnabled != 1.0f) return false;
+    if (spec->tireWearEnabled != 0.0f && spec->tireWearEnabled != 1.0f) return false;
     if (!(isfinite(spec->tireLoadSensitivityK) && spec->tireLoadSensitivityK >= 0.0f &&
           spec->tireLoadSensitivityK <= 0.05f))
         return false;
@@ -595,6 +597,7 @@ static uint32_t vehicle_content_hash(const VehicleSpec *spec)
     HASH_FLOAT(tireRelaxationLengthM);
     HASH_FLOAT(tireLongRelaxationLengthM);
     HASH_FLOAT(tireThermalEnabled);
+    HASH_FLOAT(tireWearEnabled);
     HASH_FLOAT(tireLoadRefPerWheelN);
     HASH_FLOAT(maxRoadWheelAngleRad);
     HASH_FLOAT(maxSteerRateRadS);
@@ -799,4 +802,16 @@ bool vehicle_instance_init(VehicleInstance *instance, const VehicleDefinition *d
     instance->autoTrans.forwardOnly = false;
     vehicle_instance_reset(instance);
     return true;
+}
+
+void vehicle_tire_service(VehicleInstance *instance, bool replace)
+{
+    if (instance == NULL) return;
+    for (int i = 0; i < WHEEL_COUNT; i++) {
+        const bool front = i == WHEEL_FRONT_LEFT || i == WHEEL_FRONT_RIGHT;
+        instance->tireState[i].pressureKpa =
+            front ? instance->spec.tirePressureFrontKpa : instance->spec.tirePressureRearKpa;
+        instance->tireState[i].temperatureC = TIRE_AMBIENT_TEMP_C;
+        if (replace) instance->tireState[i].wear = 0.0f;
+    }
 }

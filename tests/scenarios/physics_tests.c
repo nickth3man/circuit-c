@@ -4355,6 +4355,83 @@ static void scenario_tire_thermal(void)
     }
 }
 
+/*
+ * tire-wear — issue #22: wear accumulates monotonically from slip abuse, degrades grip
+ * continuously to a bounded floor, and resets only via the service hook.
+ */
+static void scenario_tire_wear(void)
+{
+    /* ---- 1. Enabled: locked braking wears faster than normal driving. ---- */
+    {
+        Game *game = alloc_game();
+        game_init(game);
+        game->spec.tireWearEnabled = 1.0f;
+
+        /* Normal cruise: already at speed, gentle throttle -> minimal slip, little wear. */
+        set_vehicle_rolling_speed(game, 15.0f);
+        game->input.throttle = 0.1f;
+        game->input.steer = 0.0f;
+        for (int i = 0; i < 600; i++) game_fixed_update(game, FIXED_DT_S);
+        const float wearCruise = game->vehicleInstance.tireState[WHEEL_REAR_LEFT].wear;
+
+        /* Hard locked braking from speed: locked wheels, big slip -> much faster wear. */
+        Game *game2 = alloc_game();
+        game_init(game2);
+        game2->spec.tireWearEnabled = 1.0f;
+        set_vehicle_rolling_speed(game2, 25.0f);
+        game2->input.brake = 1.0f;
+        game2->input.throttle = 0.0f;
+        for (int i = 0; i < 600; i++) game_fixed_update(game2, FIXED_DT_S);
+        const float wearBrake = game2->vehicleInstance.tireState[WHEEL_REAR_LEFT].wear;
+
+        check(wearCruise >= 0.0f, "cruise wear is non-negative (%.6f)", (double)wearCruise);
+        check(wearBrake > wearCruise, "locked braking wears faster than cruising (%.6f > %.6f)",
+              (double)wearBrake, (double)wearCruise);
+        check(wearBrake <= 1.0f, "wear stays bounded at 1.0 (got %.6f)", (double)wearBrake);
+
+        /* Grip degradation is continuous, bounded, and floor-guarded. */
+        const float wearMult = game2->derived.tireWearGripMultiplier[WHEEL_REAR_LEFT];
+        const float floor = 1.0f - TIRE_WEAR_FULL_DEGRADE;
+        check(isfinite(wearMult) && wearMult >= floor - 1e-4f && wearMult <= 1.0f + 1e-4f,
+              "wear grip multiplier stays within [%.3f, 1] (got %.4f)", (double)floor,
+              (double)wearMult);
+
+        /* Wear is monotonic: a further run never decreases it. */
+        const float before = game2->vehicleInstance.tireState[WHEEL_REAR_LEFT].wear;
+        for (int i = 0; i < 300; i++) game_fixed_update(game2, FIXED_DT_S);
+        const float after = game2->vehicleInstance.tireState[WHEEL_REAR_LEFT].wear;
+        check(after >= before - 1e-7f, "wear is monotonic (%.6f -> %.6f)", (double)before,
+              (double)after);
+
+        /* ---- 2. Service hook: replace resets wear; re-accumulates afterwards. ---- */
+        vehicle_tire_service(&game2->vehicleInstance, true);
+        check(game2->vehicleInstance.tireState[WHEEL_REAR_LEFT].wear == 0.0f,
+              "tire service resets wear to zero");
+        for (int i = 0; i < 300; i++) game_fixed_update(game2, FIXED_DT_S);
+        check(game2->vehicleInstance.tireState[WHEEL_REAR_LEFT].wear > 0.0f,
+              "wear re-accumulates after service");
+        free(game2);
+        free(game);
+    }
+
+    /* ---- 3. Disabled default: wear never moves, multiplier pinned at 1. ---- */
+    {
+        Game *game = alloc_game();
+        game_init(game);
+        check(game->spec.tireWearEnabled == 0.0f, "wear model defaults to off");
+        set_vehicle_rolling_speed(game, 25.0f);
+        game->input.brake = 1.0f;
+        for (int i = 0; i < 600; i++) game_fixed_update(game, FIXED_DT_S);
+        for (int w = 0; w < WHEEL_COUNT; w++) {
+            check_near((double)game->vehicleInstance.tireState[w].wear, 0.0, 1e-9,
+                       "disabled model: wear pinned at zero");
+            check_near((double)game->derived.tireWearGripMultiplier[w], 1.0, 1e-6,
+                       "disabled model: wear grip multiplier pinned at 1.0");
+        }
+        free(game);
+    }
+}
+
 static const TestScenario kPhysicsScenarios[] = {
     { "telemetry", "CSV writer: stable header, row count, failure handling",
       scenario_telemetry },
@@ -4363,6 +4440,8 @@ static const TestScenario kPhysicsScenarios[] = {
     { "tire", "nonlinear curves, slip ratio, and combined-friction ellipse", scenario_tire },
     { "tire-thermal", "issue #21: bulk temperature/pressure model heats, cools, stays bounded",
       scenario_tire_thermal },
+    { "tire-wear", "issue #22: monotonic wear, bounded grip degradation, service reset",
+      scenario_tire_wear },
     { "solver-stages",
       "staged solver: prefix runs, stage contracts, rollback and failure report",
       scenario_solver_stages },

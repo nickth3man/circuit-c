@@ -157,6 +157,10 @@ typedef struct {
      * per-wheel temperature from slip/rolling heat and maps temperature + live pressure to
      * bounded grip/stiffness effects. */
     float tireThermalEnabled;
+    /* 0/1 master switch for tire wear (#22). 0 (default) keeps wear pinned and the baseline
+     * exact; 1 accumulates per-wheel wear monotonically from slip energy and surface
+     * abrasion, degrading grip continuously to a bounded floor. */
+    float tireWearEnabled;
     float tireLoadRefPerWheelN;
 
     float maxRoadWheelAngleRad;
@@ -311,6 +315,7 @@ typedef struct {
         [WHEEL_COUNT];                /* N*m; self-aligning moment from pneumatic trail (#20) */
     float camberThrustN[WHEEL_COUNT]; /* N; camber-derived lateral force per wheel */
     float tireTemperatureGripMultiplier[WHEEL_COUNT]; /* dimensionless; 1.0 when thermal off */
+    float tireWearGripMultiplier[WHEEL_COUNT];        /* dimensionless; 1.0 when wear off */
 
     /* Which solver stage first produced a non-finite state, as a PhysicsStage value, or 0 when
      * the last step was healthy. Diagnostic only: it is recomputed every step and, like the
@@ -428,6 +433,10 @@ uint32_t vehicle_setup_hash(const VehicleSetup *setup);
 bool vehicle_instance_derive(VehicleInstance *instance, const VehicleDefinition *definition,
                              const VehicleSetup *setup);
 void vehicle_instance_reset(VehicleInstance *instance);
+/* Deterministic tire service hook (issue #22, consumed by future pit rules): `replace` resets
+ * every wheel's wear to 0; when `replace` is false only pressure/temperature are restored to
+ * their cold nominal/ambient values. Never touches the vehicle pose or any other state. */
+void vehicle_tire_service(VehicleInstance *instance, bool replace);
 bool vehicle_instance_init(VehicleInstance *instance, const VehicleDefinition *definition,
                            const VehicleSetup *setup);
 
