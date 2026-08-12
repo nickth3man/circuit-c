@@ -336,8 +336,11 @@ These tasks may run in parallel once their dependencies are complete.
 - [ ] [#46 — Deliver interactive cross-platform builds and reproducible release packaging](https://github.com/nickth3man/circuit-c/issues/46)
   - Depends on: #5, #29, #35
 
-- [ ] [#47 — Add versioned player profile, settings, controls, and accessibility](https://github.com/nickth3man/circuit-c/issues/47)
+- [x] [#47 — Add versioned player profile, settings, controls, and accessibility](https://github.com/nickth3man/circuit-c/issues/47)
   - Depends on: #5, #29, #35
+  - `player_profile` module: versioned JSON persistence (atomic tmp+rename, .corrupt backup,
+    per-version migration), settings/accessibility, conflict-checked bindings, best-lap
+    records by stable content id, headless in-memory mode. Verified: 159 scenarios.
 
 ## Phase 5 gate
 
