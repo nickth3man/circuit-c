@@ -312,8 +312,10 @@ Multiple lanes may operate in parallel after #13, but dependencies within each l
     excluded from the checksum), rain/drain/temp evolution, wetness → grip + tire cooling via
     the road frame. Dry default = identity. Verified: 167 scenarios.
 
-- [ ] [#42 — Build the track authoring, validation, conversion, and preview workflow](https://github.com/nickth3man/circuit-c/issues/42)
+- [x] [#42 — Build the track authoring, validation, conversion, and preview workflow](https://github.com/nickth3man/circuit-c/issues/42)
   - Depends on: #35, #37, #41
+  - track_validate() + CLI (--validate-tracks / --track-info, make targets) + deterministic
+    SVG preview generator. New track-validate scenario. Verified: 168 scenarios.
 
 - [ ] [#43 — Ship independent circuits, discovery metadata, previews, and track coverage](https://github.com/nickth3man/circuit-c/issues/43)
   - Depends on: #36, #42
