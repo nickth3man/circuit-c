@@ -17,6 +17,7 @@
 #include "scenario_shared.h"
 
 #include "content/roster_promotion.h"
+#include "content/track_manifest.h"
 #include "dev/car_corpus.h"
 #include "game/ai_driver.h"
 #include "game/car_roster.h"
@@ -1384,6 +1385,46 @@ static void scenario_damage_recovery(void)
 /* ------------------------------------------------------------------------------------- */
 /* Scenario: timing-records — authoritative timing, validity, bests (issue #50)           */
 /* ------------------------------------------------------------------------------------- */
+
+/* Cover the grandprix circuit (issue #43): loads, validates, and the AI completes laps. */
+static void scenario_grandprix_coverage(void)
+{
+    TrackDefinition track;
+    memset(&track, 0, sizeof(track));
+    uint32_t hash = 0u;
+    char error[256] = "";
+    check(track_load_by_id("grandprix", &track, &hash, error, sizeof(error)),
+          "grandprix loads by id (%s)", error);
+    char why[256] = "";
+    check(track_validate(&track, why, sizeof(why)), "grandprix validates (%s)", why);
+    check(track.count == 240 && track.checkpointCount == 24,
+          "grandprix has its authored geometry (%d nodes, %d gates)", track.count,
+          track.checkpointCount);
+
+    Game *game = alloc_game();
+    game_init(game);
+    game->trackDef = track; /* transfer ownership */
+    memset(&track, 0, sizeof(track));
+    game_spawn_on_track(game);
+    game->controller.kind = CONTROLLER_KIND_AI;
+    game->state = STATE_PLAYING;
+    /* Stuck recovery (#28) lets the driver rejoin after a limit excursion — the coverage
+     * fixture's job is proving the track is drivable, not that one shared AI config never
+     * stalls on it. */
+    game->session.rules.stuckRecoveryEnabled = true;
+    int ticks = 0;
+    while (ticks < 30000 && game->progress.lap < 2) {
+        game_fixed_update(game, FIXED_DT_S);
+        ticks++;
+    }
+    check(game->progress.lap >= 2, "the AI completes laps on grandprix (%d laps in %d ticks)",
+          (int)game->progress.lap, ticks);
+    check(game->progress.bestLapTimeS > 0.0f, "grandprix records a best lap (%.2f s)",
+          (double)game->progress.bestLapTimeS);
+    check(isfinite(game->vehicle.positionM.x) && isfinite(game->vehicle.positionM.y),
+          "grandprix run stays finite");
+    free(game);
+}
 
 static void scenario_timing_records(void)
 {
@@ -5437,6 +5478,9 @@ static const TestScenario kGameplayScenarios[] = {
     { "timing-records",
       "issue #50: sub-tick crossing fractions, best/theoretical laps, validity reasons",
       scenario_timing_records },
+    { "grandprix-coverage",
+      "issue #43: the shipped grandprix circuit loads, validates, and the AI laps it",
+      scenario_grandprix_coverage },
     { "collision-world",
       "issue #26 world contract: stable ids, layers, authored objects, multi-proxy order, "
       "penetration recovery, corners, contact feed",

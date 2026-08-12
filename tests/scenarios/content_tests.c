@@ -1322,7 +1322,7 @@ static void scenario_track_migration(void)
     check(track_catalog_load(NULL, &catalog, error, sizeof(error)),
           "track catalog loads from " TRACK_CATALOG_DIR " (error: %s)",
           catalog.count > 0 ? "(none)" : error);
-    check(catalog.count == 4, "catalog holds four tracks (got %d)", catalog.count);
+    check(catalog.count == 5, "catalog holds five shipped tracks (got %d)", catalog.count);
     if (catalog.count != 4) {
         track_catalog_free(&catalog);
         return;
