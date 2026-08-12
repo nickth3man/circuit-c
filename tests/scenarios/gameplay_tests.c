@@ -22,6 +22,7 @@
 #include "game/ai_driver.h"
 #include "game/car_roster.h"
 #include "game/car_selection.h"
+#include "game/championship.h"
 #include "game/setup_editor.h"
 #include "game/pit_state.h"
 #include "game/race_presentation.h"
@@ -2063,6 +2064,116 @@ static void scenario_pit_cycle(void)
               "pit speeding added time (%.2f)",
               (double)game->session.roster.entrants[0].result.penaltyTimeS);
         free(game);
+    }
+}
+
+/* Issue #58: championships, points, standings, dropped results, persistence. */
+static void scenario_championship(void)
+{
+    /* ---- 1. Points table and event application. ---- */
+    {
+        ChampionshipConfig cfg;
+        championship_config_three_events(&cfg);
+        check(championship_points_for_position(&cfg, 1) == 25, "P1 scores 25");
+        check(championship_points_for_position(&cfg, 2) == 18, "P2 scores 18");
+        check(championship_points_for_position(&cfg, 11) == 0, "beyond the table scores 0");
+
+        ChampionshipStandings st;
+        memset(&st, 0, sizeof(st));
+        st.version = cfg.version;
+        check(championship_apply_event(&cfg, &st, "rwd_grip", 1, false), "P1 applied");
+        check(championship_apply_event(&cfg, &st, "awd_gt", 2, false), "P2 applied");
+        check(st.standings[0].points == 25 && st.standings[1].points == 18,
+              "standings carry points (%d vs %d)", st.standings[0].points,
+              st.standings[1].points);
+        check(st.standings[0].wins == 1, "winner has a win");
+    }
+
+    /* ---- 2. Drop rule: worst result dropped across events. ---- */
+    {
+        ChampionshipConfig cfg;
+        championship_config_three_events(&cfg);
+        ChampionshipStandings st;
+        memset(&st, 0, sizeof(st));
+        st.version = cfg.version;
+        (void)championship_apply_event(&cfg, &st, "rwd_grip", 1, false); /* 25 */
+        (void)championship_apply_event(&cfg, &st, "rwd_grip", 1, false); /* 25 */
+        (void)championship_apply_event(&cfg, &st, "rwd_grip", 5, false); /* 10 */
+        /* With one drop, the 10-point race is dropped: 25 + 25 = 50. */
+        check(st.standings[0].points == 50, "drop rule applied (50 = 25+25, dropped 10)");
+    }
+
+    /* ---- 3. DNS/DNF/DSQ: DNF scores 0, DSQ does not consume a drop. ---- */
+    {
+        ChampionshipConfig cfg;
+        championship_config_three_events(&cfg);
+        ChampionshipStandings st;
+        memset(&st, 0, sizeof(st));
+        st.version = cfg.version;
+        (void)championship_apply_event(&cfg, &st, "a", 1, false); /* 25 */
+        (void)championship_apply_event(&cfg, &st, "a", 0, false); /* DNF: 0 */
+        (void)championship_apply_event(&cfg, &st, "a", 2, false); /* 18 */
+        /* Drop rule drops the 0 (DNF), leaving 25 + 18 = 43. */
+        check(st.standings[0].points == 43, "DNF result dropped (43)", st.standings[0].points);
+        (void)championship_apply_event(&cfg, &st, "b", 1, false); /* 25 */
+        (void)championship_apply_event(&cfg, &st, "b", 1, false); /* 25 */
+        (void)championship_apply_event(&cfg, &st, "b", 1, true);  /* DSQ: never dropped */
+        /* The DSQ result is never dropped and never counts toward the drop threshold, so one
+         * 25 is still dropped: 25 total (contrast: a DNF would be dropped, keeping 50). */
+        check(st.standings[1].points == 25, "DSQ never dropped and not counted (25)",
+              st.standings[1].points);
+        check(st.standings[1].eventsCompleted == 2, "DSQ not counted as a completed event");
+    }
+
+    /* ---- 4. Ranking with tie-break: points, then wins, then finishes. ---- */
+    {
+        ChampionshipConfig cfg;
+        championship_config_three_events(&cfg);
+        ChampionshipStandings st;
+        memset(&st, 0, sizeof(st));
+        st.version = cfg.version;
+        /* Driver "many-wins": 1,1,3 -> 25+25+15 = 65 (drop 15) = 50, 2 wins. */
+        (void)championship_apply_event(&cfg, &st, "many-wins", 1, false);
+        (void)championship_apply_event(&cfg, &st, "many-wins", 1, false);
+        (void)championship_apply_event(&cfg, &st, "many-wins", 3, false);
+        /* Driver "one-big": 1,2,2 -> 25+18+18 = 61 (drop 18) = 43, 1 win. */
+        (void)championship_apply_event(&cfg, &st, "one-big", 1, false);
+        (void)championship_apply_event(&cfg, &st, "one-big", 2, false);
+        (void)championship_apply_event(&cfg, &st, "one-big", 2, false);
+        championship_rank(&cfg, &st);
+        check(strcmp(st.standings[0].driverId, "many-wins") == 0,
+              "more wins ranks first on the tie-break");
+    }
+
+    /* ---- 5. Serialization round-trip + version gate. ---- */
+    {
+        ChampionshipConfig cfg;
+        championship_config_three_events(&cfg);
+        ChampionshipStandings st;
+        memset(&st, 0, sizeof(st));
+        st.version = cfg.version;
+        (void)championship_add_driver(&st, "rwd_grip");
+        (void)championship_apply_event(&cfg, &st, "rwd_grip", 1, false);
+        (void)championship_apply_event(&cfg, &st, "awd_gt", 2, false);
+
+        char buf[4096];
+        const int n = championship_serialize(&cfg, &st, buf, sizeof(buf));
+        check(n > 0, "championship serializes (%d bytes)", n);
+
+        ChampionshipConfig cfg2;
+        ChampionshipStandings st2;
+        memset(&cfg2, 0, sizeof(cfg2));
+        memset(&st2, 0, sizeof(st2));
+        check(championship_deserialize(&cfg2, &st2, buf), "championship deserializes");
+        check(st2.standings[0].points == 25 && st2.standings[1].points == 18,
+              "deserialized standings match (%d, %d)", st2.standings[0].points,
+              st2.standings[1].points);
+        /* Version mismatch is rejected. */
+        check(!championship_deserialize(&cfg2, &st2,
+                                        "{\"schema\":\"circuit/championship\","
+                                        "\"version\":99,\"points\":[],"
+                                        "\"dropCount\":0,\"drivers\":[]}"),
+              "incompatible save version rejected");
     }
 }
 static void scenario_timing_records(void)
@@ -6151,6 +6262,10 @@ static const TestScenario kGameplayScenarios[] = {
       "issue #57: pit geometry config gate, entry->box->service->exit cycle, limiter + "
       "PIT_SPEED penalty",
       scenario_pit_cycle },
+    { "championship",
+      "issue #58: points, drop rule, DNS/DNF/DSQ, ranking tie-breaks, persistence + version "
+      "gate",
+      scenario_championship },
     { "collision-world",
       "issue #26 world contract: stable ids, layers, authored objects, multi-proxy order, "
       "penetration recovery, corners, contact feed",

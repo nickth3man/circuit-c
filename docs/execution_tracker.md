@@ -432,8 +432,10 @@ Start #54 after both the grid/start and basic live-AI requirements are complete.
 
 ## Pits and event structure lane
 
-- [ ] [#57 — Implement pit lane, speed limiter, stops, fuel/tire/damage service, and AI strategy hooks](https://github.com/nickth3man/circuit-c/issues/57)
+- [x] [#57 — Implement pit lane, speed limiter, stops, fuel/tire/damage service, and AI strategy hooks](https://github.com/nickth3man/circuit-c/issues/57)
   - Depends on: #22, #24, #28, #37, #55
+  - EntrantPitState cycle (entry->box->service->exit), limiter + PIT_SPEED penalty, pit
+    geometry config gate; grandprix authors a pit lane. Verified: 175 scenarios.
 
 - [ ] [#58 — Add practice, qualifying, race weekends, championships, points, and progression](https://github.com/nickth3man/circuit-c/issues/58)
   - Depends on: #33, #56, #57
