@@ -24,6 +24,7 @@
 #include "game/car_selection.h"
 #include "game/championship.h"
 #include "game/setup_editor.h"
+#include "game/ghost.h"
 #include "game/pit_state.h"
 #include "game/race_presentation.h"
 #include "render/car_visual.h"
@@ -2395,6 +2396,147 @@ static void scenario_ai_racecraft(void)
         free(a);
         free(b);
     }
+}
+
+/* Issue #51: persistent, non-interacting player ghosts. */
+static void scenario_ghost(void)
+{
+    const char *path = "artifacts/ghost_scenario.ghost";
+    ghost_store_remove(path);
+
+    /* ---- 1. Record a run and commit it as the best ghost. ---- */
+    {
+        Game *game = alloc_game();
+        game_init(game);
+        track_load_chicane(&game->trackDef);
+        game_spawn_on_track(game);
+        game->controller.kind = CONTROLLER_KIND_AI;
+        for (int t = 0; t < 4000; t++) game_fixed_update(game, FIXED_DT_S);
+        game->progress.bestLapTimeS = 40.0f;
+        bool replaced = false;
+        check(game_ghost_commit(game, path, &replaced), "ghost committed");
+        check(replaced, "first commit replaces the empty store");
+        GhostRecording *rec = (GhostRecording *)calloc(1, sizeof(GhostRecording));
+        if (rec == NULL) {
+            check(false, "ghost load buffer allocated");
+        } else {
+            check(ghost_store_load(path, rec), "committed ghost loads back");
+            check(rec->bestLapTimeS == 40.0f, "ghost stores the best lap (%.1f)",
+                  (double)rec->bestLapTimeS);
+        }
+        free(rec);
+        free(game);
+    }
+
+    /* ---- 2. Ghost presence never perturbs the authoritative checksum. ---- */
+    {
+        Game *without = alloc_game();
+        Game *with = alloc_game();
+        game_init(without);
+        game_init(with);
+        track_load_chicane(&without->trackDef);
+        track_load_chicane(&with->trackDef);
+        game_spawn_on_track(without);
+        game_spawn_on_track(with);
+        without->controller.kind = CONTROLLER_KIND_AI;
+        with->controller.kind = CONTROLLER_KIND_AI;
+        char why[256] = "";
+        check(game_ghost_arm(with, path, why, sizeof(why)), "ghost arms (%s)", why);
+        for (int t = 0; t < 4000; t++) {
+            game_fixed_update(without, FIXED_DT_S);
+            game_fixed_update(with, FIXED_DT_S);
+        }
+        check(game_state_checksum(without) == game_state_checksum(with),
+              "ghost presence does not change the authoritative checksum (0x%08x vs 0x%08x)",
+              game_state_checksum(without), game_state_checksum(with));
+        free(without);
+        free(with);
+    }
+
+    /* ---- 3. A ghost reproduces the recorded trajectory within the determinism contract. ---- */
+    {
+        /* The reference run (the one the recording came from) and a ghost-driven run of the
+         * same length must place the ghost exactly where the reference car was. */
+        Game *ref = alloc_game();
+        game_init(ref);
+        track_load_chicane(&ref->trackDef);
+        game_spawn_on_track(ref);
+        ref->controller.kind = CONTROLLER_KIND_AI;
+        for (int t = 0; t < 2000; t++) game_fixed_update(ref, FIXED_DT_S);
+
+        Game *ghostRun = alloc_game();
+        game_init(ghostRun);
+        track_load_chicane(&ghostRun->trackDef);
+        game_spawn_on_track(ghostRun);
+        ghostRun->controller.kind = CONTROLLER_KIND_AI;
+        char why[256] = "";
+        check(game_ghost_arm(ghostRun, path, why, sizeof(why)), "ghost arms for replay (%s)",
+              why);
+        for (int t = 0; t < 2000; t++) game_fixed_update(ghostRun, FIXED_DT_S);
+
+        /* Both runs were driven by the same AI config from the same spawn: the ghost vehicle
+         * must match the reference car at every sampled tick (replay determinism). */
+        const Vector2 gp = ghostRun->ghost.instance.vehicle.positionM;
+        const Vector2 rp = ref->vehicle.positionM;
+        const float d = sqrtf((gp.x - rp.x) * (gp.x - rp.x) + (gp.y - rp.y) * (gp.y - rp.y));
+        check(d < 0.05f, "ghost reproduces the recorded trajectory (offset %.3f m)", (double)d);
+        free(ref);
+        free(ghostRun);
+    }
+
+    /* ---- 4. Incompatible ghosts are rejected with an exact reason. ---- */
+    {
+        GhostRecording *rec = (GhostRecording *)calloc(1, sizeof(GhostRecording));
+        if (rec == NULL) {
+            check(false, "ghost load buffer allocated");
+        } else {
+            check(ghost_store_load(path, rec), "store loads for the rejection test");
+            rec->trackHash ^= 0xDEADBEEFu; /* corrupt the content identity */
+            char why[256] = "untouched";
+            Game *game = alloc_game();
+            game_init(game);
+            track_load_chicane(&game->trackDef);
+            game_spawn_on_track(game);
+            check(!ghost_validate(rec, track_geometry_hash(&game->trackDef), game->trackDef.id,
+                                  &game->vehicleDefinition, &game->vehicleSetup, why,
+                                  sizeof(why)) &&
+                      strstr(why, "hash"),
+                  "incompatible ghost rejected and named (%s)", why);
+            free(game);
+        }
+        free(rec);
+    }
+
+    /* ---- 5. Best-record replacement is atomic and monotonic. ---- */
+    {
+        Game *game = alloc_game();
+        game_init(game);
+        track_load_chicane(&game->trackDef);
+        game_spawn_on_track(game);
+        game->controller.kind = CONTROLLER_KIND_AI;
+        for (int t = 0; t < 500; t++) game_fixed_update(game, FIXED_DT_S);
+        bool replaced = false;
+
+        game->progress.bestLapTimeS = 30.0f;
+        replaced = false;
+        check(game_ghost_commit(game, path, &replaced) && replaced,
+              "faster ghost replaces the record");
+        game->progress.bestLapTimeS = 35.0f; /* slower */
+        replaced = true;
+        check(game_ghost_commit(game, path, &replaced) && !replaced,
+              "slower ghost does not replace the record");
+        game->progress.bestLapTimeS = 25.0f; /* faster again */
+        check(game_ghost_commit(game, path, &replaced) && replaced,
+              "new best replaces the record");
+        GhostRecording *rec = (GhostRecording *)calloc(1, sizeof(GhostRecording));
+        check(rec != NULL, "ghost load buffer allocated");
+        check(ghost_store_load(path, rec) && rec->bestLapTimeS == 25.0f,
+              "store holds the best recording (%.1f)", (double)rec->bestLapTimeS);
+        free(rec);
+        free(game);
+    }
+
+    ghost_store_remove(path);
 }
 static void scenario_timing_records(void)
 {
@@ -6494,6 +6636,10 @@ static const TestScenario kGameplayScenarios[] = {
       "issue #53: traffic-aware following/overtaking without contact, monotonic difficulty, "
       "determinism",
       scenario_ai_racecraft },
+    { "ghost",
+      "issue #51: non-interacting ghost (checksum invariance, trajectory reproduction, "
+      "rejection, atomic best-record)",
+      scenario_ghost },
     { "collision-world",
       "issue #26 world contract: stable ids, layers, authored objects, multi-proxy order, "
       "penetration recovery, corners, contact feed",

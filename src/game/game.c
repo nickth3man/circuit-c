@@ -393,6 +393,8 @@ GAME_API void game_reset_sim(Game *game)
 {
     if (game == NULL) return;
     car_roster_reload();
+    game_ghost_disarm(
+        game); /* a reset is a new session; the ghost was recorded for the old one */
     /* Every entrant, in roster order. A car put back on the grid must not steer to a plan
      * computed for where it used to be, so each entrant's private controller memory goes with
      * its vehicle state; kind and frozen configuration survive, because the reset changes the
@@ -414,6 +416,99 @@ GAME_API void game_clear_entrant_input(Game *game, int entrantIndex)
     if (entrantIndex < 0 || entrantIndex >= RACE_MAX_ENTRANTS) return;
     game->entrantInputActive[entrantIndex] = false;
     input_zero(&game->entrantInput[entrantIndex]);
+}
+
+GAME_API bool game_ghost_arm(Game *game, const char *path, char *reason, size_t reasonCap)
+{
+    if (game == NULL || path == NULL) return false;
+    /* A GhostRecording is ~430 KB (the replay ring); never put one on the caller's stack. */
+    GhostRecording *rec = (GhostRecording *)calloc(1, sizeof(GhostRecording));
+    if (rec == NULL) {
+        if (reason != NULL && reasonCap > 0)
+            snprintf(reason, reasonCap, "out of memory loading ghost");
+        return false;
+    }
+    if (!ghost_store_load(path, rec)) {
+        free(rec);
+        if (reason != NULL && reasonCap > 0)
+            snprintf(reason, reasonCap, "could not load ghost from '%s'", path);
+        return false;
+    }
+    if (!ghost_validate(rec, track_geometry_hash(&game->trackDef), game->trackDef.id,
+                        &game->vehicleDefinition, &game->vehicleSetup, reason, reasonCap)) {
+        free(rec);
+        return false;
+    }
+    /* Arm: own the recording, rebuild the vehicle from its snapshot, and start playback. */
+    Ghost *ghost = &game->ghost;
+    memset(ghost, 0, sizeof(*ghost));
+    ghost->recording = *rec;
+    free(rec);
+    controller_init(&ghost->controller, CONTROLLER_KIND_REPLAY);
+    if (!replay_restore_initial_vehicle(&ghost->recording.replay, &game->vehicleDefinition,
+                                        &game->vehicleSetup, &ghost->instance)) {
+        if (reason != NULL && reasonCap > 0)
+            snprintf(reason, reasonCap, "ghost vehicle snapshot is incompatible");
+        memset(ghost, 0, sizeof(*ghost));
+        return false;
+    }
+    (void)vehicle_instance_derive(&ghost->instance, &game->vehicleDefinition,
+                                  &game->vehicleSetup);
+    if (!replay_begin_playback(&ghost->recording.replay)) {
+        memset(ghost, 0, sizeof(*ghost));
+        if (reason != NULL && reasonCap > 0)
+            snprintf(reason, reasonCap, "ghost timeline is empty");
+        return false;
+    }
+    track_reset_progress_at(&ghost->progress, &game->trackDef, 0);
+    ghost->active = true;
+    return true;
+}
+
+GAME_API void game_ghost_disarm(Game *game)
+{
+    if (game == NULL) return;
+    memset(&game->ghost, 0, sizeof(game->ghost));
+}
+
+GAME_API bool game_ghost_commit(Game *game, const char *path, bool *replaced)
+{
+    if (game == NULL || path == NULL) return false;
+    if (replaced != NULL) *replaced = false;
+    if (game->replay.mode == REPLAY_MODE_RECORDING) replay_stop(&game->replay);
+    if (game->replay.count <= 0 || !game->replay.initialVehicle.valid) return false;
+
+    /* Existing store: keep it unless the new recording is at least as good. Both recordings
+     * are ~430 KB; keep them off the caller's stack. */
+    GhostRecording *existing = (GhostRecording *)calloc(1, sizeof(GhostRecording));
+    if (existing == NULL) return false;
+    bool keepExisting = false;
+    if (ghost_store_load(path, existing)) {
+        if (game->progress.bestLapTimeS <= 0.0f ||
+            (existing->bestLapTimeS > 0.0f &&
+             game->progress.bestLapTimeS > existing->bestLapTimeS))
+            keepExisting = true; /* existing record stands */
+    }
+    free(existing);
+    if (keepExisting) return true;
+
+    GhostRecording *rec = (GhostRecording *)calloc(1, sizeof(GhostRecording));
+    if (rec == NULL) return false;
+    rec->schema = GHOST_SCHEMA_VERSION;
+    snprintf(rec->trackId, sizeof(rec->trackId), "%s", game->trackDef.id);
+    rec->trackHash = track_geometry_hash(&game->trackDef);
+    snprintf(rec->carId, sizeof(rec->carId), "%s", game->vehicleDefinition.id);
+    rec->carHash = game->vehicleDefinition.contentHash;
+    rec->setupHash = vehicle_setup_hash(&game->vehicleSetup);
+    rec->bestLapTimeS = game->progress.bestLapTimeS;
+    rec->replay = game->replay;
+    rec->replay.mode = REPLAY_MODE_IDLE;
+    rec->replay.playbackCursor = 0;
+    const bool saved = ghost_store_save(path, rec);
+    free(rec);
+    if (!saved) return false;
+    if (replaced != NULL) *replaced = true;
+    return true;
 }
 
 GAME_API void game_apply_spec(Game *game, const VehicleSpec *spec)
@@ -1631,6 +1726,74 @@ static void simulate_extra_entrant(Game *game, RaceEntrant *entrant, const TickC
 }
 
 /*
+ * Ghost simulation (issue #51): the loaded recording is played back through the ghost's OWN
+ * vehicle, mirroring the extra-entrant pipeline but with NO collision body, NO session events,
+ * NO rules participation, and NO checksum contribution. The only writes are the ghost's own
+ * instance, controller memory, and progress (presentation-only).
+ */
+static void simulate_ghost(Game *game, float dt)
+{
+    Ghost *ghost = &game->ghost;
+    if (!ghost->active) return;
+    if (ghost->recording.replay.mode != REPLAY_MODE_PLAYBACK) {
+        game_ghost_disarm(game); /* timeline exhausted */
+        return;
+    }
+
+    Input sample;
+    input_zero(&sample);
+    if (!replay_next(&ghost->recording.replay, &sample)) {
+        game_ghost_disarm(game);
+        return;
+    }
+    const ControllerTickView view = { .sample = &sample,
+                                      .track = &game->trackDef,
+                                      .runtime = &game->trackRuntime,
+                                      .vehicle = &ghost->instance.vehicle,
+                                      .derived = &ghost->instance.derived,
+                                      .spec = &ghost->instance.spec,
+                                      .traffic = NULL,
+                                      .dt = dt };
+    controller_update(&ghost->controller, CONTROLLER_KIND_REPLAY, &view,
+                      &ghost->controllerOutput);
+
+    ControllerOutput applied = ghost->controllerOutput;
+    auto_transmission_update(&ghost->instance.autoTrans, &ghost->instance.vehicle,
+                             &ghost->instance.spec, &ghost->instance.derived, &applied, dt);
+    ghost->instance.vehicleControls.steer = applied.steer;
+    ghost->instance.vehicleControls.throttle = applied.throttle;
+    ghost->instance.vehicleControls.brake = applied.brake;
+    ghost->instance.vehicleControls.handbrake = applied.handbrake;
+
+    const Vector2 startPosM = ghost->instance.renderState.currPositionM;
+    if (game->trackDef.count >= 3) {
+        for (int w = 0; w < WHEEL_COUNT; w++) {
+            const Vector2 worldContact =
+                physics_wheel_world_position(&ghost->instance.vehicle, (WheelId)w);
+            ghost->instance.vehicle.wheels[w].surfaceId =
+                Track_SurfaceAt(&game->trackDef, &game->trackRuntime, worldContact);
+        }
+    }
+    physics_fixed_update(&ghost->instance.spec, &ghost->instance.vehicle,
+                         &ghost->instance.derived, &ghost->instance.renderState,
+                         ghost->instance.tireState, NULL, NULL, NULL, &applied, dt);
+
+    if (game->trackDef.count >= 3) {
+        const TrackProgressEvent pev = track_update_progress(
+            &game->trackDef, &ghost->progress, startPosM,
+            ghost->instance.renderState.currPositionM, ghost->instance.vehicle.headingRad, dt);
+        if (pev.checkpoint.crossed && pev.checkpoint.lapCompleted) {
+            ghost->progress.lastLapTimeS =
+                pev.checkpoint.lapTimeS + pev.checkpoint.crossingFraction * dt;
+            if (ghost->progress.bestLapTimeS == 0.0f ||
+                ghost->progress.lastLapTimeS < ghost->progress.bestLapTimeS)
+                ghost->progress.bestLapTimeS = ghost->progress.lastLapTimeS;
+        }
+        ghost->progress.lapTimerS += dt;
+    }
+}
+
+/*
  * Stage 7 — collision.
  * Reads: the immutable track's collision world and the entrant's post-physics pose. Writes:
  * the entrant's pose, its crash lockout, and the world's per-tick contact feed. Vehicle-to-
@@ -2024,6 +2187,9 @@ GAME_API void game_fixed_update(Game *game, float dt)
         for (int i = 1; i < game->session.roster.count; i++) {
             simulate_extra_entrant(game, &game->session.roster.entrants[i], &ctx, dt);
         }
+        /* The ghost (issue #51) replays its own vehicle after the roster but before
+         * collision: it never gains a collision body, so it cannot perturb the race. */
+        simulate_ghost(game, dt);
         stage_collision(game, &ctx, dt);
         /* Deterministic session environment (issue #41): wetness/temperature evolution. */
         race_environment_update(&game->session.environment, dt);

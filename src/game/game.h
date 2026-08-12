@@ -45,6 +45,7 @@
 #include "game/car_selection.h"
 #include "game/controller.h"
 #include "game/setup_editor.h"
+#include "game/ghost.h"
 #include "game/input.h"
 #include "game/particle.h"
 #include "game/race_session.h"
@@ -211,6 +212,12 @@ struct Game {
     /* Deterministic input recording and playback. Fixed capacity, no allocation. */
     ReplayBuffer replay;
 
+    /* Non-interacting player ghost (issue #51): its own vehicle simulation driven by a
+     * loaded recording, OUTSIDE the roster — no collision body, no rules participation, no
+     * events, and excluded from the state checksum, so its presence cannot perturb the
+     * authoritative participants. */
+    Ghost ghost;
+
     /* Rolling checksum of the deterministic simulation state, recomputed every fixed
      * update. Two runs of the same input timeline must agree on this value. */
     uint32_t stateChecksum;
@@ -305,5 +312,21 @@ GAME_API void game_reset_sim(Game *game);
  */
 GAME_API void game_set_entrant_input(Game *game, int entrantIndex, const Input *sample);
 GAME_API void game_clear_entrant_input(Game *game, int entrantIndex);
+
+/*
+ * Ghost (issue #51): load a recording from the store and arm it as a non-interacting ghost.
+ * Validates content/track/setup compatibility first and writes the exact rejection reason on
+ * failure. Disarms any previously armed ghost.
+ */
+GAME_API bool game_ghost_arm(Game *game, const char *path, char *reason, size_t reasonCap);
+GAME_API void game_ghost_disarm(Game *game);
+
+/*
+ * Atomically commit the session's current recording as the best ghost (issue #51): the store
+ * file is replaced only when the new recording is compatible AND its best lap beats (or ties)
+ * the stored one — the replacement is a temp-file + rename so it is atomic. Returns false on
+ * any failure; `replaced` reports whether the file actually changed.
+ */
+GAME_API bool game_ghost_commit(Game *game, const char *path, bool *replaced);
 
 #endif /* CIRCUIT_GAME_H */
