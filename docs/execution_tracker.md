@@ -317,8 +317,11 @@ Multiple lanes may operate in parallel after #13, but dependencies within each l
   - track_validate() + CLI (--validate-tracks / --track-info, make targets) + deterministic
     SVG preview generator. New track-validate scenario. Verified: 168 scenarios.
 
-- [ ] [#43 — Ship independent circuits, discovery metadata, previews, and track coverage](https://github.com/nickth3man/circuit-c/issues/43)
+- [x] [#43 — Ship independent circuits, discovery metadata, previews, and track coverage](https://github.com/nickth3man/circuit-c/issues/43)
   - Depends on: #36, #42
+  - New independent grandprix circuit (240 nodes, 24 gates, variable width) with validation,
+    hash round-trip, AI lap coverage (with #28 recovery), and a preview fixture. Catalog now
+    five tracks. Verified: 169 scenarios.
 
 ## Phase 4 gate
 
