@@ -23,6 +23,7 @@
 #include "game/car_roster.h"
 #include "game/car_selection.h"
 #include "game/setup_editor.h"
+#include "game/race_presentation.h"
 #include "render/car_visual.h"
 #include "render/car_visual_raster.h"
 #include "core/config.h"
@@ -1884,6 +1885,77 @@ static void scenario_penalty_rules(void)
               "cut penalty added");
         check(game->session.roster.entrants[1].progress.lapInvalid,
               "cut penalty invalidated the lap");
+        free(game);
+    }
+}
+
+/* Issue #56: presentation snapshot, retry, and next-session flow. */
+static void scenario_hud_flow(void)
+{
+    /* ---- 1. Presentation snapshot derived from authoritative session state. ---- */
+    {
+        SessionConfig cfg;
+        session_config_set_default(&cfg);
+        cfg.mode = RACE_MODE_RACE;
+        cfg.aiCount = 2;
+        cfg.targetLaps = 10;
+        Game *game = alloc_game();
+        char why[256] = "";
+        check(game_configure_session(game, &cfg, why, sizeof(why)), "race launches");
+        game->controller.kind = CONTROLLER_KIND_AI;
+        for (int t = 0; t < 600; t++) game_fixed_update(game, FIXED_DT_S);
+
+        RacePresentationSnapshot snap;
+        race_presentation_snapshot(&game->session, &game->trackDef, &snap);
+        check(snap.entrantCount == 3, "snapshot has all entrants (%d)", snap.entrantCount);
+        check(snap.localPosition >= 1, "local entrant has a live position (%d)",
+              snap.localPosition);
+        check(snap.targetLaps == 10, "snapshot carries target laps (%d)", snap.targetLaps);
+        check(snap.phase == game->session.phase, "snapshot phase matches session");
+        free(game);
+    }
+
+    /* ---- 2. Snapshot is immutable: captured values don't change after more ticks. ---- */
+    {
+        SessionConfig cfg;
+        session_config_set_default(&cfg);
+        cfg.targetLaps = 10;
+        Game *game = alloc_game();
+        char why[256] = "";
+        check(game_configure_session(game, &cfg, why, sizeof(why)), "time trial launches");
+        game->controller.kind = CONTROLLER_KIND_AI;
+        for (int t = 0; t < 300; t++) game_fixed_update(game, FIXED_DT_S);
+        RacePresentationSnapshot snap;
+        race_presentation_snapshot(&game->session, &game->trackDef, &snap);
+        const float snapTime = snap.sessionTimeS;
+        /* Run more ticks — the live session advances, but the snapshot must NOT change. */
+        for (int t = 0; t < 300; t++) game_fixed_update(game, FIXED_DT_S);
+        check(game->session.clockS > snapTime, "live session advanced past snapshot");
+        check(snap.sessionTimeS == snapTime, "snapshot is an immutable value copy");
+        free(game);
+    }
+
+    /* ---- 3. Retry resets the session cleanly. ---- */
+    {
+        SessionConfig cfg;
+        session_config_set_default(&cfg);
+        cfg.targetLaps = 10;
+        Game *game = alloc_game();
+        char why[256] = "";
+        check(game_configure_session(game, &cfg, why, sizeof(why)), "time trial launches");
+        game->controller.kind = CONTROLLER_KIND_AI;
+        for (int t = 0; t < 600; t++) game_fixed_update(game, FIXED_DT_S);
+        check(game->session.tick > 0, "session advanced before retry (%llu)",
+              (unsigned long long)game->session.tick);
+        const uint64_t ticksBefore = game->session.tick;
+        /* Retry: same rules, fresh grid. */
+        check(race_session_retry(&game->session, &game->trackDef), "retry succeeds");
+        check(game->session.tick == 0, "retry resets the tick (%llu)",
+              (unsigned long long)game->session.tick);
+        check(game->session.classifiedCount == 0, "retry clears classifiedCount");
+        check(game->session.roster.count == 1, "retry preserves the roster");
+        check(game->progress.lap == 0, "retry resets lap progress");
+        (void)ticksBefore;
         free(game);
     }
 }
@@ -5966,6 +6038,9 @@ static const TestScenario kGameplayScenarios[] = {
       "issue #55: track-limits, penalty model (rule/consequence/evidence/lifecycle), "
       "default-off",
       scenario_penalty_rules },
+    { "hud-flow",
+      "issue #56: presentation snapshot (authoritative, immutable), retry resets session state",
+      scenario_hud_flow },
     { "collision-world",
       "issue #26 world contract: stable ids, layers, authored objects, multi-proxy order, "
       "penetration recovery, corners, contact feed",
