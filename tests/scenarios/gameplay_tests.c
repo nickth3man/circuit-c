@@ -1426,6 +1426,168 @@ static void scenario_grandprix_coverage(void)
     free(game);
 }
 
+/* Issue #48: the player-facing configuration bundle. Validation, serialization, and launch. */
+static void scenario_session_config(void)
+{
+    /* ---- 1. Defaults are valid on a clean install. ---- */
+    {
+        SessionConfig cfg;
+        session_config_set_default(&cfg);
+        char why[256] = "";
+        check(session_config_validate(&cfg, why, sizeof(why)),
+              "default session config is valid (%s)", why);
+    }
+
+    /* ---- 2. Invalid combinations are rejected with an exact, named reason. ---- */
+    {
+        SessionConfig cfg;
+        session_config_set_default(&cfg);
+        char why[256] = "untouched";
+
+        snprintf(cfg.trackId, sizeof(cfg.trackId), "%s", "no_such_track");
+        check(!session_config_validate(&cfg, why, sizeof(why)) && strstr(why, "track"),
+              "unknown track rejected and named (%s)", why);
+        session_config_set_default(&cfg);
+
+        snprintf(cfg.carId, sizeof(cfg.carId), "%s", "no_such_car");
+        check(!session_config_validate(&cfg, why, sizeof(why)) && strstr(why, "car"),
+              "unknown car rejected and named (%s)", why);
+        session_config_set_default(&cfg);
+
+        /* Time trial cannot have AI opponents. */
+        cfg.aiCount = 3;
+        check(!session_config_validate(&cfg, why, sizeof(why)) && strstr(why, "time trial"),
+              "AI in a time trial rejected and named (%s)", why);
+        session_config_set_default(&cfg);
+
+        /* AI field beyond the grid. */
+        cfg.mode = RACE_MODE_RACE;
+        cfg.aiCount = RACE_MAX_ENTRANTS;
+        check(!session_config_validate(&cfg, why, sizeof(why)) && strstr(why, "range"),
+              "oversized AI field rejected and named (%s)", why);
+        session_config_set_default(&cfg);
+
+        cfg.targetLaps = 0;
+        check(!session_config_validate(&cfg, why, sizeof(why)) && strstr(why, "laps"),
+              "zero-lap target rejected and named (%s)", why);
+        session_config_set_default(&cfg);
+
+        cfg.environment.precipitation = 2.0f;
+        check(!session_config_validate(&cfg, why, sizeof(why)) && strstr(why, "precipitation"),
+              "out-of-range precipitation rejected and named (%s)", why);
+        session_config_set_default(&cfg);
+    }
+
+    /* ---- 3. Serialization is deterministic and widget-order independent. ---- */
+    {
+        SessionConfig a, b;
+        session_config_set_default(&a);
+        /* Build b by setting fields in a different order; the document must be byte-identical. */
+        session_config_set_default(&b);
+        b.targetLaps = 5;
+        b.absLevel = 3;
+        a.targetLaps = 5;
+        a.absLevel = 3;
+
+        char bufA[1024];
+        char bufB[1024];
+        {
+            FILE *mem = tmpfile();
+            if (mem == NULL) {
+                check(false, "tmpfile opened");
+            } else {
+                session_config_serialize(&a, mem);
+                rewind(mem);
+                const size_t n = fread(bufA, 1, sizeof(bufA) - 1, mem);
+                bufA[n] = '\0';
+                fclose(mem);
+            }
+        }
+        {
+            FILE *mem = tmpfile();
+            if (mem == NULL) {
+                check(false, "tmpfile opened");
+            } else {
+                session_config_serialize(&b, mem);
+                rewind(mem);
+                const size_t n = fread(bufB, 1, sizeof(bufB) - 1, mem);
+                bufB[n] = '\0';
+                fclose(mem);
+            }
+        }
+        check(strcmp(bufA, bufB) == 0, "serialized config is widget-order independent");
+
+        /* Round-trip: deserialize yields a config that re-serializes identically. */
+        SessionConfig round;
+        check(session_config_deserialize(&round, bufA), "config deserializes");
+        char bufRound[1024];
+        {
+            FILE *mem = tmpfile();
+            if (mem == NULL) {
+                check(false, "tmpfile opened");
+            } else {
+                session_config_serialize(&round, mem);
+                rewind(mem);
+                const size_t n = fread(bufRound, 1, sizeof(bufRound) - 1, mem);
+                bufRound[n] = '\0';
+                fclose(mem);
+            }
+        }
+        check(strcmp(bufA, bufRound) == 0, "round-trip is byte-identical");
+        char why[256] = "";
+        check(session_config_validate(&round, why, sizeof(why)),
+              "deserialized config is valid (%s)", why);
+    }
+
+    /* ---- 4. Launch representative FWD/RWD/AWD time trials. ---- */
+    {
+        const char *cars[] = { "fwd_light", "rwd_grip", "awd_gt" };
+        for (int i = 0; i < 3; i++) {
+            SessionConfig cfg;
+            session_config_set_default(&cfg);
+            snprintf(cfg.carId, sizeof(cfg.carId), "%s", cars[i]);
+            Game *game = alloc_game();
+            char why[256] = "";
+            check(game_configure_session(game, &cfg, why, sizeof(why)),
+                  "%s time trial launches (%s)", cars[i], why);
+            for (int t = 0; t < 120; t++) game_fixed_update(game, FIXED_DT_S);
+            check(isfinite(game->vehicle.positionM.x) && isfinite(game->vehicle.positionM.y),
+                  "%s time trial stays finite", cars[i]);
+            check(game->session.roster.count == 1, "%s time trial is solo", cars[i]);
+            free(game);
+        }
+    }
+
+    /* ---- 5. Launch a multi-AI race session. ---- */
+    {
+        SessionConfig cfg;
+        session_config_set_default(&cfg);
+        cfg.mode = RACE_MODE_RACE;
+        cfg.aiCount = 3;
+        cfg.targetLaps = 2;
+        Game *game = alloc_game();
+        char why[256] = "";
+        check(game_configure_session(game, &cfg, why, sizeof(why)),
+              "multi-AI race launches (%s)", why);
+        check(game->session.roster.count == 4, "race grid has player + 3 AI (%d)",
+              game->session.roster.count);
+        int aiCount = 0;
+        for (int i = 0; i < game->session.roster.count; i++) {
+            if (game->session.roster.entrants[i].controller.kind == CONTROLLER_KIND_AI)
+                aiCount++;
+        }
+        check(aiCount == 3, "three AI controllers on the grid (%d)", aiCount);
+        for (int t = 0; t < 300; t++) game_fixed_update(game, FIXED_DT_S);
+        /* Every entrant stays finite after a short run. */
+        bool allFinite = true;
+        for (int i = 0; i < game->session.roster.count; i++) {
+            const VehicleState *v = &game->session.roster.entrants[i].instance.vehicle;
+            if (!isfinite(v->positionM.x) || !isfinite(v->positionM.y)) allFinite = false;
+        }
+        check(allFinite, "every race entrant stays finite");
+        free(game);
+    }
+}
 static void scenario_timing_records(void)
 {
     /* ---- 1. Crossing fraction: a gate crossed mid-tick reports the sub-tick position. ---- */
@@ -5481,6 +5643,10 @@ static const TestScenario kGameplayScenarios[] = {
     { "grandprix-coverage",
       "issue #43: the shipped grandprix circuit loads, validates, and the AI laps it",
       scenario_grandprix_coverage },
+    { "session-config",
+      "issue #48: validated SessionConfig, deterministic serialization, time trial + AI race "
+      "launch",
+      scenario_session_config },
     { "collision-world",
       "issue #26 world contract: stable ids, layers, authored objects, multi-proxy order, "
       "penetration recovery, corners, contact feed",

@@ -451,6 +451,125 @@ GAME_API bool game_configure_run(Game *game, const GameRunConfig *config)
     if (!keepTrack) return game_spawn_on_track(game);
     return true;
 }
+static void set_reason_safe(char *reason, size_t cap, const char *msg)
+{
+    if (reason != NULL && cap > 0) (void)snprintf(reason, cap, "%s", msg);
+}
+
+/*
+ * The player-facing path to "start a race" (issue #48). Validates the bundle first — no invalid
+ * combination reaches allocation or spawn — then loads the track, rebuilds the grid (the player
+ * in slot 0 plus the requested AI field in race mode), freezes the rules and environment, and
+ * releases the session. The player's chosen assists (ABS/TCS) are baked into their setup. The
+ * reason string is player-facing on failure.
+ */
+GAME_API bool game_configure_session(Game *game, const SessionConfig *cfg, char *reason,
+                                     size_t reasonCap)
+{
+    if (game == NULL || cfg == NULL) {
+        set_reason_safe(reason, reasonCap, "no game or config");
+        return false;
+    }
+    char why[256] = "";
+    if (!session_config_validate(cfg, why, sizeof(why))) {
+        set_reason_safe(reason, reasonCap, why);
+        return false;
+    }
+
+    /* Load the chosen track. Mirrors game_configure_run: catalog transfer, runtime rebind. */
+    TrackCatalog catalog;
+    memset(&catalog, 0, sizeof(catalog));
+    char loadErr[256] = "";
+    if (!track_catalog_load(NULL, &catalog, loadErr, sizeof(loadErr))) {
+        set_reason_safe(reason, reasonCap, "track catalog unavailable");
+        return false;
+    }
+    const int trackIdx = track_catalog_find(&catalog, cfg->trackId);
+    if (trackIdx < 0) {
+        track_catalog_free(&catalog);
+        set_reason_safe(reason, reasonCap, "track not found");
+        return false;
+    }
+    TrackDefinition loaded = catalog.entries[trackIdx].definition;
+    memset(&catalog.entries[trackIdx].definition, 0, sizeof(TrackDefinition));
+    track_catalog_free(&catalog);
+    track_free(&game->trackDef);
+    game->trackDef = loaded;
+    track_runtime_bind(&game->trackRuntime, &game->trackDef);
+    memset(game->session.trackId, 0, sizeof(game->session.trackId));
+    snprintf(game->session.trackId, sizeof(game->session.trackId), "%s", cfg->trackId);
+
+    /* Build the player's car from the chosen id. */
+    const int playerIdx = car_roster_find(cfg->carId);
+    VehicleSpec playerSpec;
+    if (playerIdx < 0 || !car_roster_spec(playerIdx, &playerSpec)) {
+        set_reason_safe(reason, reasonCap, "player car unavailable");
+        return false;
+    }
+    char playerId[CAR_SELECTION_ID_CHARS];
+    car_roster_id(playerIdx, playerId, sizeof(playerId));
+    VehicleDefinition playerDef;
+    if (!vehicle_definition_init(&playerDef, playerId, playerId, 1u, &playerSpec)) {
+        set_reason_safe(reason, reasonCap, "player car invalid");
+        return false;
+    }
+    VehicleSetup playerSetup;
+    vehicle_setup_set_default(&playerDef, &playerSetup);
+    playerSetup.absLevel = cfg->absLevel;
+    playerSetup.tcsLevel = cfg->tcsLevel;
+
+    /* Rebuild the grid: player first, then the AI field. A fresh roster starts the ids at 1. */
+    race_roster_init(&game->session.roster);
+    const RaceEntrantSpawn playerSpawn = { .definition = &playerDef,
+                                           .setup = &playerSetup,
+                                           .controllerKind = CONTROLLER_KIND_HUMAN,
+                                           .localPlayer = true,
+                                           .gridSlot = 0 };
+    EntrantId playerIdOut = RACE_ENTRANT_ID_NONE;
+    if (!race_roster_spawn(&game->session.roster, &playerSpawn, &playerIdOut)) {
+        set_reason_safe(reason, reasonCap, "player spawn failed");
+        return false;
+    }
+
+    if (cfg->mode == RACE_MODE_RACE && cfg->aiCount > 0) {
+        const int rosterCount = car_roster_count();
+        int assigned = 0;
+        for (int i = 0; i < rosterCount && assigned < cfg->aiCount; i++) {
+            if (i == playerIdx) continue; /* never put the player car on the AI grid twice */
+            VehicleSpec aiSpec;
+            if (!car_roster_spec(i, &aiSpec)) continue;
+            char aiId[CAR_SELECTION_ID_CHARS];
+            car_roster_id(i, aiId, sizeof(aiId));
+            VehicleDefinition aiDef;
+            if (!vehicle_definition_init(&aiDef, aiId, aiId, 1u, &aiSpec)) continue;
+            if (!aiDef.aiEligible) continue; /* fail-closed: skip ineligible content */
+            const RaceEntrantSpawn aiSpawn = { .definition = &aiDef,
+                                               .controllerKind = CONTROLLER_KIND_AI,
+                                               .localPlayer = false,
+                                               .gridSlot = assigned + 1 };
+            EntrantId aiIdOut = RACE_ENTRANT_ID_NONE;
+            if (race_roster_spawn(&game->session.roster, &aiSpawn, &aiIdOut)) assigned++;
+        }
+        if (assigned < cfg->aiCount) {
+            set_reason_safe(reason, reasonCap, "not enough AI-eligible cars for the field");
+            return false;
+        }
+    }
+
+    /* Freeze the rules and environment, then release the grid. */
+    RaceRules rules;
+    race_rules_set_default(&rules);
+    rules.mode = cfg->mode;
+    rules.targetLaps = cfg->targetLaps;
+    rules.countdownS = cfg->countdownS;
+    rules.damageMode = cfg->damageMode;
+    rules.stuckRecoveryEnabled = cfg->stuckRecoveryEnabled;
+    game->session.environment = cfg->environment;
+    race_session_start(&game->session, &rules);
+    game->state = STATE_PLAYING;
+
+    return game_spawn_on_track(game);
+}
 
 GAME_API bool game_spawn_on_track(Game *game)
 {

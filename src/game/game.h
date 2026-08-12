@@ -53,6 +53,7 @@
 #include "physics/vehicle.h"
 #include "physics/auto_transmission.h"
 #include "game/telemetry.h"
+#include "game/session_config.h"
 
 typedef enum {
     STATE_MENU = 0,
@@ -281,7 +282,8 @@ GAME_API bool game_divergence_report(const Game *a, const Game *b, char *out, si
  * session (no car, setup outside vehicle bounds, missing class tag, or non-player-selectable
  * kind). Headless tests call this directly to prove invalid setups are rejected before a
  * session starts. */
-GAME_API bool game_can_start_race(const Game *game, char *reason, size_t reasonCap);
+GAME_API bool game_configure_session(Game *game, const SessionConfig *cfg, char *reason,
+                                     size_t reasonCap);
 
 /* Reset the vehicle and resynchronise render history. Counters and tick are preserved. */
 GAME_API void game_reset_sim(Game *game);
