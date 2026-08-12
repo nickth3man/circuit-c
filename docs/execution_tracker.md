@@ -235,8 +235,12 @@ Multiple lanes may operate in parallel after #13, but dependencies within each l
 
 ## Powertrain lane
 
-- [ ] [#23 — Model engine inertia, clutch coupling, and shift engagement](https://github.com/nickth3man/circuit-c/issues/23)
+- [x] [#23 — Model engine inertia, clutch coupling, and shift engagement](https://github.com/nickth3man/circuit-c/issues/23)
   - Depends on: #8, #9, #13
+  - Dynamic engine behind `engineInertiaKgM2` (default 0 = kinematic baseline): RPM from
+    torque/inertia with engine braking + idle assist, clutch with capacity-limited slip and
+    full lock, phased shifts (cut/swap/engage) for auto and manual gearboxes. Shift state
+    checksummed/replayed. Verified: 160 scenarios.
 
 - [ ] [#24 — Add fuel consumption and dynamic mass/CG effects](https://github.com/nickth3man/circuit-c/issues/24)
   - Depends on: #8, #23
