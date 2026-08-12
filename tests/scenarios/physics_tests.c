@@ -3161,7 +3161,9 @@ static void param_audit_check_effect(const VehicleSpec *defaults, const TrackDef
             if (strcmp(param->name, "drive.max_clutch_torque") == 0 ||
                 strcmp(param->name, "drive.shift_duration") == 0 ||
                 strcmp(param->name, "drive.fuel_tank_capacity") == 0 ||
-                strcmp(param->name, "drive.fuel_rate") == 0)
+                strcmp(param->name, "drive.fuel_rate") == 0 ||
+                strcmp(param->name, "susp.travel_front") == 0 ||
+                strcmp(param->name, "susp.travel_rear") == 0)
                 continue;
             check(false, "'%s' is classified physics but changed nothing", param->name);
             unproven++;
@@ -3348,6 +3350,80 @@ static void param_audit_check_fuel(const VehicleSpec *defaults)
     }
 }
 
+/* The travel fields (issue #19) only bite once the bump stop engages, which the generic drive
+ * script never reaches; this probe corners hard enough to compress past full travel and
+ * compares the trajectory across travel extremes. */
+static void param_audit_check_suspension_travel(const VehicleSpec *defaults)
+{
+    /* Soft springs so the elastic transfer actually compresses past the travel bounds. */
+    VehicleSpec shortTravel = *defaults;
+    shortTravel.suspWheelRateFrontNpm = 5000.0f;
+    shortTravel.suspWheelRateRearNpm = 5000.0f;
+    shortTravel.suspTravelFrontM = 0.03f;
+    shortTravel.suspTravelRearM = 0.03f;
+    vehicle_spec_refresh_derived(&shortTravel);
+    VehicleSpec longTravel = *defaults;
+    longTravel.suspWheelRateFrontNpm = 5000.0f;
+    longTravel.suspWheelRateRearNpm = 5000.0f;
+    longTravel.suspTravelFrontM = 0.25f;
+    longTravel.suspTravelRearM = 0.25f;
+    vehicle_spec_refresh_derived(&longTravel);
+
+    uint32_t sigShort = 0u, sigLong = 0u, sigBase = 0u;
+    float peakShort = 0.0f, peakLong = 0.0f;
+
+    const struct {
+        const VehicleSpec *spec;
+        uint32_t *sigOut;
+        float *peakOut;
+    } cases[3] = { { defaults, &sigBase, NULL },
+                   { &shortTravel, &sigShort, &peakShort },
+                   { &longTravel, &sigLong, &peakLong } };
+
+    for (int c = 0; c < 3; c++) {
+        VehicleState state;
+        VehicleDerived derived;
+        VehicleRenderState renderState;
+        VehicleTireState tireState[WHEEL_COUNT];
+        float fuelKg = cases[c].spec->massFuelKg;
+        vehicle_state_reset(cases[c].spec, &state, &derived, &renderState);
+        for (int w = 0; w < WHEEL_COUNT; w++) {
+            const bool front = w <= WHEEL_FRONT_RIGHT;
+            tireState[w].pressureKpa = front ? cases[c].spec->tirePressureFrontKpa
+                                             : cases[c].spec->tirePressureRearKpa;
+            tireState[w].temperatureC = TIRE_AMBIENT_TEMP_C;
+            tireState[w].wear = 0.0f;
+        }
+        set_rolling_wheels(cases[c].spec, &state, 20.0f);
+        state.selectedGear = 3;
+
+        ControllerOutput input;
+        controller_output_zero(&input);
+        input.steer = 0.7f;
+        input.throttle = 0.3f;
+
+        VehicleSpec working = *cases[c].spec;
+        for (int tick = 0; tick < 600; tick++) {
+            if (working.fuelEnabled > 0.0f) vehicle_spec_set_fuel_mass(&working, fuelKg);
+            physics_fixed_update(&working, &state, &derived, &renderState, tireState, NULL,
+                                 &fuelKg, &input, FIXED_DT_S);
+            if (cases[c].peakOut != NULL) {
+                for (int w = 0; w < WHEEL_COUNT; w++) {
+                    if (derived.suspCompressionM[w] > *cases[c].peakOut)
+                        *cases[c].peakOut = derived.suspCompressionM[w];
+                }
+            }
+        }
+        *cases[c].sigOut = param_audit_hash_bytes(0x811c9dc5u, &state, sizeof(state));
+    }
+
+    check(peakShort > 0.03f && peakLong < peakShort,
+          "shorter travel engages the bump stop earlier (%.3f vs %.3f m)", (double)peakShort,
+          (double)peakLong);
+    check(sigShort != sigBase, "travel changes the trajectory once the bump stop engages");
+    check(sigLong != sigShort, "different travel bounds produce different trajectories");
+}
+
 static void scenario_param_audit(void)
 {
     VehicleSpec defaults;
@@ -3364,6 +3440,7 @@ static void scenario_param_audit(void)
     param_audit_check_typed_fields(&defaults, &track);
     param_audit_check_dynamic_engine(&defaults);
     param_audit_check_fuel(&defaults);
+    param_audit_check_suspension_travel(&defaults);
     param_audit_check_document();
 
     track_free(&track);
@@ -4993,6 +5070,115 @@ static void scenario_suspension_load_transfer(void)
     }
 }
 
+/*
+ * suspension-travel — issue #19: compression/travel, bump stops, wheel unloading.
+ *
+ * Soft springs so the elastic transfer visibly compresses; the bump stop then stiffens the
+ * axle and the droop limit declares a lifted wheel. Compression/travel stays finite and
+ * transitions are progressive.
+ */
+static void scenario_suspension_travel(void)
+{
+    /* ---- 1. Bump-stop engagement is progressive and bounded. ---- */
+    {
+        Game *game = alloc_game();
+        game_init(game);
+        game->spec.suspWheelRateFrontNpm = 5000.0f;
+        game->spec.suspWheelRateRearNpm = 5000.0f;
+        game->spec.suspTravelFrontM = 0.05f;
+        game->spec.suspTravelRearM = 0.05f;
+        vehicle_spec_refresh_derived(&game->spec);
+
+        game->input.steer = 0.7f;
+        game->input.throttle = 0.3f;
+        float peakCompression = 0.0f;
+        bool sawBump = false;
+        bool finite = true;
+        for (int i = 0; i < 600; i++) {
+            game_fixed_update(game, FIXED_DT_S);
+            for (int w = 0; w < WHEEL_COUNT; w++) {
+                const float c = game->derived.suspCompressionM[w];
+                if (c > peakCompression) peakCompression = c;
+                if (game->derived.bumpStopEngaged[w]) sawBump = true;
+                if (!isfinite(c)) finite = false;
+            }
+        }
+        check(finite, "compression diagnostics stay finite");
+        check(peakCompression > 0.05f, "hard cornering compresses past full travel (%.3f m)",
+              (double)peakCompression);
+        check(sawBump, "the bump stop engaged under hard cornering");
+
+        /* Progressive: the bump fraction rises with cornering effort, capped at 1. */
+        check(game->vehicle.bumpStopFracFront >= 0.0f &&
+                  game->vehicle.bumpStopFracFront <= 1.0f &&
+                  game->vehicle.bumpStopFracRear >= 0.0f &&
+                  game->vehicle.bumpStopFracRear <= 1.0f,
+              "bump fractions stay in [0,1] (%.3f/%.3f)",
+              (double)game->vehicle.bumpStopFracFront, (double)game->vehicle.bumpStopFracRear);
+        free(game);
+    }
+
+    /* ---- 2. Wheel unloading: the droop limit declares loss of contact and the load floors. ---- */
+    {
+        Game *game = alloc_game();
+        game_init(game);
+        /* A narrow track makes the transfer moment/track large enough to floor an inside
+         * wheel in a hard corner (the transfer inverse-scales with the track width). */
+        game->spec.trackWidthFrontM = 0.7f;
+        game->spec.trackWidthRearM = 0.7f;
+        vehicle_spec_refresh_derived(&game->spec);
+
+        game->input.steer = 0.7f;
+        game->input.throttle = 0.25f;
+        bool sawLift = false;
+        for (int i = 0; i < 600; i++) {
+            game_fixed_update(game, FIXED_DT_S);
+            for (int w = 0; w < WHEEL_COUNT; w++) {
+                if (!game->derived.wheelContact[w]) sawLift = true;
+            }
+        }
+        check(sawLift, "hard cornering on a narrow track unloads a wheel to the floor");
+        /* The MIN_NORMAL_LOAD_N floor keeps the solver stable, so a lifted wheel retains a
+         * small fraction of its grip; the meaningful assertion is that it carries far less
+         * than a loaded wheel. */
+        float loadedMax = 0.0f, liftedMax = 0.0f;
+        for (int w = 0; w < WHEEL_COUNT; w++) {
+            const float f = fabsf(game->vehicle.wheels[w].forceLateralN);
+            if (!game->derived.wheelContact[w]) {
+                if (f > liftedMax) liftedMax = f;
+            } else {
+                if (f > loadedMax) loadedMax = f;
+            }
+        }
+        check(liftedMax < loadedMax * 0.2f + 5.0f,
+              "a lifted wheel carries a small fraction of a loaded wheel's force (%.0f vs %.0f "
+              "N)",
+              (double)liftedMax, (double)loadedMax);
+        free(game);
+    }
+
+    /* ---- 3. Determinism. ---- */
+    {
+        Game *a = alloc_game();
+        Game *b = alloc_game();
+        game_init(a);
+        game_init(b);
+        a->spec.suspWheelRateFrontNpm = b->spec.suspWheelRateFrontNpm = 5000.0f;
+        a->spec.suspWheelRateRearNpm = b->spec.suspWheelRateRearNpm = 5000.0f;
+        a->input.steer = b->input.steer = 0.7f;
+        a->input.throttle = b->input.throttle = 0.3f;
+        bool same = true;
+        for (int i = 0; i < 900; i++) {
+            game_fixed_update(a, FIXED_DT_S);
+            game_fixed_update(b, FIXED_DT_S);
+            if (game_state_checksum(a) != game_state_checksum(b)) same = false;
+        }
+        check(same, "suspension-travel runs are deterministic over 900 ticks");
+        free(a);
+        free(b);
+    }
+}
+
 static const TestScenario kPhysicsScenarios[] = {
     { "telemetry", "CSV writer: stable header, row count, failure handling",
       scenario_telemetry },
@@ -5015,6 +5201,9 @@ static const TestScenario kPhysicsScenarios[] = {
     { "suspension-load-transfer",
       "issue #18: derived roll stiffness, geometric+elastic transfer, moment closure, symmetry",
       scenario_suspension_load_transfer },
+    { "suspension-travel",
+      "issue #19: compression/travel bounds, progressive bump stops, wheel unloading",
+      scenario_suspension_travel },
     { "solver-stages",
       "staged solver: prefix runs, stage contracts, rollback and failure report",
       scenario_solver_stages },

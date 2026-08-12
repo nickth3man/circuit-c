@@ -125,6 +125,8 @@ static uint32_t hash_entrant(uint32_t h, const RaceEntrant *entrant)
     h = hash_u32(h, (uint32_t)v->shiftPhase);
     h = hash_f32(h, v->shiftTimerS);
     h = hash_u32(h, (uint32_t)v->shiftTargetGear);
+    h = hash_f32(h, v->bumpStopFracFront);
+    h = hash_f32(h, v->bumpStopFracRear);
     h = hash_f32(h, v->filteredLongAccelMps2);
     h = hash_f32(h, v->prevLongAccelMps2);
     h = hash_f32(h, v->filteredLatAccelMps2);

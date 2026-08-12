@@ -233,6 +233,12 @@ typedef struct {
     float frontRoadWheelAngleRad;
     float engineRpm;
     int selectedGear;
+    /* Bump-stop engagement fractions per axle, 0..1 (issue #19). Derived each tick from the
+     * elastic load share's compression against the travel limit, and consumed as the axle's
+     * effective roll-stiffness modifier on the NEXT tick — the documented one-tick lag of the
+     * reduced-order quasi-static model. Authoritative (checksummed, replayed). */
+    float bumpStopFracFront;
+    float bumpStopFracRear;
     /* Dynamic-engine/clutch state (#23). Zeroed by default = kinematic engine, which is what
      * keeps every recorded baseline. `shiftPhase`/`shiftTimerS`/`shiftTargetGear` drive the
      * phased-shift machine; clutch engagement is derived from them (1 when not shifting). */
@@ -324,8 +330,14 @@ typedef struct {
     float lateralLoadTransferElasticRearN;
     float lateralLoadTransferGeometricFrontN;
     float lateralLoadTransferGeometricRearN;
-    float rollAxisHeightAtCgM;                     /* m; roll centres interpolated at the CG */
-    float rollMomentNm;                            /* N*m; m*ay*h */
+    float rollAxisHeightAtCgM; /* m; roll centres interpolated at the CG */
+    float rollMomentNm;        /* N*m; m*ay*h */
+    /* Suspension travel diagnostics (issue #19): per-wheel compression from the elastic load
+     * share, wheel-contact status, and bump-stop engagement. Recomputed every tick, never
+     * integrated, excluded from the checksum. */
+    float suspCompressionM[WHEEL_COUNT]; /* m; positive compression, negative droop */
+    bool wheelContact[WHEEL_COUNT];      /* false when the wheel has left contact (droop) */
+    bool bumpStopEngaged[WHEEL_COUNT];   /* true when the wheel is past full compression */
     float tireLoadSensitivityMuScale[WHEEL_COUNT]; /* dimensionless; per-wheel (Fz/FzRef)^-k */
     float differentialOmegaRadS[2];                /* rad/s; {omega_RL, omega_RR} post-diff */
     float differentialTorqueNm[2];                 /* N*m; {T_RL, T_RR} post-redistribution  */

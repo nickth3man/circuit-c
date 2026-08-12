@@ -472,6 +472,7 @@ bool physics_state_is_valid(const VehicleSpec *spec, const VehicleState *state,
     FINITE_VALUE(derived->lateralLoadTransferGeometricRearN);
     FINITE_VALUE(derived->rollAxisHeightAtCgM);
     FINITE_VALUE(derived->rollMomentNm);
+    for (int i = 0; i < WHEEL_COUNT; i++) FINITE_VALUE(derived->suspCompressionM[i]);
     for (int i = 0; i < WHEEL_COUNT; i++) FINITE_VALUE(derived->tireLoadSensitivityMuScale[i]);
     FINITE_VALUE(derived->differentialOmegaRadS[0]);
     FINITE_VALUE(derived->differentialOmegaRadS[1]);
@@ -1012,10 +1013,28 @@ static void stage_normal_loads(PhysicsStep *step)
                           spec->trackWidthFrontM;
         geometricRearN = lateralForceN * (1.0f - frontWeightShare) * spec->suspRollCentreRearM /
                          spec->trackWidthRearM;
-        elasticFrontN =
-            spec->rollStiffnessFrontFraction * elasticMomentNm / spec->trackWidthFrontM;
-        elasticRearN =
-            (1.0f - spec->rollStiffnessFrontFraction) * elasticMomentNm / spec->trackWidthRearM;
+
+        /* Suspension travel (issue #19): a bump stop engaged on an axle stiffens that axle's
+         * roll resistance at the bump-stop rate, shifting the elastic split progressively.
+         * The fractions consumed here are the PREVIOUS tick's compression result (the
+         * documented one-tick lag of the reduced-order quasi-static model); this tick's
+         * fractions are stored below for the next tick. */
+        const float kFrontBase = SUSP_AXLE_ROLL_STIFFNESS_NM_RAD(
+            spec->trackWidthFrontM, spec->suspWheelRateFrontNpm, spec->suspAntiRollFrontNpm);
+        const float kRearBase = SUSP_AXLE_ROLL_STIFFNESS_NM_RAD(
+            spec->trackWidthRearM, spec->suspWheelRateRearNpm, spec->suspAntiRollRearNpm);
+        const float kFrontEff =
+            kFrontBase + 0.5f * spec->trackWidthFrontM * spec->trackWidthFrontM *
+                             SUSP_BUMP_STOP_RATE_NPM * state->bumpStopFracFront;
+        const float kRearEff = kRearBase + 0.5f * spec->trackWidthRearM *
+                                               spec->trackWidthRearM * SUSP_BUMP_STOP_RATE_NPM *
+                                               state->bumpStopFracRear;
+        const float elasticFrontShare = (kFrontEff + kRearEff > 0.0f)
+                                            ? kFrontEff / (kFrontEff + kRearEff)
+                                            : spec->rollStiffnessFrontFraction;
+
+        elasticFrontN = elasticFrontShare * elasticMomentNm / spec->trackWidthFrontM;
+        elasticRearN = (1.0f - elasticFrontShare) * elasticMomentNm / spec->trackWidthRearM;
 
         dFzFront = elasticFrontN + geometricFrontN;
         dFzRear = elasticRearN + geometricRearN;
@@ -1029,6 +1048,36 @@ static void stage_normal_loads(PhysicsStep *step)
     derived->lateralLoadTransferGeometricFrontN = geometricFrontN;
     derived->lateralLoadTransferGeometricRearN = geometricRearN;
 
+    /* Per-wheel travel/contact diagnostics (issue #19): compression from the ELASTIC share
+     * (the geometric route does not compress the springs), the droop limit declaring a wheel
+     * out of contact, and this tick's bump-stop fractions for the next tick's split. */
+    state->bumpStopFracFront = 0.0f;
+    state->bumpStopFracRear = 0.0f;
+    for (int i = 0; i < WHEEL_COUNT; i++) {
+        const bool front = i <= WHEEL_FRONT_RIGHT;
+        const float travelM = front ? spec->suspTravelFrontM : spec->suspTravelRearM;
+        const float rateNpm = front ? spec->suspWheelRateFrontNpm : spec->suspWheelRateRearNpm;
+        const float elasticAxleN = front ? elasticFrontN : elasticRearN;
+        const float py = state->wheels[i].localPositionM.y;
+        const float elasticWheelN = (py > 0.0f) ? -0.5f * elasticAxleN : 0.5f * elasticAxleN;
+        const float compressionM = (rateNpm > 0.0f) ? elasticWheelN / rateNpm : 0.0f;
+        derived->suspCompressionM[i] = compressionM;
+
+        /* `wheelContact` is set from the FINAL per-wheel load in the loop below: the droop
+         * limit declares the travel state, but a wheel only stops producing force when its
+         * TOTAL load (static + geometric + elastic) reaches the floor. */
+        derived->bumpStopEngaged[i] = (compressionM > travelM);
+
+        if (travelM > 0.0f) {
+            const float frac = (compressionM - travelM) / travelM;
+            if (frac > 0.0f) {
+                float *axleFrac = front ? &state->bumpStopFracFront : &state->bumpStopFracRear;
+                if (frac > *axleFrac) *axleFrac = frac;
+                if (*axleFrac > 1.0f) *axleFrac = 1.0f;
+            }
+        }
+    }
+
     for (int i = 0; i < WHEEL_COUNT; i++) {
         const bool front = (i <= WHEEL_FRONT_RIGHT);
         const float axleTotalN = front ? loads.frontN : loads.rearN;
@@ -1041,6 +1090,7 @@ static void stage_normal_loads(PhysicsStep *step)
         float Fz = axleTotalN * 0.5f + (py > 0.0f ? -dFzAxle : dFzAxle);
         Fz = fmaxf(Fz, MIN_NORMAL_LOAD_N);
         state->wheels[i].normalLoadN = Fz;
+        derived->wheelContact[i] = (Fz > MIN_NORMAL_LOAD_N + 1e-3f);
     }
 }
 

@@ -208,6 +208,11 @@
 #define SUSP_TRAVEL_REAR_M 0.095f
 #define SUSP_ROLL_CENTRE_FRONT_M 0.080f
 #define SUSP_ROLL_CENTRE_REAR_M 0.100f
+/* Bump-stop and droop limits (issue #19). Beyond full compression the axle's effective roll
+ * stiffness grows at the bump-stop rate, shifting the elastic split progressively; beyond the
+ * droop limit the wheel is declared out of contact and its load floors at MIN_NORMAL_LOAD_N. */
+#define SUSP_BUMP_STOP_RATE_NPM 120000.0f /* N/m; wheel-referred, engaged past full travel */
+#define SUSP_DROOP_FRACTION 0.6f          /* dimensionless; droop = droop_frac * travel */
 
 /* Wheel offset (ET, mm) and brake hardware. */
 #define WHEEL_OFFSET_ET_FRONT_MM 35.0f

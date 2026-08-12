@@ -394,12 +394,14 @@ static const DevParameter g_params[] = {
       DEV_OWNER_DEFINITION,
       "Rear anti-roll stiffness. Adds to the wheel rate in the axle's roll stiffness (#18)." },
     { "susp.travel_front", "Suspension", "m", SPEC_OFFSET(suspTravelFrontM),
-      SUSP_TRAVEL_FRONT_M, 0.03f, 0.25f, 0.005f, false, false, 1, DEV_CLASS_APPEARANCE,
+      SUSP_TRAVEL_FRONT_M, 0.03f, 0.25f, 0.005f, false, false, 1, DEV_CLASS_PHYSICS_INPUT,
       DEV_OWNER_DEFINITION,
-      "Front suspension travel. Appearance only: sets the arch gap with ride height." },
+      "Front suspension travel. Full-compression bound for the bump-stop engagement and the "
+      "droop limit (issue #19); also sets the arch gap with ride height." },
     { "susp.travel_rear", "Suspension", "m", SPEC_OFFSET(suspTravelRearM), SUSP_TRAVEL_REAR_M,
-      0.03f, 0.25f, 0.005f, false, false, 1, DEV_CLASS_APPEARANCE, DEV_OWNER_DEFINITION,
-      "Rear suspension travel. Appearance only: sets the arch gap with ride height." },
+      0.03f, 0.25f, 0.005f, false, false, 1, DEV_CLASS_PHYSICS_INPUT, DEV_OWNER_DEFINITION,
+      "Rear suspension travel. Full-compression bound for the bump-stop engagement and the "
+      "droop limit (issue #19); also sets the arch gap with ride height." },
     { "susp.roll_centre_front", "Suspension", "m", SPEC_OFFSET(suspRollCentreFrontM),
       SUSP_ROLL_CENTRE_FRONT_M, 0.0f, 0.4f, 0.005f, false, false, 2, DEV_CLASS_PHYSICS_INPUT,
       DEV_OWNER_DEFINITION,

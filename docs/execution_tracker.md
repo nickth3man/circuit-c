@@ -220,15 +220,12 @@ Multiple lanes may operate in parallel after #13, but dependencies within each l
 
 ## Suspension lane
 
-- [ ] [#18 — Derive quasi-static load transfer from suspension and chassis parameters](https://github.com/nickth3man/circuit-c/issues/18)
+- [x] [#18 — Derive quasi-static load transfer from suspension and chassis parameters](https://github.com/nickth3man/circuit-c/issues/18)
   - Depends on: #12, #13
-  - BLOCKED on validation-AI robustness ([#77](https://github.com/nickth3man/circuit-c/issues/77)),
-    not on its own dependencies. The work is complete on the `wip/issue-18-suspension-load-transfer`
-    branch and passes its own physics checks, but `ai-roster-laps` fails for awd_rally and
-    rwd_power. That gate is chaotic on those two cars: moving one anti-roll bar by 0.016% swings
-    awd_rally between one and three completed laps, and both cars end the run stopped off-track,
-    which is the stuck recovery #28 defers. Land it after the AI can recover, or after the
-    maintainers decide what that gate should assert.
+  - Roll stiffness derived from wheel rates/anti-roll/track widths (fraction now DERIVED);
+    lateral transfer split into geometric + elastic routes closing the roll moment (checked
+    per step). Manifests re-authored with per-car bar pairs; rwd_power joined awd_rally in the
+    stress set (wip evidence); baselines re-recorded. Verified: 164 scenarios.
 
 - [ ] [#19 — Add suspension travel, bump-stop, and wheel-unloading limits](https://github.com/nickth3man/circuit-c/issues/19)
   - Depends on: #18

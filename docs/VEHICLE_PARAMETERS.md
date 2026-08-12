@@ -177,8 +177,8 @@ validation.
 | `susp.wheel_rate_rear` | `physics` | `definition` | 26000 | N/m | 5000 .. 80000 | 100 | expert | — | Rear wheel rate. Sets the axle's roll stiffness and the elastic transfer split (#18). |
 | `susp.anti_roll_front` | `physics` | `definition` | 15500 | N/m | 0 .. 60000 | 100 | expert | — | Front anti-roll stiffness. Adds to the wheel rate in the axle's roll stiffness (#18). |
 | `susp.anti_roll_rear` | `physics` | `definition` | 18500 | N/m | 0 .. 60000 | 100 | expert | — | Rear anti-roll stiffness. Adds to the wheel rate in the axle's roll stiffness (#18). |
-| `susp.travel_front` | `appearance` | `definition` | 0.09 | m | 0.03 .. 0.25 | 0.005 | advanced | — | Front suspension travel. Appearance only: sets the arch gap with ride height. |
-| `susp.travel_rear` | `appearance` | `definition` | 0.095 | m | 0.03 .. 0.25 | 0.005 | advanced | — | Rear suspension travel. Appearance only: sets the arch gap with ride height. |
+| `susp.travel_front` | `physics` | `definition` | 0.09 | m | 0.03 .. 0.25 | 0.005 | advanced | — | Front suspension travel. Full-compression bound for the bump-stop engagement and the droop limit (issue #19); also sets the arch gap with ride height. |
+| `susp.travel_rear` | `physics` | `definition` | 0.095 | m | 0.03 .. 0.25 | 0.005 | advanced | — | Rear suspension travel. Full-compression bound for the bump-stop engagement and the droop limit (issue #19); also sets the arch gap with ride height. |
 | `susp.roll_centre_front` | `physics` | `definition` | 0.08 | m | 0 .. 0.4 | 0.005 | expert | — | Front roll-centre height. Carries the geometric route of lateral load transfer and shortens the elastic arm (issue #18). |
 | `susp.roll_centre_rear` | `physics` | `definition` | 0.1 | m | 0 .. 0.4 | 0.005 | expert | — | Rear roll-centre height. Carries the geometric route of lateral load transfer and shortens the elastic arm (issue #18). |
 
