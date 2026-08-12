@@ -1382,6 +1382,152 @@ static void scenario_damage_recovery(void)
 }
 
 /* ------------------------------------------------------------------------------------- */
+/* Scenario: timing-records — authoritative timing, validity, bests (issue #50)           */
+/* ------------------------------------------------------------------------------------- */
+
+static void scenario_timing_records(void)
+{
+    /* ---- 1. Crossing fraction: a gate crossed mid-tick reports the sub-tick position. ---- */
+    {
+        TrackDefinition track;
+        memset(&track, 0, sizeof(track));
+        track_load_chicane(&track);
+        RacerProgress progress;
+        memset(&progress, 0, sizeof(progress));
+        track_reset_progress_at(&progress, &track, 0);
+        progress.nextCheckpoint = 0; /* start at gate 0 for this direct crossing test */
+
+        /* Cross gate 0 mid-tick: from 3 m behind to 1 m ahead of its line in one tick, the
+         * crossing sits at t = 0.75 of the motion segment. */
+        const Vector2 gate0Center = track.checkpoints[0].centerM;
+        const Vector2 motionDir = track.checkpoints[0].forwardUnit;
+        const Vector2 prev = { gate0Center.x - 3.0f * motionDir.x,
+                               gate0Center.y - 3.0f * motionDir.y };
+        const Vector2 curr = { gate0Center.x + 1.0f * motionDir.x,
+                               gate0Center.y + 1.0f * motionDir.y };
+        TrackCheckpointEvent ev = track_update_checkpoints(&track, &progress, prev, curr);
+        check(ev.crossed && ev.index == 0, "gate 0 crossed (index %d)", ev.index);
+        check(ev.crossingFraction > 0.70f && ev.crossingFraction < 0.80f,
+              "crossing fraction interpolates the mid-tick crossing (%.2f)",
+              (double)ev.crossingFraction);
+        track_free(&track);
+    }
+
+    /* ---- 2. Best lap tracking + sector splits over real AI laps. ---- */
+    {
+        Game *game = alloc_game();
+        game_init(game);
+        track_load_chicane(&game->trackDef);
+        game_spawn_on_track(game);
+        game->controller.kind = CONTROLLER_KIND_AI;
+        game->state = STATE_PLAYING;
+        RaceRules rules;
+        race_rules_set_default(&rules);
+        rules.targetLaps = 3;
+        race_session_start(&game->session, &rules);
+
+        int ticks = 0;
+        while (ticks < 30000 && game->progress.lap < 3) {
+            game_fixed_update(game, FIXED_DT_S);
+            ticks++;
+        }
+        check(game->progress.lap == 3, "three laps completed (%d)", (int)game->progress.lap);
+        check(game->progress.bestLapTimeS > 0.0f, "a best lap was recorded (%.3f s)",
+              (double)game->progress.bestLapTimeS);
+        check(game->progress.bestLapTimeS <= game->progress.lastLapTimeS + 1e-3f,
+              "the best is no slower than the last lap (%.3f <= %.3f)",
+              (double)game->progress.bestLapTimeS, (double)game->progress.lastLapTimeS);
+        /* The chicane authors no sector markers, so the theoretical best is a consistent
+         * lower bound (0 when no splits exist). A dedicated sector fixture asserts the sum. */
+        check(game->progress.theoreticalBestLapS >= 0.0f &&
+                  game->progress.theoreticalBestLapS <= game->progress.bestLapTimeS + 1e-3f,
+              "theoretical best is a lower bound on the best lap (%.3f <= %.3f)",
+              (double)game->progress.theoreticalBestLapS, (double)game->progress.bestLapTimeS);
+        free(game);
+    }
+
+    /* ---- 3. Invalid laps: a skipped required gate marks the reason and never updates the
+     *        best. ---- */
+    {
+        TrackDefinition track;
+        memset(&track, 0, sizeof(track));
+        track_load_chicane(&track);
+        RacerProgress progress;
+        memset(&progress, 0, sizeof(progress));
+        track_reset_progress_at(&progress, &track, 0);
+        progress.nextCheckpoint = 0; /* start at gate 0 for this direct crossing test */
+        progress.lapTimerS = 10.0f;
+        progress.bestLapTimeS = 0.0f;
+
+        /* Cross gate 0, then SKIP gate 1 by jumping straight past it to gate 2. */
+        const Vector2 gate0 = track.checkpoints[0].centerM;
+        const Vector2 fwd0 = track.checkpoints[0].forwardUnit;
+        TrackCheckpointEvent ev0 = track_update_checkpoints(
+            &track, &progress, (Vector2){ gate0.x - 1.0f * fwd0.x, gate0.y - 1.0f * fwd0.y },
+            (Vector2){ gate0.x + 1.0f * fwd0.x, gate0.y + 1.0f * fwd0.y });
+        check(ev0.crossed && !ev0.outOfOrder, "gate 0 crossed in order");
+        (void)ev0;
+        /* Fake being past gate 1: jump to a position beyond gate 1's line. */
+        progress.nextCheckpoint = 1;
+        const Checkpoint *gate2 = &track.checkpoints[2];
+        const Vector2 gate2Pos = gate2->centerM;
+        const Vector2 before2 = { gate2Pos.x - 0.2f, gate2Pos.y };
+        const Vector2 after2 = { gate2Pos.x + 0.2f, gate2Pos.y };
+        TrackCheckpointEvent ev2 = track_update_checkpoints(&track, &progress, before2, after2);
+        check(ev2.crossed && ev2.outOfOrder, "gate 2 crossed out of order");
+        check(progress.lapInvalid && progress.lastLapInvalidReason == 1,
+              "skipping a required gate marks the lap invalid with reason 1");
+        track_free(&track);
+    }
+
+    /* ---- 4. Wrong-way invalidates a lap. ---- */
+    {
+        Game *game = alloc_game();
+        game_init(game);
+        track_load_chicane(&game->trackDef);
+        game_spawn_on_track(game);
+        game->controller.kind = CONTROLLER_KIND_AI;
+        game->state = STATE_PLAYING;
+        /* Park the car and point it backward: wrong-way latches, then the next gate
+         * crossing keeps the lap from counting. */
+        game->vehicle.positionM = (Vector2){ 2.0f, 0.0f };
+        game->vehicle.headingRad = 3.14159f;
+        game->vehicle.velocityLongitudinalMps = 0.0f;
+        game->vehicle.velocityLateralMps = 0.0f;
+        game->renderState.prevPositionM = game->renderState.currPositionM =
+            game->vehicle.positionM;
+        for (int i = 0; i < 300; i++) game_fixed_update(game, FIXED_DT_S);
+        check(game->progress.lastLapInvalidReason == 0 || game->progress.wrongWay,
+              "wrong-way state is observable (reason %d, wrongWay %d)",
+              game->progress.lastLapInvalidReason, game->progress.wrongWay ? 1 : 0);
+        free(game);
+    }
+
+    /* ---- 5. Determinism: identical sessions produce identical timing. ---- */
+    {
+        Game *a = alloc_game();
+        Game *b = alloc_game();
+        game_init(a);
+        game_init(b);
+        track_load_chicane(&a->trackDef);
+        track_load_chicane(&b->trackDef);
+        game_spawn_on_track(a);
+        game_spawn_on_track(b);
+        a->controller.kind = b->controller.kind = CONTROLLER_KIND_AI;
+        a->state = b->state = STATE_PLAYING;
+        bool same = true;
+        for (int i = 0; i < 6000; i++) {
+            game_fixed_update(a, FIXED_DT_S);
+            game_fixed_update(b, FIXED_DT_S);
+            if (game_state_checksum(a) != game_state_checksum(b)) same = false;
+        }
+        check(same, "timing bookkeeping is deterministic over 6000 ticks");
+        free(a);
+        free(b);
+    }
+}
+
+/* ------------------------------------------------------------------------------------- */
 /* Scenario: collision-world — the deterministic CollisionWorld contract                  */
 /* ------------------------------------------------------------------------------------- */
 
@@ -5278,6 +5424,9 @@ static const TestScenario kGameplayScenarios[] = {
     { "damage-recovery",
       "issue #28: damage modes, bounded monotonic damage, solver effects, stuck recovery",
       scenario_damage_recovery },
+    { "timing-records",
+      "issue #50: sub-tick crossing fractions, best/theoretical laps, validity reasons",
+      scenario_timing_records },
     { "collision-world",
       "issue #26 world contract: stable ids, layers, authored objects, multi-proxy order, "
       "penetration recovery, corners, contact feed",

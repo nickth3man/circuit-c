@@ -1035,9 +1035,12 @@ float track_length_m(const TrackDefinition *track)
     return total;
 }
 
-/* Generic gate test for any forward-gated line (Checkpoint, SectorMarker, PitGate, StartFinish). */
+/* Generic gate test for any forward-gated line (Checkpoint, SectorMarker, PitGate, StartFinish).
+ * When `fractionOut` is non-NULL and the gate is crossed, it receives the sub-tick
+ * interpolation fraction t in [0,1] where the motion segment pierces the gate line (issue #50:
+ * precise lap/sector timing from fixed-tick crossings). */
 static bool gate_crossed_generic(Vector2 centerM, Vector2 forwardUnit, float halfWidthM,
-                                 Vector2 prevPosM, Vector2 currPosM)
+                                 Vector2 prevPosM, Vector2 currPosM, float *fractionOut)
 {
     const Vector2 perp = { -forwardUnit.y, forwardUnit.x };
     const Vector2 gateA = { centerM.x + perp.x * halfWidthM, centerM.y + perp.y * halfWidthM };
@@ -1045,6 +1048,17 @@ static bool gate_crossed_generic(Vector2 centerM, Vector2 forwardUnit, float hal
     const Vector2 motion = { currPosM.x - prevPosM.x, currPosM.y - prevPosM.y };
     if (motion.x * motion.x + motion.y * motion.y < 1e-24f) return false;
     if (motion.x * forwardUnit.x + motion.y * forwardUnit.y <= 0.0f) return false;
+    if (fractionOut != NULL) *fractionOut = 0.0f;
+
+    /* Solve for the parameter t where the motion segment intersects the gate line. The gate
+     * is a line through centerM with normal forwardUnit: t = n.(center - prev) / n.motion. */
+    const float denom = forwardUnit.x * motion.x + forwardUnit.y * motion.y;
+    const float num =
+        forwardUnit.x * (centerM.x - prevPosM.x) + forwardUnit.y * (centerM.y - prevPosM.y);
+    if (fabsf(denom) > 1e-9f) {
+        const float t = num / denom;
+        if (t >= 0.0f && t <= 1.0f && fractionOut != NULL) *fractionOut = t;
+    }
     return segments_intersect(prevPosM, currPosM, gateA, gateB);
 }
 
@@ -1053,7 +1067,7 @@ static bool gate_crossed(const Checkpoint *gate, Vector2 prevPosM, Vector2 currP
 {
     if (gate == NULL) return false;
     return gate_crossed_generic(gate->centerM, gate->forwardUnit, gate->halfWidthM, prevPosM,
-                                currPosM);
+                                currPosM, NULL);
 }
 
 TrackCheckpointEvent track_update_checkpoints(const TrackDefinition *track,
@@ -1086,7 +1100,7 @@ TrackCheckpointEvent track_update_checkpoints(const TrackDefinition *track,
      * no gate must not be discarded. */
     if (track->hasStartFinish && track->routeClosed) {
         if (gate_crossed_generic(track->startFinish.centerM, track->startFinish.forwardUnit,
-                                 track->startFinish.halfWidthM, prevPosM, currPosM)) {
+                                 track->startFinish.halfWidthM, prevPosM, currPosM, NULL)) {
             progress->lapArmed = true;
         }
     }
@@ -1096,7 +1110,10 @@ TrackCheckpointEvent track_update_checkpoints(const TrackDefinition *track,
     bool expectedCrossed = false;
     if (expected >= 0 && expected < track->checkpointCount) {
         if (progress->lastCrossedIndex != expected || progress->ticksSinceCross > 6) {
-            if (gate_crossed(&track->checkpoints[expected], prevPosM, currPosM)) {
+            if (gate_crossed_generic(track->checkpoints[expected].centerM,
+                                     track->checkpoints[expected].forwardUnit,
+                                     track->checkpoints[expected].halfWidthM, prevPosM,
+                                     currPosM, &event.crossingFraction)) {
                 expectedCrossed = true;
                 event.crossed = true;
                 event.index = expected;
@@ -1121,6 +1138,7 @@ TrackCheckpointEvent track_update_checkpoints(const TrackDefinition *track,
         if (event.index >= 0 && event.index < track->checkpointCount &&
             track->checkpoints[event.index].required) {
             progress->lapInvalid = true;
+            progress->lastLapInvalidReason = 1; /* skipped required gate (#50) */
         }
         return event;
     }
@@ -1196,7 +1214,7 @@ TrackSectorEvent track_update_sectors(const TrackDefinition *track, RacerProgres
     if (expected < 0 || expected >= track->sectorMarkerCount) return event;
     const SectorMarker *marker = &track->sectorMarkers[expected];
     if (gate_crossed_generic(marker->centerM, marker->forwardUnit, marker->halfWidthM, prevPosM,
-                             currPosM)) {
+                             currPosM, &event.crossingFraction)) {
         event.crossed = true;
         event.index = expected;
         event.sectorTimeS = progress->sectorTimerS;

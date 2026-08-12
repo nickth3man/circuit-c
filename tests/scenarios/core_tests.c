@@ -1874,7 +1874,8 @@ static void scenario_player_profile(void)
         p.reducedFlashes = true;
         check(player_profile_rebind(&p, "throttle", "KEY_W"), "bind throttle");
         check(player_profile_rebind(&p, "brake", "KEY_S"), "bind brake");
-        check(player_profile_record_lap(&p, "chicane", "rwd_grip", 42.5f), "record a best lap");
+        check(player_profile_record_lap(&p, "chicane", "rwd_grip", "v1:abc", 42.5f),
+              "record a best lap");
 
         char buf[PLAYER_PROFILE_JSON_CAP];
         const int len = player_profile_serialize(&p, buf, sizeof(buf));
@@ -1891,8 +1892,8 @@ static void scenario_player_profile(void)
         check(strcmp(player_profile_bound_key(&q, "throttle"), "KEY_W") == 0 &&
                   strcmp(player_profile_bound_key(&q, "brake"), "KEY_S") == 0,
               "bindings round-trip");
-        check_near((double)player_profile_best_lap(&q, "chicane", "rwd_grip"), 42.5, 1e-4,
-                   "record round-trips");
+        check_near((double)player_profile_best_lap(&q, "chicane", "rwd_grip", "v1:abc"), 42.5,
+                   1e-4, "record round-trips");
     }
 
     /* ---- 3. Old-version text (no version key) loads with defaults for new fields. ---- */
@@ -1937,16 +1938,22 @@ static void scenario_player_profile(void)
     {
         PlayerProfile p;
         player_profile_load_memory(&p);
-        check(player_profile_record_lap(&p, "chicane", "rwd_grip", 45.0f), "first record");
-        check(!player_profile_record_lap(&p, "chicane", "rwd_grip", 50.0f),
+        check(player_profile_record_lap(&p, "chicane", "rwd_grip", "v1:abc", 45.0f),
+              "first record");
+        check(!player_profile_record_lap(&p, "chicane", "rwd_grip", "v1:abc", 50.0f),
               "a slower lap does not replace the best");
-        check(player_profile_record_lap(&p, "chicane", "rwd_grip", 44.0f), "a faster lap does");
-        check_near((double)player_profile_best_lap(&p, "chicane", "rwd_grip"), 44.0, 1e-4,
-                   "best lap is the fastest recorded");
-        check(player_profile_best_lap(&p, "chicane", "missing_car") == 0.0f,
+        check(player_profile_record_lap(&p, "chicane", "rwd_grip", "v1:abc", 44.0f),
+              "a faster lap does");
+        check_near((double)player_profile_best_lap(&p, "chicane", "rwd_grip", "v1:abc"), 44.0,
+                   1e-4, "best lap is the fastest recorded");
+        check(player_profile_best_lap(&p, "chicane", "missing_car", "v1:abc") == 0.0f,
               "unknown car id queries return 0 without crashing");
-        check(player_profile_best_lap(&p, "missing_track", "rwd_grip") == 0.0f,
+        check(player_profile_best_lap(&p, "missing_track", "rwd_grip", "v1:abc") == 0.0f,
               "unknown track id queries return 0 without crashing");
+        check(player_profile_record_lap(&p, "chicane", "rwd_grip", "v1:changed", 30.0f),
+              "a different compatibility key records separately");
+        check_near((double)player_profile_best_lap(&p, "chicane", "rwd_grip", "v1:abc"), 44.0,
+                   1e-4, "the original key's record is untouched by the new key");
     }
 }
 

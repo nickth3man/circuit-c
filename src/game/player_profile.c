@@ -73,9 +73,10 @@ int player_profile_serialize(const PlayerProfile *profile, char *out, size_t cap
     EMIT("\"records\":[");
     for (int i = 0; i < profile->recordCount; i++) {
         if (i > 0) EMIT(",");
-        EMIT("{\"trackId\":\"%s\",\"carId\":\"%s\",\"bestLapTimeS\":%.6f}",
+        EMIT("{\"trackId\":\"%s\",\"carId\":\"%s\",\"compatibilityKey\":\"%s\","
+             "\"bestLapTimeS\":%.6f}",
              profile->records[i].trackId, profile->records[i].carId,
-             (double)profile->records[i].bestLapTimeS);
+             profile->records[i].compatibilityKey, (double)profile->records[i].bestLapTimeS);
     }
     EMIT("]}");
 #undef EMIT
@@ -205,6 +206,13 @@ bool player_profile_deserialize(PlayerProfile *profile, const char *text, char *
                 json_document_free(doc);
                 return false;
             }
+            if (!copy_field(profile->records[i].compatibilityKey,
+                            sizeof(profile->records[i].compatibilityKey),
+                            json_object_get(entry, "compatibilityKey"),
+                            "records[].compatibilityKey", error, errorCap)) {
+                json_document_free(doc);
+                return false;
+            }
             const JsonValue *timeVal = json_object_get(entry, "bestLapTimeS");
             if (timeVal != NULL && json_is_number(timeVal))
                 profile->records[i].bestLapTimeS = (float)json_as_number(timeVal);
@@ -328,13 +336,15 @@ const char *player_profile_bound_key(const PlayerProfile *profile, const char *a
 }
 
 bool player_profile_record_lap(PlayerProfile *profile, const char *trackId, const char *carId,
-                               float bestLapTimeS)
+                               const char *compatibilityKey, float bestLapTimeS)
 {
-    if (profile == NULL || trackId == NULL || carId == NULL || !(bestLapTimeS > 0.0f))
+    if (profile == NULL || trackId == NULL || carId == NULL || compatibilityKey == NULL ||
+        !(bestLapTimeS > 0.0f))
         return false;
     for (int i = 0; i < profile->recordCount; i++) {
         if (strcmp(profile->records[i].trackId, trackId) == 0 &&
-            strcmp(profile->records[i].carId, carId) == 0) {
+            strcmp(profile->records[i].carId, carId) == 0 &&
+            strcmp(profile->records[i].compatibilityKey, compatibilityKey) == 0) {
             if (bestLapTimeS < profile->records[i].bestLapTimeS) {
                 profile->records[i].bestLapTimeS = bestLapTimeS;
                 return true;
@@ -347,18 +357,23 @@ bool player_profile_record_lap(PlayerProfile *profile, const char *trackId, cons
              sizeof(profile->records[profile->recordCount].trackId), "%s", trackId);
     snprintf(profile->records[profile->recordCount].carId,
              sizeof(profile->records[profile->recordCount].carId), "%s", carId);
+    snprintf(profile->records[profile->recordCount].compatibilityKey,
+             sizeof(profile->records[profile->recordCount].compatibilityKey), "%s",
+             compatibilityKey);
     profile->records[profile->recordCount].bestLapTimeS = bestLapTimeS;
     profile->recordCount++;
     return true;
 }
 
 float player_profile_best_lap(const PlayerProfile *profile, const char *trackId,
-                              const char *carId)
+                              const char *carId, const char *compatibilityKey)
 {
-    if (profile == NULL || trackId == NULL || carId == NULL) return 0.0f;
+    if (profile == NULL || trackId == NULL || carId == NULL || compatibilityKey == NULL)
+        return 0.0f;
     for (int i = 0; i < profile->recordCount; i++) {
         if (strcmp(profile->records[i].trackId, trackId) == 0 &&
-            strcmp(profile->records[i].carId, carId) == 0)
+            strcmp(profile->records[i].carId, carId) == 0 &&
+            strcmp(profile->records[i].compatibilityKey, compatibilityKey) == 0)
             return profile->records[i].bestLapTimeS;
     }
     return 0.0f;

@@ -186,6 +186,13 @@ static uint32_t hash_entrant(uint32_t h, const RaceEntrant *entrant)
     h = hash_u32(h, p->lapArmed ? 1u : 0u);
     h = hash_f32(h, p->lapTimerS);
     h = hash_f32(h, p->lastLapTimeS);
+    h = hash_f32(h, p->bestLapTimeS);
+    h = hash_f32(h, p->theoreticalBestLapS);
+    for (int i = 0; i < TRACK_MAX_SECTOR_MARKERS; i++) {
+        h = hash_f32(h, p->sectorTimesS[i]);
+        h = hash_f32(h, p->bestSectorTimesS[i]);
+    }
+    h = hash_u32(h, (uint32_t)p->lastLapInvalidReason);
 
     /* Route localization (issue #38). The cached location is hashed because it is next tick's
      * continuity hint: rebuilding it with a global scan can legitimately choose a different
@@ -1215,15 +1222,49 @@ static void stage_progress(Game *game, const TickContext *ctx, float dt)
         if (ev.crossed) {
             game->pendingTelemetryCheckpointEvent = ev;
             if (ev.lapCompleted && game->session.roster.count > 0) {
+                /* Authoritative lap timing (issue #50): the lap time is the whole-tick
+                 * accumulation before this tick plus the interpolated fraction of the
+                 * crossing tick — deterministic and render-FPS independent. Only VALID laps
+                 * reach lapCompleted (the track code guards lapInvalid), so a valid lap may
+                 * update the best; invalid laps keep their reason. */
+                const float precise = ev.lapTimeS + ev.crossingFraction * dt;
+                game->progress.lastLapTimeS = precise;
+                game->progress.lastLapInvalidReason = 0;
+                if (game->progress.bestLapTimeS == 0.0f ||
+                    precise < game->progress.bestLapTimeS) {
+                    game->progress.bestLapTimeS = precise;
+                    for (int s = 0; s < TRACK_MAX_SECTOR_MARKERS; s++) {
+                        game->progress.bestSectorTimesS[s] = game->progress.sectorTimesS[s];
+                    }
+                }
+                float theoreticalBestS = 0.0f;
+                for (int s = 0; s < TRACK_MAX_SECTOR_MARKERS; s++) {
+                    if (game->progress.bestSectorTimesS[s] > 0.0f)
+                        theoreticalBestS += game->progress.bestSectorTimesS[s];
+                }
+                game->progress.theoreticalBestLapS = theoreticalBestS;
                 race_session_log_event(&game->session, RACE_EVENT_LAP_COMPLETED,
                                        game->session.roster.entrants[0].id,
                                        (int32_t)game->progress.lap);
             }
         }
         const TrackSectorEvent sev = pev.sector;
-        if (sev.crossed && game->session.roster.count > 0) {
-            race_session_log_event(&game->session, RACE_EVENT_SECTOR_COMPLETED,
-                                   game->session.roster.entrants[0].id, sev.index);
+        if (sev.crossed) {
+            /* Store this lap's split with the same sub-tick interpolation (#50). */
+            if (sev.index >= 0 && sev.index < TRACK_MAX_SECTOR_MARKERS) {
+                game->progress.sectorTimesS[sev.index] =
+                    sev.sectorTimeS + sev.crossingFraction * dt;
+            }
+            if (game->session.roster.count > 0) {
+                race_session_log_event(&game->session, RACE_EVENT_SECTOR_COMPLETED,
+                                       game->session.roster.entrants[0].id, sev.index);
+            }
+        }
+        /* A latched wrong-way condition invalidates the current lap (#50): the lap cannot
+         * count toward bests while the car is running against the route. */
+        if (pev.wrongWay && !game->progress.lapInvalid) {
+            game->progress.lapInvalid = true;
+            game->progress.lastLapInvalidReason = 2;
         }
         game->progress.lapTimerS += dt;
         game->progress.sectorTimerS += dt;
@@ -1315,14 +1356,34 @@ static void simulate_extra_entrant(Game *game, RaceEntrant *entrant, const TickC
         const TrackCheckpointEvent ev = pev.checkpoint;
         if (ev.crossed) {
             if (ev.lapCompleted) {
+                /* Same authoritative timing as the compat entrant (issue #50). */
+                const float precise = ev.lapTimeS + ev.crossingFraction * dt;
+                entrant->progress.lastLapTimeS = precise;
+                entrant->progress.lastLapInvalidReason = 0;
+                if (entrant->progress.bestLapTimeS == 0.0f ||
+                    precise < entrant->progress.bestLapTimeS) {
+                    entrant->progress.bestLapTimeS = precise;
+                    for (int s = 0; s < TRACK_MAX_SECTOR_MARKERS; s++) {
+                        entrant->progress.bestSectorTimesS[s] =
+                            entrant->progress.sectorTimesS[s];
+                    }
+                }
                 race_session_log_event(&game->session, RACE_EVENT_LAP_COMPLETED, entrant->id,
                                        (int32_t)entrant->progress.lap);
             }
         }
         const TrackSectorEvent sev = pev.sector;
         if (sev.crossed) {
+            if (sev.index >= 0 && sev.index < TRACK_MAX_SECTOR_MARKERS) {
+                entrant->progress.sectorTimesS[sev.index] =
+                    sev.sectorTimeS + sev.crossingFraction * dt;
+            }
             race_session_log_event(&game->session, RACE_EVENT_SECTOR_COMPLETED, entrant->id,
                                    sev.index);
+        }
+        if (pev.wrongWay && !entrant->progress.lapInvalid) {
+            entrant->progress.lapInvalid = true;
+            entrant->progress.lastLapInvalidReason = 2;
         }
         entrant->progress.lapTimerS += dt;
         entrant->progress.sectorTimerS += dt;

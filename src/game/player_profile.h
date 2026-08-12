@@ -20,12 +20,13 @@
 #include "content/vehicle_manifest.h" /* VEHICLE_CONTENT_ID_CAPACITY */
 #include "world/track.h"              /* TRACK_ID_CHARS */
 
-#define PLAYER_PROFILE_VERSION 1u
+#define PLAYER_PROFILE_VERSION 2u
 #define PLAYER_PROFILE_ACTION_CHARS 32
 #define PLAYER_PROFILE_KEY_CHARS 16
+#define PLAYER_PROFILE_RECORD_KEY_CHARS 64
 #define PLAYER_PROFILE_MAX_BINDINGS 24
 #define PLAYER_PROFILE_MAX_RECORDS 16
-#define PLAYER_PROFILE_JSON_CAP 8192
+#define PLAYER_PROFILE_JSON_CAP 16384
 
 typedef struct {
     uint32_t version;
@@ -50,10 +51,13 @@ typedef struct {
         char key[PLAYER_PROFILE_KEY_CHARS];
     } bindings[PLAYER_PROFILE_MAX_BINDINGS];
     int bindingCount;
-    /* Best laps keyed by track + car content ids. */
+    /* Best laps keyed by track + car content ids and a compatibility key (issue #50): the
+     * key encodes the track geometry hash + car content hash + rules/assists policy, so a
+     * record never compares across materially different physics. */
     struct {
         char trackId[TRACK_ID_CHARS];
         char carId[VEHICLE_CONTENT_ID_CAPACITY];
+        char compatibilityKey[PLAYER_PROFILE_RECORD_KEY_CHARS];
         float bestLapTimeS;
     } records[PLAYER_PROFILE_MAX_RECORDS];
     int recordCount;
@@ -93,14 +97,18 @@ bool player_profile_rebind(PlayerProfile *profile, const char *action, const cha
 /* The key currently bound to `action`, or NULL. */
 const char *player_profile_bound_key(const PlayerProfile *profile, const char *action);
 
-/* Record a best lap for a track/car pair. Returns true when the record was stored (new or
- * improved); the existing record wins on a slower time. Unknown content ids are still stored:
- * they are stable identifiers, and the game decides what to do with a missing one. */
+/* Record a best lap for a track/car pair under a compatibility key (issue #50: track
+ * geometry hash + car content hash + rules/assists digest). Returns true when the record was
+ * stored (new or improved); the existing record wins on a slower time, and a record with a
+ * DIFFERENT key is never replaced or compared (the caller decides what to do with a new key —
+ * the old record simply stays). Unknown content ids are still stored: they are stable
+ * identifiers, and the game decides what to do with a missing one. */
 bool player_profile_record_lap(PlayerProfile *profile, const char *trackId, const char *carId,
-                               float bestLapTimeS);
+                               const char *compatibilityKey, float bestLapTimeS);
 
-/* The stored best lap for a track/car pair, or 0.0 when none exists. */
+/* The stored best lap for a track/car pair under exactly this compatibility key, or 0.0 when
+ * none exists. */
 float player_profile_best_lap(const PlayerProfile *profile, const char *trackId,
-                              const char *carId);
+                              const char *carId, const char *compatibilityKey);
 
 #endif /* CIRCUIT_PLAYER_PROFILE_H */

@@ -107,7 +107,9 @@ typedef struct {
     int index;         /* which gate; -1 when nothing was crossed */
     bool outOfOrder;   /* it was not the gate the car was supposed to take next */
     bool lapCompleted; /* the crossing closed a lap */
-    float lapTimeS;    /* the completed lap's time; meaningful only when lapCompleted */
+    float
+        lapTimeS; /* the completed lap's time (whole-tick); meaningful only when lapCompleted */
+    float crossingFraction; /* [0,1]: where along prev->curr the gate line was crossed (#50) */
 } TrackCheckpointEvent;
 
 /* Sector crossing event, independent of lap validation. */
@@ -115,6 +117,8 @@ typedef struct {
     bool crossed;
     int index;         /* which sector marker; -1 when none */
     float sectorTimeS; /* time since last sector boundary */
+    float
+        crossingFraction; /* [0,1]: where along prev->curr the marker line was crossed (#50) */
 } TrackSectorEvent;
 
 /* Everything one entrant's progress stage produced this tick. See track_update_progress(). */
@@ -247,16 +251,21 @@ typedef struct {
  * from gate 0" state, so a caller that calloc's one does not have to initialise it.
  */
 typedef struct {
-    int nextCheckpoint;     /* index of the next gate the car must cross */
-    int lap;                /* completed laps */
-    int lapStartCheckpoint; /* gate whose crossing closes one lap for this run */
-    float lapTimerS;        /* seconds elapsed since the last checkpoint/lap */
-    float lastLapTimeS;     /* time of the most recently completed lap */
+    int nextCheckpoint;        /* index of the next gate the car must cross */
+    int lap;                   /* completed laps */
+    int lapStartCheckpoint;    /* gate whose crossing closes one lap for this run */
+    float lapTimerS;           /* seconds elapsed since the last checkpoint/lap */
+    float lastLapTimeS;        /* time of the most recently completed lap (sub-tick precise) */
+    float bestLapTimeS;        /* best VALID lap; 0 = none recorded yet (#50) */
+    float theoreticalBestLapS; /* sum of the best recorded sector splits (#50) */
     /* Sector timing: independent of route validation. */
     int nextSector;        /* index of the next sector marker */
     float sectorTimerS;    /* time since last sector boundary */
     float lastSectorTimeS; /* time of the most recently completed sector */
-    bool lapInvalid;       /* true if a required checkpoint was skipped (outOfOrder) */
+    float sectorTimesS[TRACK_MAX_SECTOR_MARKERS];     /* the current lap's splits (#50) */
+    float bestSectorTimesS[TRACK_MAX_SECTOR_MARKERS]; /* best-ever splits per sector (#50) */
+    bool lapInvalid;          /* true if a required checkpoint was skipped (outOfOrder) */
+    int lastLapInvalidReason; /* 0 valid; 1 skipped required gate; 2 wrong way (#50) */
     bool
         lapArmed; /* SF latch: set when the start/finish line is crossed, cleared when a lap closes */
     bool routeFinished;   /* open point-to-point: true once final checkpoint crossed */
