@@ -420,8 +420,10 @@ Start #54 after both the grid/start and basic live-AI requirements are complete.
   - race_session_live_order() (authoritative), finishing window + DNF, fastest lap, enriched
     results. Verified: 172 scenarios.
 
-- [ ] [#55 — Implement track limits, cuts, wrong-way, contact, and penalty rules](https://github.com/nickth3man/circuit-c/issues/55)
+- [x] [#55 — Implement track limits, cuts, wrong-way, contact, and penalty rules](https://github.com/nickth3man/circuit-c/issues/55)
   - Depends on: #28, #38, #54
+  - RacePenalty model (rule/consequence/evidence/lifecycle), stage_penalties (track-limits +
+    wrong-way, default-off), penalty API. Verified: 173 scenarios.
 
 - [ ] [#56 — Complete race HUD, classified results, records, retry, and next-session flow](https://github.com/nickth3man/circuit-c/issues/56)
   - Depends on: #47, #50, #54, #55
