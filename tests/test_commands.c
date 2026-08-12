@@ -33,6 +33,7 @@
 #include "content/track_manifest.h"
 #include "content/vehicle_manifest.h"
 #include "game/car_roster.h"
+#include "game/race_presentation.h"
 #include "render/car_visual.h"
 #include "render/car_visual_raster.h"
 #include "core/config.h"
@@ -242,6 +243,78 @@ int test_track_info(const char *path)
     printf("  geometry hash %08x\n", track_geometry_hash(&track));
     printf("  manifest hash %08x\n", manifestHash);
     track_free(&track);
+    return 0;
+}
+
+/*
+ * The headless acceptance demo (issue #60): one reproducible, player-visible session that
+ * exercises configure -> grid/countdown -> multi-AI race with rules -> finish/classify ->
+ * retry, exactly as a player would experience it. Prints a deterministic digest line
+ * (DEMO-RACE ok ...) so CI can assert the whole loop ran, and exits nonzero on any failure.
+ */
+int test_demo_race(void)
+{
+    SessionConfig cfg;
+    session_config_set_default(&cfg);
+    cfg.mode = RACE_MODE_RACE;
+    cfg.aiCount = 3;
+    cfg.targetLaps = 2;
+    cfg.countdownS = 3.0f;
+    cfg.damageMode = DAMAGE_MECHANICAL;
+    cfg.stuckRecoveryEnabled = true;
+
+    Game *game = alloc_game();
+    char why[256] = "";
+    if (!game_configure_session(game, &cfg, why, sizeof(why))) {
+        printf("DEMO-RACE FAIL configure: %s\n", why);
+        free(game);
+        return 1;
+    }
+    if (game->session.phase != RACE_PHASE_COUNTDOWN) {
+        printf("DEMO-RACE FAIL phase after configure: %d\n", (int)game->session.phase);
+        free(game);
+        return 1;
+    }
+    /* The player's car is driven by the AI in the demo (the scripted walkthrough drives it
+     * interactively; the headless run needs a driver). */
+    game->controller.kind = CONTROLLER_KIND_AI;
+
+    int ticks = 0;
+    while (!race_session_is_over(&game->session) && ticks < 60000) {
+        game_fixed_update(game, FIXED_DT_S);
+        ticks++;
+    }
+    if (!race_session_is_over(&game->session)) {
+        printf("DEMO-RACE FAIL did not classify in %d ticks\n", ticks);
+        free(game);
+        return 1;
+    }
+    if (!game->session.results.valid || game->session.results.count != 4) {
+        printf("DEMO-RACE FAIL results invalid (count %d)\n", game->session.results.count);
+        free(game);
+        return 1;
+    }
+    const RaceResultRow *winner = &game->session.results.rows[0];
+    printf("DEMO-RACE ok laps %d entrants %d winner id %u time %.3f fastest %.3f checksum "
+           "%08x ticks %d\n",
+           game->session.results.rows[0].lapsCompleted, game->session.results.count,
+           winner->entrantId, (double)winner->finishTimeS,
+           (double)game->session.results.fastestLapTimeS, game_state_checksum(game), ticks);
+
+    /* Retry the same session and confirm a fresh grid + reset tick (issue #56 flow). */
+    if (!race_session_retry(&game->session, &game->trackDef)) {
+        printf("DEMO-RACE FAIL retry\n");
+        free(game);
+        return 1;
+    }
+    if (game->session.tick != 0 || game->session.classifiedCount != 0) {
+        printf("DEMO-RACE FAIL retry did not reset (tick %llu classified %d)\n",
+               (unsigned long long)game->session.tick, game->session.classifiedCount);
+        free(game);
+        return 1;
+    }
+    printf("DEMO-RACE retry ok\n");
+    free(game);
     return 0;
 }
 

@@ -280,8 +280,8 @@ REGRESSION_SCENARIOS := skidpad step-steer transition lift-off \
         benchmark ci compile-commands format format-check format-py lint-py lint analyze fuzz \
         validate-hotreload compare-rgba measure-rotation record tidy tidy-changed tidy-run \
         clean clean-telemetry clean-artifacts dirs windows-only cards inspect visual-diagnose \
-        benchmark-multi validate-tracks track-info package package-smoke print-source-groups \
-        print-source-group
+        benchmark-multi validate-tracks track-info package package-smoke acceptance \
+        release-evidence print-source-groups print-source-group
 
 all: dev
 
@@ -410,6 +410,23 @@ track-info: tests
 # content, licenses, hashes, and launch instructions. Run the packaged exe from ANY directory.
 package: release
 	@$(PYTHON) tools/package/make_bundle.py
+
+# Headless acceptance demo (issue #60): one full configured AI race (grid/countdown/race/
+# classify/retry) with a deterministic digest line; exits nonzero on any failure.
+acceptance: tests
+	./$(EXE_TESTS) --demo-race
+
+# Release evidence archive (issue #60): regression report, acceptance digest, content hashes,
+# and package manifest under artifacts/release-evidence/ for the release candidate.
+release-evidence: verify acceptance package
+	@mkdir -p $(ARTIFACTS)/release-evidence
+	cp -f $(ARTIFACTS)/regression.md $(ARTIFACTS)/release-evidence/regression.md
+	./$(EXE_TESTS) --validate-tracks > $(ARTIFACTS)/release-evidence/tracks.txt
+	./$(EXE_TESTS) --demo-race > $(ARTIFACTS)/release-evidence/acceptance.txt
+	@$(PYTHON) -c "import json,hashlib; d=json.load(open('build/package/$(BUNDLE_NAME)/MANIFEST.json')); print('package files:',len(d['files']))" \
+	    > $(ARTIFACTS)/release-evidence/package.txt
+	cp -f build/package/$(BUNDLE_NAME)/MANIFEST.json $(ARTIFACTS)/release-evidence/package-manifest.json
+	@echo "release evidence in $(ARTIFACTS)/release-evidence/"
 
 # Smoke the packaged bundle from an unrelated working directory (issue #46 acceptance):
 # the release exe must find its content next to itself, not in the caller's CWD.

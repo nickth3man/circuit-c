@@ -38,6 +38,8 @@ static void print_usage(const char *argv0)
            argv0);
     printf("       %s --track-info PATH        print one track's canonical hash and summary\n",
            argv0);
+    printf("       %s --demo-race              headless acceptance demo: one full AI race\n",
+           argv0);
     printf("       %s --verify-failure-bundle [DIR]  create, inspect, and clean a fixture\n",
            argv0);
     printf("       %s --generate-corpus [DIR]   export the vehicle corpus as tuning profiles\n",
@@ -153,6 +155,9 @@ int main(int argc, char **argv)
         if (strcmp(argv[i], "--track-info") == 0) {
             return test_track_info((i + 1 < argc && argv[i + 1][0] != '-') ? argv[i + 1]
                                                                            : NULL);
+        }
+        if (strcmp(argv[i], "--demo-race") == 0) {
+            return test_demo_race();
         }
         if (strcmp(argv[i], "--generate-corpus") == 0) {
             return test_generate_corpus((i + 1 < argc && argv[i + 1][0] != '-') ? argv[i + 1]
