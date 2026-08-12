@@ -41,7 +41,11 @@ typedef struct {
     int absLevel; /* player assists: 0..3 */
     int tcsLevel;
     RaceEnvironment environment;
-    uint64_t seed; /* deterministic session seed */
+    /* Pit cycle (issue #57): pitLaneEnabled requires the track to have pit geometry, or the
+     * config is rejected before allocation. */
+    bool pitLaneEnabled;
+    float pitServiceTimeS; /* seconds of stopped service per pit stop (0 = rules default) */
+    uint64_t seed;         /* deterministic session seed */
 } SessionConfig;
 
 /* Defaults: chicane + the reference rwd_grip, solo time trial, 3 laps, dry weather, ABS 2 /

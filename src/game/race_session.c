@@ -25,6 +25,10 @@ void race_rules_set_default(RaceRules *rules)
     rules->falseStartPenaltyS = FALSE_START_PENALTY_S;
     rules->falseStartSpeedMps = FALSE_START_SPEED_MPS;
     rules->finishingWindowS = RACE_FINISHING_WINDOW_S;
+    rules->pitLaneEnabled = false;
+    rules->pitServiceTimeS = PIT_SERVICE_TIME_S;
+    rules->pitSpeedLimitMps = PIT_SPEED_LIMIT_MPS;
+    rules->pitMandatory = false;
 }
 
 void race_environment_set_default(RaceEnvironment *env)

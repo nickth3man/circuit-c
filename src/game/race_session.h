@@ -96,6 +96,12 @@ typedef struct {
     float
         finishingWindowS; /* race: seconds after the first finisher before DNF'ing the rest (#54) */
     bool trackLimitsEnabled; /* when true, off-track entries produce steward penalties (#55) */
+    /* Pit cycle (issue #57): when false, pit geometry is ignored entirely and no pit rule can
+     * fire. When true, the session requires the track to have pit geometry. */
+    bool pitLaneEnabled;
+    float pitServiceTimeS;  /* seconds of stopped service per pit stop (#57) */
+    float pitSpeedLimitMps; /* pit-lane speed limit; exceeded = PIT_SPEED penalty (#55) */
+    bool pitMandatory;      /* require at least one pit stop per session */
 } RaceRules;
 
 typedef enum {

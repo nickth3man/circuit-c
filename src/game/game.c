@@ -93,6 +93,8 @@ static uint32_t hash_entrant(uint32_t h, const RaceEntrant *entrant)
     h = hash_u32(h, entrant->result.stalledTicks);
     h = hash_u32(h, entrant->result.falseStarted ? 1u : 0u);
     h = hash_u32(h, entrant->result.offTrackTicks);
+    h = hash_u32(h, (uint32_t)entrant->result.pit.state);
+    h = hash_f32(h, entrant->result.pit.serviceTimerS);
 
     const VehicleSetup *setup = &entrant->setup;
     h = hash_f32(h, setup->tirePressureFrontKpa);
@@ -567,6 +569,8 @@ GAME_API bool game_configure_session(Game *game, const SessionConfig *cfg, char 
     rules.countdownS = cfg->countdownS;
     rules.damageMode = cfg->damageMode;
     rules.stuckRecoveryEnabled = cfg->stuckRecoveryEnabled;
+    rules.pitLaneEnabled = cfg->pitLaneEnabled;
+    if (cfg->pitServiceTimeS > 0.0f) rules.pitServiceTimeS = cfg->pitServiceTimeS;
     game->session.environment = cfg->environment;
     race_session_start(&game->session, &rules);
     game->state = STATE_PLAYING;
@@ -1729,6 +1733,43 @@ static void stage_penalties(Game *game)
 }
 
 /*
+ * Stage 8a3 — pit cycle (issue #57). Advances each entrant's pit state machine, applies the
+ * speed limiter while in-lane, and penalizes pit speeding through the #55 penalty system.
+ * Default-off (rules.pitLaneEnabled): no trace changes and no pit rule can fire.
+ */
+static void stage_pit(Game *game)
+{
+    if (game->session.phase != RACE_PHASE_RUNNING) return;
+    const RaceRules *rules = &game->session.rules;
+    if (!rules->pitLaneEnabled) return;
+    const TrackDefinition *track = &game->trackDef;
+    for (int i = 0; i < game->session.roster.count; i++) {
+        RaceEntrant *entrant = &game->session.roster.entrants[i];
+        if (entrant->result.finished) continue;
+        VehicleInstance *inst = &entrant->instance;
+        const bool inLane =
+            pit_state_update(&entrant->result.pit, track, inst->vehicle.positionM,
+                             inst->derived.speedMps, inst, rules->pitServiceTimeS, FIXED_DT_S);
+        /* Speed limiter: cap the authoritative velocity vector while in the lane (derived
+         * speed is recomputed from it next tick, so scaling only the derived field would be a
+         * no-op). Pit speeding is penalized through the #55 system. */
+        if (inLane) {
+            const float limit = rules->pitSpeedLimitMps;
+            const float speed = inst->derived.speedMps;
+            if (speed > limit) {
+                race_session_add_penalty(&game->session, PENALTY_RULE_PIT_SPEED,
+                                         PENALTY_CONSEQUENCE_TIME, entrant->id,
+                                         PIT_SPEED_PENALTY_S, (int32_t)(speed * 10.0f));
+                const float scale = limit / speed;
+                inst->vehicle.velocityLongitudinalMps *= scale;
+                inst->vehicle.velocityLateralMps *= scale;
+                inst->vehicle.yawRateRadS *= scale;
+            }
+        }
+    }
+}
+
+/*
  * Stage 8b — deterministic stuck recovery (issue #28).
  * Reads: each entrant's speed/progress and the frozen rules. Writes: the entrant's pose,
  * velocity, penalty, stall counter, and a session event.
@@ -1923,6 +1964,7 @@ GAME_API void game_fixed_update(Game *game, float dt)
         stage_rules(game);
         stage_false_start(game);
         stage_penalties(game);
+        stage_pit(game);
         stage_stuck_recovery(game);
         stage_presentation(game, dt);
     }

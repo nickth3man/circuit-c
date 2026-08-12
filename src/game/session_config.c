@@ -57,7 +57,9 @@ void session_config_set_default(SessionConfig *cfg)
     cfg->absLevel = 2;
     cfg->tcsLevel = 1;
     race_environment_set_default(&cfg->environment);
-    cfg->seed = 0xC1C0C1C0ULL; /* fixed default seed for reproducible sessions */
+    cfg->pitLaneEnabled = false;
+    cfg->pitServiceTimeS = 0.0f; /* 0 = rules default */
+    cfg->seed = 0xC1C0C1C0ULL;   /* fixed default seed for reproducible sessions */
 }
 
 bool session_config_validate(const SessionConfig *cfg, char *reason, size_t reasonCap)
@@ -119,6 +121,23 @@ bool session_config_validate(const SessionConfig *cfg, char *reason, size_t reas
         set_reason(reason, reasonCap, "environment temperature is not finite");
         return false;
     }
+    /* Pit rules need a track that authors pit geometry (issue #57). */
+    if (cfg->pitLaneEnabled) {
+        TrackCatalog catalog;
+        memset(&catalog, 0, sizeof(catalog));
+        char err[128] = "";
+        if (!track_catalog_load(NULL, &catalog, err, sizeof(err))) {
+            set_reason(reason, reasonCap, "track catalog unavailable");
+            return false;
+        }
+        const int idx = track_catalog_find(&catalog, cfg->trackId);
+        bool hasPits = (idx >= 0 && track_pit_has_geometry(&catalog.entries[idx].definition));
+        track_catalog_free(&catalog);
+        if (!hasPits) {
+            set_reason(reason, reasonCap, "track has no pit geometry for pit rules");
+            return false;
+        }
+    }
     return true;
 }
 
@@ -133,15 +152,18 @@ bool session_config_serialize(const SessionConfig *cfg, FILE *out)
             "\"trackId\":\"%s\",\"carId\":\"%s\","
             "\"aiCount\":%d,\"aiDifficulty\":%d,\"mode\":%d,\"targetLaps\":%d,"
             "\"countdownS\":%.6f,\"damageMode\":%d,\"stuckRecoveryEnabled\":%s,"
+            "\"pitLaneEnabled\":%s,\"pitServiceTimeS\":%.6f,"
             "\"absLevel\":%d,\"tcsLevel\":%d,\"seed\":%llu,"
             "\"environment\":{\"precipitation\":%.6f,\"ambientTempC\":%.6f,"
             "\"trackTempC\":%.6f,\"timeOfDayHours\":%.6f,\"region\":\"%s\"}}\n",
             cfg->trackId, cfg->carId, cfg->aiCount, cfg->aiDifficulty, (int)cfg->mode,
             cfg->targetLaps, (double)cfg->countdownS, cfg->damageMode,
-            cfg->stuckRecoveryEnabled ? "true" : "false", cfg->absLevel, cfg->tcsLevel,
-            (unsigned long long)cfg->seed, (double)cfg->environment.precipitation,
-            (double)cfg->environment.ambientTempC, (double)cfg->environment.trackTempC,
-            (double)cfg->environment.timeOfDayHours, cfg->environment.region);
+            cfg->stuckRecoveryEnabled ? "true" : "false",
+            cfg->pitLaneEnabled ? "true" : "false", (double)cfg->pitServiceTimeS, cfg->absLevel,
+            cfg->tcsLevel, (unsigned long long)cfg->seed,
+            (double)cfg->environment.precipitation, (double)cfg->environment.ambientTempC,
+            (double)cfg->environment.trackTempC, (double)cfg->environment.timeOfDayHours,
+            cfg->environment.region);
     return true;
 }
 
@@ -233,6 +255,8 @@ bool session_config_deserialize(SessionConfig *cfg, const char *text)
     if (!find_float(text, "countdownS", &parsed.countdownS)) return false;
     if (!find_int(text, "damageMode", &parsed.damageMode)) return false;
     if (!find_bool(text, "stuckRecoveryEnabled", &parsed.stuckRecoveryEnabled)) return false;
+    if (!find_bool(text, "pitLaneEnabled", &parsed.pitLaneEnabled)) return false;
+    if (!find_float(text, "pitServiceTimeS", &parsed.pitServiceTimeS)) return false;
     if (!find_int(text, "absLevel", &parsed.absLevel)) return false;
     if (!find_int(text, "tcsLevel", &parsed.tcsLevel)) return false;
     if (!find_u64(text, "seed", &parsed.seed)) return false;

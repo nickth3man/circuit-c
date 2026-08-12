@@ -35,6 +35,7 @@
 
 #include "game/controller.h"
 #include "game/controller_output.h"
+#include "game/pit_state.h"
 #include "physics/vehicle.h"
 #include "world/track.h"
 
@@ -73,6 +74,7 @@ typedef struct {
     uint32_t stalledTicks;
     bool falseStarted; /* one-shot: a jump start has already been recorded for this entrant */
     uint32_t offTrackTicks; /* consecutive ticks beyond the racing surface (#55) */
+    EntrantPitState pit;    /* pit cycle state machine (#57) */
 } EntrantResult;
 
 /*

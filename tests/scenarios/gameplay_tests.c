@@ -23,6 +23,7 @@
 #include "game/car_roster.h"
 #include "game/car_selection.h"
 #include "game/setup_editor.h"
+#include "game/pit_state.h"
 #include "game/race_presentation.h"
 #include "render/car_visual.h"
 #include "render/car_visual_raster.h"
@@ -1956,6 +1957,111 @@ static void scenario_hud_flow(void)
         check(game->session.roster.count == 1, "retry preserves the roster");
         check(game->progress.lap == 0, "retry resets lap progress");
         (void)ticksBefore;
+        free(game);
+    }
+}
+
+/* Issue #57: pit lane cycle (entry, limiter, box, service, exit). */
+static void scenario_pit_cycle(void)
+{
+    /* ---- 1. Configuration: pit rules require track pit geometry. ---- */
+    {
+        SessionConfig cfg;
+        session_config_set_default(&cfg);
+        cfg.pitLaneEnabled = true;
+        char why[256] = "";
+        /* Chicane has no pit geometry -> rejected with a named reason. */
+        check(!session_config_validate(&cfg, why, sizeof(why)) && strstr(why, "pit"),
+              "pit rules on a pit-less track rejected and named (%s)", why);
+        /* Grandprix authors pit geometry -> accepted. */
+        session_config_set_default(&cfg);
+        snprintf(cfg.trackId, sizeof(cfg.trackId), "%s", "grandprix");
+        cfg.pitLaneEnabled = true;
+        check(session_config_validate(&cfg, why, sizeof(why)),
+              "pit rules on grandprix accepted (%s)", why);
+    }
+
+    /* ---- 2. Pit state machine: entry -> box -> service -> exit. ---- */
+    {
+        TrackDefinition track;
+        memset(&track, 0, sizeof(track));
+        char error[256] = "";
+        check(track_load_by_id("grandprix", &track, NULL, error, sizeof(error)),
+              "grandprix loads (%s)", error);
+        check(track_pit_has_geometry(&track), "grandprix has pit geometry");
+
+        Game *game = alloc_game();
+        game_init(game);
+        VehicleInstance *inst = &game->vehicleInstance;
+        EntrantPitState pit;
+        pit_state_reset(&pit);
+
+        /* Entry zone: near the pit-entry gate. */
+        const Vector2 entry = { 33.06f, 141.89f };
+        const bool inLane =
+            pit_state_update(&pit, &track, entry, 20.0f, inst, PIT_SERVICE_TIME_S, FIXED_DT_S);
+        check(inLane, "pit lane detected at the entry gate");
+        check(pit.state == PIT_STATE_ENTERING, "state entered (state %d)", (int)pit.state);
+
+        /* Stop inside service box 1 at zero speed -> AT_BOX, service timer armed. */
+        const Vector2 box = { 14.57f, 140.07f };
+        (void)pit_state_update(&pit, &track, box, 0.0f, inst, PIT_SERVICE_TIME_S, FIXED_DT_S);
+        check(pit.state == PIT_STATE_AT_BOX, "stopped at the box (state %d)", (int)pit.state);
+
+        /* Damage the car, then request service. */
+        inst->damage = 0.8f;
+        for (int w = 0; w < WHEEL_COUNT; w++) inst->tireState[w].wear = 0.5f;
+        pit.requestTires = true;
+        pit.requestRepair = true;
+
+        /* Wait out the service timer. */
+        int ticks = 0;
+        while (pit.state == PIT_STATE_AT_BOX && ticks < 500) {
+            (void)pit_state_update(&pit, &track, box, 0.0f, inst, PIT_SERVICE_TIME_S,
+                                   FIXED_DT_S);
+            ticks++;
+        }
+        check(pit.served, "service applied after %d ticks", ticks);
+        check(inst->damage == 0.0f, "damage repaired by service (%.2f)", (double)inst->damage);
+        bool wearCleared = true;
+        for (int w = 0; w < WHEEL_COUNT; w++) {
+            if (inst->tireState[w].wear != 0.0f) wearCleared = false;
+        }
+        check(wearCleared, "tires replaced by service");
+
+        /* Exit: leave the lane -> NONE. */
+        const Vector2 out = { 200.0f, 0.0f };
+        (void)pit_state_update(&pit, &track, out, 20.0f, inst, PIT_SERVICE_TIME_S, FIXED_DT_S);
+        check(pit.state == PIT_STATE_NONE, "pit cycle ends after exit (state %d)",
+              (int)pit.state);
+        free(game);
+        track_free(&track);
+    }
+
+    /* ---- 3. End-to-end: pitLaneEnabled session, limiter + PIT_SPEED penalty. ---- */
+    {
+        SessionConfig cfg;
+        session_config_set_default(&cfg);
+        snprintf(cfg.trackId, sizeof(cfg.trackId), "%s", "grandprix");
+        cfg.targetLaps = 10;
+        cfg.pitLaneEnabled = true;
+        Game *game = alloc_game();
+        char why[256] = "";
+        check(game_configure_session(game, &cfg, why, sizeof(why)),
+              "grandprix pit session launches (%s)", why);
+        game->controller.kind = CONTROLLER_KIND_AI;
+
+        /* Teleport into the pit lane at speed; the limiter must cap it and penalize. */
+        game->vehicle.positionM = (Vector2){ 20.0f, 138.0f };
+        game->vehicle.velocityLongitudinalMps = 40.0f;
+        game->renderState.currPositionM = game->vehicle.positionM;
+        game->renderState.prevPositionM = game->vehicle.positionM;
+        for (int t = 0; t < 30; t++) game_fixed_update(game, FIXED_DT_S);
+        check(game->session.penalties.totalAppended > 0u, "pit speeding penalized (%u)",
+              game->session.penalties.totalAppended);
+        check(game->session.roster.entrants[0].result.penaltyTimeS > 0.0f,
+              "pit speeding added time (%.2f)",
+              (double)game->session.roster.entrants[0].result.penaltyTimeS);
         free(game);
     }
 }
@@ -6041,6 +6147,10 @@ static const TestScenario kGameplayScenarios[] = {
     { "hud-flow",
       "issue #56: presentation snapshot (authoritative, immutable), retry resets session state",
       scenario_hud_flow },
+    { "pit-cycle",
+      "issue #57: pit geometry config gate, entry->box->service->exit cycle, limiter + "
+      "PIT_SPEED penalty",
+      scenario_pit_cycle },
     { "collision-world",
       "issue #26 world contract: stable ids, layers, authored objects, multi-proxy order, "
       "penetration recovery, corners, contact feed",

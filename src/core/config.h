@@ -405,6 +405,10 @@
 #define TRACK_LIMITS_WARN_TICKS 60     /* ticks off-track before a warning (1 s at 60 Hz) */
 #define TRACK_LIMITS_PENALTY_TICKS 180 /* ticks before a time penalty (3 s) */
 #define TRACK_LIMITS_PENALTY_S 1.0f    /* seconds added per track-limits penalty */
+/* Pit cycle (issue #57). */
+#define PIT_SERVICE_TIME_S 3.0f   /* s; stopped service duration per pit stop */
+#define PIT_SPEED_LIMIT_MPS 15.0f /* m/s (~54 km/h); pit-lane speed limit */
+#define PIT_SPEED_PENALTY_S 2.0f  /* s; time penalty per pit speeding offence */
 /* Fuel model (issue #24). */
 #define FUEL_DENSITY_KG_PER_L 0.75f     /* kg per litre (gasoline) */
 #define FUEL_STARVATION_RESERVE_KG 0.5f /* kg; drive torque fades linearly below this */

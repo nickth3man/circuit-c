@@ -4,7 +4,7 @@
   "id": "grandprix",
   "displayName": "Grand Prix",
   "description": "A grand-prix style circuit: hairpin, long sweeper, kink, and stadium section.",
-  "contentVersion": "grandprix_v1",
+  "contentVersion": "grandprix_v2",
   "route": {
     "closed": true,
     "nodes": [
@@ -1887,5 +1887,42 @@
       "halfWidth": 12.89,
       "required": true
     }
-  ]
+  ],
+  "pit": {
+    "entry": {
+      "x": 33.06,
+      "y": 141.89,
+      "forwardX": -0.9379,
+      "forwardY": -0.3469,
+      "halfWidth": 5.0
+    },
+    "exit": {
+      "x": 0.29,
+      "y": 128.36,
+      "forwardX": -0.9379,
+      "forwardY": -0.3469,
+      "halfWidth": 5.0
+    },
+    "speedLine": {
+      "x": 29.68,
+      "y": 140.21,
+      "forwardX": -0.9379,
+      "forwardY": -0.3469,
+      "halfWidth": 5.0
+    },
+    "serviceBoxes": [
+      {
+        "minX": 7.9,
+        "maxX": 21.24,
+        "minY": 135.17,
+        "maxY": 144.96
+      },
+      {
+        "minX": 11.37,
+        "maxX": 24.71,
+        "minY": 125.79,
+        "maxY": 135.59
+      }
+    ]
+  }
 }
