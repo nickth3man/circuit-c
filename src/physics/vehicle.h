@@ -161,6 +161,12 @@ typedef struct {
      * exact; 1 accumulates per-wheel wear monotonically from slip energy and surface
      * abrasion, degrading grip continuously to a bounded floor. */
     float tireWearEnabled;
+    /* Dynamic engine model (#23). 0 (default) keeps the kinematic engine (RPM derived from
+     * wheel speed, instantaneous shifts) and the baseline exact; > 0 gives the engine real
+     * rotational inertia, a clutch with slip, and phased shifts with torque interruption. */
+    float engineInertiaKgM2; /* kg*m^2; 0 = kinematic engine (baseline), >0 = dynamic (#23) */
+    float maxClutchTorqueNm; /* N*m; clutch torque capacity while slipping */
+    float shiftDurationS;    /* s; total phased-shift window (cut, swap, engage) */
     float tireLoadRefPerWheelN;
 
     float maxRoadWheelAngleRad;
@@ -221,6 +227,12 @@ typedef struct {
     float frontRoadWheelAngleRad;
     float engineRpm;
     int selectedGear;
+    /* Dynamic-engine/clutch state (#23). Zeroed by default = kinematic engine, which is what
+     * keeps every recorded baseline. `shiftPhase`/`shiftTimerS`/`shiftTargetGear` drive the
+     * phased-shift machine; clutch engagement is derived from them (1 when not shifting). */
+    int shiftPhase;      /* 0 none, 1 cutting (clutch opening), 2 engaging (clutch closing) */
+    float shiftTimerS;   /* seconds into the current phase */
+    int shiftTargetGear; /* gear applied at the cutting->engaging boundary */
     float filteredLongAccelMps2;
     float prevLongAccelMps2;
 

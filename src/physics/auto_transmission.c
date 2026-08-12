@@ -1,4 +1,5 @@
 #include "physics/auto_transmission.h"
+#include "physics/drivetrain.h"
 #include "physics/vehicle.h"
 #include "game/controller_output.h"
 
@@ -14,14 +15,23 @@ void auto_transmission_update(AutoTransmission *at, VehicleState *vs, const Vehi
 
     switch (at->driveState) {
         case AUTO_DRIVE: {
-            /* Auto-shift forward gears */
+            /* Auto-shift forward gears. With the dynamic engine (#23) the change is a
+             * phased shift (clutch cut, gear swap at the midpoint, re-engage); the
+             * kinematic engine keeps the historical instantaneous swap. */
             const float upRpm = spec->engineRedlineRpm * AUTO_SHIFT_UP_FACTOR;
             const float downRpm = spec->engineRedlineRpm * AUTO_SHIFT_DOWN_FACTOR;
 
-            if (vs->engineRpm > upRpm && vs->selectedGear < spec->gearCount)
-                vs->selectedGear++;
-            else if (vs->engineRpm < downRpm && vs->selectedGear > 1)
-                vs->selectedGear--;
+            if (spec->engineInertiaKgM2 > 0.0f) {
+                if (vs->engineRpm > upRpm && vs->selectedGear < spec->gearCount)
+                    (void)drivetrain_request_shift(vs, vs->selectedGear + 1);
+                else if (vs->engineRpm < downRpm && vs->selectedGear > 1)
+                    (void)drivetrain_request_shift(vs, vs->selectedGear - 1);
+            } else {
+                if (vs->engineRpm > upRpm && vs->selectedGear < spec->gearCount)
+                    vs->selectedGear++;
+                else if (vs->engineRpm < downRpm && vs->selectedGear > 1)
+                    vs->selectedGear--;
+            }
 
             /* Brake-to-stop → neutral → reverse */
             if (derived->speedMps < AUTO_STOP_THRESHOLD_MPS && io->brake > 0.0f) {

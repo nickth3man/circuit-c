@@ -1,6 +1,7 @@
 #include "physics/drivetrain.h"
 
 #include <math.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "core/math_utils.h"
@@ -51,6 +52,106 @@ float drivetrain_total_gear_ratio(const VehicleSpec *spec, int selectedGear)
     }
     if (selectedGear < 1 || selectedGear > spec->gearCount) return 0.0f;
     return spec->gearRatios[selectedGear - 1] * spec->finalDriveRatio;
+}
+
+/* ----------------------------------------------------------------------- dynamic engine -- */
+
+float drivetrain_clutch_engagement(const VehicleSpec *spec, const VehicleState *state)
+{
+    if (spec == NULL || state == NULL || state->shiftPhase == 0 ||
+        !(spec->shiftDurationS > 0.0f))
+        return 1.0f;
+    const float half = spec->shiftDurationS * 0.5f;
+    if (half <= 0.0f) return 1.0f;
+    if (state->shiftPhase == 1) { /* cutting: 1 -> 0 */
+        float t = state->shiftTimerS / half;
+        if (t > 1.0f) t = 1.0f;
+        return 1.0f - t;
+    }
+    /* engaging: 0 -> 1 */
+    float t = state->shiftTimerS / half;
+    if (t > 1.0f) t = 1.0f;
+    return t;
+}
+
+bool drivetrain_request_shift(VehicleState *state, int targetGear)
+{
+    if (state == NULL || state->shiftPhase != 0) return false;
+    if (targetGear < -1 || targetGear == 0 || targetGear > 6) return false;
+    state->shiftPhase = 1; /* cutting */
+    state->shiftTimerS = 0.0f;
+    state->shiftTargetGear = targetGear;
+    return true;
+}
+
+void drivetrain_advance_shift(VehicleState *state, const VehicleSpec *spec, float dt)
+{
+    if (state == NULL || spec == NULL || state->shiftPhase == 0) return;
+    state->shiftTimerS += dt;
+    const float half = spec->shiftDurationS * 0.5f;
+    if (state->shiftPhase == 1 && state->shiftTimerS >= half) {
+        /* Apply the gear at the cut->engage boundary: the driveline is decoupled there. */
+        state->selectedGear = state->shiftTargetGear;
+        state->shiftPhase = 2;
+        state->shiftTimerS = 0.0f;
+        return;
+    }
+    if (state->shiftPhase == 2 && state->shiftTimerS >= half) {
+        state->shiftPhase = 0;
+        state->shiftTimerS = 0.0f;
+    }
+}
+
+float drivetrain_update_dynamic_engine(const VehicleSpec *spec, VehicleState *state,
+                                       float engineTorqueNm, float drivenOmegaRadS, float dt)
+{
+    if (spec == NULL || state == NULL || !(spec->engineInertiaKgM2 > 0.0f) || !(dt > 0.0f))
+        return 1.0f;
+
+    const float engagement = drivetrain_clutch_engagement(spec, state);
+    const float engineOmega = state->engineRpm * CIRCUIT_TWO_PI / 60.0f;
+    const float engagedOmega =
+        drivetrain_engine_rpm(spec, state->selectedGear, drivenOmegaRadS) * CIRCUIT_TWO_PI /
+        60.0f;
+    const float omegaDiff = engineOmega - engagedOmega;
+
+    /* Nearly synchronous with a FULLY engaged clutch: lock (kinematic constraint). The
+     * strict engagement threshold matters: once the clutch starts opening for a shift the
+     * engine must decouple and free-rev against the clutch friction, not stay kinematic. */
+    const float lockEps = 3.0f; /* rad/s: ~29 rpm */
+    /* Neutral decouples the driveline: the engine always free-revs there (no clutch, no
+     * lock), which is what makes neutral a legitimate revving state. */
+    const bool inNeutral = (state->selectedGear == 0);
+    if (!inNeutral && engagement > 0.95f && fabsf(omegaDiff) < lockEps) {
+        state->engineRpm = drivetrain_engine_rpm(spec, state->selectedGear, drivenOmegaRadS);
+        return 1.0f; /* locked: full torque transfer */
+    }
+
+    /* Net crankshaft torque: engine output, engine braking (off-throttle pumping loss), and
+     * the clutch's friction torque opposing the speed difference. */
+    const float throttleOff = (state->engineRpm <= spec->engineIdleRpm) ? 0.0f : 1.0f;
+    const float engineBrakeNm = spec->engineBrakingTorqueNm * throttleOff;
+    const float clutchTorqueNm = inNeutral ? 0.0f : spec->maxClutchTorqueNm * engagement;
+    float netNm = engineTorqueNm - engineBrakeNm - signf_nonzero(omegaDiff) * clutchTorqueNm;
+
+    /* Idle assist: never wind below idle under inertia; a stalled engine stays at zero until
+     * torque returns. */
+    float dOmega = netNm / spec->engineInertiaKgM2;
+    float rpm = state->engineRpm + dOmega * dt * 60.0f / CIRCUIT_TWO_PI;
+    if (rpm < spec->engineIdleRpm && netNm >= 0.0f) rpm = spec->engineIdleRpm;
+    if (rpm < 0.0f) rpm = 0.0f;
+    const float limiter = spec->engineRedlineRpm * 1.05f;
+    if (rpm > limiter) rpm = limiter;
+    state->engineRpm = rpm;
+
+    /* Clutch torque-transfer scale while slipping: the driveline can only carry what the
+     * clutch can transmit (and never more than the engine makes). */
+    const float engineTorqueAbs = fabsf(engineTorqueNm);
+    if (engineTorqueAbs <= 1e-6f) return 0.0f;
+    float scale = (spec->maxClutchTorqueNm * engagement) / engineTorqueAbs;
+    if (scale < 0.0f) scale = 0.0f;
+    if (scale > 1.0f) scale = 1.0f;
+    return scale;
 }
 
 float drivetrain_engine_rpm(const VehicleSpec *spec, int selectedGear,

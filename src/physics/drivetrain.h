@@ -18,6 +18,41 @@ typedef struct {
 float drivetrain_engine_torque_at_rpm(const VehicleSpec *spec, float engineRpm);
 float drivetrain_total_gear_ratio(const VehicleSpec *spec, int selectedGear);
 
+/* ----------------------------------------------------------------------- dynamic engine -- */
+/*
+ * Dynamic-engine model (issue #23): clutch engagement derived from the shift machine, the
+ * engine-RPM integrator, and phased-shift bookkeeping. All functions are no-ops on the
+ * kinematic engine (engineInertiaKgM2 == 0) so the baseline is byte-identical.
+ */
+
+/* Clutch engagement in [0,1]: 1 when no shift is active, ramping 1->0 during the cutting
+ * phase and 0->1 during the engaging phase. */
+float drivetrain_clutch_engagement(const VehicleSpec *spec, const VehicleState *state);
+
+/* Begin a shift toward `targetGear` (cuts the clutch; the gear is applied at the phase
+ * boundary). Returns false when a shift is already in progress or the target is out of
+ * range. */
+bool drivetrain_request_shift(VehicleState *state, int targetGear);
+
+/* Advance the shift machine by dt (applies shiftTargetGear at the cut->engage boundary).
+ * No-op when no shift is active. */
+void drivetrain_advance_shift(VehicleState *state, const VehicleSpec *spec, float dt);
+
+/*
+ * Evolve the engine's angular speed from torque and inertia with clutch coupling: when the
+ * engine and the driveline are nearly synchronous (and the clutch is engaged) the engine
+ * locks to the wheel-implied speed; otherwise the clutch slips, transferring up to
+ * maxClutchTorqueNm * engagement, and the engine free-accelerates under net torque. Engine
+ * braking torque (off-throttle pumping loss) is applied from the existing
+ * spec->engineBrakingTorqueNm. Idle assist holds the floor at idle; a hard stall (rpm below
+ * zero under load) clamps at zero.
+ */
+/* Evolve the engine as above. Returns the clutch torque-transfer scale in [0,1] to apply to
+ * the driveline drive torque: 1.0 when locked, otherwise the fraction of engine torque the
+ * clutch can carry (min(1, maxClutch*engagement / engineTorque)). */
+float drivetrain_update_dynamic_engine(const VehicleSpec *spec, VehicleState *state,
+                                       float engineTorqueNm, float drivenOmegaRadS, float dt);
+
 /*
  * Fraction of driveline torque sent to the FRONT axle: 0 for RWD, 1 for FWD, the configured
  * frontTorqueSplit (clamped to [0,1]) for AWD. The rear axle receives the remainder.

@@ -580,9 +580,15 @@ bool physics_state_is_valid(const VehicleSpec *spec, const VehicleState *state,
     if (derived->lowSpeedBlend < 0.0f || derived->lowSpeedBlend > 1.0f) return false;
     if (fabsf(state->frontRoadWheelAngleRad) > spec->maxRoadWheelAngleRad + 1e-5f) return false;
     if (state->selectedGear < -1 || state->selectedGear > spec->gearCount) return false;
-    if (state->engineRpm < spec->engineIdleRpm - 1e-3f ||
-        state->engineRpm > spec->engineRedlineRpm + 1e-3f)
+    /* The dynamic engine (#23) legitimately spans [0 (stall), redline*1.05 (limiter)];
+     * the kinematic engine is always within [idle, redline]. */
+    if (spec->engineInertiaKgM2 > 0.0f) {
+        if (state->engineRpm < -1e-3f || state->engineRpm > spec->engineRedlineRpm * 1.06f)
+            return false;
+    } else if (state->engineRpm < spec->engineIdleRpm - 1e-3f ||
+               state->engineRpm > spec->engineRedlineRpm + 1e-3f) {
         return false;
+    }
     if ((DifferentialMode)(int)spec->differentialMode == DIFF_LOCKED) {
         /* Locked means locked on each DRIVEN axle. An undriven axle's wheels legitimately
          * rotate at different speeds (turns, asymmetric surfaces), so requiring lockstep
@@ -779,11 +785,24 @@ static void stage_powertrain(PhysicsStep *step)
 
     const float drivenOmegaRadS =
         drivetrain_driven_mean_omega(wheelOmegaRadS, step->frontShare);
-    state->engineRpm = drivetrain_engine_rpm(spec, state->selectedGear, drivenOmegaRadS);
 
     step->torques = drivetrain_calculate_torques(spec, state->selectedGear, wheelOmegaRadS,
                                                  wheelTireReactionNm, input->throttle,
                                                  input->brake, input->handbrake);
+    if (spec->engineInertiaKgM2 > 0.0f) {
+        /* Dynamic engine (issue #23): evolve RPM from torque/inertia with clutch coupling,
+         * then transfer torque through the clutch (full when locked, capacity-limited while
+         * slipping). The kinematic path below keeps the baseline byte-identical when the
+         * inertia is 0. */
+        drivetrain_advance_shift(state, spec, step->dt);
+        const float clutchScale = drivetrain_update_dynamic_engine(
+            spec, state, step->torques.engineTorqueNm, drivenOmegaRadS, step->dt);
+        for (int i = 0; i < WHEEL_COUNT; i++) {
+            step->torques.driveTorqueNm[i] *= clutchScale;
+        }
+    } else {
+        state->engineRpm = drivetrain_engine_rpm(spec, state->selectedGear, drivenOmegaRadS);
+    }
     /* Mechanical damage: degraded engine output (issue #28). */
     if (step->damage != NULL && *step->damage > 0.0f) {
         const float d = *step->damage > 1.0f ? 1.0f : *step->damage;
@@ -1502,12 +1521,17 @@ static void stage_integrate_wheels(PhysicsStep *step)
                                       redlineWheelOmegaRadS);
     }
     {
-        float postOmega[WHEEL_COUNT];
-        for (int i = 0; i < WHEEL_COUNT; i++)
-            postOmega[i] = state->wheels[i].angularVelocityRadS;
-        state->engineRpm =
-            drivetrain_engine_rpm(spec, state->selectedGear,
-                                  drivetrain_driven_mean_omega(postOmega, step->frontShare));
+        /* Kinematic rpm sync from the integrated wheel speeds. With the dynamic engine
+         * (#23) the rpm is authoritative engine state evolved in the powertrain stage, so
+         * only the kinematic engine is re-derived here. */
+        if (!(spec->engineInertiaKgM2 > 0.0f)) {
+            float postOmega[WHEEL_COUNT];
+            for (int i = 0; i < WHEEL_COUNT; i++)
+                postOmega[i] = state->wheels[i].angularVelocityRadS;
+            state->engineRpm = drivetrain_engine_rpm(
+                spec, state->selectedGear,
+                drivetrain_driven_mean_omega(postOmega, step->frontShare));
+        }
     }
 }
 

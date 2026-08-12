@@ -2821,6 +2821,14 @@ static uint32_t param_audit_drive_signature(const VehicleSpec *spec, bool *allFi
         if (tick < 450) {
             state.selectedGear = 1 + tick / 90;
             if (state.selectedGear > spec->gearCount) state.selectedGear = spec->gearCount;
+            /* With the dynamic engine (#23), issue one phased shift mid-run so the clutch
+             * cut, gear swap and re-engage are exercised: a locked-clutch dynamic engine is
+             * deliberately identical to the kinematic one, so without the shift the audit
+             * would correctly see "nothing changed". */
+            if (spec->engineInertiaKgM2 > 0.0f && tick == 300 &&
+                state.selectedGear < spec->gearCount) {
+                (void)drivetrain_request_shift(&state, state.selectedGear + 1);
+            }
             input.throttle = 1.0f;
             input.brake = 0.0f;
             input.handbrake = 0.0f;
@@ -3134,6 +3142,13 @@ static void param_audit_check_effect(const VehicleSpec *defaults, const TrackDef
             continue;
         }
         if (param->classification == DEV_CLASS_PHYSICS_INPUT && !changed) {
+            /* The dynamic-engine clutch/duration fields (#23) are coupled to engine_inertia:
+             * they only move the car once the dynamic engine is on. param_audit_check_
+             * dynamic_engine() proves them across the coupled extremes, so the one-field
+             * perturb is exempted rather than reported. */
+            if (strcmp(param->name, "drive.max_clutch_torque") == 0 ||
+                strcmp(param->name, "drive.shift_duration") == 0)
+                continue;
             check(false, "'%s' is classified physics but changed nothing", param->name);
             unproven++;
         }
@@ -3252,6 +3267,37 @@ static void param_audit_check_document(void)
           stale);
 }
 
+/* The dynamic-engine triplet (#23) is coupled: clutch torque and shift duration only matter
+ * once engineInertiaKgM2 > 0, so the one-field-at-a-time perturb cannot prove them. This
+ * probe enables the dynamic engine and compares drive trajectories across the coupled
+ * extremes instead. */
+static void param_audit_check_dynamic_engine(const VehicleSpec *defaults)
+{
+    VehicleSpec kin = *defaults;
+    kin.engineInertiaKgM2 = 0.0f;
+    const uint32_t kinSig = param_audit_drive_signature(&kin, NULL);
+
+    VehicleSpec dyn = *defaults;
+    dyn.engineInertiaKgM2 = 1.0f;
+    const uint32_t dynSig = param_audit_drive_signature(&dyn, NULL);
+    check(dynSig != kinSig, "dynamic engine changes the drive trajectory vs kinematic");
+
+    VehicleSpec clutchLow = dyn;
+    clutchLow.maxClutchTorqueNm = 100.0f;
+    check(param_audit_drive_signature(&clutchLow, NULL) != dynSig,
+          "clutch torque capacity changes the trajectory");
+
+    VehicleSpec shiftFast = dyn;
+    shiftFast.shiftDurationS = 0.05f;
+    check(param_audit_drive_signature(&shiftFast, NULL) != dynSig,
+          "short shift duration changes the trajectory");
+
+    VehicleSpec shiftSlow = dyn;
+    shiftSlow.shiftDurationS = 0.5f;
+    check(param_audit_drive_signature(&shiftSlow, NULL) != dynSig,
+          "long shift duration changes the trajectory");
+}
+
 static void scenario_param_audit(void)
 {
     VehicleSpec defaults;
@@ -3266,6 +3312,7 @@ static void scenario_param_audit(void)
     param_audit_check_owner(&defaults);
     param_audit_check_effect(&defaults, &track);
     param_audit_check_typed_fields(&defaults, &track);
+    param_audit_check_dynamic_engine(&defaults);
     param_audit_check_document();
 
     track_free(&track);
@@ -4435,6 +4482,130 @@ static void scenario_tire_wear(void)
     }
 }
 
+/*
+ * dynamic-engine — issue #23: engine inertia, clutch coupling, and phased shifts.
+ *
+ * The dynamic engine (engineInertiaKgM2 > 0) revs from torque/inertia in neutral, slips the
+ * clutch on launch and shifts with a torque interruption over shiftDurationS. The kinematic
+ * engine (inertia 0) is the unchanged baseline; the whole suite already proves that.
+ */
+static void scenario_dynamic_engine(void)
+{
+    /* ---- 1. Free-rev: neutral + throttle winds the engine toward the limiter. ---- */
+    {
+        Game *game = alloc_game();
+        game_init(game);
+        game->spec.engineInertiaKgM2 = 0.5f;
+        game->autoTrans.enabled = false; /* keep it in neutral: no auto shifts */
+        game->vehicle.selectedGear = 0;  /* neutral */
+        game->input.throttle = 1.0f;
+        float peakRpm = 0.0f;
+        for (int i = 0; i < 1800; i++) {
+            game_fixed_update(game, FIXED_DT_S);
+            if (game->vehicle.engineRpm > peakRpm) peakRpm = game->vehicle.engineRpm;
+        }
+        check(peakRpm > game->spec.engineIdleRpm + 1000.0f,
+              "neutral free-rev rises well above idle (peak %.0f rpm)", (double)peakRpm);
+        check(peakRpm <= game->spec.engineRedlineRpm * 1.06f,
+              "free-rev is bounded by the limiter (peak %.0f rpm)", (double)peakRpm);
+        check(isfinite(game->vehicle.engineRpm), "engine rpm stays finite");
+        free(game);
+    }
+
+    /* ---- 2. Clutch launch: from rest in first, the clutch slips then the car moves. ---- */
+    {
+        Game *game = alloc_game();
+        game_init(game);
+        game->spec.engineInertiaKgM2 = 0.5f;
+        game->vehicle.selectedGear = 1;
+        game->input.throttle = 1.0f;
+        for (int i = 0; i < 1200; i++) game_fixed_update(game, FIXED_DT_S);
+        check(game->derived.speedMps > 5.0f,
+              "dynamic-engine launch accelerates the car (%.1f m/s)",
+              (double)game->derived.speedMps);
+        check(isfinite(game->vehicle.engineRpm) && game->vehicle.engineRpm > 0.0f,
+              "engine is running after launch");
+        free(game);
+    }
+
+    /* ---- 3. Phased shift: torque interruption over shiftDurationS, gear at midpoint. ---- */
+    {
+        Game *game = alloc_game();
+        game_init(game);
+        game->spec.engineInertiaKgM2 = 0.5f;
+        /* A clutch smaller than the engine torque makes the interruption visible: the
+         * driveline can only carry maxClutch * engagement. Auto shifting is off so the
+         * box cannot race the manual shift with its own request. */
+        game->spec.maxClutchTorqueNm = 150.0f;
+        game->autoTrans.enabled = false;
+        game->vehicle.selectedGear = 2;
+        set_vehicle_rolling_speed(game, 15.0f);
+        game->input.throttle = 0.8f;
+
+        /* Settle the driveline so derived drive torque is meaningful. */
+        for (int i = 0; i < 60; i++) game_fixed_update(game, FIXED_DT_S);
+
+        const float halfTicks = game->spec.shiftDurationS / FIXED_DT_S / 2.0f;
+        const float preShiftTorque = game->derived.driveTorqueNm[WHEEL_REAR_LEFT];
+        check(preShiftTorque > 1.0f, "settled drive torque is meaningful (%.1f N*m)",
+              (double)preShiftTorque);
+        check(drivetrain_request_shift(&game->vehicle, 3), "shift request accepted");
+
+        /* Through the cutting phase (one tick before the boundary): gear unchanged, drive
+         * torque drops to the clutch's closing capacity. */
+        for (int i = 0; i < (int)halfTicks - 1; i++) game_fixed_update(game, FIXED_DT_S);
+        check(game->vehicle.shiftPhase == 1 && game->vehicle.selectedGear == 2,
+              "cutting phase holds the old gear");
+        check(game->derived.driveTorqueNm[WHEEL_REAR_LEFT] < preShiftTorque * 0.2f,
+              "the clutch cut interrupts drive torque");
+
+        /* At the midpoint: gear applied, phase engaging. */
+        game_fixed_update(game, FIXED_DT_S);
+        check(game->vehicle.selectedGear == 3, "gear swapped at the shift midpoint");
+        check(game->vehicle.shiftPhase == 2, "phase moved to engaging");
+
+        /* After the full window: shift complete and the clutch re-locked. */
+        for (int i = 0; i < (int)halfTicks + 2; i++) game_fixed_update(game, FIXED_DT_S);
+        check(game->vehicle.shiftPhase == 0, "shift completes");
+        check(game->vehicle.shiftTimerS == 0.0f, "shift timer resets");
+        free(game);
+    }
+
+    /* ---- 4. Engine braking: off-throttle at speed lets the rpm fall under load. ---- */
+    {
+        Game *game = alloc_game();
+        game_init(game);
+        game->spec.engineInertiaKgM2 = 0.5f;
+        game->vehicle.selectedGear = 3;
+        set_vehicle_rolling_speed(game, 25.0f);
+        game->input.throttle = 0.0f;
+        game->input.brake = 0.0f;
+        for (int i = 0; i < 900; i++) game_fixed_update(game, FIXED_DT_S);
+        check(game->derived.speedMps < 25.0f, "engine braking decelerates the car (%.1f m/s)",
+              (double)game->derived.speedMps);
+        free(game);
+    }
+
+    /* ---- 5. Determinism: identical dynamic-engine runs reproduce byte-identically. ---- */
+    {
+        Game *a = alloc_game();
+        Game *b = alloc_game();
+        game_init(a);
+        game_init(b);
+        a->spec.engineInertiaKgM2 = b->spec.engineInertiaKgM2 = 0.5f;
+        a->input.throttle = b->input.throttle = 1.0f;
+        bool same = true;
+        for (int i = 0; i < 900; i++) {
+            game_fixed_update(a, FIXED_DT_S);
+            game_fixed_update(b, FIXED_DT_S);
+            if (game_state_checksum(a) != game_state_checksum(b)) same = false;
+        }
+        check(same, "dynamic-engine runs are deterministic over 900 ticks");
+        free(a);
+        free(b);
+    }
+}
+
 static const TestScenario kPhysicsScenarios[] = {
     { "telemetry", "CSV writer: stable header, row count, failure handling",
       scenario_telemetry },
@@ -4445,6 +4616,9 @@ static const TestScenario kPhysicsScenarios[] = {
       scenario_tire_thermal },
     { "tire-wear", "issue #22: monotonic wear, bounded grip degradation, service reset",
       scenario_tire_wear },
+    { "dynamic-engine",
+      "issue #23: inertia free-rev, clutch launch, phased shift, engine braking, determinism",
+      scenario_dynamic_engine },
     { "solver-stages",
       "staged solver: prefix runs, stage contracts, rollback and failure report",
       scenario_solver_stages },

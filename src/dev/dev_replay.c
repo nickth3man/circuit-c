@@ -101,6 +101,9 @@ static bool write_vehicle_snapshot(FILE *file, const ReplayVehicleSnapshot *snap
     WRITE_F32(vehicle->frontRoadWheelAngleRad);
     WRITE_F32(vehicle->engineRpm);
     WRITE_I32(vehicle->selectedGear);
+    WRITE_I32(vehicle->shiftPhase);
+    WRITE_F32(vehicle->shiftTimerS);
+    WRITE_I32(vehicle->shiftTargetGear);
     WRITE_F32(vehicle->filteredLongAccelMps2);
     WRITE_F32(vehicle->prevLongAccelMps2);
     WRITE_F32(vehicle->filteredLatAccelMps2);
@@ -301,6 +304,9 @@ static void read_vehicle_snapshot(Reader *reader, ReplayVehicleSnapshot *snapsho
     READ_F32(vehicle->frontRoadWheelAngleRad);
     READ_F32(vehicle->engineRpm);
     READ_I32(vehicle->selectedGear);
+    READ_I32(vehicle->shiftPhase);
+    READ_F32(vehicle->shiftTimerS);
+    READ_I32(vehicle->shiftTargetGear);
     READ_F32(vehicle->filteredLongAccelMps2);
     READ_F32(vehicle->prevLongAccelMps2);
     READ_F32(vehicle->filteredLatAccelMps2);

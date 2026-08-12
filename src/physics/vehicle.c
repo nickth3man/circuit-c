@@ -241,6 +241,9 @@ void vehicle_spec_set_default(VehicleSpec *spec)
     spec->tireLongRelaxationLengthM = TIRE_LONG_RELAXATION_LENGTH_M;
     spec->tireThermalEnabled = 0.0f; /* off: bit-identical baseline (#21) */
     spec->tireWearEnabled = 0.0f;    /* off: bit-identical baseline (#22) */
+    spec->engineInertiaKgM2 = 0.0f;  /* 0 = kinematic engine, bit-identical baseline (#23) */
+    spec->maxClutchTorqueNm = 400.0f;
+    spec->shiftDurationS = 0.20f;
     spec->ackermannPercent = ACKERMANN_PERCENT;
     spec->differentialMode = (float)DIFFERENTIAL_MODE_DEFAULT;
     spec->differentialBiasRatio = DIFFERENTIAL_BIAS_RATIO;
@@ -388,6 +391,15 @@ bool vehicle_spec_is_valid(const VehicleSpec *spec)
         return false;
     if (spec->tireThermalEnabled != 0.0f && spec->tireThermalEnabled != 1.0f) return false;
     if (spec->tireWearEnabled != 0.0f && spec->tireWearEnabled != 1.0f) return false;
+    if (!(isfinite(spec->engineInertiaKgM2) && spec->engineInertiaKgM2 >= 0.0f &&
+          spec->engineInertiaKgM2 <= 10.0f))
+        return false;
+    if (!(isfinite(spec->maxClutchTorqueNm) && spec->maxClutchTorqueNm > 0.0f &&
+          spec->maxClutchTorqueNm <= 5000.0f))
+        return false;
+    if (!(isfinite(spec->shiftDurationS) && spec->shiftDurationS > 0.0f &&
+          spec->shiftDurationS <= 2.0f))
+        return false;
     if (!(isfinite(spec->tireLoadSensitivityK) && spec->tireLoadSensitivityK >= 0.0f &&
           spec->tireLoadSensitivityK <= 0.05f))
         return false;
@@ -598,6 +610,9 @@ static uint32_t vehicle_content_hash(const VehicleSpec *spec)
     HASH_FLOAT(tireLongRelaxationLengthM);
     HASH_FLOAT(tireThermalEnabled);
     HASH_FLOAT(tireWearEnabled);
+    HASH_FLOAT(engineInertiaKgM2);
+    HASH_FLOAT(maxClutchTorqueNm);
+    HASH_FLOAT(shiftDurationS);
     HASH_FLOAT(tireLoadRefPerWheelN);
     HASH_FLOAT(maxRoadWheelAngleRad);
     HASH_FLOAT(maxSteerRateRadS);

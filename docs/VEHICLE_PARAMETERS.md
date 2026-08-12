@@ -200,6 +200,9 @@ validation.
 | `drive.reverse` | `physics` | `setup` | 3.2 | — | 0.4 .. 6 | 0.01 | advanced | — | Reverse gear ratio. |
 | `drive.final` | `physics` | `setup` | 4.1 | — | 1 .. 8 | 0.01 | advanced | — | Final drive ratio. |
 | `drive.efficiency` | `physics` | `definition` | 0.9 | — | 0.5 .. 1 | 0.01 | expert | — | Drivetrain efficiency. |
+| `drive.engine_inertia` | `physics` | `definition` | 0 | kg*m^2 | 0 .. 10 | 0.1 | expert | — | Dynamic engine inertia (#23). 0 = kinematic engine, baseline exact. |
+| `drive.max_clutch_torque` | `physics` | `definition` | 400 | N*m | 50 .. 5000 | 10 | expert | — | Clutch torque capacity while slipping (#23). |
+| `drive.shift_duration` | `physics` | `definition` | 0.2 | s | 0.02 .. 2 | 0.01 | expert | — | Phased shift window: cut, swap, engage (#23). |
 | `drive.diff_mode` | `physics` | `setup` | 2 | — | 0 .. 2 | 1 | advanced | — | 0=locked 1=open 2=LSD. |
 | `drive.diff_bias_ratio` | `physics` | `setup` | 2 | — | 1 .. 5 | 0.1 | expert | — | LSD bias ratio. |
 | `drive.diff_preload` | `physics` | `setup` | 60 | N*m | 0 .. 400 | 5 | expert | — | LSD preload. |

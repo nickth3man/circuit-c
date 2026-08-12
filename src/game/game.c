@@ -119,6 +119,9 @@ static uint32_t hash_entrant(uint32_t h, const RaceEntrant *entrant)
     h = hash_f32(h, v->frontRoadWheelAngleRad);
     h = hash_f32(h, v->engineRpm);
     h = hash_u32(h, (uint32_t)v->selectedGear);
+    h = hash_u32(h, (uint32_t)v->shiftPhase);
+    h = hash_f32(h, v->shiftTimerS);
+    h = hash_u32(h, (uint32_t)v->shiftTargetGear);
     h = hash_f32(h, v->filteredLongAccelMps2);
     h = hash_f32(h, v->prevLongAccelMps2);
     h = hash_f32(h, v->filteredLatAccelMps2);
@@ -740,14 +743,30 @@ static void apply_oneshots(Game *game, const Input *input, const ControllerOutpu
         }
     }
     if (!game->autoTrans.enabled) {
+        /* Manual shifts go through the same gearbox state machine (#23): the dynamic engine
+         * cuts the clutch and swaps at the phase midpoint; the kinematic engine keeps the
+         * historical instantaneous swap. */
+        const bool dynamic = game->spec.engineInertiaKgM2 > 0.0f;
         if (output->shiftUp) {
             if (game->vehicle.selectedGear < game->spec.gearCount) {
-                game->vehicle.selectedGear++;
+                if (dynamic) {
+                    (void)drivetrain_request_shift(&game->vehicle,
+                                                   game->vehicle.selectedGear + 1);
+                } else {
+                    game->vehicle.selectedGear++;
+                }
             }
             game->sim.shiftUpCount++;
         }
         if (output->shiftDown) {
-            if (game->vehicle.selectedGear > -1) game->vehicle.selectedGear--;
+            if (game->vehicle.selectedGear > -1) {
+                if (dynamic) {
+                    (void)drivetrain_request_shift(&game->vehicle,
+                                                   game->vehicle.selectedGear - 1);
+                } else {
+                    game->vehicle.selectedGear--;
+                }
+            }
             game->sim.shiftDownCount++;
         }
     }
