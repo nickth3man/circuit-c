@@ -250,8 +250,11 @@ Multiple lanes may operate in parallel after #13, but dependencies within each l
 
 ## Driver-assist lane
 
-- [ ] [#25 — Add deterministic ABS and traction-control controllers](https://github.com/nickth3man/circuit-c/issues/25)
+- [x] [#25 — Add deterministic ABS and traction-control controllers](https://github.com/nickth3man/circuit-c/issues/25)
   - Depends on: #9, #20, #23
+  - Pedal-level ABS/TCS in VehicleSetup (levels 0-2, default off = baseline exact): continuous
+    proportional reduction over a slip deadband — stateless, replay-reproducible. Verified:
+    162 scenarios.
 
 ## Collision lane
 
