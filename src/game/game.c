@@ -1186,8 +1186,22 @@ static void stage_physics(Game *game, TickContext *ctx, float dt)
      * derivation runs BEFORE the step so this tick's physics sees the new mass. */
     float *fuelPtr = (game->spec.fuelEnabled > 0.0f) ? &game->fuelKg : NULL;
     if (fuelPtr != NULL) vehicle_spec_set_fuel_mass(&game->spec, game->fuelKg);
+    /* 2.5D road frame (issue #40): derived from the route localization and wheel positions
+     * when a track is loaded; NULL keeps the physics flat. */
+    TrackRoadFrame roadFrame;
+    memset(&roadFrame, 0, sizeof(roadFrame));
+    const TrackRoadFrame *roadPtr = NULL;
+    if (ctx->trackLoaded && game->progress.location.valid) {
+        Vector2 wheelPos[WHEEL_COUNT];
+        for (int w = 0; w < WHEEL_COUNT; w++) {
+            wheelPos[w] = physics_wheel_world_position(&game->vehicle, (WheelId)w);
+        }
+        track_road_frame_derive(&game->trackDef, &game->progress.location, wheelPos,
+                                game->derived.speedMps, &roadFrame);
+        roadPtr = &roadFrame;
+    }
     physics_fixed_update(&game->spec, &game->vehicle, &game->derived, &game->renderState,
-                         game->tireState, damagePtr, fuelPtr, &ctx->applied, dt);
+                         game->tireState, damagePtr, fuelPtr, roadPtr, &ctx->applied, dt);
     CIRCUIT_ZONE_END(physics);
 }
 
@@ -1346,9 +1360,22 @@ static void simulate_extra_entrant(Game *game, RaceEntrant *entrant, const TickC
     if (fuelPtr != NULL) {
         vehicle_spec_set_fuel_mass(&entrant->instance.spec, entrant->instance.fuelKg);
     }
+    TrackRoadFrame roadFrame;
+    memset(&roadFrame, 0, sizeof(roadFrame));
+    const TrackRoadFrame *roadPtr = NULL;
+    if (ctx->trackLoaded && entrant->progress.location.valid) {
+        Vector2 wheelPos[WHEEL_COUNT];
+        for (int w = 0; w < WHEEL_COUNT; w++) {
+            wheelPos[w] = physics_wheel_world_position(&entrant->instance.vehicle, (WheelId)w);
+        }
+        track_road_frame_derive(&game->trackDef, &entrant->progress.location, wheelPos,
+                                entrant->instance.derived.speedMps, &roadFrame);
+        roadPtr = &roadFrame;
+    }
     physics_fixed_update(&entrant->instance.spec, &entrant->instance.vehicle,
                          &entrant->instance.derived, &entrant->instance.renderState,
-                         entrant->instance.tireState, damagePtr, fuelPtr, &applied, dt);
+                         entrant->instance.tireState, damagePtr, fuelPtr, roadPtr, &applied,
+                         dt);
 
     if (ctx->trackLoaded) {
         const TrackProgressEvent pev =

@@ -12,6 +12,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "core/math_utils.h"
+
 #define FNV1A_OFFSET_BASIS 2166136261u
 #define FNV1A_PRIME 16777619u
 
@@ -241,6 +243,71 @@ static float track_grid_nearest_sq(const TrackQueryGrid *grid, const TrackDefini
 }
 
 /* --------------- public API -------------------------------------------------------------- */
+
+void track_road_frame_derive(const TrackDefinition *track, const RouteLocation *loc,
+                             const Vector2 wheelPositions[WHEEL_COUNT], float speedMps,
+                             TrackRoadFrame *out)
+{
+    if (out == NULL) return;
+    memset(out, 0, sizeof(*out));
+    if (track == NULL || track->nodes == NULL || track->count <= 0 || loc == NULL ||
+        !loc->valid)
+        return;
+
+    const int seg = loc->segmentIndex;
+    if (seg < 0 || seg >= track->count) return;
+    const bool closed = track->routeClosed;
+    const int next = closed ? (seg + 1) % track->count : seg + 1;
+    if (next >= track->count) return;
+
+    const TrackNode *a = &track->nodes[seg];
+    const TrackNode *b = &track->nodes[next];
+    const float segLen = sqrtf((b->centerM.x - a->centerM.x) * (b->centerM.x - a->centerM.x) +
+                               (b->centerM.y - a->centerM.y) * (b->centerM.y - a->centerM.y));
+
+    /* Grade: elevation slope along the route. */
+    if (segLen > 1e-6f) {
+        const float grade = (b->elevationM - a->elevationM) / segLen;
+        out->gradeSin = clampf(grade, -1.0f, 1.0f);
+    }
+
+    /* Bank: interpolated crossfall at the localization point. */
+    const float bankRad = a->bankingRad + (b->bankingRad - a->bankingRad) * loc->segmentT;
+    out->bankSin = sinf(bankRad);
+
+    /* Profile curvature (crest/dip): the second difference over the segment, times the road
+     * speed squared. Positive = downward acceleration = loads the wheels (a dip); negative
+     * = crest, unloads. */
+    if (segLen > 1e-6f && closed) {
+        const int prev = (seg - 1 + track->count) % track->count;
+        const float curvature =
+            (a->elevationM - 2.0f * b->elevationM + track->nodes[prev].elevationM) /
+            (segLen * segLen);
+        /* sign: a dip (b lower than neighbors) gives negative second difference in this
+         * ordering; flip so positive = downward. */
+        out->verticalAccelMps2 = -curvature * speedMps * speedMps;
+    }
+
+    /* Kerb state per axle: a wheel beyond the racing surface of its segment sits on the
+     * runoff kerb; the profile height is the node's kerb height. */
+    for (int i = 0; i < WHEEL_COUNT; i++) {
+        const bool front = i <= WHEEL_FRONT_RIGHT;
+        const TrackNode *n = &track->nodes[seg];
+        float halfWidth = n->halfWidthM;
+        float runoff = n->runoffHalfWidthM;
+        const Vector2 d = { wheelPositions[i].x - loc->pointM.x,
+                            wheelPositions[i].y - loc->pointM.y };
+        const float dist = sqrtf(d.x * d.x + d.y * d.y);
+        const bool onKerb = (dist > halfWidth && dist <= runoff + 1e-4f);
+        if (front) {
+            out->frontOnKerb = out->frontOnKerb || onKerb;
+            if (n->kerbHeightM > out->kerbHeightFrontM) out->kerbHeightFrontM = n->kerbHeightM;
+        } else {
+            out->rearOnKerb = out->rearOnKerb || onKerb;
+            if (n->kerbHeightM > out->kerbHeightRearM) out->kerbHeightRearM = n->kerbHeightM;
+        }
+    }
+}
 
 void track_init(TrackDefinition *track)
 {

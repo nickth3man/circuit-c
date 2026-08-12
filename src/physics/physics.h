@@ -11,6 +11,8 @@
 
 #include <stdbool.h>
 
+typedef struct TrackRoadFrame TrackRoadFrame;
+
 #include "game/controller_output.h"
 #include "physics/drivetrain.h" /* DrivetrainTorques, DifferentialMode */
 #include "physics/vehicle.h"
@@ -153,6 +155,9 @@ typedef struct {
      * present and enabled the powertrain stage consumes fuel from engine work and starves
      * drive torque near empty. */
     float *fuelKg;
+    /* Reduced-order road frame (issue #40): grade gravity, bank, profile curvature, kerbs.
+     * NULL (or all-zero) means flat track — the approved baseline. */
+    const TrackRoadFrame *roadFrame;
     ControllerOutput input;
     float dt;
 
@@ -180,7 +185,8 @@ typedef struct {
 bool physics_step_init(PhysicsStep *step, const VehicleSpec *spec, VehicleState *state,
                        VehicleDerived *derived, VehicleRenderState *renderState,
                        VehicleTireState *tireState, float *damage, float *fuelKg,
-                       const ControllerOutput *input, float dt);
+                       const TrackRoadFrame *roadFrame, const ControllerOutput *input,
+                       float dt);
 
 /*
  * Run stages up to and including `throughStage`, continuing from wherever the step last got
@@ -204,7 +210,7 @@ void physics_step_run(PhysicsStep *step, PhysicsStage throughStage);
  */
 void physics_fixed_update(const VehicleSpec *spec, VehicleState *state, VehicleDerived *derived,
                           VehicleRenderState *renderState, VehicleTireState *tireState,
-                          float *damage, float *fuelKg, const ControllerOutput *input,
-                          float dt);
+                          float *damage, float *fuelKg, const TrackRoadFrame *roadFrame,
+                          const ControllerOutput *input, float dt);
 
 #endif /* CIRCUIT_PHYSICS_H */

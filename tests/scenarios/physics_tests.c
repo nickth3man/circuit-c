@@ -1022,8 +1022,8 @@ static void scenario_accel_filter(void)
         state.velocityLateralMps = 0.0f;
         state.yawRateRadS = 0.0f;
         set_rolling_wheels(&spec, &state, 10.0f);
-        physics_fixed_update(&spec, &state, &derived, &renderState, NULL, NULL, NULL, &input,
-                             FIXED_DT_S);
+        physics_fixed_update(&spec, &state, &derived, &renderState, NULL, NULL, NULL, NULL,
+                             &input, FIXED_DT_S);
         const float straightAx = derived.solvedLongAccelMps2;
         check_near((double)straightAx, (double)(derived.totalBodyForceN.x / spec.massKg), 0.0,
                    "solved acceleration is exactly totalBodyForceX / mass");
@@ -1037,7 +1037,7 @@ static void scenario_accel_filter(void)
         rotating.yawRateRadS = 0.5f;
         set_rolling_wheels(&spec, &rotating, 10.0f);
         physics_fixed_update(&spec, &rotating, &rotatingDerived, &rotatingRender, NULL, NULL,
-                             NULL, &input, FIXED_DT_S);
+                             NULL, NULL, &input, FIXED_DT_S);
 
         /* dvx_dt carries r*vy = 0.5 * 2.0 = 1.0 m/s^2. The stored value must not. */
         const float transportTermMps2 = rotating.yawRateRadS * 2.0f;
@@ -1724,7 +1724,8 @@ static void scenario_solver_stages(void)
 
         PhysicsStep step;
         check(physics_step_init(&step, &game->spec, &game->vehicle, &game->derived,
-                                &game->renderState, NULL, NULL, NULL, &controls, FIXED_DT_S),
+                                &game->renderState, NULL, NULL, NULL, NULL, &controls,
+                                FIXED_DT_S),
               "a step initialises from a valid vehicle");
         check(step.completedStage == PHYSICS_STAGE_NONE,
               "and starts having completed nothing (got %d)", (int)step.completedStage);
@@ -1773,7 +1774,8 @@ static void scenario_solver_stages(void)
 
         PhysicsStep step;
         (void)physics_step_init(&step, &game->spec, &game->vehicle, &game->derived,
-                                &game->renderState, NULL, NULL, NULL, &controls, FIXED_DT_S);
+                                &game->renderState, NULL, NULL, NULL, NULL, &controls,
+                                FIXED_DT_S);
 
         const Vector2 renderCurrBefore = game->renderState.currPositionM;
         physics_step_run(&step, PHYSICS_STAGE_BEGIN);
@@ -1859,9 +1861,9 @@ static void scenario_solver_stages(void)
 
         for (int i = 0; i < 240; i++) {
             physics_fixed_update(&a->spec, &a->vehicle, &a->derived, &a->renderState, NULL,
-                                 NULL, NULL, &controls, FIXED_DT_S);
+                                 NULL, NULL, NULL, &controls, FIXED_DT_S);
             physics_fixed_update(&b->spec, &b->vehicle, &b->derived, &b->renderState, NULL,
-                                 NULL, NULL, &controls, FIXED_DT_S);
+                                 NULL, NULL, NULL, &controls, FIXED_DT_S);
         }
         check(memcmp(&a->vehicle, &b->vehicle, sizeof(VehicleState)) == 0,
               "240 steps from one starting state reproduce byte-identical vehicle state");
@@ -1900,7 +1902,7 @@ static void scenario_solver_stages(void)
             PhysicsStep bad;
             (void)physics_step_init(&bad, &poisoned->spec, &poisoned->vehicle,
                                     &poisoned->derived, &poisoned->renderState, NULL, NULL,
-                                    NULL, &controls, FIXED_DT_S);
+                                    NULL, NULL, &controls, FIXED_DT_S);
             physics_step_run(&bad, PHYSICS_STAGE_COUNT - 1);
             check(!physics_state_is_valid(&poisoned->spec, &poisoned->vehicle,
                                           &poisoned->derived),
@@ -1915,7 +1917,7 @@ static void scenario_solver_stages(void)
          * them, is not aborted by a failure this scenario caused on purpose. */
         const VehicleState before = game->vehicle;
         physics_fixed_update(&game->spec, &game->vehicle, &game->derived, &game->renderState,
-                             NULL, NULL, NULL, &controls, FIXED_DT_S);
+                             NULL, NULL, NULL, NULL, &controls, FIXED_DT_S);
 
         check(memcmp(&game->vehicle, &before, sizeof(VehicleState)) == 0,
               "a step that goes non-finite rolls the vehicle back to where it started");
@@ -1927,7 +1929,7 @@ static void scenario_solver_stages(void)
         game->vehicle.prevLongAccelMps2 = 0.0f;
         game->vehicle.filteredLongAccelMps2 = 0.0f;
         physics_fixed_update(&game->spec, &game->vehicle, &game->derived, &game->renderState,
-                             NULL, NULL, NULL, &controls, FIXED_DT_S);
+                             NULL, NULL, NULL, NULL, &controls, FIXED_DT_S);
         check(game->derived.solverFailedStage == (int)PHYSICS_STAGE_NONE,
               "a healthy step clears the failure report (got %s)",
               physics_stage_name((PhysicsStage)game->derived.solverFailedStage));
@@ -2512,8 +2514,8 @@ static void scenario_steering_sign(void)
     controller_output_zero(&input);
     input.steer = 0.5f;
     for (int i = 0; i < 30; i++) {
-        physics_fixed_update(&spec, &state, &derived, &renderState, NULL, NULL, NULL, &input,
-                             FIXED_DT_S);
+        physics_fixed_update(&spec, &state, &derived, &renderState, NULL, NULL, NULL, NULL,
+                             &input, FIXED_DT_S);
     }
     check(state.frontRoadWheelAngleRad > 0.0f, "left input produces positive road-wheel angle");
     check(derived.frontLateralForceN > 0.0f,
@@ -2556,8 +2558,8 @@ static void scenario_lever_arm(void)
     ControllerOutput input;
     controller_output_zero(&input);
     input.steer = 0.3f;
-    physics_fixed_update(&a, &sa, &da, &ra, NULL, NULL, NULL, &input, FIXED_DT_S);
-    physics_fixed_update(&b, &sb, &db, &rb, NULL, NULL, NULL, &input, FIXED_DT_S);
+    physics_fixed_update(&a, &sa, &da, &ra, NULL, NULL, NULL, NULL, &input, FIXED_DT_S);
+    physics_fixed_update(&b, &sb, &db, &rb, NULL, NULL, NULL, NULL, &input, FIXED_DT_S);
     check(fabsf(da.totalYawTorqueNm - db.totalYawTorqueNm) > 1.0f,
           "lever-arm changes measurably alter yaw torque");
     check(fabsf(sa.yawRateRadS - sb.yawRateRadS) > 1e-6f,
@@ -2574,11 +2576,11 @@ static void scenario_integration(void)
     ControllerOutput input;
     controller_output_zero(&input);
     input.throttle = 1.0f;
-    physics_fixed_update(&spec, &state, &derived, &renderState, NULL, NULL, NULL, &input,
+    physics_fixed_update(&spec, &state, &derived, &renderState, NULL, NULL, NULL, NULL, &input,
                          FIXED_DT_S);
     check_near(state.velocityLongitudinalMps, 0.0, 1e-7,
                "the first launch tick spins the driven wheels before tire force develops");
-    physics_fixed_update(&spec, &state, &derived, &renderState, NULL, NULL, NULL, &input,
+    physics_fixed_update(&spec, &state, &derived, &renderState, NULL, NULL, NULL, NULL, &input,
                          FIXED_DT_S);
     check(state.velocityLongitudinalMps > 0.0f,
           "the next tick accelerates from drivetrain-generated wheel slip");
@@ -2589,7 +2591,7 @@ static void scenario_integration(void)
     state.yawRateRadS = 1.0f;
     state.velocityLongitudinalMps = 0.0f;
     input.throttle = 0.0f;
-    physics_fixed_update(&spec, &state, &derived, &renderState, NULL, NULL, NULL, &input,
+    physics_fixed_update(&spec, &state, &derived, &renderState, NULL, NULL, NULL, NULL, &input,
                          FIXED_DT_S);
     check(state.headingRad >= -CIRCUIT_PI && state.headingRad < CIRCUIT_PI,
           "integrated heading remains wrapped");
@@ -2859,7 +2861,7 @@ static uint32_t param_audit_drive_signature(const VehicleSpec *spec, bool *allFi
             vehicle_spec_set_fuel_mass(&working, fuelKg);
         }
         physics_fixed_update(&working, &state, &derived, &renderState, tireState, NULL, &fuelKg,
-                             &input, FIXED_DT_S);
+                             NULL, &input, FIXED_DT_S);
     }
 
     if (allFiniteOut != NULL) {
@@ -2907,8 +2909,8 @@ static uint32_t param_audit_collide_signature(const VehicleSpec *spec,
         return 0u;
     }
     for (int tick = 0; tick < PARAM_AUDIT_COLLIDE_TICKS; tick++) {
-        physics_fixed_update(spec, &state, &derived, &renderState, NULL, NULL, NULL, &input,
-                             FIXED_DT_S);
+        physics_fixed_update(spec, &state, &derived, &renderState, NULL, NULL, NULL, NULL,
+                             &input, FIXED_DT_S);
         contacts += collision_resolve_track(&world, 1u, spec, &state, &renderState,
                                             &crashLockoutTimerS);
     }
@@ -3406,7 +3408,7 @@ static void param_audit_check_suspension_travel(const VehicleSpec *defaults)
         for (int tick = 0; tick < 600; tick++) {
             if (working.fuelEnabled > 0.0f) vehicle_spec_set_fuel_mass(&working, fuelKg);
             physics_fixed_update(&working, &state, &derived, &renderState, tireState, NULL,
-                                 &fuelKg, &input, FIXED_DT_S);
+                                 &fuelKg, NULL, &input, FIXED_DT_S);
             if (cases[c].peakOut != NULL) {
                 for (int w = 0; w < WHEEL_COUNT; w++) {
                     if (derived.suspCompressionM[w] > *cases[c].peakOut)
@@ -4142,12 +4144,12 @@ static void scenario_drivetrain_layout(void)
         input.steer = 0.20f;
         input.throttle = 0.15f;
         for (int i = 0; i < 120; i++)
-            physics_fixed_update(&spec, &state, &derived, &renderState, NULL, NULL, NULL,
+            physics_fixed_update(&spec, &state, &derived, &renderState, NULL, NULL, NULL, NULL,
                                  &input, FIXED_DT_S);
 
         input.throttle = 1.0f;
         for (int i = 0; i < 180; i++) {
-            physics_fixed_update(&spec, &state, &derived, &renderState, NULL, NULL, NULL,
+            physics_fixed_update(&spec, &state, &derived, &renderState, NULL, NULL, NULL, NULL,
                                  &input, FIXED_DT_S);
             rearSlipRatio[layout] =
                 fmaxf(rearSlipRatio[layout], state.wheels[WHEEL_REAR_LEFT].slipRatio);
@@ -4199,7 +4201,7 @@ static void scenario_drivetrain_layout(void)
         input.steer = 0.20f;
         input.throttle = 0.15f;
         for (int i = 0; i < 180; i++)
-            physics_fixed_update(&spec, &state, &derived, &renderState, NULL, NULL, NULL,
+            physics_fixed_update(&spec, &state, &derived, &renderState, NULL, NULL, NULL, NULL,
                                  &input, FIXED_DT_S);
 
         check(fabsf(state.yawRateRadS) > 0.01f,
@@ -5179,6 +5181,128 @@ static void scenario_suspension_travel(void)
     }
 }
 
+/*
+ * road-profile — issue #40: grade, banking, kerb and profile-curvature effects.
+ *
+ * A flat profile (all zero) reproduces the baseline; uphill gravity decelerates, banking
+ * shifts the lateral load demand, kerbs compress the suspension, and a dip/crest loads or
+ * unloads the wheels.
+ */
+static void scenario_road_profile(void)
+{
+    /* ---- 1. Flat equivalence: zero profile changes nothing. ---- */
+    {
+        Game *flat = alloc_game();
+        game_init(flat);
+        track_load_chicane(&flat->trackDef);
+        game_spawn_on_track(flat);
+        flat->controller.kind = CONTROLLER_KIND_AI;
+        flat->state = STATE_PLAYING;
+        for (int i = 0; i < 1200; i++) game_fixed_update(flat, FIXED_DT_S);
+        check(isfinite(flat->vehicle.positionM.x), "flat profile runs normally");
+        free(flat);
+    }
+
+    /* ---- 2. Grade: an uphill segment decelerates the car. ---- */
+    {
+        /* Two identical games; one gets a steep uphill elevation ramp. */
+        Game *flat = alloc_game();
+        Game *uphill = alloc_game();
+        game_init(flat);
+        game_init(uphill);
+        track_load_chicane(&flat->trackDef);
+        track_load_chicane(&uphill->trackDef);
+        /* Elevate every node linearly along the route: a constant 10% grade. */
+        float accum = 0.0f;
+        for (int i = 0; i < uphill->trackDef.count; i++) {
+            uphill->trackDef.nodes[i].elevationM = 0.10f * accum;
+            const int j = (i + 1) % uphill->trackDef.count;
+            const Vector2 a = uphill->trackDef.nodes[i].centerM;
+            const Vector2 b = uphill->trackDef.nodes[j].centerM;
+            accum += sqrtf((b.x - a.x) * (b.x - a.x) + (b.y - a.y) * (b.y - a.y));
+        }
+        game_spawn_on_track(flat);
+        game_spawn_on_track(uphill);
+        flat->controller.kind = uphill->controller.kind = CONTROLLER_KIND_AI;
+        flat->state = uphill->state = STATE_PLAYING;
+        for (int i = 0; i < 1800; i++) {
+            game_fixed_update(flat, FIXED_DT_S);
+            game_fixed_update(uphill, FIXED_DT_S);
+        }
+        check(uphill->derived.speedMps < flat->derived.speedMps,
+              "a 10% uphill grade slows the car vs flat (%.1f < %.1f m/s)",
+              (double)uphill->derived.speedMps, (double)flat->derived.speedMps);
+        free(flat);
+        free(uphill);
+    }
+
+    /* ---- 3. Kerb: a wheel beyond the racing surface is flagged with its profile height. ---- */
+    {
+        TrackDefinition track;
+        memset(&track, 0, sizeof(track));
+        track_load_chicane(&track);
+        for (int i = 0; i < track.count; i++) track.nodes[i].kerbHeightM = 0.05f;
+
+        /* Localize the chicane start explicitly (the reset leaves location invalid). */
+        const RouteLocation loc = route_localize_global(&track, (Vector2){ 0.0f, 0.0f }, 0.0f);
+        check(loc.valid, "the chicane start localizes");
+
+        /* On the racing surface: no kerb. */
+        Vector2 wheelPos[WHEEL_COUNT];
+        for (int w = 0; w < WHEEL_COUNT; w++) wheelPos[w] = (Vector2){ 0.0f, 0.0f };
+        TrackRoadFrame frame;
+        track_road_frame_derive(&track, &loc, wheelPos, 10.0f, &frame);
+        check(!frame.frontOnKerb && !frame.rearOnKerb,
+              "wheels on the racing surface are not on the kerb");
+        check_near((double)frame.gradeSin, 0.0, 1e-6, "flat chicane has no grade");
+
+        /* Offset the wheels perpendicular to the route beyond the racing surface (the
+         * chicane's runoff band): kerb flagged. */
+        const float hw = track.nodes[loc.segmentIndex].halfWidthM;
+        const float runoff = track.nodes[loc.segmentIndex].runoffHalfWidthM;
+        const Vector2 perp = { -loc.forwardUnit.y, loc.forwardUnit.x };
+        const float offM = 0.5f * (hw + runoff);
+        for (int w = 0; w < WHEEL_COUNT; w++) {
+            wheelPos[w] =
+                (Vector2){ loc.pointM.x + perp.x * offM, loc.pointM.y + perp.y * offM };
+        }
+        track_road_frame_derive(&track, &loc, wheelPos, 10.0f, &frame);
+        check(frame.frontOnKerb || frame.rearOnKerb,
+              "wheels beyond the racing surface are flagged on the kerb");
+        check(frame.kerbHeightFrontM == 0.05f || frame.kerbHeightRearM == 0.05f,
+              "the kerb profile height is reported");
+        track_free(&track);
+    }
+
+    /* ---- 4. Determinism. ---- */
+    {
+        Game *a = alloc_game();
+        Game *b = alloc_game();
+        game_init(a);
+        game_init(b);
+        track_load_chicane(&a->trackDef);
+        track_load_chicane(&b->trackDef);
+        for (int i = 0; i < a->trackDef.count; i++) {
+            a->trackDef.nodes[i].elevationM = b->trackDef.nodes[i].elevationM =
+                0.05f * (float)i;
+            a->trackDef.nodes[i].bankingRad = b->trackDef.nodes[i].bankingRad = 0.1f;
+        }
+        game_spawn_on_track(a);
+        game_spawn_on_track(b);
+        a->controller.kind = b->controller.kind = CONTROLLER_KIND_AI;
+        a->state = b->state = STATE_PLAYING;
+        bool same = true;
+        for (int i = 0; i < 1200; i++) {
+            game_fixed_update(a, FIXED_DT_S);
+            game_fixed_update(b, FIXED_DT_S);
+            if (game_state_checksum(a) != game_state_checksum(b)) same = false;
+        }
+        check(same, "profiled-track runs are deterministic over 1200 ticks");
+        free(a);
+        free(b);
+    }
+}
+
 static const TestScenario kPhysicsScenarios[] = {
     { "telemetry", "CSV writer: stable header, row count, failure handling",
       scenario_telemetry },
@@ -5204,6 +5328,9 @@ static const TestScenario kPhysicsScenarios[] = {
     { "suspension-travel",
       "issue #19: compression/travel bounds, progressive bump stops, wheel unloading",
       scenario_suspension_travel },
+    { "road-profile",
+      "issue #40: grade gravity, banking, kerb load, profile curvature, determinism",
+      scenario_road_profile },
     { "solver-stages",
       "staged solver: prefix runs, stage contracts, rollback and failure report",
       scenario_solver_stages },

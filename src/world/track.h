@@ -53,6 +53,14 @@ typedef struct {
      * the barrier stands on the track edge. Deliberately LAST in the struct so the existing
      * positional initialisers `{ {x,y}, hw, surface }` keep meaning what they always did. */
     float runoffHalfWidthM;
+    /* 2.5D road profile (issue #40). Zero by default = flat baseline. `elevationM` is the
+     * centreline height (grade is its along-route slope; curvature its second difference);
+     * `bankingRad` is the crossfall angle (positive = left side up); `kerbHeightM` is the
+     * profile height of the runoff band's kerb edge, applied to wheels beyond the racing
+     * surface. All are reduced-order inputs to the planar solver, never 3D pose. */
+    float elevationM;
+    float bankingRad;
+    float kerbHeightM;
 } TrackNode;
 
 typedef struct {
@@ -528,6 +536,26 @@ bool track_grid_slot_pose(const TrackDefinition *track, int slotIndex, Vector2 *
  * enforce pit rules. */
 bool track_pit_has_geometry(const TrackDefinition *track);
 bool track_point_in_service_box(const TrackDefinition *track, Vector2 pointM);
+
+/* The reduced-order road frame at an entrant's location (issue #40): the longitudinal grade
+ * and its gravity component, the lateral bank gravity component, the vertical acceleration
+ * from the profile's curvature (crest unloads, dip loads), and the kerb state of each axle.
+ * Derived deterministically from the track profile; NULL/zero in physics means flat. */
+typedef struct TrackRoadFrame {
+    float gradeSin;          /* longitudinal slope: positive = uphill */
+    float bankSin;           /* lateral crossfall: positive = left side up */
+    float verticalAccelMps2; /* profile curvature: positive = downward (dip loads) */
+    float kerbHeightFrontM;  /* kerb profile height at the front axle's segment */
+    float kerbHeightRearM;   /* kerb profile height at the rear axle's segment */
+    bool frontOnKerb;        /* front axle wheels beyond the racing surface (kerb zone) */
+    bool rearOnKerb;         /* rear axle wheels beyond the racing surface */
+} TrackRoadFrame;
+
+/* Derive the road frame for one entrant from its route localization, the four wheel world
+ * positions, and the road speed (for the curvature term). All zero on a flat profile. */
+void track_road_frame_derive(const TrackDefinition *track, const RouteLocation *loc,
+                             const Vector2 wheelPositions[WHEEL_COUNT], float speedMps,
+                             TrackRoadFrame *out);
 
 /* Open/closed route semantics. */
 bool track_is_closed(const TrackDefinition *track);

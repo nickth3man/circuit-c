@@ -183,9 +183,45 @@ static bool parse_node(const JsonValue *node, TrackNode *out, int index, char *e
         surface = parsed;
     }
 
+    /* 2.5D profile (issue #40): optional per-node elevation, banking and kerb height. */
+    float elevation = 0.0f, banking = 0.0f, kerb = 0.0f;
+    const JsonValue *elevVal = json_object_get(node, "elevation");
+    if (elevVal != NULL) {
+        snprintf(field, sizeof(field), "route.nodes[%d].elevation", index);
+        if (!finite_number(elevVal, &elevation, field, error, errorCap)) return false;
+        if (fabsf(elevation) > 100.0f) {
+            snprintf(field, sizeof(field), "route.nodes[%d].elevation", index);
+            set_error(error, errorCap, field, "elevation must be in [-100, 100] metres");
+            return false;
+        }
+    }
+    const JsonValue *bankVal = json_object_get(node, "banking");
+    if (bankVal != NULL) {
+        snprintf(field, sizeof(field), "route.nodes[%d].banking", index);
+        if (!finite_number(bankVal, &banking, field, error, errorCap)) return false;
+        if (fabsf(banking) > 0.5f) {
+            snprintf(field, sizeof(field), "route.nodes[%d].banking", index);
+            set_error(error, errorCap, field, "banking must be in [-0.5, 0.5] radians");
+            return false;
+        }
+    }
+    const JsonValue *kerbVal = json_object_get(node, "kerbHeight");
+    if (kerbVal != NULL) {
+        snprintf(field, sizeof(field), "route.nodes[%d].kerbHeight", index);
+        if (!finite_number(kerbVal, &kerb, field, error, errorCap)) return false;
+        if (kerb < 0.0f || kerb > 0.3f) {
+            snprintf(field, sizeof(field), "route.nodes[%d].kerbHeight", index);
+            set_error(error, errorCap, field, "kerbHeight must be in [0, 0.3] metres");
+            return false;
+        }
+    }
+
     out->centerM = (Vector2){ x, y };
     out->halfWidthM = halfWidth;
     out->surfaceId = surface;
+    out->elevationM = elevation;
+    out->bankingRad = banking;
+    out->kerbHeightM = kerb;
     out->runoffHalfWidthM = runoff;
     return true;
 }
@@ -1130,9 +1166,12 @@ bool track_manifest_write(const TrackDefinition *track, const char *displayName,
         if (surface == NULL) surface = "asphalt";
         fprintf(out,
                 "      { \"x\": %.9g, \"y\": %.9g, \"halfWidth\": %.9g, "
-                "\"runoffHalfWidth\": %.9g, \"surface\": \"%s\" }%s\n",
+                "\"runoffHalfWidth\": %.9g, \"surface\": \"%s\", \"elevation\": %.9g, "
+                "\"banking\": %.9g, \"kerbHeight\": %.9g }%s\n",
                 (double)n->centerM.x, (double)n->centerM.y, (double)n->halfWidthM,
-                (double)n->runoffHalfWidthM, surface, (i + 1 < track->count) ? "," : "");
+                (double)n->runoffHalfWidthM, surface, (double)n->elevationM,
+                (double)n->bankingRad, (double)n->kerbHeightM,
+                (i + 1 < track->count) ? "," : "");
     }
     fprintf(out, "    ]\n  },\n");
 

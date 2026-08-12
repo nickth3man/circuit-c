@@ -11,6 +11,7 @@
 #include "core/math_utils.h"
 #include "physics/surface.h"
 #include "physics/tire.h"
+#include "world/track.h"
 
 Vector2 physics_contact_point_velocity_body(const VehicleState *state, Vector2 pointM)
 {
@@ -688,7 +689,7 @@ const char *physics_stage_name(PhysicsStage stage)
 bool physics_step_init(PhysicsStep *step, const VehicleSpec *spec, VehicleState *state,
                        VehicleDerived *derived, VehicleRenderState *renderState,
                        VehicleTireState *tireState, float *damage, float *fuelKg,
-                       const ControllerOutput *input, float dt)
+                       const TrackRoadFrame *roadFrame, const ControllerOutput *input, float dt)
 {
     if (step == NULL) return false;
     memset(step, 0, sizeof(*step));
@@ -703,6 +704,7 @@ bool physics_step_init(PhysicsStep *step, const VehicleSpec *spec, VehicleState 
     step->tireState = tireState;
     step->damage = damage;
     step->fuelKg = fuelKg;
+    step->roadFrame = roadFrame;
     step->input = *input; /* copied: the step's demands cannot change halfway through it */
     step->dt = dt;
     step->completedStage = PHYSICS_STAGE_NONE;
@@ -1088,6 +1090,25 @@ static void stage_normal_loads(PhysicsStep *step)
          * receive -dFz. The sign of dFzAxle inverts this for right turns automatically, so the
          * single formula covers both directions. */
         float Fz = axleTotalN * 0.5f + (py > 0.0f ? -dFzAxle : dFzAxle);
+
+        /* Road profile (issue #40): profile curvature scales the load (a dip pushes down,
+         * a crest unloads), and a wheel on the kerb compresses its suspension over the kerb
+         * profile height. Both are bounded and deterministic; absent/flat frame = identity. */
+        if (step->roadFrame != NULL) {
+            const float profileScale =
+                clampf(1.0f + step->roadFrame->verticalAccelMps2 / GRAVITY_MPS2, 0.2f, 2.0f);
+            Fz *= profileScale;
+            const bool onKerb =
+                front ? step->roadFrame->frontOnKerb : step->roadFrame->rearOnKerb;
+            if (onKerb) {
+                const float kerbH = front ? step->roadFrame->kerbHeightFrontM
+                                          : step->roadFrame->kerbHeightRearM;
+                const float rateNpm =
+                    front ? spec->suspWheelRateFrontNpm : spec->suspWheelRateRearNpm;
+                Fz += kerbH * rateNpm; /* suspension compressed over the kerb */
+            }
+        }
+
         Fz = fmaxf(Fz, MIN_NORMAL_LOAD_N);
         state->wheels[i].normalLoadN = Fz;
         derived->wheelContact[i] = (Fz > MIN_NORMAL_LOAD_N + 1e-3f);
@@ -1487,10 +1508,21 @@ static void stage_accumulate(PhysicsStep *step)
                                      state->wheels[i].localPositionM.y * bodyForceN.x;
     }
 
-    derived->totalBodyForceN = (Vector2){
-        derived->frontBodyForceN.x + derived->rearBodyForceN.x + step->resistanceBodyN.x,
-        derived->frontBodyForceN.y + derived->rearBodyForceN.y + step->resistanceBodyN.y
-    };
+    /* Grade gravity (issue #40): the road's longitudinal slope adds a body-frame force
+     * opposing uphill travel. All-zero when the road frame is absent or flat. */
+    Vector2 roadForceN = { 0.0f, 0.0f };
+    if (step->roadFrame != NULL) {
+        const float massKg = step->spec->massKg;
+        roadForceN.x = -massKg * GRAVITY_MPS2 * step->roadFrame->gradeSin;
+        /* Bank gravity acts laterally: on a left-up bank it pulls the car left (+body Y). */
+        roadForceN.y = massKg * GRAVITY_MPS2 * step->roadFrame->bankSin;
+    }
+
+    derived->totalBodyForceN =
+        (Vector2){ derived->frontBodyForceN.x + derived->rearBodyForceN.x +
+                       step->resistanceBodyN.x + roadForceN.x,
+                   derived->frontBodyForceN.y + derived->rearBodyForceN.y +
+                       step->resistanceBodyN.y + roadForceN.y };
 }
 
 /*
@@ -1805,8 +1837,8 @@ static PhysicsStage diagnose_failing_stage(const PhysicsStep *failed)
     VehicleDerived derived = failed->lastGoodDerived;
     VehicleRenderState renderState = failed->lastGoodRenderState;
     if (!physics_step_init(&probe, failed->spec, &state, &derived, &renderState,
-                           failed->tireState, failed->damage, failed->fuelKg, &failed->input,
-                           failed->dt))
+                           failed->tireState, failed->damage, failed->fuelKg, failed->roadFrame,
+                           &failed->input, failed->dt))
         return PHYSICS_STAGE_NONE;
 
     for (PhysicsStage s = PHYSICS_STAGE_BEGIN; s < PHYSICS_STAGE_COUNT;
@@ -1819,11 +1851,12 @@ static PhysicsStage diagnose_failing_stage(const PhysicsStep *failed)
 
 void physics_fixed_update(const VehicleSpec *spec, VehicleState *state, VehicleDerived *derived,
                           VehicleRenderState *renderState, VehicleTireState *tireState,
-                          float *damage, float *fuelKg, const ControllerOutput *input, float dt)
+                          float *damage, float *fuelKg, const TrackRoadFrame *roadFrame,
+                          const ControllerOutput *input, float dt)
 {
     PhysicsStep step;
     if (!physics_step_init(&step, spec, state, derived, renderState, tireState, damage, fuelKg,
-                           input, dt))
+                           roadFrame, input, dt))
         return;
 
     physics_step_run(&step, PHYSICS_STAGE_COUNT - 1);
