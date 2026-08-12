@@ -300,8 +300,11 @@ Multiple lanes may operate in parallel after #13, but dependencies within each l
     Chebyshev-ring query with exact termination; linear-scan fallback on cap overflow).
     Property test proves hinted == brute force on all built-ins. No physics change.
 
-- [ ] [#40 — Add elevation, grade, banking, kerb, and road-profile effects for the 2.5D solver](https://github.com/nickth3man/circuit-c/issues/40)
+- [x] [#40 — Add elevation, grade, banking, kerb, and road-profile effects for the 2.5D solver](https://github.com/nickth3man/circuit-c/issues/40)
   - Depends on: #19, #35, #38
+  - Per-node elevation/banking/kerbHeight (manifest schema; zero = flat baseline),
+    `track_road_frame_derive()` + physics consumption (grade gravity, bank force, crest/dip
+    load scaling, kerb compression). Verified: 166 scenarios.
 
 - [ ] [#41 — Add deterministic weather, wetness, time, and environmental presentation state](https://github.com/nickth3man/circuit-c/issues/41)
   - Depends on: #21, #40
