@@ -387,8 +387,10 @@ Several lanes can begin in parallel after the phase foundations are complete.
   - SessionConfig (validated bundle, deterministic serialize/deserialize) + game_configure_session()
     (grid rebuild, assists, rules freeze). Verified: 170 scenarios.
 
-- [ ] [#49 — Implement grid placement, countdown, start lights, and false starts](https://github.com/nickth3man/circuit-c/issues/49)
+- [x] [#49 — Implement grid placement, countdown, start lights, and false starts](https://github.com/nickth3man/circuit-c/issues/49)
   - Depends on: #11, #37, #48
+  - Staggered grid placement (track_grid_pose_at + race_session_place_grid), false-start
+    detection (stage_false_start, idempotent, RACE_EVENT_FALSE_START). Verified: 171 scenarios.
 
 ## Timing and ghost lane
 
