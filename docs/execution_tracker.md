@@ -425,8 +425,10 @@ Start #54 after both the grid/start and basic live-AI requirements are complete.
   - RacePenalty model (rule/consequence/evidence/lifecycle), stage_penalties (track-limits +
     wrong-way, default-off), penalty API. Verified: 173 scenarios.
 
-- [ ] [#56 — Complete race HUD, classified results, records, retry, and next-session flow](https://github.com/nickth3man/circuit-c/issues/56)
+- [x] [#56 — Complete race HUD, classified results, records, retry, and next-session flow](https://github.com/nickth3man/circuit-c/issues/56)
   - Depends on: #47, #50, #54, #55
+  - RacePresentationSnapshot (authoritative, immutable) + race_session_retry(). Verified: 174
+    scenarios.
 
 ## Pits and event structure lane
 
