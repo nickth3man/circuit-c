@@ -261,6 +261,15 @@ GAME_API uint32_t game_state_checksum(const Game *game)
     h = hash_u32(h, (uint32_t)session->countdownTicksRemaining);
     h = hash_u32(h, (uint32_t)session->classifiedCount);
     h = hash_u32(h, session->events.totalAppended);
+    /* Physical environment (issue #41): precipitation, temperatures, and per-surface
+     * wetness are authoritative (they change grip); presentation-only fields (time of day,
+     * region) are deliberately excluded. */
+    h = hash_f32(h, session->environment.precipitation);
+    h = hash_f32(h, session->environment.ambientTempC);
+    h = hash_f32(h, session->environment.trackTempC);
+    for (int i = 0; i < SURFACE_COUNT; i++) {
+        h = hash_f32(h, session->environment.wetness[i]);
+    }
     return h;
 }
 
@@ -1198,6 +1207,10 @@ static void stage_physics(Game *game, TickContext *ctx, float dt)
         }
         track_road_frame_derive(&game->trackDef, &game->progress.location, wheelPos,
                                 game->derived.speedMps, &roadFrame);
+        for (int w = 0; w < WHEEL_COUNT; w++) {
+            roadFrame.wetness[w] =
+                game->session.environment.wetness[(int)game->vehicle.wheels[w].surfaceId];
+        }
         roadPtr = &roadFrame;
     }
     physics_fixed_update(&game->spec, &game->vehicle, &game->derived, &game->renderState,
@@ -1370,6 +1383,11 @@ static void simulate_extra_entrant(Game *game, RaceEntrant *entrant, const TickC
         }
         track_road_frame_derive(&game->trackDef, &entrant->progress.location, wheelPos,
                                 entrant->instance.derived.speedMps, &roadFrame);
+        for (int w = 0; w < WHEEL_COUNT; w++) {
+            roadFrame.wetness[w] =
+                game->session.environment
+                    .wetness[(int)entrant->instance.vehicle.wheels[w].surfaceId];
+        }
         roadPtr = &roadFrame;
     }
     physics_fixed_update(&entrant->instance.spec, &entrant->instance.vehicle,
@@ -1720,6 +1738,8 @@ GAME_API void game_fixed_update(Game *game, float dt)
             simulate_extra_entrant(game, &game->session.roster.entrants[i], &ctx, dt);
         }
         stage_collision(game, &ctx, dt);
+        /* Deterministic session environment (issue #41): wetness/temperature evolution. */
+        race_environment_update(&game->session.environment, dt);
         accumulate_damage(game);
         stage_rules(game);
         stage_stuck_recovery(game);

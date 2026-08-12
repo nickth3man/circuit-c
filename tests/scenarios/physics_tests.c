@@ -5303,6 +5303,93 @@ static void scenario_road_profile(void)
     }
 }
 
+/*
+ * weather — issue #41: deterministic wetness/temperature environment.
+ *
+ * Rain builds surface wetness, drainage dries it, wetness reduces grip and cools tires, and
+ * the dry default reproduces the baseline. All physical state is checksummed.
+ */
+static void scenario_weather(void)
+{
+    /* ---- 1. Dry default: zero wetness, no effect. ---- */
+    {
+        RaceEnvironment env;
+        race_environment_set_default(&env);
+        check(env.precipitation == 0.0f && env.wetness[SURFACE_ASPHALT] == 0.0f,
+              "dry default has no wetness");
+        check_near((double)env.ambientTempC, 20.0, 1e-6, "default ambient is 20 C");
+    }
+
+    /* ---- 2. Rain builds wetness; drainage dries it; both bounded. ---- */
+    {
+        RaceEnvironment env;
+        race_environment_set_default(&env);
+        env.precipitation = 1.0f;
+        for (int i = 0; i < 2400; i++) race_environment_update(&env, FIXED_DT_S);
+        check(env.wetness[SURFACE_ASPHALT] > 0.5f, "rain saturates the asphalt wetness (%.3f)",
+              (double)env.wetness[SURFACE_ASPHALT]);
+        check(env.wetness[SURFACE_ASPHALT] <= 1.0f, "wetness is bounded at 1");
+
+        env.precipitation = 0.0f;
+        for (int i = 0; i < 2400; i++) race_environment_update(&env, FIXED_DT_S);
+        check(env.wetness[SURFACE_ASPHALT] < 0.1f, "drainage dries the surface (%.3f)",
+              (double)env.wetness[SURFACE_ASPHALT]);
+        check(env.wetness[SURFACE_ASPHALT] >= 0.0f, "wetness never goes negative");
+    }
+
+    /* ---- 3. Wetness reduces grip and slows the car. ---- */
+    {
+        Game *dry = alloc_game();
+        Game *wet = alloc_game();
+        game_init(dry);
+        game_init(wet);
+        track_load_chicane(&dry->trackDef);
+        track_load_chicane(&wet->trackDef);
+        /* Keep the wet session saturated: rain on + saturated surfaces. */
+        wet->session.environment.precipitation = 1.0f;
+        for (int s = 0; s < SURFACE_COUNT; s++) wet->session.environment.wetness[s] = 1.0f;
+        game_spawn_on_track(dry);
+        game_spawn_on_track(wet);
+        dry->controller.kind = wet->controller.kind = CONTROLLER_KIND_AI;
+        dry->state = wet->state = STATE_PLAYING;
+        for (int i = 0; i < 1800; i++) {
+            game_fixed_update(dry, FIXED_DT_S);
+            game_fixed_update(wet, FIXED_DT_S);
+        }
+        check(wet->derived.speedMps < dry->derived.speedMps,
+              "a fully wet track is slower than dry (%.1f < %.1f m/s)",
+              (double)wet->derived.speedMps, (double)dry->derived.speedMps);
+        check(dry->session.environment.wetness[SURFACE_ASPHALT] == 0.0f,
+              "the dry control stayed dry");
+        free(dry);
+        free(wet);
+    }
+
+    /* ---- 4. Determinism: identical weather sessions reproduce. ---- */
+    {
+        Game *a = alloc_game();
+        Game *b = alloc_game();
+        game_init(a);
+        game_init(b);
+        track_load_chicane(&a->trackDef);
+        track_load_chicane(&b->trackDef);
+        a->session.environment.precipitation = b->session.environment.precipitation = 1.0f;
+        game_spawn_on_track(a);
+        game_spawn_on_track(b);
+        a->controller.kind = b->controller.kind = CONTROLLER_KIND_AI;
+        a->state = b->state = STATE_PLAYING;
+        bool same = true;
+        for (int i = 0; i < 1200; i++) {
+            game_fixed_update(a, FIXED_DT_S);
+            game_fixed_update(b, FIXED_DT_S);
+            if (game_state_checksum(a) != game_state_checksum(b)) same = false;
+        }
+        check(same, "weather runs are deterministic over 1200 ticks");
+        free(a);
+        free(b);
+    }
+}
+
 static const TestScenario kPhysicsScenarios[] = {
     { "telemetry", "CSV writer: stable header, row count, failure handling",
       scenario_telemetry },
@@ -5331,6 +5418,8 @@ static const TestScenario kPhysicsScenarios[] = {
     { "road-profile",
       "issue #40: grade gravity, banking, kerb load, profile curvature, determinism",
       scenario_road_profile },
+    { "weather", "issue #41: rain/wetness evolution, grip loss, dry baseline, determinism",
+      scenario_weather },
     { "solver-stages",
       "staged solver: prefix runs, stage contracts, rollback and failure report",
       scenario_solver_stages },

@@ -213,6 +213,11 @@
  * droop limit the wheel is declared out of contact and its load floors at MIN_NORMAL_LOAD_N. */
 #define SUSP_BUMP_STOP_RATE_NPM 120000.0f /* N/m; wheel-referred, engaged past full travel */
 #define SUSP_DROOP_FRACTION 0.6f          /* dimensionless; droop = droop_frac * travel */
+/* Session environment (issue #41). */
+#define ENV_RAIN_RATE_PER_S 0.10f       /* wetness/s at full precipitation */
+#define ENV_DRY_RATE_PER_S 0.05f        /* wetness/s drained/evaporated */
+#define ENV_TRACK_TEMP_RATE_PER_S 0.02f /* 1/s; track temperature relaxation */
+#define WETNESS_GRIP_LOSS 0.25f         /* dimensionless; max surface mu loss when fully wet */
 
 /* Wheel offset (ET, mm) and brake hardware. */
 #define WHEEL_OFFSET_ET_FRONT_MM 35.0f

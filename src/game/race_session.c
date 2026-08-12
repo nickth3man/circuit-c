@@ -24,12 +24,40 @@ void race_rules_set_default(RaceRules *rules)
     rules->stuckRecoveryDelayS = STUCK_RECOVERY_DELAY_S;
 }
 
+void race_environment_set_default(RaceEnvironment *env)
+{
+    if (env == NULL) return;
+    memset(env, 0, sizeof(*env));
+    env->ambientTempC = 20.0f;
+    env->trackTempC = 20.0f;
+    env->timeOfDayHours = 12.0f;
+}
+
+void race_environment_update(RaceEnvironment *env, float dt)
+{
+    if (env == NULL || !(dt > 0.0f)) return;
+    /* Rain adds wetness to every surface; drainage and evaporation dry it. */
+    const float rainAdd = ENV_RAIN_RATE_PER_S * env->precipitation * dt;
+    const float dryRem = ENV_DRY_RATE_PER_S * dt;
+    for (int s = 0; s < SURFACE_COUNT; s++) {
+        float w = env->wetness[s] + rainAdd - dryRem;
+        if (w < 0.0f) w = 0.0f;
+        if (w > 1.0f) w = 1.0f;
+        env->wetness[s] = w;
+    }
+    /* Track temperature relaxes toward ambient plus a small rain cooling offset. */
+    const float targetC = env->ambientTempC - 5.0f * env->precipitation;
+    const float alpha = 1.0f - expf(-ENV_TRACK_TEMP_RATE_PER_S * dt);
+    env->trackTempC += (targetC - env->trackTempC) * alpha;
+}
+
 void race_session_init(RaceSession *session)
 {
     if (session == NULL) return;
     memset(session, 0, sizeof(*session));
     race_roster_init(&session->roster);
     race_rules_set_default(&session->rules);
+    race_environment_set_default(&session->environment);
     session->phase = RACE_PHASE_CONFIGURING;
     session->resumePhase = RACE_PHASE_CONFIGURING;
 }
@@ -51,6 +79,9 @@ void race_session_start(RaceSession *session, const RaceRules *rules)
     session->tick = 0u;
     session->clockS = 0.0f;
     session->classifiedCount = 0;
+    /* A fresh race starts with the authored environment defaults; the session config flow
+     * (#48) will set precipitation/ambient explicitly. */
+    race_environment_set_default(&session->environment);
     /* Resolved once, in fixed steps. The simulation rate is a product constant, so a countdown
      * is a whole number of ticks and lasts the same number of ticks on every machine.
      *

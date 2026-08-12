@@ -1202,15 +1202,21 @@ static void stage_tire_forces(PhysicsStep *step)
         /* Surface-relative friction and stiffness. On asphalt the surface ratios equal 1.0 and
          * tireBScale is 1.0, so this block is a complete no-op. */
         const SurfaceSpec *s = Surface_Get(wheel->surfaceId);
+        /* Wetness grip loss (issue #41): a water film on the wheel's surface reduces mu,
+         * bounded, per wheel. 1.0 when dry or no frame. */
+        const float wetMult =
+            (step->roadFrame != NULL)
+                ? 1.0f - WETNESS_GRIP_LOSS * clampf(step->roadFrame->wetness[i], 0.0f, 1.0f)
+                : 1.0f;
         /* Mechanical damage grip loss (issue #28); 1.0 when damage is off. */
         const float damageMult =
             (step->damage != NULL && *step->damage > 0.0f)
                 ? 1.0f - DAMAGE_GRIP_LOSS * (*step->damage > 1.0f ? 1.0f : *step->damage)
                 : 1.0f;
         const float muLateralEff = lateralMuAxle * (s->muLateral / SURFACE_REFERENCE_MU_LAT) *
-                                   muScale * tempMult * wearMult * damageMult;
+                                   muScale * tempMult * wearMult * damageMult * wetMult;
         const float muLongitudinalEff = spec->tireMuLongScale * s->muLongitudinal * muScale *
-                                        tempMult * wearMult * damageMult;
+                                        tempMult * wearMult * damageMult * wetMult;
         const float BlatEff = lateralB * widthScale * pressureScale * s->tireBScale;
         const float BlongEff = spec->tireBLong * pressureScale;
 
@@ -1342,10 +1348,16 @@ static void stage_tire_thermal(PhysicsStep *step)
             const float heatW =
                 slipPowerW * TIRE_HEAT_SLIP_GAIN + rollingPowerW * TIRE_HEAT_ROLLING_GAIN;
 
-            /* Cooling: convection to ambient, stronger with road speed. */
-            const float coolingW =
-                TIRE_COOLING_RATE_PER_S * (1.0f + TIRE_COOLING_SPEED_FACTOR * speedMps) *
-                (ts->temperatureC - TIRE_AMBIENT_TEMP_C) * TIRE_THERMAL_CAPACITY_J_PER_C;
+            /* Cooling: convection to ambient, stronger with road speed, and extra cooling
+             * from a water film on the wheel's surface (issue #41). */
+            const float wetCooling =
+                (step->roadFrame != NULL)
+                    ? 3.0f * clampf(step->roadFrame->wetness[i], 0.0f, 1.0f)
+                    : 0.0f;
+            const float coolingW = (TIRE_COOLING_RATE_PER_S + wetCooling) *
+                                   (1.0f + TIRE_COOLING_SPEED_FACTOR * speedMps) *
+                                   (ts->temperatureC - TIRE_AMBIENT_TEMP_C) *
+                                   TIRE_THERMAL_CAPACITY_J_PER_C;
 
             float tempC =
                 ts->temperatureC + (heatW - coolingW) * dt / TIRE_THERMAL_CAPACITY_J_PER_C;

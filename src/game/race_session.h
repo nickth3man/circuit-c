@@ -99,6 +99,26 @@ typedef enum {
     DAMAGE_MECHANICAL /* damage accumulated AND fed to the solver (engine/aero/grip) */
 } RaceDamageMode;
 
+/* Deterministic session environment (issue #41): weather/wetness/temperature state that
+ * evolves per tick and feeds physical grip and tire thermal behavior. All-zero/dry defaults
+ * reproduce the approved baseline. Purely visual fields (time of day, scenery region) are
+ * presentation hints that must never enter the checksum; the physical fields are
+ * authoritative. */
+typedef struct {
+    float precipitation;          /* 0..1 rain intensity */
+    float ambientTempC;           /* ambient air temperature */
+    float trackTempC;             /* track surface temperature, evolves toward ambient */
+    float wetness[SURFACE_COUNT]; /* 0..1 water film per surface id */
+    float timeOfDayHours;         /* presentation-only: 0..24 (excluded from the checksum) */
+    char region[32];              /* presentation-only: scenery/audio region id */
+} RaceEnvironment;
+
+/* Defaults: dry, 20 C ambient, no rain. */
+void race_environment_set_default(RaceEnvironment *env);
+/* Deterministic per-tick evolution: rain adds wetness, drainage and evaporation dry it, and
+ * the track temperature relaxes toward ambient. Bounded. */
+void race_environment_update(RaceEnvironment *env, float dt);
+
 /* Upper bound on a resolved countdown, in fixed steps — ten minutes at the simulation rate.
  * It exists so that converting a nonsense or non-finite countdown to a tick count is defined
  * behaviour rather than whatever the cast happens to produce. */
@@ -181,6 +201,10 @@ typedef struct {
     int classifiedCount; /* finishing positions awarded so far */
     RaceEventLog events;
     RaceResults results;
+
+    /* Deterministic session environment (issue #41): wetness, temperatures, precipitation.
+     * Physical fields are authoritative (checksummed); presentation fields are excluded. */
+    RaceEnvironment environment;
 } RaceSession;
 
 /* Zero the session into RACE_PHASE_CONFIGURING with an empty roster and default rules. */

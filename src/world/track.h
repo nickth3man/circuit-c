@@ -542,13 +542,14 @@ bool track_point_in_service_box(const TrackDefinition *track, Vector2 pointM);
  * from the profile's curvature (crest unloads, dip loads), and the kerb state of each axle.
  * Derived deterministically from the track profile; NULL/zero in physics means flat. */
 typedef struct TrackRoadFrame {
-    float gradeSin;          /* longitudinal slope: positive = uphill */
-    float bankSin;           /* lateral crossfall: positive = left side up */
-    float verticalAccelMps2; /* profile curvature: positive = downward (dip loads) */
-    float kerbHeightFrontM;  /* kerb profile height at the front axle's segment */
-    float kerbHeightRearM;   /* kerb profile height at the rear axle's segment */
-    bool frontOnKerb;        /* front axle wheels beyond the racing surface (kerb zone) */
-    bool rearOnKerb;         /* rear axle wheels beyond the racing surface */
+    float gradeSin;             /* longitudinal slope: positive = uphill */
+    float bankSin;              /* lateral crossfall: positive = left side up */
+    float verticalAccelMps2;    /* profile curvature: positive = downward (dip loads) */
+    float kerbHeightFrontM;     /* kerb profile height at the front axle's segment */
+    float kerbHeightRearM;      /* kerb profile height at the rear axle's segment */
+    bool frontOnKerb;           /* front axle wheels beyond the racing surface (kerb zone) */
+    bool rearOnKerb;            /* rear axle wheels beyond the racing surface */
+    float wetness[WHEEL_COUNT]; /* 0..1 water film at each wheel's surface (issue #41) */
 } TrackRoadFrame;
 
 /* Derive the road frame for one entrant from its route localization, the four wheel world
