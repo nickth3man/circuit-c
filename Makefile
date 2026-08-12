@@ -184,7 +184,7 @@ SHARED_SRCS := src/game/input.c src/core/math_utils.c src/dev/dev_scenario.c src
                src/dev/failure_bundle.c \
                src/physics/surface.c src/physics/vehicle.c \
                src/world/collision_world.c \
-               src/core/json.c src/content/vehicle_manifest.c src/content/track_manifest.c src/content/roster_promotion.c src/content/vehicle_class.c
+               src/core/json.c src/core/content_paths.c src/content/vehicle_manifest.c src/content/track_manifest.c src/content/roster_promotion.c src/content/vehicle_class.c
 # failure_bundle.c is SHARED, not DEV: --validate-lap writes a bundle from the platform layer,
 # which links SHARED_SRCS but not GAME_SRCS. Its own dependencies (dev_params, dev_replay,
 # replay) are already here, and it holds no static state, so both binaries can carry a copy.
@@ -261,6 +261,9 @@ EXE_TESTS   := $(BUILD_TESTS)/circuit_tests$(EXE_SUFFIX)
 EXE_DEBUG   := $(BUILD_DEV)/circuit$(EXE_SUFFIX)
 EXE_RELEASE := $(BUILD_RELEASE)/circuit_release$(EXE_SUFFIX)
 
+# Release bundle directory name (issue #46); the packaging script mirrors it.
+BUNDLE_NAME := circuit-release
+
 ARTIFACTS := artifacts
 # Ephemeral run evidence, all of it under the already-ignored artifacts/ root.
 TELEMETRY := $(ARTIFACTS)/telemetry
@@ -277,7 +280,8 @@ REGRESSION_SCENARIOS := skidpad step-steer transition lift-off \
         benchmark ci compile-commands format format-check format-py lint-py lint analyze fuzz \
         validate-hotreload compare-rgba measure-rotation record tidy tidy-changed tidy-run \
         clean clean-telemetry clean-artifacts dirs windows-only cards inspect visual-diagnose \
-        benchmark-multi validate-tracks track-info print-source-groups print-source-group
+        benchmark-multi validate-tracks track-info package package-smoke print-source-groups \
+        print-source-group
 
 all: dev
 
@@ -401,6 +405,21 @@ validate-tracks: tests
 track-info: tests
 	@test -n "$(TRACK)" || (echo "usage: make track-info TRACK=data/tracks/chicane.track.json" >&2; exit 2)
 	./$(EXE_TESTS) --track-info $(TRACK)
+
+# Release bundle (issue #46): self-contained, CWD-independent package with runtime DLLs,
+# content, licenses, hashes, and launch instructions. Run the packaged exe from ANY directory.
+package: release
+	@$(PYTHON) tools/package/make_bundle.py
+
+# Smoke the packaged bundle from an unrelated working directory (issue #46 acceptance):
+# the release exe must find its content next to itself, not in the caller's CWD.
+package-smoke: package
+	@echo "package-smoke: launching $(BUNDLE_NAME) from a scratch directory..."
+	@tmp=$$(mktemp -d); \
+	cd $$tmp && "$(CURDIR)/build/package/$(BUNDLE_NAME)/circuit_release.exe" --smoke-test; \
+	rc=$$?; rm -rf $$tmp; \
+	if [ $$rc -ne 0 ]; then echo "package-smoke: FAILED (exit $$rc)"; exit 1; fi; \
+	echo "package-smoke: ok"
 
 # ------------------------------------------------------------------- telemetry tooling --
 

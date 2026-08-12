@@ -13,6 +13,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <sys/stat.h>
 #include <time.h>
 
 #if defined(_WIN32)
@@ -34,6 +35,7 @@
 #include "render/car_visual_raster.h"
 #include "render/track_ribbon_geometry.h"
 #include "core/config.h"
+#include "core/content_paths.h"
 #include "dev/dev_params.h"
 #include "dev/dev_replay.h"
 #include "dev/dev_scenario.h"
@@ -1957,8 +1959,29 @@ static void scenario_player_profile(void)
     }
 }
 
+/* Issue #46: content discovery resolves against the product root, not the CWD. */
+static void scenario_content_paths(void)
+{
+    char resolved[1024];
+    content_path_resolve("data/tracks", resolved, sizeof(resolved));
+    check(resolved[0] != '\0', "content path resolves to a non-empty path");
+    /* The resolved path must be a real directory the loader can open. */
+    {
+        struct stat st;
+        check(stat(resolved, &st) == 0 && (st.st_mode & S_IFDIR) != 0,
+              "resolved content path exists (%s)", resolved);
+    }
+
+    /* The root itself: either an explicit root or the CWD fallback. */
+    char root[1024];
+    content_path_root(root, sizeof(root));
+    check(root[0] != '\0', "content root is discoverable (%s)", root);
+}
+
 static const TestScenario kCoreScenarios[] = {
     { "math", "clampf, lerpf, smooth_to, wrap_angle, smoothstep, lerp_angle", scenario_math },
+    { "content-paths", "issue #46: product-root content discovery, CWD independent",
+      scenario_content_paths },
     { "player-profile", "issue #47: versioned profile, migration, corrupt recovery, bindings",
       scenario_player_profile },
     { "units", "world<->render conversion and the heading sign convention", scenario_units },

@@ -3,6 +3,7 @@
  */
 #include "content/track_manifest.h"
 
+#include "core/content_paths.h"
 #include "core/json.h"
 
 #include <ctype.h>
@@ -964,6 +965,13 @@ bool track_catalog_load(const char *dir, TrackCatalog *out, char *error, size_t 
         set_error(error, errorCap, NULL, "no catalog directory given");
         return false;
     }
+    /* Issue #46: an explicit dir is trusted verbatim (test fixtures); the default catalog
+     * path resolves against the product root so packaged builds work from any CWD. */
+    char resolved[1024];
+    if (dir == NULL) {
+        content_path_resolve(useDir, resolved, sizeof(resolved));
+        useDir = resolved;
+    }
     DIR *d = opendir(useDir);
     if (d == NULL) {
         set_error(error, errorCap, useDir, "could not open directory");
@@ -1098,8 +1106,10 @@ bool track_load_by_id(const char *id, TrackDefinition *out, uint32_t *manifestHa
         return false;
     }
     char path[1024];
+    char resolvedDir[1024];
+    content_path_resolve(TRACK_CATALOG_DIR, resolvedDir, sizeof(resolvedDir));
     const int written =
-        snprintf(path, sizeof(path), "%s/%s%s", TRACK_CATALOG_DIR, id, TRACK_CATALOG_SUFFIX);
+        snprintf(path, sizeof(path), "%s/%s%s", resolvedDir, id, TRACK_CATALOG_SUFFIX);
     if (written < 0 || written >= (int)sizeof(path)) {
         set_error(error, errorCap, id, "path is too long");
         return false;

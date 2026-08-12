@@ -22,6 +22,7 @@
 
 #include "content/roster_promotion.h"
 #include "content/vehicle_class.h"
+#include "core/content_paths.h"
 #include "content/vehicle_manifest.h"
 #include "physics/vehicle.h"
 
@@ -98,15 +99,19 @@ static bool ensure_roster_loaded(void)
     if (g_rosterLoaded) return (g_rosterCatalog.count > 0);
     char error[256];
     VehicleCatalog full;
-    if (!vehicle_manifest_load_dir("data/vehicles", &full, error, sizeof(error))) {
+    /* Issue #46: resolve against the product root so packaged builds work from any CWD. */
+    char vehicleDir[1024];
+    content_path_resolve("data/vehicles", vehicleDir, sizeof(vehicleDir));
+    if (!vehicle_manifest_load_dir(vehicleDir, &full, error, sizeof(error))) {
         return false;
     }
     /* The reviewed class rules, when the build ships them. A missing or unreadable directory
      * leaves an empty catalogue, which makes every class tag unconstrained rather than fatal. */
     VehicleClassCatalog classes;
     char classError[256];
-    if (!vehicle_class_load_dir(CAR_ROSTER_CLASS_DIR, &classes, classError,
-                                sizeof(classError))) {
+    char classDir[1024];
+    content_path_resolve(CAR_ROSTER_CLASS_DIR, classDir, sizeof(classDir));
+    if (!vehicle_class_load_dir(classDir, &classes, classError, sizeof(classError))) {
         memset(&classes, 0, sizeof(classes));
     }
 
