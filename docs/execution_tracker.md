@@ -354,8 +354,11 @@ These tasks may run in parallel once their dependencies are complete.
     1/4/8-car fields assert the 120 Hz budget with >= 25% headroom. Reference: 176.8 us/tick
     at 8 cars (97.9% headroom, Ryzen 5 7600X UCRT64 release).
 
-- [ ] [#46 — Deliver interactive cross-platform builds and reproducible release packaging](https://github.com/nickth3man/circuit-c/issues/46)
+- [x] [#46 — Deliver interactive cross-platform builds and reproducible release packaging](https://github.com/nickth3man/circuit-c/issues/46)
   - Depends on: #5, #29, #35
+  - content_paths (CWD-independent content discovery), make package/package-smoke
+    (self-contained bundle + sha256 manifest), smoke from an unrelated CWD. Verified: 177
+    scenarios.
 
 - [x] [#47 — Add versioned player profile, settings, controls, and accessibility](https://github.com/nickth3man/circuit-c/issues/47)
   - Depends on: #5, #29, #35
