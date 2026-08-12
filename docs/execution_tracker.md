@@ -201,13 +201,17 @@ Multiple lanes may operate in parallel after #13, but dependencies within each l
     the friction ellipse. Aligning moment diagnostic (`aligningMomentNm`) from pneumatic
     trail. Verified: 150 scenarios, 13240 checks, 0 failed; 46/46 regression PASS.
 
-- [ ] [#21 — Add deterministic tire temperature and pressure state](https://github.com/nickth3man/circuit-c/issues/21)
+- [x] [#21 — Add deterministic tire temperature and pressure state](https://github.com/nickth3man/circuit-c/issues/21)
   - Depends on: #8, #16, #20
-  - VehicleTireState (pressureKpa/temperatureC/wear) already exists in VehicleInstance and is
-    checksummed; #21 adds the thermal/pressure dynamics that evolve it.
+  - Reduced-order bulk thermal model behind `tireThermalEnabled` (default 0 = bit-identical):
+    slip/rolling heat, convection cooling, ideal-gas live pressure, Gaussian grip multiplier.
+    New `PHYSICS_STAGE_TIRE_THERMAL`; state checksummed/replayed. Verified: 156 scenarios.
 
-- [ ] [#22 — Add tire wear, grip degradation, and deterministic service hooks](https://github.com/nickth3man/circuit-c/issues/22)
+- [x] [#22 — Add tire wear, grip degradation, and deterministic service hooks](https://github.com/nickth3man/circuit-c/issues/22)
   - Depends on: #11, #21
+  - Monotonic wear from slip energy (lockup multiplier, surface abrasion), power-law grip
+    degradation to a bounded floor, `vehicle_tire_service()` pit hook. Behind
+    `tireWearEnabled` (default 0 = bit-identical). Verified: 157 scenarios.
 
 ## Aerodynamics lane
 
