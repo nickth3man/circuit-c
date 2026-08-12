@@ -197,8 +197,13 @@
 #define SUSP_CASTER_REAR_RAD 0.052f
 #define SUSP_WHEEL_RATE_FRONT_NPM 28000.0f
 #define SUSP_WHEEL_RATE_REAR_NPM 26000.0f
-#define SUSP_ANTI_ROLL_FRONT_NPM 18000.0f
-#define SUSP_ANTI_ROLL_REAR_NPM 16000.0f
+/* Wheel-referred anti-roll rates (N/m). Since issue #18 they decide the elastic front/rear
+ * roll-stiffness distribution, so the bar pair is chosen so the car's TOTAL lateral load
+ * transfer split is the one it had before — not so the internal stiffness fraction is: the
+ * elastic moment now acts on the shorter arm (h_cg - h_rollAxis) and the linkage carries the
+ * rest geometrically. */
+#define SUSP_ANTI_ROLL_FRONT_NPM 15500.0f
+#define SUSP_ANTI_ROLL_REAR_NPM 18500.0f
 #define SUSP_TRAVEL_FRONT_M 0.090f
 #define SUSP_TRAVEL_REAR_M 0.095f
 #define SUSP_ROLL_CENTRE_FRONT_M 0.080f
@@ -397,8 +402,22 @@
 #define DIFFERENTIAL_BIAS_RATIO 2.0f     /* dimensionless; LSD slower/faster cap */
 #define DIFFERENTIAL_PRELOAD_NM 60.0f    /* N*m; LSD clutch preload */
 #define DIFF_OMEGA_EPSILON_RAD_S 1.0e-3f /* rad/s; LSD omega-difference deadband */
-#define ROLL_STIFFNESS_FRONT_FRACTION \
-    0.50f                              /* dimensionless 0..1; front axle roll-moment share */
+/* One axle's roll stiffness, N*m/rad, from wheel-referred rates over its track:
+ * K = 0.5 * t^2 * (wheelRate + antiRollRate). Issue #18 made this the ONLY source of the
+ * elastic front/rear split, so ROLL_STIFFNESS_FRONT_FRACTION is a DERIVED readout — it must
+ * be the same expression vehicle_spec_refresh_derived() evaluates, not a literal. */
+#define SUSP_AXLE_ROLL_STIFFNESS_NM_RAD(trackM, wheelRateNpm, antiRollNpm) \
+    (0.5f * (trackM) * (trackM) * ((wheelRateNpm) + (antiRollNpm)))
+#define SUSP_ROLL_STIFFNESS_FRONT_NM_RAD                                          \
+    SUSP_AXLE_ROLL_STIFFNESS_NM_RAD(VEH_TRACK_FRONT_M, SUSP_WHEEL_RATE_FRONT_NPM, \
+                                    SUSP_ANTI_ROLL_FRONT_NPM)
+#define SUSP_ROLL_STIFFNESS_REAR_NM_RAD                                         \
+    SUSP_AXLE_ROLL_STIFFNESS_NM_RAD(VEH_TRACK_REAR_M, SUSP_WHEEL_RATE_REAR_NPM, \
+                                    SUSP_ANTI_ROLL_REAR_NPM)
+/* dimensionless 0..1; front axle share of ELASTIC roll stiffness (derived) */
+#define ROLL_STIFFNESS_FRONT_FRACTION   \
+    (SUSP_ROLL_STIFFNESS_FRONT_NM_RAD / \
+     (SUSP_ROLL_STIFFNESS_FRONT_NM_RAD + SUSP_ROLL_STIFFNESS_REAR_NM_RAD))
 #define SURFACE_REFERENCE_MU_LAT 1.30f /* asphalt lateral mu; tireMuLat* are absolute vs this */
 #define SURFACE_REFERENCE_MU_LONG \
     1.35f /* asphalt longitudinal mu; documentation reference only */

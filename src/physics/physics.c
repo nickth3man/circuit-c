@@ -466,6 +466,11 @@ bool physics_state_is_valid(const VehicleSpec *spec, const VehicleState *state,
      * assertions are added when the logic is wired in sub-steps 2-8. */
     FINITE_VALUE(derived->lateralLoadTransferFrontN);
     FINITE_VALUE(derived->lateralLoadTransferRearN);
+    FINITE_VALUE(derived->lateralLoadTransferElasticFrontN);
+    FINITE_VALUE(derived->lateralLoadTransferElasticRearN);
+    FINITE_VALUE(derived->lateralLoadTransferGeometricFrontN);
+    FINITE_VALUE(derived->lateralLoadTransferGeometricRearN);
+    FINITE_VALUE(derived->rollAxisHeightAtCgM);
     FINITE_VALUE(derived->rollMomentNm);
     for (int i = 0; i < WHEEL_COUNT; i++) FINITE_VALUE(derived->tireLoadSensitivityMuScale[i]);
     FINITE_VALUE(derived->differentialOmegaRadS[0]);
@@ -524,6 +529,22 @@ bool physics_state_is_valid(const VehicleSpec *spec, const VehicleState *state,
             state->wheels[WHEEL_REAR_LEFT].normalLoadN <= MIN_NORMAL_LOAD_N + 1e-3f ||
             state->wheels[WHEEL_REAR_RIGHT].normalLoadN <= MIN_NORMAL_LOAD_N + 1e-3f;
         if (!rearFloored && fabsf(rearSum - derived->normalLoadRearN) > 1e-2f) return false;
+    }
+
+    /* Roll-moment closure (issue #18): the elastic and geometric routes are two halves of one
+     * moment, so what they deliver across the two track widths must add back up to m*ay*h_cg.
+     * This is the check that fails if the roll-centre geometry, the weight-share split or the
+     * stiffness fraction is wrong — each of them individually preserves the DIRECTION of the
+     * transfer, so only the total catches them.
+     *
+     * Skipped for a car whose roll axis is at or above its CG, because the elastic arm is
+     * floored at zero there and the transfer is deliberately geometric-only; and skipped when
+     * lateral transfer is switched off, where there is no moment to close. */
+    if (spec->lateralLoadTransferEnabled && derived->rollAxisHeightAtCgM < spec->cgHeightM) {
+        const float deliveredNm = derived->lateralLoadTransferFrontN * spec->trackWidthFrontM +
+                                  derived->lateralLoadTransferRearN * spec->trackWidthRearM;
+        const float toleranceNm = 1.0f + 1e-3f * fabsf(derived->rollMomentNm);
+        if (fabsf(deliveredNm - derived->rollMomentNm) > toleranceNm) return false;
     }
 
     /* Lateral transfer direction check: when lateral acceleration is significant and neither
@@ -950,20 +971,63 @@ static void stage_normal_loads(PhysicsStep *step)
     derived->normalLoadFrontN = loads.frontN;
     derived->normalLoadRearN = loads.rearN;
 
-    /* Lateral load transfer: the roll moment caused by lateral acceleration is distributed
-     * between the front and rear axles according to rollStiffnessFrontFraction. The per-axle
-     * lateral transfer delta is then layered on top of the already-long-transferred axle load,
-     * unloading the inside wheel and loading the outside. */
+    /* Lateral load transfer, quasi-static from the suspension hardware (issue #18).
+     *
+     * The roll moment m*ay*h_cg reaches the contact patches by two routes, and the split
+     * between them is what the suspension parameters decide:
+     *
+     *   GEOMETRIC — the share carried through the linkage itself, reacting at each axle's
+     *   roll centre. It does not roll the body, it appears immediately, and it is
+     *   independent of spring and bar stiffness. Each axle takes it in proportion to the
+     *   lateral force it carries, which in steady state is its static weight share.
+     *
+     *   ELASTIC — the remainder, m*ay*(h_cg - h_rollAxis), which rolls the sprung mass
+     *   against the springs and anti-roll bars and is therefore split front-to-rear by ROLL
+     *   STIFFNESS. rollStiffnessFrontFraction is derived from wheel rates, anti-roll rates
+     *   and track widths (vehicle_spec_refresh_derived), so the bars decide the balance.
+     *
+     * The two routes sum back to the whole roll moment for any roll-centre heights:
+     * dFz_front * t_front + dFz_rear * t_rear == m * ay * h_cg, which
+     * physics_state_is_valid() checks every step.
+     *
+     * TWO SIMPLIFICATIONS, STATED. Total mass stands in for sprung mass on the elastic
+     * path, because no unsprung mass is authored anywhere. And a roll axis ABOVE the CG
+     * would make the elastic term change sign (the body would lean INTO the corner); that
+     * is outside what a quasi-static planar model can claim, so the elastic arm is floored
+     * at zero and the transfer becomes purely geometric there. */
     const float rollMoment = spec->massKg * state->filteredLatAccelMps2 * spec->cgHeightM;
     float dFzFront = 0.0f, dFzRear = 0.0f;
+    float elasticFrontN = 0.0f, elasticRearN = 0.0f;
+    float geometricFrontN = 0.0f, geometricRearN = 0.0f;
+    const float rollAxisAtCgM =
+        spec->suspRollCentreFrontM + (spec->suspRollCentreRearM - spec->suspRollCentreFrontM) *
+                                         (spec->cgToFrontM / spec->wheelbaseM);
     if (spec->lateralLoadTransferEnabled) {
-        dFzFront = spec->rollStiffnessFrontFraction * rollMoment / spec->trackWidthFrontM;
-        dFzRear =
-            (1.0f - spec->rollStiffnessFrontFraction) * rollMoment / spec->trackWidthRearM;
+        const float lateralForceN = spec->massKg * state->filteredLatAccelMps2;
+        const float frontWeightShare = spec->cgToRearM / spec->wheelbaseM;
+        const float elasticArmM = fmaxf(spec->cgHeightM - rollAxisAtCgM, 0.0f);
+        const float elasticMomentNm = lateralForceN * elasticArmM;
+
+        geometricFrontN = lateralForceN * frontWeightShare * spec->suspRollCentreFrontM /
+                          spec->trackWidthFrontM;
+        geometricRearN = lateralForceN * (1.0f - frontWeightShare) * spec->suspRollCentreRearM /
+                         spec->trackWidthRearM;
+        elasticFrontN =
+            spec->rollStiffnessFrontFraction * elasticMomentNm / spec->trackWidthFrontM;
+        elasticRearN =
+            (1.0f - spec->rollStiffnessFrontFraction) * elasticMomentNm / spec->trackWidthRearM;
+
+        dFzFront = elasticFrontN + geometricFrontN;
+        dFzRear = elasticRearN + geometricRearN;
     }
     derived->rollMomentNm = rollMoment;
+    derived->rollAxisHeightAtCgM = rollAxisAtCgM;
     derived->lateralLoadTransferFrontN = dFzFront;
     derived->lateralLoadTransferRearN = dFzRear;
+    derived->lateralLoadTransferElasticFrontN = elasticFrontN;
+    derived->lateralLoadTransferElasticRearN = elasticRearN;
+    derived->lateralLoadTransferGeometricFrontN = geometricFrontN;
+    derived->lateralLoadTransferGeometricRearN = geometricRearN;
 
     for (int i = 0; i < WHEEL_COUNT; i++) {
         const bool front = (i <= WHEEL_FRONT_RIGHT);

@@ -4890,6 +4890,109 @@ static void scenario_assists(void)
     }
 }
 
+/*
+ * suspension-load-transfer — issue #18: quasi-static transfer from the suspension hardware.
+ *
+ * The lateral transfer splits into a geometric route (through the roll centres, split by
+ * weight share) and an elastic route (on the arm h_cg - h_rollAxis, split by the DERIVED
+ * roll stiffness from wheel rates and anti-roll bars). The two always close the roll moment.
+ */
+static void scenario_suspension_load_transfer(void)
+{
+    /* ---- 1. Derived stiffness fraction comes from the hardware. ---- */
+    {
+        VehicleSpec spec;
+        vehicle_spec_set_default(&spec);
+        vehicle_spec_refresh_derived(&spec);
+        const float kFront = SUSP_AXLE_ROLL_STIFFNESS_NM_RAD(
+            spec.trackWidthFrontM, spec.suspWheelRateFrontNpm, spec.suspAntiRollFrontNpm);
+        const float kRear = SUSP_AXLE_ROLL_STIFFNESS_NM_RAD(
+            spec.trackWidthRearM, spec.suspWheelRateRearNpm, spec.suspAntiRollRearNpm);
+        const float expected = kFront / (kFront + kRear);
+        check_near((double)spec.rollStiffnessFrontFraction, (double)expected, 1e-6,
+                   "roll stiffness fraction is derived from the hardware");
+        check(spec.rollStiffnessFrontFraction > 0.0f && spec.rollStiffnessFrontFraction < 1.0f,
+              "derived fraction is a proper split (%.3f)",
+              (double)spec.rollStiffnessFrontFraction);
+    }
+
+    /* ---- 2. Monotonic: a stiffer front bar moves transfer forward. ---- */
+    {
+        Game *base = alloc_game();
+        Game *stiffFront = alloc_game();
+        game_init(base);
+        game_init(stiffFront);
+        stiffFront->spec.suspAntiRollFrontNpm = base->spec.suspAntiRollFrontNpm * 2.0f;
+        vehicle_spec_refresh_derived(&stiffFront->spec);
+
+        /* Steady cornering: hold a constant lateral acceleration. */
+        for (int i = 0; i < 240; i++) {
+            base->input.steer = stiffFront->input.steer = 0.4f;
+            base->input.throttle = stiffFront->input.throttle = 0.15f;
+            game_fixed_update(base, FIXED_DT_S);
+            game_fixed_update(stiffFront, FIXED_DT_S);
+        }
+        check(stiffFront->derived.lateralLoadTransferFrontN >
+                  base->derived.lateralLoadTransferFrontN,
+              "stiffer front bar increases front load transfer (%.0f > %.0f N)",
+              (double)stiffFront->derived.lateralLoadTransferFrontN,
+              (double)base->derived.lateralLoadTransferFrontN);
+        check(stiffFront->spec.rollStiffnessFrontFraction >
+                  base->spec.rollStiffnessFrontFraction,
+              "and the derived front fraction rises with it (%.3f > %.3f)",
+              (double)stiffFront->spec.rollStiffnessFrontFraction,
+              (double)base->spec.rollStiffnessFrontFraction);
+        free(base);
+        free(stiffFront);
+    }
+
+    /* ---- 3. Closure: elastic + geometric routes deliver exactly the roll moment. ---- */
+    {
+        Game *game = alloc_game();
+        game_init(game);
+        for (int i = 0; i < 240; i++) {
+            game->input.steer = 0.4f;
+            game->input.throttle = 0.15f;
+            game_fixed_update(game, FIXED_DT_S);
+        }
+        const float deliveredNm =
+            game->derived.lateralLoadTransferFrontN * game->spec.trackWidthFrontM +
+            game->derived.lateralLoadTransferRearN * game->spec.trackWidthRearM;
+        check_near((double)deliveredNm, (double)game->derived.rollMomentNm,
+                   1.0 + 1e-3 * fabsf(game->derived.rollMomentNm),
+                   "lateral transfer closes the roll moment");
+        const float elasticSum = game->derived.lateralLoadTransferElasticFrontN +
+                                 game->derived.lateralLoadTransferElasticRearN;
+        const float geometricSum = game->derived.lateralLoadTransferGeometricFrontN +
+                                   game->derived.lateralLoadTransferGeometricRearN;
+        check(elasticSum > 0.0f && geometricSum > 0.0f,
+              "both routes carry load (elastic %.0f N, geometric %.0f N)", (double)elasticSum,
+              (double)geometricSum);
+        free(game);
+    }
+
+    /* ---- 4. Symmetry: opposite corners produce mirrored transfer. ---- */
+    {
+        Game *left = alloc_game();
+        Game *right = alloc_game();
+        game_init(left);
+        game_init(right);
+        for (int i = 0; i < 240; i++) {
+            left->input.steer = 0.4f;
+            right->input.steer = -0.4f;
+            left->input.throttle = right->input.throttle = 0.15f;
+            game_fixed_update(left, FIXED_DT_S);
+            game_fixed_update(right, FIXED_DT_S);
+        }
+        check_near((double)left->derived.lateralLoadTransferFrontN,
+                   (double)-right->derived.lateralLoadTransferFrontN,
+                   fmaxf(fabsf(left->derived.lateralLoadTransferFrontN) * 0.05f, 1.0f),
+                   "front transfer mirrors across corner direction");
+        free(left);
+        free(right);
+    }
+}
+
 static const TestScenario kPhysicsScenarios[] = {
     { "telemetry", "CSV writer: stable header, row count, failure handling",
       scenario_telemetry },
@@ -4909,6 +5012,9 @@ static const TestScenario kPhysicsScenarios[] = {
     { "assists",
       "issue #25: pedal-level ABS and TCS reduce lock/slip, off preserves the baseline",
       scenario_assists },
+    { "suspension-load-transfer",
+      "issue #18: derived roll stiffness, geometric+elastic transfer, moment closure, symmetry",
+      scenario_suspension_load_transfer },
     { "solver-stages",
       "staged solver: prefix runs, stage contracts, rollback and failure report",
       scenario_solver_stages },

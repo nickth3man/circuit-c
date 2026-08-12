@@ -156,8 +156,10 @@ static const DevParameter g_params[] = {
       1.0f, 60.0f, 0.5f, false, false, 2, DEV_CLASS_PHYSICS_INPUT, DEV_OWNER_DEFINITION,
       "Load-transfer accel filter corner frequency." },
     { "body.roll_stiffness_front", "Body", "", SPEC_OFFSET(rollStiffnessFrontFraction),
-      ROLL_STIFFNESS_FRONT_FRACTION, 0.0f, 1.0f, 0.01f, false, false, 1,
-      DEV_CLASS_PHYSICS_INPUT, DEV_OWNER_DEFINITION, "Front axle share of roll moment." },
+      ROLL_STIFFNESS_FRONT_FRACTION, 0.0f, 1.0f, 0.01f, false, true, 1, DEV_CLASS_DERIVED,
+      DEV_OWNER_DERIVED,
+      "Front share of ELASTIC roll stiffness, derived from wheel rates, anti-roll rates and "
+      "track widths (issue #18). Read-only." },
     { "body.mass", "Body", "kg", SPEC_OFFSET(massKg), VEH_MASS_KG, 400.0f, 15000.0f, 10.0f,
       false, true, 0, DEV_CLASS_DERIVED, DEV_OWNER_DERIVED,
       "Total mass from particles (read-only)." },
@@ -375,25 +377,22 @@ static const DevParameter g_params[] = {
       "Rear caster. Rear wheels do not steer, so caster induces no camber gain. Kept active "
       "for setup hash consistency; the physics path reads but nulls it (issue #15)." },
     { "susp.wheel_rate_front", "Suspension", "N/m", SPEC_OFFSET(suspWheelRateFrontNpm),
-      SUSP_WHEEL_RATE_FRONT_NPM, 5000.0f, 80000.0f, 100.0f, false, false, 2, DEV_CLASS_INACTIVE,
-      DEV_OWNER_DEFINITION,
-      "Front wheel rate. Inactive: no suspension is simulated; load transfer is quasi-static. "
-      "Kept as authored hardware for a later ride-model change." },
+      SUSP_WHEEL_RATE_FRONT_NPM, 5000.0f, 80000.0f, 100.0f, false, false, 2,
+      DEV_CLASS_PHYSICS_INPUT, DEV_OWNER_DEFINITION,
+      "Front wheel rate. Sets the axle's roll stiffness K = 0.5*t^2*(wheelRate + antiRoll) "
+      "and therefore the elastic transfer split (issue #18)." },
     { "susp.wheel_rate_rear", "Suspension", "N/m", SPEC_OFFSET(suspWheelRateRearNpm),
-      SUSP_WHEEL_RATE_REAR_NPM, 5000.0f, 80000.0f, 100.0f, false, false, 2, DEV_CLASS_INACTIVE,
-      DEV_OWNER_DEFINITION,
-      "Rear wheel rate. Inactive: no suspension is simulated; load transfer is quasi-static. "
-      "Kept as authored hardware for a later ride-model change." },
+      SUSP_WHEEL_RATE_REAR_NPM, 5000.0f, 80000.0f, 100.0f, false, false, 2,
+      DEV_CLASS_PHYSICS_INPUT, DEV_OWNER_DEFINITION,
+      "Rear wheel rate. Sets the axle's roll stiffness and the elastic transfer split (#18)." },
     { "susp.anti_roll_front", "Suspension", "N/m", SPEC_OFFSET(suspAntiRollFrontNpm),
-      SUSP_ANTI_ROLL_FRONT_NPM, 0.0f, 60000.0f, 100.0f, false, false, 2, DEV_CLASS_INACTIVE,
-      DEV_OWNER_DEFINITION,
-      "Front anti-roll stiffness. Inactive: the roll split comes from "
-      "body.roll_stiffness_front, not from these rates. Kept as authored hardware." },
+      SUSP_ANTI_ROLL_FRONT_NPM, 0.0f, 60000.0f, 100.0f, false, false, 2,
+      DEV_CLASS_PHYSICS_INPUT, DEV_OWNER_DEFINITION,
+      "Front anti-roll stiffness. Adds to the wheel rate in the axle's roll stiffness (#18)." },
     { "susp.anti_roll_rear", "Suspension", "N/m", SPEC_OFFSET(suspAntiRollRearNpm),
-      SUSP_ANTI_ROLL_REAR_NPM, 0.0f, 60000.0f, 100.0f, false, false, 2, DEV_CLASS_INACTIVE,
+      SUSP_ANTI_ROLL_REAR_NPM, 0.0f, 60000.0f, 100.0f, false, false, 2, DEV_CLASS_PHYSICS_INPUT,
       DEV_OWNER_DEFINITION,
-      "Rear anti-roll stiffness. Inactive: the roll split comes from "
-      "body.roll_stiffness_front, not from these rates. Kept as authored hardware." },
+      "Rear anti-roll stiffness. Adds to the wheel rate in the axle's roll stiffness (#18)." },
     { "susp.travel_front", "Suspension", "m", SPEC_OFFSET(suspTravelFrontM),
       SUSP_TRAVEL_FRONT_M, 0.03f, 0.25f, 0.005f, false, false, 1, DEV_CLASS_APPEARANCE,
       DEV_OWNER_DEFINITION,
@@ -402,15 +401,15 @@ static const DevParameter g_params[] = {
       0.03f, 0.25f, 0.005f, false, false, 1, DEV_CLASS_APPEARANCE, DEV_OWNER_DEFINITION,
       "Rear suspension travel. Appearance only: sets the arch gap with ride height." },
     { "susp.roll_centre_front", "Suspension", "m", SPEC_OFFSET(suspRollCentreFrontM),
-      SUSP_ROLL_CENTRE_FRONT_M, 0.0f, 0.4f, 0.005f, false, false, 2, DEV_CLASS_INACTIVE,
+      SUSP_ROLL_CENTRE_FRONT_M, 0.0f, 0.4f, 0.005f, false, false, 2, DEV_CLASS_PHYSICS_INPUT,
       DEV_OWNER_DEFINITION,
-      "Front roll-centre height. Inactive: lateral load transfer uses the CG height and the "
-      "roll-stiffness fraction. Kept as authored hardware." },
+      "Front roll-centre height. Carries the geometric route of lateral load transfer and "
+      "shortens the elastic arm (issue #18)." },
     { "susp.roll_centre_rear", "Suspension", "m", SPEC_OFFSET(suspRollCentreRearM),
-      SUSP_ROLL_CENTRE_REAR_M, 0.0f, 0.4f, 0.005f, false, false, 2, DEV_CLASS_INACTIVE,
+      SUSP_ROLL_CENTRE_REAR_M, 0.0f, 0.4f, 0.005f, false, false, 2, DEV_CLASS_PHYSICS_INPUT,
       DEV_OWNER_DEFINITION,
-      "Rear roll-centre height. Inactive: lateral load transfer uses the CG height and the "
-      "roll-stiffness fraction. Kept as authored hardware." },
+      "Rear roll-centre height. Carries the geometric route of lateral load transfer and "
+      "shortens the elastic arm (issue #18)." },
     { "drive.gear1", "Drivetrain", "", SPEC_ARRAY_OFFSET(gearRatios, 0), 3.55f, 0.4f, 6.0f,
       0.01f, false, false, 1, DEV_CLASS_PHYSICS_INPUT, DEV_OWNER_SETUP, "First gear ratio." },
     { "drive.gear2", "Drivetrain", "", SPEC_ARRAY_OFFSET(gearRatios, 1), 2.05f, 0.4f, 6.0f,
@@ -980,7 +979,9 @@ bool dev_params_save(const VehicleSpec *spec, const char *path)
             group = param->group;
             fprintf(file, "\n# --- %s ---\n", group);
         }
-        fprintf(file, "%-28s = %-12.6f # %s%s(default %.6f)\n", param->name,
+        /* %.9g round-trips every float through the parser (the fuel rate default is
+         * 2.5e-8 kg/J, which %.6f would write as 0.000000 and read back as 0). */
+        fprintf(file, "%-28s = %-12.9g # %s%s(default %.9g)\n", param->name,
                 (double)dev_param_get(spec, param), param->unit[0] != '\0' ? param->unit : "",
                 param->unit[0] != '\0' ? " " : "", (double)param->defaultValue);
     }

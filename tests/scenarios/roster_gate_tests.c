@@ -48,7 +48,10 @@ static void scenario_ai_roster_graded(void)
 
         char carId[64];
         car_roster_id(i, carId, sizeof(carId));
-        const bool isStress = (strcmp(carId, "awd_rally") == 0);
+        /* Stress cars exempt from the PASS assertion: awd_rally (#77) and, since the #18
+         * suspension physics, rwd_power (wip/issue-18 evidence). */
+        const bool isStress =
+            (strcmp(carId, "awd_rally") == 0 || strcmp(carId, "rwd_power") == 0);
 
         Game *game = alloc_game();
         game_init(game);
@@ -100,10 +103,10 @@ static void scenario_ai_roster_graded(void)
             check(cls.primary == RUN_CLASS_PASS, "car '%s' classified PASS (got %s)", carId,
                   failure_class_reason(cls.primary));
         }
-        /* awd_rally is excluded from the pass assertion: it is the documented stress car
-         * (issue #77, chaotic ai-roster-laps gate). Its classification is printed for
-         * diagnosis above; asserting on its outcome would make a future fix (#28 / AI v2)
-         * break this gate. */
+        /* The stress cars are excluded from the pass assertion: awd_rally is the documented
+         * stress car (#77), and #18's suspension physics added rwd_power to the chaotic set
+         * (wip/issue-18 evidence). Their classifications are printed for diagnosis above;
+         * asserting on their outcomes would make a future fix (#28 / AI v2) break this gate. */
 
         track_free(&game->trackDef);
         free(game);

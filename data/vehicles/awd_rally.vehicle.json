@@ -7,7 +7,9 @@
   "contentVersion": 1,
   "appearanceId": "awd_rally",
   "contentKind": "player-selectable",
-  "classTags": ["race"],
+  "classTags": [
+    "race"
+  ],
   "controllerEligibility": [
     "human",
     "ai"
@@ -47,7 +49,6 @@
     "body.roof_type": 0,
     "body.drag_coefficient": 0.400000006,
     "body.load_filter_rate": 10,
-    "body.roll_stiffness_front": 0.349999994,
     "mass.engine": 133.333328,
     "mass.engine_x": 0.735000014,
     "mass.engine_z": 0.400000006,
@@ -93,8 +94,8 @@
     "steer.ackermann_percent": 0.300000012,
     "susp.wheel_rate_front": 28000,
     "susp.wheel_rate_rear": 26000,
-    "susp.anti_roll_front": 18000,
-    "susp.anti_roll_rear": 16000,
+    "susp.anti_roll_front": 2843.1001,
+    "susp.anti_roll_rear": 31156.9004,
     "susp.travel_front": 0.0900000036,
     "susp.travel_rear": 0.0949999988,
     "susp.roll_centre_front": 0.0799999982,

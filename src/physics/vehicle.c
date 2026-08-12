@@ -144,9 +144,20 @@ void vehicle_spec_refresh_derived(VehicleSpec *spec)
         spec->tireLoadRefPerWheelN = spec->massKg * GRAVITY_MPS2 * 0.25f;
     }
 
-    /* Wheel inertia, tire relaxation, roll stiffness, and max brake torque stay primary
-     * handling tunables. Tire designation and suspension/brake hardware feed the visual
-     * grammar; a later phase can derive the handling fields once presets migrate fully. */
+    /* Wheel inertia, tire relaxation, and max brake torque stay primary handling tunables.
+     * Roll stiffness is DERIVED from the wheel-referred rates and track widths (issue #18):
+     * K_axle = 0.5 * t^2 * (wheelRate + antiRollRate), and the elastic front fraction is the
+     * front axle's share. The expression must match config.h's derived ROLL_STIFFNESS_FRONT_
+     * FRACTION so the param audit's derived probe agrees. */
+    {
+        const float kFront = SUSP_AXLE_ROLL_STIFFNESS_NM_RAD(
+            spec->trackWidthFrontM, spec->suspWheelRateFrontNpm, spec->suspAntiRollFrontNpm);
+        const float kRear = SUSP_AXLE_ROLL_STIFFNESS_NM_RAD(
+            spec->trackWidthRearM, spec->suspWheelRateRearNpm, spec->suspAntiRollRearNpm);
+        if (kFront + kRear > 0.0f) {
+            spec->rollStiffnessFrontFraction = kFront / (kFront + kRear);
+        }
+    }
 }
 
 void vehicle_spec_set_default(VehicleSpec *spec)

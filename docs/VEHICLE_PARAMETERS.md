@@ -43,16 +43,10 @@ validation.
 |---|---|---|
 | `wheel.offset_et_front` | `definition` | Front wheel ET offset. Inactive: wheel poke is drawn from track width and tire width, never from ET. Kept as authored hardware. |
 | `wheel.offset_et_rear` | `definition` | Rear wheel ET offset. Inactive: wheel poke is drawn from track width and tire width, never from ET. Kept as authored hardware. |
-| `susp.wheel_rate_front` | `definition` | Front wheel rate. Inactive: no suspension is simulated; load transfer is quasi-static. Kept as authored hardware for a later ride-model change. |
-| `susp.wheel_rate_rear` | `definition` | Rear wheel rate. Inactive: no suspension is simulated; load transfer is quasi-static. Kept as authored hardware for a later ride-model change. |
-| `susp.anti_roll_front` | `definition` | Front anti-roll stiffness. Inactive: the roll split comes from body.roll_stiffness_front, not from these rates. Kept as authored hardware. |
-| `susp.anti_roll_rear` | `definition` | Rear anti-roll stiffness. Inactive: the roll split comes from body.roll_stiffness_front, not from these rates. Kept as authored hardware. |
-| `susp.roll_centre_front` | `definition` | Front roll-centre height. Inactive: lateral load transfer uses the CG height and the roll-stiffness fraction. Kept as authored hardware. |
-| `susp.roll_centre_rear` | `definition` | Rear roll-centre height. Inactive: lateral load transfer uses the CG height and the roll-stiffness fraction. Kept as authored hardware. |
 | `brake.pad_friction` | `definition` | Pad friction coefficient. Inactive: brake torque is authored directly as brake.max_torque. Kept as authored hardware. |
 | `aero.cop_x` | `definition` | Centre of pressure X. Inactive: vertical load is authored per axle, which fixes where the pressure centre is — it is an outcome of the four aero values, not a fifth input. Drag still acts at the CG. |
 
-10 of 140 parameters are inactive.
+4 of 149 parameters are inactive.
 
 ## Body
 
@@ -88,7 +82,7 @@ validation.
 | `body.roof_type` | `appearance` | `definition` | 0 | — | 0 .. 2 | 1 | advanced | — | Roof enum: 0=fixed, 1=targa, 2=convertible. |
 | `body.drag_coefficient` | `physics` | `definition` | 0.32 | — | 0.1 .. 1.2 | 0.01 | advanced | — | Cd in 0.5*rho*Cd*A*v^2. |
 | `body.load_filter_rate` | `physics` | `definition` | 20 | Hz | 1 .. 60 | 0.5 | expert | — | Load-transfer accel filter corner frequency. |
-| `body.roll_stiffness_front` | `physics` | `definition` | 0.5 | — | 0 .. 1 | 0.01 | advanced | — | Front axle share of roll moment. |
+| `body.roll_stiffness_front` | `derived` | `derived` | 0.501121 | — | 0 .. 1 | 0.01 | advanced | — | Front share of ELASTIC roll stiffness, derived from wheel rates, anti-roll rates and track widths (issue #18). Read-only. |
 | `body.mass` | `derived` | `derived` | 1200 | kg | 400 .. 15000 | 10 | essential | — | Total mass from particles (read-only). |
 | `body.yaw_inertia` | `derived` | `derived` | 1800 | kg*m^2 | 200 .. 40000 | 25 | advanced | — | Yaw inertia from particles (read-only). |
 | `body.cg_to_front` | `derived` | `derived` | 1.15 | m | 0.4 .. 4 | 0.01 | essential | yes | CG to front axle (derived). |
@@ -179,14 +173,14 @@ validation.
 | `susp.toe_rear` | `physics` | `setup` | 0.0017 | rad | -0.05 .. 0.05 | 0.001 | expert | — | Rear static toe, positive = toe-in. Offsets each rear wheel's effective heading; rear toe-in adds straight-line stability and drag. |
 | `susp.caster_front` | `physics` | `setup` | 0.087 | rad | 0 .. 0.25 | 0.001 | expert | — | Front caster. Induces camber gain from steering: gamma_caster = side * sin(caster) * sin(steer), feeding the camber thrust model (issue #15). |
 | `susp.caster_rear` | `physics` | `setup` | 0.052 | rad | 0 .. 0.25 | 0.001 | expert | — | Rear caster. Rear wheels do not steer, so caster induces no camber gain. Kept active for setup hash consistency; the physics path reads but nulls it (issue #15). |
-| `susp.wheel_rate_front` | `inactive` | `definition` | 28000 | N/m | 5000 .. 80000 | 100 | expert | — | Front wheel rate. Inactive: no suspension is simulated; load transfer is quasi-static. Kept as authored hardware for a later ride-model change. |
-| `susp.wheel_rate_rear` | `inactive` | `definition` | 26000 | N/m | 5000 .. 80000 | 100 | expert | — | Rear wheel rate. Inactive: no suspension is simulated; load transfer is quasi-static. Kept as authored hardware for a later ride-model change. |
-| `susp.anti_roll_front` | `inactive` | `definition` | 18000 | N/m | 0 .. 60000 | 100 | expert | — | Front anti-roll stiffness. Inactive: the roll split comes from body.roll_stiffness_front, not from these rates. Kept as authored hardware. |
-| `susp.anti_roll_rear` | `inactive` | `definition` | 16000 | N/m | 0 .. 60000 | 100 | expert | — | Rear anti-roll stiffness. Inactive: the roll split comes from body.roll_stiffness_front, not from these rates. Kept as authored hardware. |
+| `susp.wheel_rate_front` | `physics` | `definition` | 28000 | N/m | 5000 .. 80000 | 100 | expert | — | Front wheel rate. Sets the axle's roll stiffness K = 0.5*t^2*(wheelRate + antiRoll) and therefore the elastic transfer split (issue #18). |
+| `susp.wheel_rate_rear` | `physics` | `definition` | 26000 | N/m | 5000 .. 80000 | 100 | expert | — | Rear wheel rate. Sets the axle's roll stiffness and the elastic transfer split (#18). |
+| `susp.anti_roll_front` | `physics` | `definition` | 15500 | N/m | 0 .. 60000 | 100 | expert | — | Front anti-roll stiffness. Adds to the wheel rate in the axle's roll stiffness (#18). |
+| `susp.anti_roll_rear` | `physics` | `definition` | 18500 | N/m | 0 .. 60000 | 100 | expert | — | Rear anti-roll stiffness. Adds to the wheel rate in the axle's roll stiffness (#18). |
 | `susp.travel_front` | `appearance` | `definition` | 0.09 | m | 0.03 .. 0.25 | 0.005 | advanced | — | Front suspension travel. Appearance only: sets the arch gap with ride height. |
 | `susp.travel_rear` | `appearance` | `definition` | 0.095 | m | 0.03 .. 0.25 | 0.005 | advanced | — | Rear suspension travel. Appearance only: sets the arch gap with ride height. |
-| `susp.roll_centre_front` | `inactive` | `definition` | 0.08 | m | 0 .. 0.4 | 0.005 | expert | — | Front roll-centre height. Inactive: lateral load transfer uses the CG height and the roll-stiffness fraction. Kept as authored hardware. |
-| `susp.roll_centre_rear` | `inactive` | `definition` | 0.1 | m | 0 .. 0.4 | 0.005 | expert | — | Rear roll-centre height. Inactive: lateral load transfer uses the CG height and the roll-stiffness fraction. Kept as authored hardware. |
+| `susp.roll_centre_front` | `physics` | `definition` | 0.08 | m | 0 .. 0.4 | 0.005 | expert | — | Front roll-centre height. Carries the geometric route of lateral load transfer and shortens the elastic arm (issue #18). |
+| `susp.roll_centre_rear` | `physics` | `definition` | 0.1 | m | 0 .. 0.4 | 0.005 | expert | — | Rear roll-centre height. Carries the geometric route of lateral load transfer and shortens the elastic arm (issue #18). |
 
 ## Drivetrain
 

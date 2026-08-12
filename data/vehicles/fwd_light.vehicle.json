@@ -7,7 +7,9 @@
   "contentVersion": 1,
   "appearanceId": "fwd_light",
   "contentKind": "player-selectable",
-  "classTags": ["road"],
+  "classTags": [
+    "road"
+  ],
   "controllerEligibility": [
     "human",
     "ai"
@@ -47,7 +49,6 @@
     "body.roof_type": 0,
     "body.drag_coefficient": 0.360000014,
     "body.load_filter_rate": 20,
-    "body.roll_stiffness_front": 0.5,
     "mass.engine": 101.333328,
     "mass.engine_x": 1.08500004,
     "mass.engine_z": 0.349999994,
@@ -93,8 +94,8 @@
     "steer.ackermann_percent": 0.699999988,
     "susp.wheel_rate_front": 28000,
     "susp.wheel_rate_rear": 26000,
-    "susp.anti_roll_front": 18000,
-    "susp.anti_roll_rear": 16000,
+    "susp.anti_roll_front": 16121.9004,
+    "susp.anti_roll_rear": 17878.0996,
     "susp.travel_front": 0.0900000036,
     "susp.travel_rear": 0.0949999988,
     "susp.roll_centre_front": 0.0799999982,

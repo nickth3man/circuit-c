@@ -315,8 +315,16 @@ typedef struct {
      *
      * All recomputed every fixed update and never integrated. None of them is in the state
      * checksum. The logic that fills them is wired in subsequent sub-steps. */
-    float lateralLoadTransferFrontN;               /* N; inner->outer delta on front axle */
-    float lateralLoadTransferRearN;                /* N; inner->outer delta on rear axle  */
+    float
+        lateralLoadTransferFrontN;  /* N; inner->outer delta on front axle, elastic+geometric */
+    float lateralLoadTransferRearN; /* N; inner->outer delta on rear axle, elastic+geometric  */
+    /* The two routes the roll moment takes to the contact patch, reported separately so a
+     * setup change can be attributed to bars or to linkage geometry (issue #18). */
+    float lateralLoadTransferElasticFrontN;
+    float lateralLoadTransferElasticRearN;
+    float lateralLoadTransferGeometricFrontN;
+    float lateralLoadTransferGeometricRearN;
+    float rollAxisHeightAtCgM;                     /* m; roll centres interpolated at the CG */
     float rollMomentNm;                            /* N*m; m*ay*h */
     float tireLoadSensitivityMuScale[WHEEL_COUNT]; /* dimensionless; per-wheel (Fz/FzRef)^-k */
     float differentialOmegaRadS[2];                /* rad/s; {omega_RL, omega_RR} post-diff */
