@@ -465,8 +465,10 @@ Start #54 after both the grid/start and basic live-AI requirements are complete.
 
 # Phase 7 — Core Target Release Gate
 
-- [ ] [#60 — Define and pass the target acceptance demo, documentation, and release gate](https://github.com/nickth3man/circuit-c/issues/60)
+- [x] [#60 — Define and pass the target acceptance demo, documentation, and release gate](https://github.com/nickth3man/circuit-c/issues/60)
   - Depends on: #5, #11, #28, #33, #43, #44, #45, #46, #56, #57, #58
+  - --demo-race acceptance demo, make release-evidence, docs/RELEASE.md (matrix, walkthrough,
+    compatibility policy, checklist). Verified: 178 scenarios.
 
 ## Final core acceptance checklist
 
