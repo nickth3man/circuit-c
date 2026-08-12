@@ -258,8 +258,13 @@ Multiple lanes may operate in parallel after #13, but dependencies within each l
     ordering (registration-order independent). Wired into `collision_world_resolve_bodies`.
     Verified: 152 scenarios, 13267 checks, 0 failed; 46/46 regression PASS.
 
-- [ ] [#28 — Add configurable collision damage and deterministic stuck recovery](https://github.com/nickth3man/circuit-c/issues/28)
+- [x] [#28 — Add configurable collision damage and deterministic stuck recovery](https://github.com/nickth3man/circuit-c/issues/28)
   - Depends on: #11, #27
+  - `RaceRules.damageMode` (off/cosmetic/mechanical): bounded monotonic damage from contact
+    feed; mechanical degrades engine/aero/grip via a nullable solver param; off is
+    bit-identical. Stuck recovery: stalled-tick detection, route-pose repositioning,
+    occupied-envelope deferral, penalty into classified finish time, session event. Both
+    default off. Verified: 158 scenarios.
 
 ## Phase 3 gate
 
