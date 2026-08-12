@@ -41,6 +41,7 @@
 
 #include <math.h>
 #include <stddef.h>
+#include <string.h>
 
 #include "core/config.h"
 #include "core/math_utils.h"
@@ -75,6 +76,10 @@
 void ai_driver_config_default(AiDriverConfig *cfg)
 {
     if (cfg == NULL) return;
+    /* Zero first: the roster gate memcmps a default-built copy against the frozen entrant
+     * config, and padding bytes must match byte-for-byte (#53 added a bool field, which
+     * introduced padding). */
+    memset(cfg, 0, sizeof(*cfg));
     cfg->lookaheadBaseM = 6.5f;
     cfg->lookaheadSpeedS = 0.50f;
     cfg->corneringGripFraction = 0.75f;
@@ -117,6 +122,17 @@ void ai_driver_config_default(AiDriverConfig *cfg)
     cfg->planHysteresisWeight = 0.5f;
     cfg->planReplanTicks = 12;                 /* 10 Hz at 120 Hz fixed step */
     cfg->architecture = AI_DRIVER_ARCH_LEGACY; /* the baseline stays the gate (#79) */
+
+    /* Racecraft (issue #53): traffic awareness is opt-in so lone-driver behaviour (and every
+     * baseline) is bit-identical without it. */
+    cfg->trafficEnabled = false;
+    cfg->trafficFollowDistanceM = 30.0f;
+    cfg->trafficFollowMargin = 1.04f;
+    cfg->trafficPassWindowM = 14.0f;
+    cfg->trafficPassLateralM = 1.6f;
+    cfg->trafficPassNodes = 16;
+    cfg->trafficClearGapM = 10.0f;
+    cfg->difficultyScale = 1.0f;
 }
 
 /* Move an axis toward its demand no faster than the control can physically travel.
@@ -466,10 +482,71 @@ void available_grip(const VehicleSpec *spec, const TrackDefinition *track,
 
 /* ------------------------------------------------------------------------------------- */
 
+/*
+ * Racecraft (issue #53): adapt the speed target and the planned line to the deterministic
+ * traffic view. Pure reads of cfg/traffic/track plus writes of state->planOffsetM and
+ * targetSpeedMps, gated by cfg->trafficEnabled (default off: bit-identical lone driving).
+ */
+void apply_traffic(const AiDriverConfig *cfg, AiDriverState *state,
+                   const TrackDefinition *track, const AiTraffic *traffic, float speedMps,
+                   float *targetSpeedMps)
+{
+    if (traffic == NULL || traffic->count <= 0) return;
+
+    /* Nearest car ahead, within the follow window. */
+    const AiTraffic *view = traffic;
+    const AiTrafficCar *nearest = NULL;
+    for (int i = 0; i < view->count; i++) {
+        const AiTrafficCar *car = &view->cars[i];
+        if (car->distanceAheadM <= 0.0f) continue;
+        if (car->distanceAheadM > cfg->trafficFollowDistanceM) continue;
+        if (nearest == NULL || car->distanceAheadM < nearest->distanceAheadM) nearest = car;
+    }
+    if (nearest == NULL) return;
+
+    /* Follow: never out-run the car ahead; keep a small pace margin so the gap is held, not
+     * chased. */
+    const float followTarget = nearest->speedMps * cfg->trafficFollowMargin;
+    if (followTarget < *targetSpeedMps) *targetSpeedMps = followTarget;
+
+    /* Overtake: when the blocker is close and the far side is clear, shift the committed plan
+     * line toward the clear side for the next passNodes nodes. The shift is clamped to the
+     * racing corridor so the line never leaves the surface. */
+    if (nearest->distanceAheadM <= cfg->trafficPassWindowM) {
+        const float side = (nearest->lateralOffsetM >= 0.0f) ? -1.0f : 1.0f;
+        bool sideClear = true;
+        for (int i = 0; i < view->count; i++) {
+            const struct AiTrafficCar *car = &view->cars[i];
+            if (car == nearest) continue;
+            if (car->distanceAheadM < -cfg->trafficClearGapM) continue;
+            if (car->distanceAheadM > cfg->trafficClearGapM) continue;
+            /* A car near the pass side's lateral band blocks the move. */
+            if ((side > 0.0f && car->lateralOffsetM > 0.5f) ||
+                (side < 0.0f && car->lateralOffsetM < -0.5f)) {
+                sideClear = false;
+                break;
+            }
+        }
+        if (sideClear) {
+            const int base = state->planBaseNode;
+            const int nodes = track->count;
+            for (int k = 1; k <= cfg->trafficPassNodes && k < state->planLayerCount; k++) {
+                const int node = (base + k) % nodes;
+                const float halfWidth = track->nodes[node].halfWidthM;
+                const float bound = maxf(halfWidth - cfg->planEdgeMarginM, 0.5f);
+                const float shifted = state->planOffsetM[k] + side * cfg->trafficPassLateralM;
+                state->planOffsetM[k] = clampf(shifted, -bound, bound);
+            }
+        }
+    }
+    (void)speedMps;
+}
+
 void ai_driver_update(const AiDriverConfig *cfg, AiDriverState *state,
                       const TrackDefinition *track, const TrackRuntime *runtime,
                       const VehicleState *vehicle, const VehicleDerived *derived,
-                      const VehicleSpec *spec, ControllerOutput *out, float dt)
+                      const VehicleSpec *spec, ControllerOutput *out, float dt,
+                      const AiTraffic *traffic)
 {
     if (cfg == NULL || state == NULL || out == NULL) return;
     if (track == NULL || track->nodes == NULL || track->count < 3) return;
@@ -479,7 +556,8 @@ void ai_driver_update(const AiDriverConfig *cfg, AiDriverState *state,
      * flipped for the whole roster only when it passes every gate; the legacy path below is
      * the baseline and is never touched by it. */
     if (cfg->architecture == AI_DRIVER_ARCH_LIMIT) {
-        ai_driver_update_v2(cfg, state, track, runtime, vehicle, derived, spec, out, dt);
+        ai_driver_update_v2(cfg, state, track, runtime, vehicle, derived, spec, out, dt,
+                            traffic);
         return;
     }
 
@@ -626,6 +704,13 @@ void ai_driver_update(const AiDriverConfig *cfg, AiDriverState *state,
         }
     }
     targetSpeedMps = clampf(targetSpeedMps, 0.0f, cfg->maxSpeedMps);
+    targetSpeedMps *= cfg->difficultyScale;
+
+    /* Racecraft (issue #53): follow a slower car ahead and shift the line for a pass. Runs
+     * after the plan is committed so the shift is the same one the next ticks drive. */
+    if (cfg->trafficEnabled) {
+        apply_traffic(cfg, state, track, traffic, speedMps, &targetSpeedMps);
+    }
 
     /* Traction management: ease off while the tyres are at the limit, feed the power back in
      * once they hook up again. Both directions are rate-bounded, so the throttle this produces

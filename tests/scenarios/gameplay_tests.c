@@ -2268,6 +2268,134 @@ static void scenario_local_multiplayer(void)
         free(game);
     }
 }
+
+/* Issue #53: AI racecraft — traffic awareness and data-driven difficulty. */
+static void scenario_ai_racecraft(void)
+{
+    /* Helper: build a two-AI game on the chicane with per-entrant configs already applied. */
+    /* ---- 1. Following: a traffic-aware car holds a safe gap behind a slower leader. ---- */
+    {
+        Game *game = alloc_game();
+        game_init(game);
+        track_load_chicane(&game->trackDef);
+        game_spawn_on_track(game);
+        game->controller.kind = CONTROLLER_KIND_AI; /* entrant 0 = leader */
+        const RaceEntrantSpawn follower = { .controllerKind = CONTROLLER_KIND_AI,
+                                            .gridSlot = 1 };
+        (void)race_roster_spawn(&game->session.roster, &follower, NULL);
+        check(race_session_place_grid(&game->session, &game->trackDef), "grid placed");
+
+        /* Leader: slow; follower: default pace with traffic awareness on. */
+        game->controller.config.ai.maxSpeedMps = 22.0f;
+        game->session.roster.entrants[1].controller.config.ai.trafficEnabled = true;
+
+        float minDistM = 1.0e9f;
+        for (int t = 0; t < 9000; t++) {
+            game_fixed_update(game, FIXED_DT_S);
+            const Vector2 pa = game->session.roster.entrants[0].instance.vehicle.positionM;
+            const Vector2 pb = game->session.roster.entrants[1].instance.vehicle.positionM;
+            const float d =
+                sqrtf((pa.x - pb.x) * (pa.x - pb.x) + (pa.y - pb.y) * (pa.y - pb.y));
+            if (d < minDistM) minDistM = d;
+        }
+        check(minDistM > 1.5f, "follower avoids contact in traffic (min dist %.2f m)",
+              (double)minDistM);
+        check(game->session.roster.entrants[1].progress.lap >= 1,
+              "follower circulates in traffic (lap %d)",
+              game->session.roster.entrants[1].progress.lap);
+        free(game);
+    }
+
+    /* ---- 2. Overtaking: the traffic-aware follower passes the slow leader without contact. ---- */
+    {
+        Game *game = alloc_game();
+        game_init(game);
+        track_load_chicane(&game->trackDef);
+        game_spawn_on_track(game);
+        game->controller.kind = CONTROLLER_KIND_AI;
+        const RaceEntrantSpawn follower = { .controllerKind = CONTROLLER_KIND_AI,
+                                            .gridSlot = 1 };
+        (void)race_roster_spawn(&game->session.roster, &follower, NULL);
+        (void)race_session_place_grid(&game->session, &game->trackDef);
+
+        game->controller.config.ai.maxSpeedMps = 13.0f; /* very slow leader */
+        game->session.roster.entrants[1].controller.config.ai.trafficEnabled = true;
+
+        float minDistM = 1.0e9f;
+        int passedTick = -1;
+        for (int t = 0; t < 24000; t++) {
+            game_fixed_update(game, FIXED_DT_S);
+            const Vector2 pa = game->session.roster.entrants[0].instance.vehicle.positionM;
+            const Vector2 pb = game->session.roster.entrants[1].instance.vehicle.positionM;
+            const float d =
+                sqrtf((pa.x - pb.x) * (pa.x - pb.x) + (pa.y - pb.y) * (pa.y - pb.y));
+            if (d < minDistM) minDistM = d;
+            if (game->session.roster.entrants[1].progress.raceDistanceM >
+                game->session.roster.entrants[0].progress.raceDistanceM + 30.0f) {
+                passedTick = t;
+                break; /* passed and pulled a clear margin */
+            }
+        }
+        check(passedTick >= 0, "follower overtakes the slow leader (%d ticks)", passedTick);
+        check(minDistM > 1.5f, "overtake completes without contact (min dist %.2f m)",
+              (double)minDistM);
+        free(game);
+    }
+
+    /* ---- 3. Difficulty sweep: pace scale changes lap time monotonically, bounded. ---- */
+    {
+        const float scales[3] = { 0.85f, 1.0f, 1.05f };
+        float laps[3] = { 0.0f, 0.0f, 0.0f };
+        for (int s = 0; s < 3; s++) {
+            Game *game = alloc_game();
+            game_init(game);
+            track_load_chicane(&game->trackDef);
+            game_spawn_on_track(game);
+            game->controller.kind = CONTROLLER_KIND_AI;
+            game->controller.config.ai.difficultyScale = scales[s];
+            for (int t = 0; t < 14400 && game->progress.lap < 1; t++)
+                game_fixed_update(game, FIXED_DT_S);
+            laps[s] = game->progress.bestLapTimeS;
+            check(laps[s] > 0.0f, "difficulty tier %.2f completes a lap (%.2f s)",
+                  (double)scales[s], (double)laps[s]);
+            free(game);
+        }
+        check(laps[0] > laps[1] && laps[1] > laps[2],
+              "difficulty scale is monotonic in lap time (%.2f > %.2f > %.2f)", (double)laps[0],
+              (double)laps[1], (double)laps[2]);
+    }
+
+    /* ---- 4. Determinism: identical traffic-enabled runs produce identical checksums. ---- */
+    {
+        Game *a = alloc_game();
+        Game *b = alloc_game();
+        game_init(a);
+        game_init(b);
+        track_load_chicane(&a->trackDef);
+        track_load_chicane(&b->trackDef);
+        game_spawn_on_track(a);
+        game_spawn_on_track(b);
+        a->controller.kind = CONTROLLER_KIND_AI;
+        b->controller.kind = CONTROLLER_KIND_AI;
+        const RaceEntrantSpawn ai = { .controllerKind = CONTROLLER_KIND_AI, .gridSlot = 1 };
+        (void)race_roster_spawn(&a->session.roster, &ai, NULL);
+        (void)race_roster_spawn(&b->session.roster, &ai, NULL);
+        (void)race_session_place_grid(&a->session, &a->trackDef);
+        (void)race_session_place_grid(&b->session, &b->trackDef);
+        a->session.roster.entrants[0].controller.config.ai.trafficEnabled = true;
+        b->session.roster.entrants[0].controller.config.ai.trafficEnabled = true;
+        a->session.roster.entrants[1].controller.config.ai.trafficEnabled = true;
+        b->session.roster.entrants[1].controller.config.ai.trafficEnabled = true;
+        for (int t = 0; t < 3000; t++) {
+            game_fixed_update(a, FIXED_DT_S);
+            game_fixed_update(b, FIXED_DT_S);
+        }
+        check(game_state_checksum(a) == game_state_checksum(b),
+              "traffic-enabled runs are deterministic (0x%08x)", game_state_checksum(a));
+        free(a);
+        free(b);
+    }
+}
 static void scenario_timing_records(void)
 {
     /* ---- 1. Crossing fraction: a gate crossed mid-tick reports the sub-tick position. ---- */
@@ -6362,6 +6490,10 @@ static const TestScenario kGameplayScenarios[] = {
       "issue #59: independent human entrant inputs, two-player race with AI, independent "
       "classified results",
       scenario_local_multiplayer },
+    { "ai-racecraft",
+      "issue #53: traffic-aware following/overtaking without contact, monotonic difficulty, "
+      "determinism",
+      scenario_ai_racecraft },
     { "collision-world",
       "issue #26 world contract: stable ids, layers, authored objects, multi-proxy order, "
       "penetration recovery, corners, contact feed",

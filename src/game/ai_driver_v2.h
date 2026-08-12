@@ -15,6 +15,7 @@
 void ai_driver_update_v2(const AiDriverConfig *cfg, AiDriverState *state,
                          const TrackDefinition *track, const TrackRuntime *runtime,
                          const VehicleState *vehicle, const VehicleDerived *derived,
-                         const VehicleSpec *spec, ControllerOutput *out, float dt);
+                         const VehicleSpec *spec, ControllerOutput *out, float dt,
+                         const AiTraffic *traffic);
 
 #endif /* CIRCUIT_AI_DRIVER_V2_H */

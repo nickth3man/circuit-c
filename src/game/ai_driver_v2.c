@@ -219,7 +219,8 @@ static float ai_v2_speed_target_mps(const AiDriverConfig *cfg, const AiDriverSta
 void ai_driver_update_v2(const AiDriverConfig *cfg, AiDriverState *state,
                          const TrackDefinition *track, const TrackRuntime *runtime,
                          const VehicleState *vehicle, const VehicleDerived *derived,
-                         const VehicleSpec *spec, ControllerOutput *out, float dt)
+                         const VehicleSpec *spec, ControllerOutput *out, float dt,
+                         const AiTraffic *traffic)
 {
     if (cfg == NULL || state == NULL || out == NULL) return;
     if (track == NULL || track->nodes == NULL || track->count < 3) return;
@@ -349,8 +350,14 @@ void ai_driver_update_v2(const AiDriverConfig *cfg, AiDriverState *state,
     /* --- Speed target: the friction-ellipse profile. --- */
     float muLat = 1.0f, muLong = 1.0f;
     available_grip(spec, track, runtime, posM, &muLat, &muLong);
-    const float targetSpeedMps =
+    float targetSpeedMps =
         ai_v2_speed_target_mps(cfg, state, track, spec, bestSegment, speedMps, muLat, muLong);
+    targetSpeedMps *= cfg->difficultyScale;
+    /* Racecraft (issue #53): follow a slower car ahead and shift the line for a pass. The
+     * helper is shared with the baseline driver and writes the same plan offsets. */
+    if (cfg->trafficEnabled) {
+        apply_traffic(cfg, state, track, traffic, speedMps, &targetSpeedMps);
+    }
 
     /* --- Traction: slow backstop, plus throttle HOLD while sliding. --- */
     float pedalDemand;

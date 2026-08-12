@@ -48,6 +48,8 @@ typedef struct {
     const VehicleState *vehicle;
     const VehicleDerived *derived;
     const VehicleSpec *spec;
+    /* Deterministic opponents view for AI racecraft (issue #53); NULL = no traffic. */
+    const AiTraffic *traffic;
     float dt;
 } ControllerTickView;
 

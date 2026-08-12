@@ -131,6 +131,24 @@ typedef struct {
      * of the deadband that stops the pedals dithering. */
     float planHysteresisWeight;
 
+    /* --- Racecraft (issue #53) --- */
+
+    /* When true, the driver reacts to the deterministic traffic view: it follows a slower car
+     * ahead (bounded speed target) and shifts its plan line to the clear side for a pass.
+     * Default false: a lone driver's behaviour is bit-identical to the pre-traffic build. */
+    bool trafficEnabled;
+    float trafficFollowDistanceM; /* m; start following a car ahead inside this gap */
+    float trafficFollowMargin;    /* multiplier: target = carSpeed * this (1.04 = 4% margin) */
+    float trafficPassWindowM;  /* m; a blocker inside this gap triggers an overtake attempt */
+    float trafficPassLateralM; /* m; lateral line shift during a pass attempt */
+    int trafficPassNodes;      /* plan nodes ahead that shift during a pass attempt */
+    float trafficClearGapM;    /* m; a car within this longitudinal gap blocks the pass side */
+
+    /* Data-driven difficulty (issue #53): scales the pace ceiling. 1.0 = the shared default
+     * pace; <1 slower, >1 faster. Difficulty changes pace/consistency only through this
+     * number — never through hidden grip or power. */
+    float difficultyScale;
+
     /* Fixed ticks between searches. A driver commits to a line through a corner rather than
      * reconsidering it 120 times a second, and the plan is stable over far longer than this. */
     int planReplanTicks;
@@ -192,16 +210,39 @@ typedef struct {
 void ai_driver_config_default(AiDriverConfig *cfg);
 
 /*
+ * Deterministic opponent perception (issue #53). The session computes this per entrant from
+ * the roster's authoritative route distances and localizations — the same numbers that drive
+ * live ordering — so it contains no hidden state and cannot disagree with the race.
+ */
+#define AI_TRAFFIC_MAX 4
+
+typedef struct AiTrafficCar {
+    float distanceAheadM;  /* signed route gap; positive = ahead of this car */
+    float lateralOffsetM;  /* the opponent's signed lateral offset at its own point */
+    float speedMps;        /* the opponent's current speed */
+    float closingSpeedMps; /* positive = the opponent is slower (this car closes) */
+} AiTrafficCar;
+
+typedef struct {
+    int count;
+    AiTrafficCar cars[AI_TRAFFIC_MAX];
+} AiTraffic;
+
+/*
  * Produce one tick of driving.
  *
  * Writes `steer`, `throttle` and `brake` on `out` and zeroes `handbrake`; leaves the gear
  * requests exactly as it found them, which for a caller that zeroed the output is no shift.
  * Does nothing when the track has fewer than three centreline nodes.
+ *
+ * `traffic` is the optional deterministic opponents view (NULL = no traffic, the pre-#53
+ * behaviour; the driver also ignores it unless cfg->trafficEnabled is set).
  */
 void ai_driver_update(const AiDriverConfig *cfg, AiDriverState *state,
                       const TrackDefinition *track, const TrackRuntime *runtime,
                       const VehicleState *vehicle, const VehicleDerived *derived,
-                      const VehicleSpec *spec, ControllerOutput *out, float dt);
+                      const VehicleSpec *spec, ControllerOutput *out, float dt,
+                      const AiTraffic *traffic);
 
 /*
  * World position of the planned line at centreline node `nodeIndex`, for a caller that wants to

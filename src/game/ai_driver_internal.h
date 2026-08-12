@@ -51,4 +51,10 @@ void available_grip(const VehicleSpec *spec, const TrackDefinition *track,
                     const TrackRuntime *runtime, Vector2 positionM, float *muLatOut,
                     float *muLongOut);
 
+/* Racecraft (issue #53): adapt speed target and plan line to the traffic view; gated by
+ * cfg->trafficEnabled. Shared by both architectures. */
+void apply_traffic(const AiDriverConfig *cfg, AiDriverState *state,
+                   const TrackDefinition *track, const AiTraffic *traffic, float speedMps,
+                   float *targetSpeedMps);
+
 #endif /* CIRCUIT_AI_DRIVER_INTERNAL_H */

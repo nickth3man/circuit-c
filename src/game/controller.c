@@ -83,7 +83,7 @@ void controller_update(Controller *controller, ControllerKind sourceKind,
              * false because it drives with the automatic box, exactly as before. */
             ai_driver_update(&controller->config.ai, &controller->memory.ai, view->track,
                              view->runtime, view->vehicle, view->derived, view->spec, out,
-                             view->dt);
+                             view->dt, view->traffic);
             break;
 
         default: break;

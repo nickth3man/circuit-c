@@ -569,7 +569,20 @@ GAME_API bool game_configure_session(Game *game, const SessionConfig *cfg, char 
                                                .localPlayer = false,
                                                .gridSlot = assigned + 1 };
             EntrantId aiIdOut = RACE_ENTRANT_ID_NONE;
-            if (race_roster_spawn(&game->session.roster, &aiSpawn, &aiIdOut)) assigned++;
+            if (race_roster_spawn(&game->session.roster, &aiSpawn, &aiIdOut)) {
+                /* Data-driven difficulty (issue #53): the pace ceiling scales from the
+                 * session difficulty tier — never hidden grip or power. Bounded so every tier
+                 * stays within the validated pace envelope. */
+                float tierScale = 1.0f;
+                if (cfg->aiDifficulty == SESSION_DIFFICULTY_EASY) {
+                    tierScale = 0.85f;
+                } else if (cfg->aiDifficulty == SESSION_DIFFICULTY_HARD) {
+                    tierScale = 1.05f;
+                }
+                RaceEntrant *ai = race_roster_find(&game->session.roster, aiIdOut);
+                if (ai != NULL) ai->controller.config.ai.difficultyScale = tierScale;
+                assigned++;
+            }
         }
         if (assigned < cfg->aiCount) {
             set_reason_safe(reason, reasonCap, "not enough AI-eligible cars for the field");
@@ -1194,12 +1207,40 @@ static void stage_controllers(Game *game, const TickContext *ctx, float dt)
             kind = ctx->sourceKind;
             if (i > 0) sample = &game->entrantInput[i];
         }
+        /* Racecraft (issue #53): build the deterministic opponents view for AI drivers from
+         * the roster's authoritative route distances and localizations. Cheap (8 cars -> 7
+         * comparisons) and shared with live ordering, so it cannot disagree with the race. */
+        AiTraffic traffic;
+        memset(&traffic, 0, sizeof(traffic));
+        const AiTraffic *trafficPtr = NULL;
+        if (kind == CONTROLLER_KIND_AI && game->session.roster.count > 1) {
+            const float routeLen = track_length_m(&game->trackDef);
+            const float myDist = entrant->progress.raceDistanceM;
+            for (int j = 0; j < game->session.roster.count && traffic.count < AI_TRAFFIC_MAX;
+                 j++) {
+                if (j == i) continue;
+                const RaceEntrant *other = &game->session.roster.entrants[j];
+                float gap = other->progress.raceDistanceM - myDist;
+                if (game->trackDef.routeClosed && routeLen > 0.0f) {
+                    while (gap > routeLen * 0.5f) gap -= routeLen;
+                    while (gap < -routeLen * 0.5f) gap += routeLen;
+                }
+                AiTrafficCar *car = &traffic.cars[traffic.count];
+                car->distanceAheadM = gap;
+                car->lateralOffsetM = other->progress.location.lateralM;
+                car->speedMps = other->instance.derived.speedMps;
+                car->closingSpeedMps = entrant->instance.derived.speedMps - car->speedMps;
+                traffic.count++;
+            }
+            trafficPtr = &traffic;
+        }
         const ControllerTickView eview = { .sample = sample,
                                            .track = &game->trackDef,
                                            .runtime = &game->trackRuntime,
                                            .vehicle = &entrant->instance.vehicle,
                                            .derived = &entrant->instance.derived,
                                            .spec = &entrant->instance.spec,
+                                           .traffic = trafficPtr,
                                            .dt = dt };
         controller_update(&entrant->controller, kind, &eview, &entrant->controllerOutput);
     }
