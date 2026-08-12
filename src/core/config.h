@@ -380,8 +380,18 @@
 #define STUCK_RECOVERY_CLEAR_RADIUS_M 4.0f /* m; min distance to other entrants at spawn */
 #define STUCK_SPEED_MPS 0.5f               /* m/s; below this an entrant counts as stalled */
 /* Fuel model (issue #24). */
-#define FUEL_DENSITY_KG_PER_L 0.75f      /* kg per litre (gasoline) */
-#define FUEL_STARVATION_RESERVE_KG 0.5f  /* kg; drive torque fades linearly below this */
+#define FUEL_DENSITY_KG_PER_L 0.75f     /* kg per litre (gasoline) */
+#define FUEL_STARVATION_RESERVE_KG 0.5f /* kg; drive torque fades linearly below this */
+/* Driver assists (issue #25): pedal-level ABS/TCS, continuous proportional response with a
+ * slip deadband — no latch, no tick oscillation, deterministic by construction. */
+#define ABS_ENGAGE_SLIP 0.25f            /* |slipRatio| where brake reduction begins */
+#define ABS_FULL_SLIP 0.45f              /* |slipRatio| where reduction saturates */
+#define ABS_SPEED_FLOOR_MPS 2.0f         /* m/s; below this ABS does not intervene */
+#define TCS_ENGAGE_SLIP 0.15f            /* driven-wheel slip where throttle cut begins */
+#define TCS_FULL_SLIP 0.35f              /* driven-wheel slip where cut saturates */
+#define TCS_SPEED_FLOOR_MPS 3.0f         /* m/s; below this TCS does not intervene */
+#define ASSIST_GAIN_LEVEL1 0.60f         /* dimensionless; max pedal reduction at level 1 */
+#define ASSIST_GAIN_LEVEL2 0.85f         /* dimensionless; max pedal reduction at level 2 */
 #define ACKERMANN_PERCENT 1.00f          /* dimensionless; 0=parallel, 1=true Ackermann */
 #define DIFFERENTIAL_MODE_DEFAULT 2      /* 0=LOCKED, 1=OPEN, 2=LSD */
 #define DIFFERENTIAL_BIAS_RATIO 2.0f     /* dimensionless; LSD slower/faster cap */

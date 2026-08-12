@@ -334,6 +334,8 @@ typedef struct {
     float camberThrustN[WHEEL_COUNT]; /* N; camber-derived lateral force per wheel */
     float tireTemperatureGripMultiplier[WHEEL_COUNT]; /* dimensionless; 1.0 when thermal off */
     float tireWearGripMultiplier[WHEEL_COUNT];        /* dimensionless; 1.0 when wear off */
+    bool absActive; /* assist diagnostics (#25): an intervention is being applied this tick */
+    bool tcsActive;
 
     /* Which solver stage first produced a non-finite state, as a PhysicsStage value, or 0 when
      * the last step was healthy. Diagnostic only: it is recomputed every step and, like the
@@ -395,6 +397,10 @@ typedef struct {
     float differentialMode;
     float differentialBiasRatio;
     float differentialPreloadNm;
+    /* Driver assists (#25): 0 = off, 1 = light, 2 = strong. Pedal-level deterministic
+     * controllers; off preserves the baseline exactly. */
+    int absLevel;
+    int tcsLevel;
 } VehicleSetup;
 
 typedef struct {

@@ -19,6 +19,7 @@
 #include "game/car_selection.h"
 #include "game/controller.h"
 #include "physics/auto_transmission.h"
+#include "core/math_utils.h"
 #include "world/collision.h"
 #include "physics/physics.h"
 #include "game/profile.h"
@@ -108,6 +109,8 @@ static uint32_t hash_entrant(uint32_t h, const RaceEntrant *entrant)
     h = hash_f32(h, setup->differentialMode);
     h = hash_f32(h, setup->differentialBiasRatio);
     h = hash_f32(h, setup->differentialPreloadNm);
+    h = hash_u32(h, (uint32_t)setup->absLevel);
+    h = hash_u32(h, (uint32_t)setup->tcsLevel);
 
     const VehicleState *v = &entrant->instance.vehicle;
     h = hash_f32(h, v->positionM.x);
@@ -1068,6 +1071,57 @@ static void stage_record_and_commands(Game *game, const TickContext *ctx)
  * consumes. A countdown gates by zeroing the copy, which is why a held grid needs no separate
  * code path through the solver.
  */
+/* Driver assists (issue #25): pedal-level ABS and traction control on the gated copy, after
+ * the driver's demand and before physics applies it. Deterministic, stateless, and
+ * continuous (a proportional response over a slip deadband — no latch, no tick oscillation):
+ * the recorded pre-assist controller output reproduces interventions exactly on replay.
+ * Levels: 0 = off (baseline exact), 1 = light, 2 = strong. */
+static void apply_assists(Game *game, TickContext *ctx)
+{
+    const VehicleSetup *setup = &game->vehicleSetup;
+    const VehicleState *v = &game->vehicle;
+
+    /* ABS: worst |slipRatio| across the wheels while the driver is braking. */
+    if (setup->absLevel > 0 && ctx->applied.brake > 0.0f &&
+        v->velocityLongitudinalMps > ABS_SPEED_FLOOR_MPS) {
+        float worstSlip = 0.0f;
+        for (int i = 0; i < WHEEL_COUNT; i++) {
+            const float s = fabsf(v->wheels[i].slipRatio);
+            if (s > worstSlip) worstSlip = s;
+        }
+        const float t = clampf(
+            (worstSlip - ABS_ENGAGE_SLIP) / (ABS_FULL_SLIP - ABS_ENGAGE_SLIP), 0.0f, 1.0f);
+        const float gain = (setup->absLevel == 2) ? ASSIST_GAIN_LEVEL2 : ASSIST_GAIN_LEVEL1;
+        ctx->applied.brake *= 1.0f - gain * t;
+        game->derived.absActive = t > 0.0f;
+    } else {
+        game->derived.absActive = false;
+    }
+
+    /* TCS: driven-axle slip while the driver is on the throttle. */
+    if (setup->tcsLevel > 0 && ctx->applied.throttle > 0.0f &&
+        v->velocityLongitudinalMps > TCS_SPEED_FLOOR_MPS) {
+        const bool rearDriven =
+            (DrivetrainLayout)(int)game->spec.drivetrainLayout != DRIVE_LAYOUT_FWD;
+        float worstSlip = 0.0f;
+        for (int i = 0; i < WHEEL_COUNT; i++) {
+            const bool front = i <= WHEEL_FRONT_RIGHT;
+            if (front && (DrivetrainLayout)(int)game->spec.drivetrainLayout == DRIVE_LAYOUT_RWD)
+                continue;
+            if (!front && !rearDriven) continue;
+            const float s = fabsf(v->wheels[i].slipRatio);
+            if (s > worstSlip) worstSlip = s;
+        }
+        const float t = clampf(
+            (worstSlip - TCS_ENGAGE_SLIP) / (TCS_FULL_SLIP - TCS_ENGAGE_SLIP), 0.0f, 1.0f);
+        const float gain = (setup->tcsLevel == 2) ? ASSIST_GAIN_LEVEL2 : ASSIST_GAIN_LEVEL1;
+        ctx->applied.throttle *= 1.0f - gain * t;
+        game->derived.tcsActive = t > 0.0f;
+    } else {
+        game->derived.tcsActive = false;
+    }
+}
+
 static void stage_pre_physics(Game *game, TickContext *ctx, float dt)
 {
     if (game->session.phase == RACE_PHASE_COUNTDOWN) {
@@ -1075,6 +1129,7 @@ static void stage_pre_physics(Game *game, TickContext *ctx, float dt)
     }
     auto_transmission_update(&game->autoTrans, &game->vehicle, &game->spec, &game->derived,
                              &ctx->applied, dt);
+    apply_assists(game, ctx);
     game->vehicleControls.steer = ctx->applied.steer;
     game->vehicleControls.throttle = ctx->applied.throttle;
     game->vehicleControls.brake = ctx->applied.brake;

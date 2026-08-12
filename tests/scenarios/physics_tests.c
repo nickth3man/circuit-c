@@ -4782,6 +4782,114 @@ static void scenario_fuel_model(void)
     }
 }
 
+/*
+ * assists — issue #25: pedal-level ABS and traction control.
+ *
+ * ABS reduces sustained wheel lock under panic braking; TCS limits driven-wheel slip at
+ * launch. Levels default to 0 (off), which keeps the baseline exact.
+ */
+static void scenario_assists(void)
+{
+    /* ---- 1. Off by default: no intervention, baseline commands reach physics. ---- */
+    {
+        Game *game = alloc_game();
+        game_init(game);
+        check(game->vehicleSetup.absLevel == 0 && game->vehicleSetup.tcsLevel == 0,
+              "assists default to off");
+        set_vehicle_rolling_speed(game, 25.0f);
+        game->input.brake = 1.0f;
+        for (int i = 0; i < 120; i++) game_fixed_update(game, FIXED_DT_S);
+        check(!game->derived.absActive && !game->derived.tcsActive,
+              "no intervention with assists off");
+        free(game);
+    }
+
+    /* ---- 2. ABS: panic stop keeps the wheels rolling (less deep slip). ---- */
+    {
+        float deepSlipNoAbs = 0.0f, deepSlipAbs = 0.0f;
+        for (int withAbs = 0; withAbs < 2; withAbs++) {
+            Game *game = alloc_game();
+            game_init(game);
+            if (withAbs) game->vehicleSetup.absLevel = 2;
+            set_vehicle_rolling_speed(game, 25.0f);
+            for (int w = 0; w < WHEEL_COUNT; w++)
+                game->vehicle.wheels[w].surfaceId = SURFACE_SNOW;
+            game->input.brake = 1.0f;
+            float deep = 0.0f;
+            for (int i = 0; i < 600; i++) {
+                game_fixed_update(game, FIXED_DT_S);
+                bool anyDeep = false;
+                for (int w = 0; w < WHEEL_COUNT; w++) {
+                    if (fabsf(game->vehicle.wheels[w].slipRatio) > 0.7f) anyDeep = true;
+                }
+                if (anyDeep) deep += 1.0f;
+            }
+            if (withAbs) {
+                deepSlipAbs = deep;
+            } else {
+                deepSlipNoAbs = deep;
+            }
+            free(game);
+        }
+        check(deepSlipNoAbs > 0.0f, "the no-ABS snow stop actually reaches deep slip");
+        check(deepSlipAbs < deepSlipNoAbs, "ABS reduces deep-slip ticks on snow (%.0f -> %.0f)",
+              (double)deepSlipNoAbs, (double)deepSlipAbs);
+    }
+
+    /* ---- 3. TCS: launch limits driven-wheel slip. ---- */
+    {
+        float peakSlipNoTcs = 0.0f, peakSlipTcs = 0.0f;
+        for (int withTcs = 0; withTcs < 2; withTcs++) {
+            Game *game = alloc_game();
+            game_init(game);
+            if (withTcs) game->vehicleSetup.tcsLevel = 2;
+            game->input.throttle = 1.0f;
+            float peak = 0.0f;
+            for (int i = 0; i < 300; i++) {
+                game_fixed_update(game, FIXED_DT_S);
+                const float rearSlip =
+                    fabsf(game->vehicle.wheels[WHEEL_REAR_LEFT].slipRatio) >
+                            fabsf(game->vehicle.wheels[WHEEL_REAR_RIGHT].slipRatio)
+                        ? fabsf(game->vehicle.wheels[WHEEL_REAR_LEFT].slipRatio)
+                        : fabsf(game->vehicle.wheels[WHEEL_REAR_RIGHT].slipRatio);
+                if (rearSlip > peak) peak = rearSlip;
+            }
+            if (withTcs) {
+                peakSlipTcs = peak;
+            } else {
+                peakSlipNoTcs = peak;
+            }
+            free(game);
+        }
+        check(peakSlipTcs < peakSlipNoTcs, "TCS reduces peak driven-wheel slip (%.2f -> %.2f)",
+              (double)peakSlipNoTcs, (double)peakSlipTcs);
+        check(peakSlipNoTcs > TCS_ENGAGE_SLIP, "the no-TCS launch actually spun the wheels");
+    }
+
+    /* ---- 4. Determinism: identical assisted runs reproduce. ---- */
+    {
+        Game *a = alloc_game();
+        Game *b = alloc_game();
+        game_init(a);
+        game_init(b);
+        a->vehicleSetup.absLevel = b->vehicleSetup.absLevel = 2;
+        a->vehicleSetup.tcsLevel = b->vehicleSetup.tcsLevel = 2;
+        set_vehicle_rolling_speed(a, 20.0f);
+        set_vehicle_rolling_speed(b, 20.0f);
+        a->input.brake = b->input.brake = 0.5f;
+        a->input.throttle = b->input.throttle = 0.5f;
+        bool same = true;
+        for (int i = 0; i < 600; i++) {
+            game_fixed_update(a, FIXED_DT_S);
+            game_fixed_update(b, FIXED_DT_S);
+            if (game_state_checksum(a) != game_state_checksum(b)) same = false;
+        }
+        check(same, "assisted runs are deterministic over 600 ticks");
+        free(a);
+        free(b);
+    }
+}
+
 static const TestScenario kPhysicsScenarios[] = {
     { "telemetry", "CSV writer: stable header, row count, failure handling",
       scenario_telemetry },
@@ -4798,6 +4906,9 @@ static const TestScenario kPhysicsScenarios[] = {
     { "fuel-model",
       "issue #24: consumption from engine work, dynamic mass, starvation, refuel, determinism",
       scenario_fuel_model },
+    { "assists",
+      "issue #25: pedal-level ABS and TCS reduce lock/slip, off preserves the baseline",
+      scenario_assists },
     { "solver-stages",
       "staged solver: prefix runs, stage contracts, rollback and failure report",
       scenario_solver_stages },

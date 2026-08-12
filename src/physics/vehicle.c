@@ -746,6 +746,8 @@ void vehicle_setup_set_default(const VehicleDefinition *definition, VehicleSetup
     setup->differentialMode = spec->differentialMode;
     setup->differentialBiasRatio = spec->differentialBiasRatio;
     setup->differentialPreloadNm = spec->differentialPreloadNm;
+    setup->absLevel = 0; /* assists off by default: baseline exact (#25) */
+    setup->tcsLevel = 0;
 }
 
 uint32_t vehicle_setup_hash(const VehicleSetup *setup)
@@ -777,6 +779,8 @@ uint32_t vehicle_setup_hash(const VehicleSetup *setup)
     hash = vehicle_hash_f32(hash, setup->differentialMode);
     hash = vehicle_hash_f32(hash, setup->differentialBiasRatio);
     hash = vehicle_hash_f32(hash, setup->differentialPreloadNm);
+    hash = vehicle_hash_u32(hash, (uint32_t)setup->absLevel);
+    hash = vehicle_hash_u32(hash, (uint32_t)setup->tcsLevel);
     return hash;
 }
 
@@ -803,6 +807,9 @@ static void vehicle_setup_apply(VehicleSpec *spec, const VehicleSetup *setup)
 bool vehicle_setup_is_valid(const VehicleDefinition *definition, const VehicleSetup *setup)
 {
     if (definition == NULL || setup == NULL) return false;
+    if (setup->absLevel < 0 || setup->absLevel > 2 || setup->tcsLevel < 0 ||
+        setup->tcsLevel > 2)
+        return false;
     VehicleSpec compiled = definition->spec;
     vehicle_setup_apply(&compiled, setup);
     vehicle_spec_refresh_derived(&compiled);

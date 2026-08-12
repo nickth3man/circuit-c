@@ -242,8 +242,11 @@ Multiple lanes may operate in parallel after #13, but dependencies within each l
     full lock, phased shifts (cut/swap/engage) for auto and manual gearboxes. Shift state
     checksummed/replayed. Verified: 160 scenarios.
 
-- [ ] [#24 — Add fuel consumption and dynamic mass/CG effects](https://github.com/nickth3man/circuit-c/issues/24)
+- [x] [#24 — Add fuel consumption and dynamic mass/CG effects](https://github.com/nickth3man/circuit-c/issues/24)
   - Depends on: #8, #23
+  - Consumption ∝ engine work (monotonic, bounded; starvation fades drive), live fuel mass →
+    mass/CG/inertia via `vehicle_spec_set_fuel_mass()`, capacity-bounded `vehicle_refuel()`.
+    Behind `fuelEnabled` (default 0 = bit-identical). Verified: 161 scenarios.
 
 ## Driver-assist lane
 

@@ -1,7 +1,6 @@
 #include "physics/drivetrain.h"
 
 #include <math.h>
-#include <stdio.h>
 #include <string.h>
 
 #include "core/math_utils.h"

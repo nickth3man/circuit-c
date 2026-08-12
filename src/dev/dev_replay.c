@@ -90,6 +90,8 @@ static bool write_vehicle_snapshot(FILE *file, const ReplayVehicleSnapshot *snap
     WRITE_F32(setup->differentialMode);
     WRITE_F32(setup->differentialBiasRatio);
     WRITE_F32(setup->differentialPreloadNm);
+    WRITE_I32(setup->absLevel);
+    WRITE_I32(setup->tcsLevel);
 
     const VehicleState *vehicle = &snapshot->vehicle;
     WRITE_F32(vehicle->positionM.x);
@@ -293,6 +295,8 @@ static void read_vehicle_snapshot(Reader *reader, ReplayVehicleSnapshot *snapsho
     READ_F32(setup->differentialMode);
     READ_F32(setup->differentialBiasRatio);
     READ_F32(setup->differentialPreloadNm);
+    READ_I32(setup->absLevel);
+    READ_I32(setup->tcsLevel);
 
     VehicleState *vehicle = &snapshot->vehicle;
     READ_F32(vehicle->positionM.x);
