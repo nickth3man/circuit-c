@@ -379,8 +379,11 @@ Several lanes can begin in parallel after the phase foundations are complete.
 
 ## Timing and ghost lane
 
-- [ ] [#50 — Implement authoritative timing, sectors, lap validity, and time-trial records](https://github.com/nickth3man/circuit-c/issues/50)
+- [x] [#50 — Implement authoritative timing, sectors, lap validity, and time-trial records](https://github.com/nickth3man/circuit-c/issues/50)
   - Depends on: #11, #37, #38, #47
+  - Sub-tick crossing interpolation, best/theoretical-best laps + sector splits in
+    RacerProgress, validity reasons (skipped gate / wrong-way), records keyed by a
+    compatibility digest (profile schema v2). Verified: 163 scenarios.
 
 - [ ] [#51 — Promote replay data into persistent, non-interacting player ghosts](https://github.com/nickth3man/circuit-c/issues/51)
   - Depends on: #9, #44, #50
