@@ -1012,6 +1012,98 @@ static uint32_t hash_f32(uint32_t h, float value)
     return h;
 }
 
+/* Authoring validation (issue #42): checks an authored TrackDefinition for geometry,
+ * marker, grid, pit, and collision-world consistency. Deterministic; first error wins. */
+bool track_validate(const TrackDefinition *track, char *error, size_t errorCap)
+{
+    if (track == NULL) {
+        if (error != NULL && errorCap > 0) snprintf(error, errorCap, "track is NULL");
+        return false;
+    }
+    if (track->nodes == NULL || track->count < 2) {
+        if (error != NULL && errorCap > 0)
+            snprintf(error, errorCap, "route needs at least 2 nodes (got %d)", track->count);
+        return false;
+    }
+    if (track->routeClosed && track->count < 3) {
+        if (error != NULL && errorCap > 0)
+            snprintf(error, errorCap, "a closed route needs at least 3 nodes (got %d)",
+                     track->count);
+        return false;
+    }
+    const int segCount = track->routeClosed ? track->count : track->count - 1;
+    for (int i = 0; i < track->count; i++) {
+        const TrackNode *n = &track->nodes[i];
+        if (!isfinite(n->centerM.x) || !isfinite(n->centerM.y) || !isfinite(n->halfWidthM) ||
+            !isfinite(n->runoffHalfWidthM) || !isfinite(n->elevationM) ||
+            !isfinite(n->bankingRad) || !isfinite(n->kerbHeightM)) {
+            if (error != NULL && errorCap > 0)
+                snprintf(error, errorCap, "node %d has a non-finite field", i);
+            return false;
+        }
+        if (!(n->halfWidthM > 0.0f)) {
+            if (error != NULL && errorCap > 0)
+                snprintf(error, errorCap, "node %d halfWidth must be positive", i);
+            return false;
+        }
+    }
+    for (int i = 0; i < segCount; i++) {
+        const int j = track->routeClosed ? (i + 1) % track->count : i + 1;
+        const Vector2 a = track->nodes[i].centerM;
+        const Vector2 b = track->nodes[j].centerM;
+        const float lenSq = (b.x - a.x) * (b.x - a.x) + (b.y - a.y) * (b.y - a.y);
+        if (lenSq < 1e-8f) {
+            /* A closed route may close by duplicating its first node (the parking lot's
+             * authored closure): that one zero-length closing segment is the documented
+             * convention, not an error. */
+            const bool closingDuplicate = track->routeClosed && j == 0 &&
+                                          a.x == track->nodes[0].centerM.x &&
+                                          a.y == track->nodes[0].centerM.y;
+            if (!closingDuplicate) {
+                if (error != NULL && errorCap > 0)
+                    snprintf(error, errorCap, "segment %d is degenerate (zero length)", i);
+                return false;
+            }
+        }
+    }
+    /* Gates on the racing surface. */
+    for (int i = 0; i < track->checkpointCount; i++) {
+        float hw = 0.0f;
+        const float d =
+            track_distance_to_centerline_m(track, track->checkpoints[i].centerM, &hw);
+        if (d > hw + 1e-3f) {
+            if (error != NULL && errorCap > 0)
+                snprintf(error, errorCap, "checkpoint %d is off the racing surface (%.1f m)", i,
+                         (double)d);
+            return false;
+        }
+    }
+    /* Grid slots on the racing surface (when the track has a grid). */
+    for (int i = 0; i < track->gridSlotCount; i++) {
+        float hw = 0.0f;
+        const float d =
+            track_distance_to_centerline_m(track, track->gridSlots[i].positionM, &hw);
+        if (d > hw + 2.0f) {
+            if (error != NULL && errorCap > 0)
+                snprintf(error, errorCap, "grid slot %d is off the racing surface (%.1f m)", i,
+                         (double)d);
+            return false;
+        }
+    }
+    /* The collision world must build (barriers representable). */
+    {
+        CollisionWorld world;
+        memset(&world, 0, sizeof(world));
+        if (!collision_world_build_from_track(&world, track)) {
+            if (error != NULL && errorCap > 0)
+                snprintf(error, errorCap,
+                         "barriers cannot be represented in the collision world");
+            return false;
+        }
+    }
+    return true;
+}
+
 uint32_t track_geometry_hash(const TrackDefinition *track)
 {
     if (track == NULL) return 0u;

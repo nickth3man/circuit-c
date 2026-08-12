@@ -34,6 +34,10 @@ static void print_usage(const char *argv0)
            argv0);
     printf("       %s --dump-params [PATH]     write the parameter table as Markdown\n", argv0);
     printf("       %s --benchmark [TICKS]      fixed-update throughput, no telemetry\n", argv0);
+    printf("       %s --validate-tracks        validate every shipped track headlessly\n",
+           argv0);
+    printf("       %s --track-info PATH        print one track's canonical hash and summary\n",
+           argv0);
     printf("       %s --verify-failure-bundle [DIR]  create, inspect, and clean a fixture\n",
            argv0);
     printf("       %s --generate-corpus [DIR]   export the vehicle corpus as tuning profiles\n",
@@ -142,6 +146,13 @@ int main(int argc, char **argv)
         }
         if (strcmp(argv[i], "--benchmark") == 0) {
             return test_run_benchmark((i + 1 < argc) ? atoi(argv[i + 1]) : 0);
+        }
+        if (strcmp(argv[i], "--validate-tracks") == 0) {
+            return test_validate_tracks();
+        }
+        if (strcmp(argv[i], "--track-info") == 0) {
+            return test_track_info((i + 1 < argc && argv[i + 1][0] != '-') ? argv[i + 1]
+                                                                           : NULL);
         }
         if (strcmp(argv[i], "--generate-corpus") == 0) {
             return test_generate_corpus((i + 1 < argc && argv[i + 1][0] != '-') ? argv[i + 1]

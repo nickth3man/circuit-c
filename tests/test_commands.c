@@ -191,6 +191,60 @@ int test_verify_failure_bundle(const char *rootDir)
     return ok ? 0 : 1;
 }
 
+/* Track authoring workflow (issue #42): validate every shipped track headlessly, nonzero
+ * exit on any failure. Deterministic per-track diagnostics. */
+int test_validate_tracks(void)
+{
+    const char *dir = "data/tracks";
+    TrackCatalog catalog;
+    memset(&catalog, 0, sizeof(catalog));
+    char error[512] = "";
+    if (!track_catalog_load(dir, &catalog, error, sizeof(error))) {
+        printf("TRACK-VALIDATE FAIL catalog: %s\n", error);
+        return 1;
+    }
+
+    int failures = 0;
+    for (int i = 0; i < catalog.count; i++) {
+        const TrackDefinition *track = &catalog.entries[i].definition;
+        char why[256] = "";
+        if (track_validate(track, why, sizeof(why))) {
+            printf("TRACK-VALIDATE ok   %-16s hash %08x nodes %d gates %d\n", track->id,
+                   track_geometry_hash(track), track->count, track->checkpointCount);
+        } else {
+            printf("TRACK-VALIDATE FAIL %-16s %s\n", track->id, why);
+            failures++;
+        }
+    }
+    track_catalog_free(&catalog);
+    return failures == 0 ? 0 : 1;
+}
+
+/* Print one track's canonical hash and derived summary (issue #42). */
+int test_track_info(const char *path)
+{
+    if (path == NULL) return 1;
+    TrackDefinition track;
+    memset(&track, 0, sizeof(track));
+    uint32_t manifestHash = 0u;
+    char error[512] = "";
+    if (!track_manifest_load(path, &track, &manifestHash, error, sizeof(error))) {
+        printf("TRACK-INFO FAIL %s: %s\n", path, error);
+        return 1;
+    }
+    printf("TRACK-INFO %s\n", path);
+    printf("  id            %s\n", track.id);
+    printf("  version       %s\n", track.version);
+    printf("  nodes         %d\n", track.count);
+    printf("  gates         %d\n", track.checkpointCount);
+    printf("  sectors       %d\n", track.sectorMarkerCount);
+    printf("  grid slots    %d\n", track.gridSlotCount);
+    printf("  geometry hash %08x\n", track_geometry_hash(&track));
+    printf("  manifest hash %08x\n", manifestHash);
+    track_free(&track);
+    return 0;
+}
+
 int test_dump_params(const char *path)
 {
     if (path == NULL) {

@@ -10,6 +10,8 @@
 
 int test_run_benchmark(int ticks);
 int test_verify_failure_bundle(const char *rootDir);
+int test_validate_tracks(void);
+int test_track_info(const char *path);
 int test_dump_params(const char *path);
 int test_generate_corpus(const char *dir);
 int test_dump_corpus_index(const char *path);

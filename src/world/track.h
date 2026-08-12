@@ -394,6 +394,10 @@ bool track_runtime_bind(TrackRuntime *runtime, const TrackDefinition *track);
 bool track_runtime_definition_unchanged(const TrackRuntime *runtime,
                                         const TrackDefinition *track);
 
+/* Authoring validation (issue #42): checks geometry, markers, grid, pits, and the collision
+ * world for an authored definition. Deterministic; first error wins. */
+bool track_validate(const TrackDefinition *track, char *error, size_t errorCap);
+
 /* The chicane validation circuit: two straights joined by 180-degree curves, with a
  * left-right chicane set into the far straight. Closed loop, 8 required gates, gate 0 the
  * start/finish. This is the track Milestone 1 validates every car against. */

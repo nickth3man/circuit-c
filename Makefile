@@ -277,7 +277,7 @@ REGRESSION_SCENARIOS := skidpad step-steer transition lift-off \
         benchmark ci compile-commands format format-check format-py lint-py lint analyze fuzz \
         validate-hotreload compare-rgba measure-rotation record tidy tidy-changed tidy-run \
         clean clean-telemetry clean-artifacts dirs windows-only cards inspect visual-diagnose \
-        benchmark-multi print-source-groups print-source-group
+        benchmark-multi validate-tracks track-info print-source-groups print-source-group
 
 all: dev
 
@@ -392,6 +392,15 @@ benchmark: tests
 # default test suite stays timing-deterministic.
 benchmark-multi: tests
 	CIRCUIT_PERF_BENCH=1 ./$(EXE_TESTS) --scenario performance-budget
+
+# Track authoring workflow (issue #42): validate every shipped track headlessly, nonzero on
+# failure; print one track's canonical hash/summary.
+validate-tracks: tests
+	./$(EXE_TESTS) --validate-tracks
+
+track-info: tests
+	@test -n "$(TRACK)" || (echo "usage: make track-info TRACK=data/tracks/chicane.track.json" >&2; exit 2)
+	./$(EXE_TESTS) --track-info $(TRACK)
 
 # ------------------------------------------------------------------- telemetry tooling --
 

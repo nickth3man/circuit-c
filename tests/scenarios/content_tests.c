@@ -2045,6 +2045,58 @@ static void scenario_track_query_cache(void)
     }
 }
 
+/*
+ * track-validate — issue #42: the authoring validator accepts every shipped track and
+ * rejects planted geometry errors, and the canonical hash round-trips through the loader.
+ */
+static void scenario_track_validate(void)
+{
+    /* ---- 1. Every shipped track validates and round-trips its hash. ---- */
+    {
+        TrackCatalog catalog;
+        memset(&catalog, 0, sizeof(catalog));
+        char error[512] = "";
+        check(track_catalog_load(NULL, &catalog, error, sizeof(error)),
+              "track catalog loads (%s)", error);
+        check(catalog.count >= 4, "at least the four built-in tracks ship (%d)", catalog.count);
+        for (int i = 0; i < catalog.count; i++) {
+            char why[256] = "";
+            const TrackDefinition *track = &catalog.entries[i].definition;
+            check(track_validate(track, why, sizeof(why)), "shipped track '%s' validates (%s)",
+                  track->id, why);
+            /* Load by id and compare the canonical hash. */
+            TrackDefinition reloaded;
+            memset(&reloaded, 0, sizeof(reloaded));
+            uint32_t hash = 0u;
+            check(track_load_by_id(track->id, &reloaded, &hash, error, sizeof(error)),
+                  "track '%s' reloads by id (%s)", track->id, error);
+            check(track_geometry_hash(&reloaded) == track_geometry_hash(track),
+                  "track '%s' canonical hash round-trips", track->id);
+            track_free(&reloaded);
+        }
+        track_catalog_free(&catalog);
+    }
+
+    /* ---- 2. Planted errors are caught. ---- */
+    {
+        TrackDefinition track;
+        memset(&track, 0, sizeof(track));
+        track_load_chicane(&track);
+        char why[256] = "";
+
+        /* Non-finite node. */
+        track.nodes[5].centerM.x = NAN;
+        check(!track_validate(&track, why, sizeof(why)), "non-finite node rejected (%s)", why);
+        track.nodes[5].centerM.x = 0.0f;
+
+        /* Degenerate segment. */
+        track.nodes[10] = track.nodes[11];
+        check(!track_validate(&track, why, sizeof(why)), "degenerate segment rejected (%s)",
+              why);
+        track_free(&track);
+    }
+}
+
 static const TestScenario kScenarios[] = {
     { "json-parser", "strict JSON reader, escapes, and canonical hash", scenario_json_parser },
     { "vehicle-manifest",
@@ -2074,6 +2126,10 @@ static const TestScenario kScenarios[] = {
     { "track-query-cache",
       "issue #39: hinted local-neighbourhood surface queries match brute force exactly",
       scenario_track_query_cache },
+    { "track-validate",
+      "issue #42: authoring validator accepts shipped tracks, catches planted errors, hash "
+      "round-trips",
+      scenario_track_validate },
 };
 
 TestScenarioGroup test_content_scenarios(void)
