@@ -1349,8 +1349,11 @@ static void scenario_damage_recovery(void)
         game_init(game);
         track_load_chicane(&game->trackDef);
         game_spawn_on_track(game);
-        const RaceEntrantSpawn ai = { .controllerKind = CONTROLLER_KIND_AI, .gridSlot = -1 };
-        race_roster_spawn(&game->session.roster, &ai, NULL);
+        /* The blocker is a second HUMAN entrant (idle): an AI entrant would drive away under
+         * the per-entrant controller dispatch (issue #59). */
+        const RaceEntrantSpawn blockerSpawn = { .controllerKind = CONTROLLER_KIND_HUMAN,
+                                                .gridSlot = -1 };
+        race_roster_spawn(&game->session.roster, &blockerSpawn, NULL);
         game->session.rules.stuckRecoveryEnabled = true;
         game->session.rules.stuckRecoveryDelayS = 0.5f;
 
@@ -2174,6 +2177,95 @@ static void scenario_championship(void)
                                         "\"version\":99,\"points\":[],"
                                         "\"dropCount\":0,\"drivers\":[]}"),
               "incompatible save version rejected");
+    }
+}
+
+/* Issue #59: local multiplayer — independent human entrants and their results. */
+static void scenario_local_multiplayer(void)
+{
+    /* ---- 1. Two human entrants with independent input sources. ---- */
+    {
+        Game *game = alloc_game();
+        game_init(game);
+        track_load_chicane(&game->trackDef);
+        game_spawn_on_track(game);
+        /* Spawn a second human entrant. */
+        const RaceEntrantSpawn p2 = { .controllerKind = CONTROLLER_KIND_HUMAN, .gridSlot = 1 };
+        check(race_roster_spawn(&game->session.roster, &p2, NULL), "second human spawns");
+        check(race_session_place_grid(&game->session, &game->trackDef), "grid placed");
+        check(game->session.roster.count == 2, "two entrants on the grid (%d)",
+              game->session.roster.count);
+
+        /* Driver 0 uses the shared input; driver 1 uses its bound sample. */
+        Input sampleB;
+        input_zero(&sampleB);
+        sampleB.throttle = 1.0f;
+        game_set_entrant_input(game, 1, &sampleB);
+
+        input_zero(&game->input);
+        game->input.throttle = 1.0f;
+        game_fixed_update(game, FIXED_DT_S);
+        /* Both humans respond to their own source. */
+        check(game->session.roster.entrants[0].controllerOutput.throttle > 0.1f,
+              "driver 0 responds to the shared input");
+        check(game->session.roster.entrants[1].controllerOutput.throttle > 0.1f,
+              "driver 1 responds to its bound input");
+
+        /* Unbind driver 1: it stops responding, driver 0 unaffected. */
+        game_clear_entrant_input(game, 1);
+        game->input.throttle = 1.0f;
+        game_fixed_update(game, FIXED_DT_S);
+        check(game->session.roster.entrants[1].controllerOutput.throttle <= 0.1f,
+              "unbound driver 1 ignores the shared input");
+        check(game->session.roster.entrants[0].controllerOutput.throttle > 0.1f,
+              "driver 0 keeps the shared input");
+        free(game);
+    }
+
+    /* ---- 2. Two local players race alongside AI and get independent results. ---- */
+    {
+        Game *game = alloc_game();
+        game_init(game);
+        track_load_chicane(&game->trackDef);
+        game_spawn_on_track(game);
+        /* game_init already spawned the local human (slot 0). The AI start AHEAD (slots 1,2)
+         * and guarantee a finisher; the second local human idles behind (slot 3). */
+        const RaceEntrantSpawn ai1 = { .controllerKind = CONTROLLER_KIND_AI, .gridSlot = 1 };
+        const RaceEntrantSpawn ai2 = { .controllerKind = CONTROLLER_KIND_AI, .gridSlot = 2 };
+        const RaceEntrantSpawn p2 = { .controllerKind = CONTROLLER_KIND_HUMAN, .gridSlot = 3 };
+        (void)race_roster_spawn(&game->session.roster, &ai1, NULL);
+        (void)race_roster_spawn(&game->session.roster, &ai2, NULL);
+        (void)race_roster_spawn(&game->session.roster, &p2, NULL);
+        check(race_session_place_grid(&game->session, &game->trackDef), "grid placed");
+        check(game->session.roster.count == 4, "four entrants (%d)",
+              game->session.roster.count);
+
+        game->session.rules.mode = RACE_MODE_RACE;
+        game->session.rules.targetLaps = 1;
+        game->session.rules.finishingWindowS = 5.0f;
+        game->session.rules.stuckRecoveryEnabled = true;
+        race_session_start(&game->session, &game->session.rules);
+        game->state = STATE_PLAYING;
+
+        int ticks = 0;
+        while (!race_session_is_over(&game->session) && ticks < 30000) {
+            game_fixed_update(game, FIXED_DT_S);
+            ticks++;
+        }
+        check(race_session_is_over(&game->session), "local-multi race classifies (%d ticks)",
+              ticks);
+        check(game->session.results.valid && game->session.results.count == 4,
+              "all four entrants classified (%d)", game->session.results.count);
+        int humanRows = 0;
+        int aiWins = 0;
+        for (int i = 0; i < game->session.results.count; i++) {
+            const RaceResultRow *row = &game->session.results.rows[i];
+            if (row->entrantId == 1u || row->entrantId == 4u) humanRows++;
+            if ((row->entrantId == 2u || row->entrantId == 3u) && row->finished) aiWins++;
+        }
+        check(humanRows == 2, "both local players have results rows (%d)", humanRows);
+        check(aiWins >= 1, "an AI finisher triggers classification (%d)", aiWins);
+        free(game);
     }
 }
 static void scenario_timing_records(void)
@@ -6266,6 +6358,10 @@ static const TestScenario kGameplayScenarios[] = {
       "issue #58: points, drop rule, DNS/DNF/DSQ, ranking tie-breaks, persistence + version "
       "gate",
       scenario_championship },
+    { "local-multiplayer",
+      "issue #59: independent human entrant inputs, two-player race with AI, independent "
+      "classified results",
+      scenario_local_multiplayer },
     { "collision-world",
       "issue #26 world contract: stable ids, layers, authored objects, multi-proxy order, "
       "penetration recovery, corners, contact feed",

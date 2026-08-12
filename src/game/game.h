@@ -93,6 +93,15 @@ typedef struct {
 struct Game {
     GameStateId state;
     /*
+     * Local multiplayer (issue #59): per-entrant live input samples for human entrants beyond
+     * entrants[0]. When `entrantInputActive[i]` is set, entrant i's human controller reads
+     * `entrantInput[i]` instead of the shared `input` (which remains the sole source for
+     * entrants[0]). Presentation-layer state: deliberately excluded from the checksum, exactly
+     * like the shared input it shadows. Zeroed by game_init().
+     */
+    Input entrantInput[RACE_MAX_ENTRANTS];
+    bool entrantInputActive[RACE_MAX_ENTRANTS];
+    /*
      * The menu's car selection: an index into the car_selection_* enumeration (id-sorted
      * roster order — see car_selection.h) plus the stable id of that entry. -1 with an
      * empty id when the catalog holds nothing selectable. game_init() resolves the
@@ -287,5 +296,14 @@ GAME_API bool game_configure_session(Game *game, const SessionConfig *cfg, char 
 
 /* Reset the vehicle and resynchronise render history. Counters and tick are preserved. */
 GAME_API void game_reset_sim(Game *game);
+
+/*
+ * Local multiplayer (issue #59): bind a live input sample to one roster entrant's human
+ * controller. Entrant 0 keeps reading the shared `game->input`; other human entrants need
+ * their own source. Index out of range is ignored. The sample is copied; the caller may reuse
+ * its buffer. Call game_clear_entrant_input() to unbind.
+ */
+GAME_API void game_set_entrant_input(Game *game, int entrantIndex, const Input *sample);
+GAME_API void game_clear_entrant_input(Game *game, int entrantIndex);
 
 #endif /* CIRCUIT_GAME_H */

@@ -400,6 +400,22 @@ GAME_API void game_reset_sim(Game *game)
     race_roster_reset(&game->session.roster);
 }
 
+GAME_API void game_set_entrant_input(Game *game, int entrantIndex, const Input *sample)
+{
+    if (game == NULL || sample == NULL) return;
+    if (entrantIndex < 0 || entrantIndex >= RACE_MAX_ENTRANTS) return;
+    game->entrantInput[entrantIndex] = *sample;
+    game->entrantInputActive[entrantIndex] = true;
+}
+
+GAME_API void game_clear_entrant_input(Game *game, int entrantIndex)
+{
+    if (game == NULL) return;
+    if (entrantIndex < 0 || entrantIndex >= RACE_MAX_ENTRANTS) return;
+    game->entrantInputActive[entrantIndex] = false;
+    input_zero(&game->entrantInput[entrantIndex]);
+}
+
 GAME_API void game_apply_spec(Game *game, const VehicleSpec *spec)
 {
     if (game == NULL || spec == NULL) return;
@@ -1164,18 +1180,28 @@ static void stage_controllers(Game *game, const TickContext *ctx, float dt)
     /* Every additional entrant decides with the same controller contract against its own
      * vehicle state (issue #44). Controllers run every tick, even when the session is not
      * simulating, so an AI observes the world while paused or classified like the local
-     * driver does. */
+     * driver does. Local multiplayer (issue #59): a human entrant reads its own bound sample;
+     * unbound it reads a zeroed sample (the shared input belongs to entrants[0]). AI ignores
+     * the sample either way. */
     for (int i = 1; i < game->session.roster.count; i++) {
         RaceEntrant *entrant = &game->session.roster.entrants[i];
-        const ControllerTickView eview = { .sample = &ctx->sample,
+        /* Per-entrant dispatch (issue #59): an AI entrant always drives with its own driver
+         * regardless of the session's input source; a human entrant reads its own bound
+         * sample (zeroed when unbound — the shared input belongs to entrants[0]). */
+        ControllerKind kind = entrant->controller.kind;
+        const Input *sample = &ctx->sample;
+        if (kind == CONTROLLER_KIND_HUMAN) {
+            kind = ctx->sourceKind;
+            if (i > 0) sample = &game->entrantInput[i];
+        }
+        const ControllerTickView eview = { .sample = sample,
                                            .track = &game->trackDef,
                                            .runtime = &game->trackRuntime,
                                            .vehicle = &entrant->instance.vehicle,
                                            .derived = &entrant->instance.derived,
                                            .spec = &entrant->instance.spec,
                                            .dt = dt };
-        controller_update(&entrant->controller, ctx->sourceKind, &eview,
-                          &entrant->controllerOutput);
+        controller_update(&entrant->controller, kind, &eview, &entrant->controllerOutput);
     }
 }
 
