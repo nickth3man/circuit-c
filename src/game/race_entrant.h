@@ -65,6 +65,12 @@ typedef struct {
     bool finished;
     int finishPosition; /* 1-based once classified; 0 while the entrant is still racing */
     float finishTimeS;  /* session clock when the distance was completed; 0 until then */
+    /* Accumulated recovery penalties (issue #28), added to finishTimeS at classification.
+     * Monotonic inside the recovery stage; checked into the session checksum. */
+    float penaltyTimeS;
+    /* Consecutive fixed ticks the entrant has been stalled (issue #28 recovery detection).
+     * Part of authoritative state because it decides when the recovery fires. */
+    uint32_t stalledTicks;
 } EntrantResult;
 
 /*

@@ -1228,6 +1228,160 @@ static void scenario_session_ai(void)
 }
 
 /* ------------------------------------------------------------------------------------- */
+/* Scenario: damage-recovery — collision damage + stuck recovery (issue #28)              */
+/* ------------------------------------------------------------------------------------- */
+
+static int session_event_count(const RaceSession *session, RaceEventKind kind);
+
+static void scenario_damage_recovery(void)
+{
+    /* A scripted crash: the car sits 7.5 m above the parking-lot bottom barrier (centreline
+     * y = -150, barrier at y = -154) moving straight down at it. */
+    const struct {
+        Vector2 pos;
+        float speedMps;
+    } crash = { { 0.0f, -146.5f }, 15.0f };
+
+    /* ---- 1. Damage-off: contact physics unchanged, damage never accumulates. ---- */
+    {
+        Game *game = alloc_game();
+        game_init(game);
+        track_init(&game->trackDef);
+        game_spawn_on_track(game);
+        game->vehicle.positionM = crash.pos;
+        game->vehicle.velocityLateralMps = -crash.speedMps;
+        game->renderState.prevPositionM = game->renderState.currPositionM = crash.pos;
+        check(game->session.rules.damageMode == DAMAGE_OFF, "damage defaults to off");
+        for (int i = 0; i < 240; i++) game_fixed_update(game, FIXED_DT_S);
+        check(game->vehicleInstance.damage == 0.0f,
+              "damage-off: contact leaves damage at zero");
+        free(game);
+    }
+
+    /* ---- 2. Mechanical: the same crash accumulates bounded, monotonic damage. ---- */
+    {
+        Game *game = alloc_game();
+        game_init(game);
+        game->session.rules.damageMode = DAMAGE_MECHANICAL;
+        track_init(&game->trackDef);
+        game_spawn_on_track(game);
+        game->vehicle.positionM = crash.pos;
+        game->vehicle.velocityLateralMps = -crash.speedMps;
+        game->renderState.prevPositionM = game->renderState.currPositionM = crash.pos;
+        for (int i = 0; i < 240; i++) game_fixed_update(game, FIXED_DT_S);
+        const float afterCrash = game->vehicleInstance.damage;
+        check(afterCrash > 0.0f && afterCrash <= 1.0f,
+              "mechanical crash accumulates bounded damage (%.3f)", (double)afterCrash);
+
+        /* Repeated contact keeps it monotonic and capped at 1. */
+        float last = afterCrash;
+        for (int i = 0; i < 300; i++) game_fixed_update(game, FIXED_DT_S);
+        check(game->vehicleInstance.damage >= last - 1e-6f,
+              "damage is monotonic (%.3f -> %.3f)", (double)last,
+              (double)game->vehicleInstance.damage);
+        check(game->vehicleInstance.damage <= 1.0f, "damage never exceeds 1.0");
+        free(game);
+    }
+
+    /* ---- 3. Mechanical damage degrades performance through the solver. ---- */
+    {
+        Game *clean = alloc_game();
+        Game *broken = alloc_game();
+        game_init(clean);
+        game_init(broken);
+        broken->session.rules.damageMode = DAMAGE_MECHANICAL;
+        broken->vehicleInstance.damage = 1.0f;
+        clean->input.throttle = broken->input.throttle = 1.0f;
+        for (int i = 0; i < 900; i++) {
+            game_fixed_update(clean, FIXED_DT_S);
+            game_fixed_update(broken, FIXED_DT_S);
+        }
+        check(broken->derived.speedMps < clean->derived.speedMps * 0.97f,
+              "full mechanical damage measurably reduces top speed (%.2f vs %.2f m/s)",
+              (double)broken->derived.speedMps, (double)clean->derived.speedMps);
+        check(clean->vehicleInstance.damage == 0.0f,
+              "the undamaged control car accumulated no damage");
+        free(clean);
+        free(broken);
+    }
+
+    /* ---- 4. Stuck recovery: a stalled car rejoins the route with a penalty + event. ---- */
+    {
+        Game *game = alloc_game();
+        game_init(game);
+        track_load_chicane(&game->trackDef);
+        game_spawn_on_track(game);
+        game->session.rules.stuckRecoveryEnabled = true;
+        game->session.rules.stuckRecoveryDelayS = 0.5f;
+
+        /* Stall the car off the racing line: zero speed, off the surface. */
+        game->vehicle.positionM = (Vector2){ 0.0f, -30.0f };
+        game->vehicle.velocityLongitudinalMps = 0.0f;
+        game->vehicle.velocityLateralMps = 0.0f;
+        game->renderState.prevPositionM = game->renderState.currPositionM =
+            game->vehicle.positionM;
+
+        const Vector2 stuckPos = game->vehicle.positionM;
+        for (int i = 0; i < 150; i++) game_fixed_update(game, FIXED_DT_S);
+        const Vector2 recoveredPos = game->vehicle.positionM;
+        const float moved =
+            sqrtf((recoveredPos.x - stuckPos.x) * (recoveredPos.x - stuckPos.x) +
+                  (recoveredPos.y - stuckPos.y) * (recoveredPos.y - stuckPos.y));
+        check(moved > 1.0f, "stuck recovery repositioned the car (%.1f m away)", (double)moved);
+        check(game->session.roster.entrants[0].result.penaltyTimeS > 0.0f,
+              "recovery accumulated a time penalty (%.1f s)",
+              (double)game->session.roster.entrants[0].result.penaltyTimeS);
+        check(game->vehicle.velocityLongitudinalMps == 0.0f &&
+                  game->vehicle.velocityLateralMps == 0.0f,
+              "recovery cleared the invalid motion");
+        check(session_event_count(&game->session, RACE_EVENT_STUCK_RECOVERED) >= 1,
+              "recovery raised a session event");
+        free(game);
+    }
+
+    /* ---- 5. Occupied envelope defers recovery until the pose is clear. ---- */
+    {
+        Game *game = alloc_game();
+        game_init(game);
+        track_load_chicane(&game->trackDef);
+        game_spawn_on_track(game);
+        const RaceEntrantSpawn ai = { .controllerKind = CONTROLLER_KIND_AI, .gridSlot = -1 };
+        race_roster_spawn(&game->session.roster, &ai, NULL);
+        game->session.rules.stuckRecoveryEnabled = true;
+        game->session.rules.stuckRecoveryDelayS = 0.5f;
+
+        /* Stall entrant 1 ON the racing line (its recovery pose is its own position), then
+         * park entrant 2 on top of it so the recovery envelope is occupied. */
+        RaceEntrant *stuck = &game->session.roster.entrants[0];
+        RaceEntrant *blocker = &game->session.roster.entrants[1];
+        const Vector2 stallPos =
+            (Vector2){ 0.0f, 0.0f }; /* chicane start, on the racing line */
+        stuck->instance.vehicle.positionM = stallPos;
+        stuck->instance.vehicle.velocityLongitudinalMps = 0.0f;
+        stuck->instance.vehicle.velocityLateralMps = 0.0f;
+        stuck->instance.renderState.prevPositionM = stuck->instance.renderState.currPositionM =
+            stuck->instance.vehicle.positionM;
+        blocker->instance.vehicle.positionM = stallPos;
+        blocker->instance.renderState.prevPositionM =
+            blocker->instance.renderState.currPositionM = blocker->instance.vehicle.positionM;
+
+        for (int i = 0; i < 120; i++) game_fixed_update(game, FIXED_DT_S);
+        check(stuck->result.penaltyTimeS == 0.0f,
+              "occupied recovery pose defers the recovery (no penalty yet)");
+
+        /* Move the blocker away; the next recovery window must fire. */
+        blocker->instance.vehicle.positionM = (Vector2){ 0.0f, 30.0f };
+        blocker->instance.renderState.prevPositionM =
+            blocker->instance.renderState.currPositionM = blocker->instance.vehicle.positionM;
+        for (int i = 0; i < 150; i++) game_fixed_update(game, FIXED_DT_S);
+        check(stuck->result.penaltyTimeS > 0.0f,
+              "recovery fires once the envelope clears (penalty %.1f s)",
+              (double)stuck->result.penaltyTimeS);
+        free(game);
+    }
+}
+
+/* ------------------------------------------------------------------------------------- */
 /* Scenario: collision-world — the deterministic CollisionWorld contract                  */
 /* ------------------------------------------------------------------------------------- */
 
@@ -5121,6 +5275,9 @@ static const TestScenario kGameplayScenarios[] = {
     { "session-ai",
       "issue #52: AI eligibility, per-controller isolation, session lap/finish, track decls",
       scenario_session_ai },
+    { "damage-recovery",
+      "issue #28: damage modes, bounded monotonic damage, solver effects, stuck recovery",
+      scenario_damage_recovery },
     { "collision-world",
       "issue #26 world contract: stable ids, layers, authored objects, multi-proxy order, "
       "penetration recovery, corners, contact feed",

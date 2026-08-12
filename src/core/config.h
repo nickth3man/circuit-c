@@ -364,15 +364,26 @@
 /* Tire wear model (#22). Master switch is VehicleSpec.tireWearEnabled (default 0 = disabled,
  * bit-identical baseline). Wear accumulates monotonically from slip energy and surface
  * abrasion; grip degrades continuously to a bounded floor. */
-#define TIRE_WEAR_SLIP_GAIN 2.0e-6f   /* 1/J; wear per joule of slip work */
-#define TIRE_WEAR_LOCKUP_MULT 4.0f    /* dimensionless; extra wear when the wheel is locked */
-#define TIRE_WEAR_FULL_DEGRADE 0.30f  /* dimensionless; grip loss at 100% wear */
-#define TIRE_WEAR_DEGRADE_EXP 1.5f    /* dimensionless; degradation curve exponent */
-#define ACKERMANN_PERCENT 1.00f       /* dimensionless; 0=parallel, 1=true Ackermann */
-#define DIFFERENTIAL_MODE_DEFAULT 2   /* 0=LOCKED, 1=OPEN, 2=LSD */
-#define DIFFERENTIAL_BIAS_RATIO 2.0f  /* dimensionless; LSD slower/faster cap */
-#define DIFFERENTIAL_PRELOAD_NM 60.0f /* N*m; LSD clutch preload */
-#define DIFF_OMEGA_EPSILON_RAD_S 1.0e-3f /* rad/s; LSD omega-difference deadband */
+#define TIRE_WEAR_SLIP_GAIN 2.0e-6f  /* 1/J; wear per joule of slip work */
+#define TIRE_WEAR_LOCKUP_MULT 4.0f   /* dimensionless; extra wear when the wheel is locked */
+#define TIRE_WEAR_FULL_DEGRADE 0.30f /* dimensionless; grip loss at 100% wear */
+#define TIRE_WEAR_DEGRADE_EXP 1.5f   /* dimensionless; degradation curve exponent */
+/* Collision damage and stuck recovery (issue #28). Damage is bounded [0,1], accumulated from
+ * significant contact approach speeds, and consumed by the solver only in mechanical mode. */
+#define DAMAGE_IMPACT_THRESHOLD_MPS 2.0f /* m/s; below this a contact causes no damage */
+#define DAMAGE_PER_MPS 0.004f            /* 1/(m/s); damage per m/s over the threshold */
+#define DAMAGE_ENGINE_LOSS 0.40f      /* dimensionless; max engine output loss at full damage */
+#define DAMAGE_AERO_GAIN 0.50f        /* dimensionless; max drag increase at full damage */
+#define DAMAGE_GRIP_LOSS 0.30f        /* dimensionless; max grip loss at full damage */
+#define STUCK_RECOVERY_DELAY_S 2.0f   /* s; stall time before recovery fires */
+#define STUCK_RECOVERY_PENALTY_S 3.0f /* s; time penalty added per recovery */
+#define STUCK_RECOVERY_CLEAR_RADIUS_M 4.0f /* m; min distance to other entrants at spawn */
+#define STUCK_SPEED_MPS 0.5f               /* m/s; below this an entrant counts as stalled */
+#define ACKERMANN_PERCENT 1.00f            /* dimensionless; 0=parallel, 1=true Ackermann */
+#define DIFFERENTIAL_MODE_DEFAULT 2        /* 0=LOCKED, 1=OPEN, 2=LSD */
+#define DIFFERENTIAL_BIAS_RATIO 2.0f       /* dimensionless; LSD slower/faster cap */
+#define DIFFERENTIAL_PRELOAD_NM 60.0f      /* N*m; LSD clutch preload */
+#define DIFF_OMEGA_EPSILON_RAD_S 1.0e-3f   /* rad/s; LSD omega-difference deadband */
 #define ROLL_STIFFNESS_FRONT_FRACTION \
     0.50f                              /* dimensionless 0..1; front axle roll-moment share */
 #define SURFACE_REFERENCE_MU_LAT 1.30f /* asphalt lateral mu; tireMuLat* are absolute vs this */

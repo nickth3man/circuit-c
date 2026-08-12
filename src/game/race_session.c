@@ -19,6 +19,9 @@ void race_rules_set_default(RaceRules *rules)
     rules->mode = RACE_MODE_TIME_TRIAL;
     rules->targetLaps = RESULTS_TARGET_LAPS;
     rules->countdownS = 0.0f;
+    rules->damageMode = DAMAGE_OFF;
+    rules->stuckRecoveryEnabled = false;
+    rules->stuckRecoveryDelayS = STUCK_RECOVERY_DELAY_S;
 }
 
 void race_session_init(RaceSession *session)
@@ -242,7 +245,8 @@ void race_session_update_rules(RaceSession *session)
 
         entrant->result.finished = true;
         entrant->result.finishPosition = ++session->classifiedCount;
-        entrant->result.finishTimeS = session->clockS;
+        /* Recovery penalties (issue #28) land on the entrant's classified time. */
+        entrant->result.finishTimeS = session->clockS + entrant->result.penaltyTimeS;
         race_session_log_event(session, RACE_EVENT_ENTRANT_FINISHED, entrant->id,
                                entrant->result.finishPosition);
     }

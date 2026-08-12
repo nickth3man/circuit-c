@@ -82,7 +82,22 @@ typedef struct {
      * existing caller gets and why no recorded trace moves. Resolved to whole fixed steps at
      * start and clamped to RACE_COUNTDOWN_MAX_TICKS. */
     float countdownS;
+    /* Collision damage policy (issue #28): 0 = off (contact physics unchanged), 1 = cosmetic
+     * (damage accumulates for presentation only), 2 = mechanical (damage also degrades
+     * engine/aero/grip in the solver). Default 0 preserves every recorded baseline. */
+    int damageMode;
+    /* Deterministic stuck recovery (issue #28): when true, an entrant stalled for
+     * stuckRecoveryDelayS is repositioned onto its localized route pose with a time penalty
+     * and a session event. Default false: no trace changes. */
+    bool stuckRecoveryEnabled;
+    float stuckRecoveryDelayS;
 } RaceRules;
+
+typedef enum {
+    DAMAGE_OFF = 0,   /* contact physics untouched; damage not accumulated */
+    DAMAGE_COSMETIC,  /* damage accumulated for HUD/presentation, no physics effect */
+    DAMAGE_MECHANICAL /* damage accumulated AND fed to the solver (engine/aero/grip) */
+} RaceDamageMode;
 
 /* Upper bound on a resolved countdown, in fixed steps — ten minutes at the simulation rate.
  * It exists so that converting a nonsense or non-finite countdown to a tick count is defined
@@ -94,6 +109,7 @@ typedef enum {
     RACE_EVENT_LAP_COMPLETED,     /* value is the lap number just completed */
     RACE_EVENT_SECTOR_COMPLETED,  /* value is the sector index just crossed */
     RACE_EVENT_ENTRANT_FINISHED,  /* value is the finishing position awarded */
+    RACE_EVENT_STUCK_RECOVERED,   /* value is the running penalty count for that entrant */
     RACE_EVENT_KIND_COUNT
 } RaceEventKind;
 

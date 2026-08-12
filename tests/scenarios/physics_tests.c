@@ -1022,7 +1022,8 @@ static void scenario_accel_filter(void)
         state.velocityLateralMps = 0.0f;
         state.yawRateRadS = 0.0f;
         set_rolling_wheels(&spec, &state, 10.0f);
-        physics_fixed_update(&spec, &state, &derived, &renderState, NULL, &input, FIXED_DT_S);
+        physics_fixed_update(&spec, &state, &derived, &renderState, NULL, NULL, &input,
+                             FIXED_DT_S);
         const float straightAx = derived.solvedLongAccelMps2;
         check_near((double)straightAx, (double)(derived.totalBodyForceN.x / spec.massKg), 0.0,
                    "solved acceleration is exactly totalBodyForceX / mass");
@@ -1035,8 +1036,8 @@ static void scenario_accel_filter(void)
         rotating.velocityLateralMps = 2.0f;
         rotating.yawRateRadS = 0.5f;
         set_rolling_wheels(&spec, &rotating, 10.0f);
-        physics_fixed_update(&spec, &rotating, &rotatingDerived, &rotatingRender, NULL, &input,
-                             FIXED_DT_S);
+        physics_fixed_update(&spec, &rotating, &rotatingDerived, &rotatingRender, NULL, NULL,
+                             &input, FIXED_DT_S);
 
         /* dvx_dt carries r*vy = 0.5 * 2.0 = 1.0 m/s^2. The stored value must not. */
         const float transportTermMps2 = rotating.yawRateRadS * 2.0f;
@@ -1723,7 +1724,7 @@ static void scenario_solver_stages(void)
 
         PhysicsStep step;
         check(physics_step_init(&step, &game->spec, &game->vehicle, &game->derived,
-                                &game->renderState, NULL, &controls, FIXED_DT_S),
+                                &game->renderState, NULL, NULL, &controls, FIXED_DT_S),
               "a step initialises from a valid vehicle");
         check(step.completedStage == PHYSICS_STAGE_NONE,
               "and starts having completed nothing (got %d)", (int)step.completedStage);
@@ -1772,7 +1773,7 @@ static void scenario_solver_stages(void)
 
         PhysicsStep step;
         (void)physics_step_init(&step, &game->spec, &game->vehicle, &game->derived,
-                                &game->renderState, NULL, &controls, FIXED_DT_S);
+                                &game->renderState, NULL, NULL, &controls, FIXED_DT_S);
 
         const Vector2 renderCurrBefore = game->renderState.currPositionM;
         physics_step_run(&step, PHYSICS_STAGE_BEGIN);
@@ -1858,9 +1859,9 @@ static void scenario_solver_stages(void)
 
         for (int i = 0; i < 240; i++) {
             physics_fixed_update(&a->spec, &a->vehicle, &a->derived, &a->renderState, NULL,
-                                 &controls, FIXED_DT_S);
+                                 NULL, &controls, FIXED_DT_S);
             physics_fixed_update(&b->spec, &b->vehicle, &b->derived, &b->renderState, NULL,
-                                 &controls, FIXED_DT_S);
+                                 NULL, &controls, FIXED_DT_S);
         }
         check(memcmp(&a->vehicle, &b->vehicle, sizeof(VehicleState)) == 0,
               "240 steps from one starting state reproduce byte-identical vehicle state");
@@ -1898,8 +1899,8 @@ static void scenario_solver_stages(void)
             poisoned->vehicle.filteredLongAccelMps2 = 1.0e38f;
             PhysicsStep bad;
             (void)physics_step_init(&bad, &poisoned->spec, &poisoned->vehicle,
-                                    &poisoned->derived, &poisoned->renderState, NULL, &controls,
-                                    FIXED_DT_S);
+                                    &poisoned->derived, &poisoned->renderState, NULL, NULL,
+                                    &controls, FIXED_DT_S);
             physics_step_run(&bad, PHYSICS_STAGE_COUNT - 1);
             check(!physics_state_is_valid(&poisoned->spec, &poisoned->vehicle,
                                           &poisoned->derived),
@@ -1914,7 +1915,7 @@ static void scenario_solver_stages(void)
          * them, is not aborted by a failure this scenario caused on purpose. */
         const VehicleState before = game->vehicle;
         physics_fixed_update(&game->spec, &game->vehicle, &game->derived, &game->renderState,
-                             NULL, &controls, FIXED_DT_S);
+                             NULL, NULL, &controls, FIXED_DT_S);
 
         check(memcmp(&game->vehicle, &before, sizeof(VehicleState)) == 0,
               "a step that goes non-finite rolls the vehicle back to where it started");
@@ -1926,7 +1927,7 @@ static void scenario_solver_stages(void)
         game->vehicle.prevLongAccelMps2 = 0.0f;
         game->vehicle.filteredLongAccelMps2 = 0.0f;
         physics_fixed_update(&game->spec, &game->vehicle, &game->derived, &game->renderState,
-                             NULL, &controls, FIXED_DT_S);
+                             NULL, NULL, &controls, FIXED_DT_S);
         check(game->derived.solverFailedStage == (int)PHYSICS_STAGE_NONE,
               "a healthy step clears the failure report (got %s)",
               physics_stage_name((PhysicsStage)game->derived.solverFailedStage));
@@ -2511,7 +2512,8 @@ static void scenario_steering_sign(void)
     controller_output_zero(&input);
     input.steer = 0.5f;
     for (int i = 0; i < 30; i++) {
-        physics_fixed_update(&spec, &state, &derived, &renderState, NULL, &input, FIXED_DT_S);
+        physics_fixed_update(&spec, &state, &derived, &renderState, NULL, NULL, &input,
+                             FIXED_DT_S);
     }
     check(state.frontRoadWheelAngleRad > 0.0f, "left input produces positive road-wheel angle");
     check(derived.frontLateralForceN > 0.0f,
@@ -2554,8 +2556,8 @@ static void scenario_lever_arm(void)
     ControllerOutput input;
     controller_output_zero(&input);
     input.steer = 0.3f;
-    physics_fixed_update(&a, &sa, &da, &ra, NULL, &input, FIXED_DT_S);
-    physics_fixed_update(&b, &sb, &db, &rb, NULL, &input, FIXED_DT_S);
+    physics_fixed_update(&a, &sa, &da, &ra, NULL, NULL, &input, FIXED_DT_S);
+    physics_fixed_update(&b, &sb, &db, &rb, NULL, NULL, &input, FIXED_DT_S);
     check(fabsf(da.totalYawTorqueNm - db.totalYawTorqueNm) > 1.0f,
           "lever-arm changes measurably alter yaw torque");
     check(fabsf(sa.yawRateRadS - sb.yawRateRadS) > 1e-6f,
@@ -2572,10 +2574,10 @@ static void scenario_integration(void)
     ControllerOutput input;
     controller_output_zero(&input);
     input.throttle = 1.0f;
-    physics_fixed_update(&spec, &state, &derived, &renderState, NULL, &input, FIXED_DT_S);
+    physics_fixed_update(&spec, &state, &derived, &renderState, NULL, NULL, &input, FIXED_DT_S);
     check_near(state.velocityLongitudinalMps, 0.0, 1e-7,
                "the first launch tick spins the driven wheels before tire force develops");
-    physics_fixed_update(&spec, &state, &derived, &renderState, NULL, &input, FIXED_DT_S);
+    physics_fixed_update(&spec, &state, &derived, &renderState, NULL, NULL, &input, FIXED_DT_S);
     check(state.velocityLongitudinalMps > 0.0f,
           "the next tick accelerates from drivetrain-generated wheel slip");
     check_near(state.positionM.x, state.velocityLongitudinalMps * FIXED_DT_S, 1e-6,
@@ -2585,7 +2587,7 @@ static void scenario_integration(void)
     state.yawRateRadS = 1.0f;
     state.velocityLongitudinalMps = 0.0f;
     input.throttle = 0.0f;
-    physics_fixed_update(&spec, &state, &derived, &renderState, NULL, &input, FIXED_DT_S);
+    physics_fixed_update(&spec, &state, &derived, &renderState, NULL, NULL, &input, FIXED_DT_S);
     check(state.headingRad >= -CIRCUIT_PI && state.headingRad < CIRCUIT_PI,
           "integrated heading remains wrapped");
 }
@@ -2837,7 +2839,7 @@ static uint32_t param_audit_drive_signature(const VehicleSpec *spec, bool *allFi
             input.throttle = 1.0f;
             input.steer = 0.0f;
         }
-        physics_fixed_update(spec, &state, &derived, &renderState, tireState, &input,
+        physics_fixed_update(spec, &state, &derived, &renderState, tireState, NULL, &input,
                              FIXED_DT_S);
     }
 
@@ -2886,7 +2888,8 @@ static uint32_t param_audit_collide_signature(const VehicleSpec *spec,
         return 0u;
     }
     for (int tick = 0; tick < PARAM_AUDIT_COLLIDE_TICKS; tick++) {
-        physics_fixed_update(spec, &state, &derived, &renderState, NULL, &input, FIXED_DT_S);
+        physics_fixed_update(spec, &state, &derived, &renderState, NULL, NULL, &input,
+                             FIXED_DT_S);
         contacts += collision_resolve_track(&world, 1u, spec, &state, &renderState,
                                             &crashLockoutTimerS);
     }
@@ -3964,12 +3967,12 @@ static void scenario_drivetrain_layout(void)
         input.steer = 0.20f;
         input.throttle = 0.15f;
         for (int i = 0; i < 120; i++)
-            physics_fixed_update(&spec, &state, &derived, &renderState, NULL, &input,
+            physics_fixed_update(&spec, &state, &derived, &renderState, NULL, NULL, &input,
                                  FIXED_DT_S);
 
         input.throttle = 1.0f;
         for (int i = 0; i < 180; i++) {
-            physics_fixed_update(&spec, &state, &derived, &renderState, NULL, &input,
+            physics_fixed_update(&spec, &state, &derived, &renderState, NULL, NULL, &input,
                                  FIXED_DT_S);
             rearSlipRatio[layout] =
                 fmaxf(rearSlipRatio[layout], state.wheels[WHEEL_REAR_LEFT].slipRatio);
@@ -4021,7 +4024,7 @@ static void scenario_drivetrain_layout(void)
         input.steer = 0.20f;
         input.throttle = 0.15f;
         for (int i = 0; i < 180; i++)
-            physics_fixed_update(&spec, &state, &derived, &renderState, NULL, &input,
+            physics_fixed_update(&spec, &state, &derived, &renderState, NULL, NULL, &input,
                                  FIXED_DT_S);
 
         check(fabsf(state.yawRateRadS) > 0.01f,

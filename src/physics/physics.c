@@ -658,7 +658,8 @@ const char *physics_stage_name(PhysicsStage stage)
 
 bool physics_step_init(PhysicsStep *step, const VehicleSpec *spec, VehicleState *state,
                        VehicleDerived *derived, VehicleRenderState *renderState,
-                       VehicleTireState *tireState, const ControllerOutput *input, float dt)
+                       VehicleTireState *tireState, float *damage,
+                       const ControllerOutput *input, float dt)
 {
     if (step == NULL) return false;
     memset(step, 0, sizeof(*step));
@@ -671,6 +672,7 @@ bool physics_step_init(PhysicsStep *step, const VehicleSpec *spec, VehicleState 
     step->derived = derived;
     step->renderState = renderState;
     step->tireState = tireState;
+    step->damage = damage;
     step->input = *input; /* copied: the step's demands cannot change halfway through it */
     step->dt = dt;
     step->completedStage = PHYSICS_STAGE_NONE;
@@ -782,6 +784,14 @@ static void stage_powertrain(PhysicsStep *step)
     step->torques = drivetrain_calculate_torques(spec, state->selectedGear, wheelOmegaRadS,
                                                  wheelTireReactionNm, input->throttle,
                                                  input->brake, input->handbrake);
+    /* Mechanical damage: degraded engine output (issue #28). */
+    if (step->damage != NULL && *step->damage > 0.0f) {
+        const float d = *step->damage > 1.0f ? 1.0f : *step->damage;
+        const float mult = 1.0f - DAMAGE_ENGINE_LOSS * d;
+        for (int i = 0; i < WHEEL_COUNT; i++) {
+            step->torques.driveTorqueNm[i] *= mult;
+        }
+    }
     if (input->brake >= 0.60f && brakeLoads.frontN + brakeLoads.rearN > 0.0f) {
         const float loadBias = brakeLoads.frontN / (brakeLoads.frontN + brakeLoads.rearN);
         /* Combined braking and cornering consumes rear lateral capacity too. Keep a small
@@ -1015,10 +1025,15 @@ static void stage_tire_forces(PhysicsStep *step)
         /* Surface-relative friction and stiffness. On asphalt the surface ratios equal 1.0 and
          * tireBScale is 1.0, so this block is a complete no-op. */
         const SurfaceSpec *s = Surface_Get(wheel->surfaceId);
+        /* Mechanical damage grip loss (issue #28); 1.0 when damage is off. */
+        const float damageMult =
+            (step->damage != NULL && *step->damage > 0.0f)
+                ? 1.0f - DAMAGE_GRIP_LOSS * (*step->damage > 1.0f ? 1.0f : *step->damage)
+                : 1.0f;
         const float muLateralEff = lateralMuAxle * (s->muLateral / SURFACE_REFERENCE_MU_LAT) *
-                                   muScale * tempMult * wearMult;
-        const float muLongitudinalEff =
-            spec->tireMuLongScale * s->muLongitudinal * muScale * tempMult * wearMult;
+                                   muScale * tempMult * wearMult * damageMult;
+        const float muLongitudinalEff = spec->tireMuLongScale * s->muLongitudinal * muScale *
+                                        tempMult * wearMult * damageMult;
         const float BlatEff = lateralB * widthScale * pressureScale * s->tireBScale;
         const float BlongEff = spec->tireBLong * pressureScale;
 
@@ -1204,6 +1219,14 @@ static void stage_resistance(PhysicsStep *step)
     Vector2 aeroDragN =
         physics_aero_drag_body_n(spec, state->velocityLongitudinalMps,
                                  state->velocityLateralMps, &derived->aeroDragMagnitudeN);
+    /* Mechanical damage: damaged aero adds drag (issue #28). */
+    if (step->damage != NULL && *step->damage > 0.0f) {
+        const float d = *step->damage > 1.0f ? 1.0f : *step->damage;
+        const float mult = 1.0f + DAMAGE_AERO_GAIN * d;
+        aeroDragN.x *= mult;
+        aeroDragN.y *= mult;
+        derived->aeroDragMagnitudeN *= mult;
+    }
 
     Vector2 rollingN = { 0.0f, 0.0f };
     derived->rollingResistanceMagnitudeN = 0.0f;
@@ -1621,7 +1644,7 @@ static PhysicsStage diagnose_failing_stage(const PhysicsStep *failed)
     VehicleDerived derived = failed->lastGoodDerived;
     VehicleRenderState renderState = failed->lastGoodRenderState;
     if (!physics_step_init(&probe, failed->spec, &state, &derived, &renderState,
-                           failed->tireState, &failed->input, failed->dt))
+                           failed->tireState, failed->damage, &failed->input, failed->dt))
         return PHYSICS_STAGE_NONE;
 
     for (PhysicsStage s = PHYSICS_STAGE_BEGIN; s < PHYSICS_STAGE_COUNT;
@@ -1634,10 +1657,11 @@ static PhysicsStage diagnose_failing_stage(const PhysicsStep *failed)
 
 void physics_fixed_update(const VehicleSpec *spec, VehicleState *state, VehicleDerived *derived,
                           VehicleRenderState *renderState, VehicleTireState *tireState,
-                          const ControllerOutput *input, float dt)
+                          float *damage, const ControllerOutput *input, float dt)
 {
     PhysicsStep step;
-    if (!physics_step_init(&step, spec, state, derived, renderState, tireState, input, dt))
+    if (!physics_step_init(&step, spec, state, derived, renderState, tireState, damage, input,
+                           dt))
         return;
 
     physics_step_run(&step, PHYSICS_STAGE_COUNT - 1);

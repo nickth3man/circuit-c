@@ -88,6 +88,8 @@ static uint32_t hash_entrant(uint32_t h, const RaceEntrant *entrant)
     h = hash_u32(h, entrant->result.finished ? 1u : 0u);
     h = hash_u32(h, (uint32_t)entrant->result.finishPosition);
     h = hash_f32(h, entrant->result.finishTimeS);
+    h = hash_f32(h, entrant->result.penaltyTimeS);
+    h = hash_u32(h, entrant->result.stalledTicks);
 
     const VehicleSetup *setup = &entrant->setup;
     h = hash_f32(h, setup->tirePressureFrontKpa);
@@ -1093,8 +1095,12 @@ static void stage_physics(Game *game, TickContext *ctx, float dt)
                 Track_SurfaceAt(&game->trackDef, &game->trackRuntime, worldContact);
         }
     }
+    /* Collision damage feeds the solver only in mechanical mode (#28): cosmetic and off
+     * modes keep contact physics identical. */
+    float *damagePtr =
+        (game->session.rules.damageMode == DAMAGE_MECHANICAL) ? &game->damage : NULL;
     physics_fixed_update(&game->spec, &game->vehicle, &game->derived, &game->renderState,
-                         game->tireState, &ctx->applied, dt);
+                         game->tireState, damagePtr, &ctx->applied, dt);
     CIRCUIT_ZONE_END(physics);
 }
 
@@ -1211,9 +1217,12 @@ static void simulate_extra_entrant(Game *game, RaceEntrant *entrant, const TickC
                 Track_SurfaceAt(&game->trackDef, &game->trackRuntime, worldContact);
         }
     }
+    float *damagePtr = (game->session.rules.damageMode == DAMAGE_MECHANICAL)
+                           ? &entrant->instance.damage
+                           : NULL;
     physics_fixed_update(&entrant->instance.spec, &entrant->instance.vehicle,
                          &entrant->instance.derived, &entrant->instance.renderState,
-                         entrant->instance.tireState, &applied, dt);
+                         entrant->instance.tireState, damagePtr, &applied, dt);
 
     if (ctx->trackLoaded) {
         const TrackProgressEvent pev =
@@ -1311,6 +1320,31 @@ static void stage_collision(Game *game, const TickContext *ctx, float dt)
 }
 
 /*
+ * Stage 7b — collision damage (issue #28).
+ * Reads: the per-tick contact feed and the frozen rules. Writes: each entrant's bounded
+ * damage scalar. Off mode never touches the field, so contact physics is identical;
+ * cosmetic and mechanical modes accumulate from significant approach speeds. The crash
+ * lockout already gates repeated contacts into distinct events, which is the cooldown.
+ */
+static void accumulate_damage(Game *game)
+{
+    if (game->session.rules.damageMode == DAMAGE_OFF) return;
+    const CollisionWorld *world = &game->trackRuntime.collisionWorld;
+    for (int i = 0; i < game->session.roster.count; i++) {
+        RaceEntrant *entrant = &game->session.roster.entrants[i];
+        float damage = entrant->instance.damage;
+        for (int c = 0; c < world->contactCount; c++) {
+            const CollisionContact *contact = &world->contacts[c];
+            if (contact->bodyId != entrant->id) continue;
+            const float excess = contact->approachSpeedMps - DAMAGE_IMPACT_THRESHOLD_MPS;
+            if (excess > 0.0f) damage += excess * DAMAGE_PER_MPS;
+        }
+        if (damage > 1.0f) damage = 1.0f;
+        entrant->instance.damage = damage;
+    }
+}
+
+/*
  * Stage 8 — rules and classification.
  * Reads: every entrant's RacerProgress and the frozen rules. Writes: the session clock, phase,
  * countdown, per-entrant results, the event log, and the screen the classified race hands to
@@ -1321,6 +1355,83 @@ static void stage_rules(Game *game)
     race_session_update_rules(&game->session);
     if (game->session.phase == RACE_PHASE_CLASSIFIED) {
         game->state = STATE_RESULTS;
+    }
+}
+
+/*
+ * Stage 8b — deterministic stuck recovery (issue #28).
+ * Reads: each entrant's speed/progress and the frozen rules. Writes: the entrant's pose,
+ * velocity, penalty, stall counter, and a session event.
+ *
+ * An entrant stalled below STUCK_SPEED_MPS for stuckRecoveryDelayS is repositioned onto its
+ * localized route pose (the route-localization recovery candidate), its invalid motion is
+ * cleared, a time penalty is accumulated into its result, and the event is logged. The spawn
+ * is refused while another entrant occupies the recovery envelope, so recovery can never drop
+ * a car into a collision. Disabled by default: no trace changes.
+ */
+static void stage_stuck_recovery(Game *game)
+{
+    const RaceRules *rules = &game->session.rules;
+    if (!rules->stuckRecoveryEnabled) return;
+    const int delayTicks = (int)(rules->stuckRecoveryDelayS / FIXED_DT_S);
+    if (delayTicks <= 0) return;
+
+    for (int i = 0; i < game->session.roster.count; i++) {
+        RaceEntrant *entrant = &game->session.roster.entrants[i];
+        if (entrant->result.finished) continue;
+
+        if (entrant->instance.derived.speedMps < STUCK_SPEED_MPS) {
+            entrant->result.stalledTicks++;
+        } else {
+            entrant->result.stalledTicks = 0;
+        }
+        if (entrant->result.stalledTicks < (uint32_t)delayTicks) continue;
+
+        const RouteLocation *loc = &entrant->progress.location;
+        if (!loc->valid) {
+            entrant->result.stalledTicks = 0;
+            continue;
+        }
+
+        /* Occupied-envelope check: never spawn into another car. */
+        const Vector2 pose = loc->pointM;
+        const float clearSq = STUCK_RECOVERY_CLEAR_RADIUS_M * STUCK_RECOVERY_CLEAR_RADIUS_M;
+        bool occupied = false;
+        for (int j = 0; j < game->session.roster.count; j++) {
+            if (j == i) continue;
+            const Vector2 other = game->session.roster.entrants[j].instance.vehicle.positionM;
+            const float dx = other.x - pose.x;
+            const float dy = other.y - pose.y;
+            if (dx * dx + dy * dy < clearSq) {
+                occupied = true;
+                break;
+            }
+        }
+        if (occupied) {
+            entrant->result.stalledTicks = 0; /* wait for the envelope to clear */
+            continue;
+        }
+
+        /* Deterministic recovery: route pose, cleared motion, penalty, event. */
+        VehicleState *v = &entrant->instance.vehicle;
+        v->positionM = pose;
+        v->headingRad = atan2f(loc->forwardUnit.y, loc->forwardUnit.x);
+        v->velocityLongitudinalMps = 0.0f;
+        v->velocityLateralMps = 0.0f;
+        v->yawRateRadS = 0.0f;
+        for (int w = 0; w < WHEEL_COUNT; w++) {
+            v->wheels[w].angularVelocityRadS = 0.0f;
+        }
+        entrant->instance.renderState.prevPositionM = pose;
+        entrant->instance.renderState.currPositionM = pose;
+        entrant->instance.renderState.prevHeadingRad = v->headingRad;
+        entrant->instance.renderState.currHeadingRad = v->headingRad;
+        entrant->instance.crashLockoutTimerS = 0.0f;
+
+        entrant->result.penaltyTimeS += STUCK_RECOVERY_PENALTY_S;
+        race_session_log_event(&game->session, RACE_EVENT_STUCK_RECOVERED, entrant->id,
+                               (int32_t)entrant->result.stalledTicks);
+        entrant->result.stalledTicks = 0;
     }
 }
 
@@ -1436,7 +1547,9 @@ GAME_API void game_fixed_update(Game *game, float dt)
             simulate_extra_entrant(game, &game->session.roster.entrants[i], &ctx, dt);
         }
         stage_collision(game, &ctx, dt);
+        accumulate_damage(game);
         stage_rules(game);
+        stage_stuck_recovery(game);
         stage_presentation(game, dt);
     }
 
