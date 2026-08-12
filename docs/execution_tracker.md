@@ -415,8 +415,10 @@ Several lanes can begin in parallel after the phase foundations are complete.
 
 Start #54 after both the grid/start and basic live-AI requirements are complete.
 
-- [ ] [#54 — Implement multi-entrant race order, finish, and classification](https://github.com/nickth3man/circuit-c/issues/54)
+- [x] [#54 — Implement multi-entrant race order, finish, and classification](https://github.com/nickth3man/circuit-c/issues/54)
   - Depends on: #11, #38, #49, #52
+  - race_session_live_order() (authoritative), finishing window + DNF, fastest lap, enriched
+    results. Verified: 172 scenarios.
 
 - [ ] [#55 — Implement track limits, cuts, wrong-way, contact, and penalty rules](https://github.com/nickth3man/circuit-c/issues/55)
   - Depends on: #28, #38, #54
