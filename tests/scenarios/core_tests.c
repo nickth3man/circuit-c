@@ -29,6 +29,7 @@
 #include "scenario_shared.h"
 
 #include "dev/car_corpus.h"
+#include "game/player_profile.h"
 #include "render/car_visual.h"
 #include "render/car_visual_raster.h"
 #include "render/track_ribbon_geometry.h"
@@ -1845,8 +1846,114 @@ static void scenario_multi_failure_bundle_capture(void)
     free(game);
 }
 
+/*
+ * player-profile — issue #47: versioned profile persistence, migration, corrupt recovery,
+ * binding conflicts, and record handling. Uses in-memory serialization only — no user dirs.
+ */
+static void scenario_player_profile(void)
+{
+    /* ---- 1. Defaults. ---- */
+    {
+        PlayerProfile p;
+        player_profile_load_memory(&p);
+        check(p.version == PLAYER_PROFILE_VERSION, "profile version is current");
+        check_near((double)p.masterVolume, 1.0, 1e-6, "default master volume is 1.0");
+        check(p.lastCarId[0] == '\0' && p.lastTrackId[0] == '\0',
+              "default profile has no last selections");
+        check(p.bindingCount == 0 && p.recordCount == 0, "default profile is empty");
+    }
+
+    /* ---- 2. Round-trip: serialize -> deserialize preserves everything. ---- */
+    {
+        PlayerProfile p;
+        player_profile_load_memory(&p);
+        p.lastCarId[0] = 'r';
+        p.lastCarId[1] = '\0';
+        snprintf(p.lastTrackId, sizeof(p.lastTrackId), "%s", "chicane_v2");
+        p.masterVolume = 0.5f;
+        p.reducedFlashes = true;
+        check(player_profile_rebind(&p, "throttle", "KEY_W"), "bind throttle");
+        check(player_profile_rebind(&p, "brake", "KEY_S"), "bind brake");
+        check(player_profile_record_lap(&p, "chicane", "rwd_grip", 42.5f), "record a best lap");
+
+        char buf[PLAYER_PROFILE_JSON_CAP];
+        const int len = player_profile_serialize(&p, buf, sizeof(buf));
+        check(len > 0, "profile serializes (%d bytes)", len);
+
+        PlayerProfile q;
+        char err[128] = "";
+        check(player_profile_deserialize(&q, buf, err, sizeof(err)),
+              "profile deserializes (%s)", err);
+        check(strcmp(q.lastCarId, "r") == 0 && strcmp(q.lastTrackId, "chicane_v2") == 0,
+              "last selections round-trip");
+        check_near((double)q.masterVolume, 0.5, 1e-6, "volume round-trips");
+        check(q.reducedFlashes, "accessibility flag round-trips");
+        check(strcmp(player_profile_bound_key(&q, "throttle"), "KEY_W") == 0 &&
+                  strcmp(player_profile_bound_key(&q, "brake"), "KEY_S") == 0,
+              "bindings round-trip");
+        check_near((double)player_profile_best_lap(&q, "chicane", "rwd_grip"), 42.5, 1e-4,
+                   "record round-trips");
+    }
+
+    /* ---- 3. Old-version text (no version key) loads with defaults for new fields. ---- */
+    {
+        PlayerProfile p;
+        char err[128] = "";
+        check(player_profile_deserialize(&p, "{\"masterVolume\":0.25,\"lastCarId\":\"x\"}", err,
+                                         sizeof(err)),
+              "version-less profile text loads");
+        check_near((double)p.masterVolume, 0.25, 1e-6, "old text still reads known fields");
+        check(strcmp(p.lastCarId, "x") == 0, "old text reads lastCarId");
+        check(p.version == PLAYER_PROFILE_VERSION, "loaded profile reports current version");
+    }
+
+    /* ---- 4. Corrupt input: rejected, defaults returned, no crash. ---- */
+    {
+        PlayerProfile p;
+        p.masterVolume = 0.9f;
+        char err[128] = "";
+        check(!player_profile_deserialize(&p, "{not json at all", err, sizeof(err)),
+              "garbage text is rejected (%s)", err);
+        check_near((double)p.masterVolume, 1.0, 1e-6,
+                   "failed load leaves the default volume, not partial state");
+    }
+
+    /* ---- 5. Binding conflicts and rebinding. ---- */
+    {
+        PlayerProfile p;
+        player_profile_load_memory(&p);
+        check(player_profile_rebind(&p, "throttle", "KEY_W"), "bind throttle to W");
+        check(!player_profile_rebind(&p, "brake", "KEY_W"),
+              "a second action cannot take an in-use key");
+        check(strcmp(player_profile_bound_key(&p, "throttle"), "KEY_W") == 0,
+              "the original binding survives the refused rebind");
+        check(player_profile_rebind(&p, "throttle", "KEY_UP"), "an action may rebind");
+        check(strcmp(player_profile_bound_key(&p, "throttle"), "KEY_UP") == 0,
+              "the rebind took effect");
+        check(player_profile_rebind(&p, "brake", "KEY_S"), "and other actions stay bindable");
+    }
+
+    /* ---- 6. Records: improve, keep, and query. ---- */
+    {
+        PlayerProfile p;
+        player_profile_load_memory(&p);
+        check(player_profile_record_lap(&p, "chicane", "rwd_grip", 45.0f), "first record");
+        check(!player_profile_record_lap(&p, "chicane", "rwd_grip", 50.0f),
+              "a slower lap does not replace the best");
+        check(player_profile_record_lap(&p, "chicane", "rwd_grip", 44.0f), "a faster lap does");
+        check_near((double)player_profile_best_lap(&p, "chicane", "rwd_grip"), 44.0, 1e-4,
+                   "best lap is the fastest recorded");
+        check(player_profile_best_lap(&p, "chicane", "missing_car") == 0.0f,
+              "unknown car id queries return 0 without crashing");
+        check(player_profile_best_lap(&p, "missing_track", "rwd_grip") == 0.0f,
+              "unknown track id queries return 0 without crashing");
+    }
+}
+
 static const TestScenario kCoreScenarios[] = {
     { "math", "clampf, lerpf, smooth_to, wrap_angle, smoothstep, lerp_angle", scenario_math },
+    { "player-profile", "issue #47: versioned profile, migration, corrupt recovery, bindings",
+      scenario_player_profile },
     { "units", "world<->render conversion and the heading sign convention", scenario_units },
     { "timestep", "substep cap, backlog drops, frame clamp, interpolation alpha",
       scenario_timestep },
