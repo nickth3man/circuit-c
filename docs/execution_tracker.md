@@ -437,8 +437,10 @@ Start #54 after both the grid/start and basic live-AI requirements are complete.
   - EntrantPitState cycle (entry->box->service->exit), limiter + PIT_SPEED penalty, pit
     geometry config gate; grandprix authors a pit lane. Verified: 175 scenarios.
 
-- [ ] [#58 — Add practice, qualifying, race weekends, championships, points, and progression](https://github.com/nickth3man/circuit-c/issues/58)
+- [x] [#58 — Add practice, qualifying, race weekends, championships, points, and progression](https://github.com/nickth3man/circuit-c/issues/58)
   - Depends on: #33, #56, #57
+  - Championship model: points table, drop rule, DNS/DNF/DSQ, tie-breaks, versioned
+    persistence. Verified: 176 scenarios.
 
 ## Phase 6 gate
 
