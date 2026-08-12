@@ -403,16 +403,21 @@ Several lanes can begin in parallel after the phase foundations are complete.
     RacerProgress, validity reasons (skipped gate / wrong-way), records keyed by a
     compatibility digest (profile schema v2). Verified: 163 scenarios.
 
-- [ ] [#51 — Promote replay data into persistent, non-interacting player ghosts](https://github.com/nickth3man/circuit-c/issues/51)
+- [x] [#51 — Promote replay data into persistent, non-interacting player ghosts](https://github.com/nickth3man/circuit-c/issues/51)
   - Depends on: #9, #44, #50
+  - GhostRecording store (atomic), non-interacting ghost simulation outside the roster
+    (checksum-invariant), compatibility gate, best-record replacement. Verified: 180 scenarios.
 
 ## AI lane
 
-- [ ] [#52 — Integrate the validation AI as a live session Controller](https://github.com/nickth3man/circuit-c/issues/52)
+- [x] [#52 — Integrate the validation AI as a live session Controller](https://github.com/nickth3man/circuit-c/issues/52)
   - Depends on: #9, #10, #30, #38
+  - AI live controller + aiEligible manifest gate (fail-closed spawn refusal).
 
-- [ ] [#53 — Add AI racecraft, traffic awareness, and data-driven difficulty](https://github.com/nickth3man/circuit-c/issues/53)
+- [x] [#53 — Add AI racecraft, traffic awareness, and data-driven difficulty](https://github.com/nickth3man/circuit-c/issues/53)
   - Depends on: #27, #38, #45, #52
+  - Deterministic traffic view + apply_traffic (follow/pass, default-off), difficultyScale pace
+    tiers. Verified: 179 scenarios.
 
 ## Classification, rules, and results lane
 
