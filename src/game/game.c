@@ -23,6 +23,7 @@
 #include "world/collision.h"
 #include "physics/physics.h"
 #include "game/profile.h"
+#include "core/content_paths.h"
 #include "render/render.h"
 #include "world/track.h"
 #include "content/track_manifest.h"
@@ -573,6 +574,168 @@ static void set_reason_safe(char *reason, size_t cap, const char *msg)
 }
 
 /*
+ * Copy a stable content id into a SessionConfig id field, refusing rather than truncating.
+ *
+ * The two buffers are sized by different modules — the selection's is the wider one — so this is
+ * a real narrowing, not a formality. A truncated id names a different car or no car at all, and
+ * the damage would surface much later as "player car unavailable" from the configure path, with
+ * nothing left to say which id was mangled. Returns false when the id does not fit.
+ */
+static bool copy_config_id(char *dst, size_t cap, const char *src)
+{
+    if (dst == NULL || cap == 0 || src == NULL) return false;
+    const size_t len = strlen(src);
+    if (len >= cap) return false;
+    memset(dst, 0, cap);
+    memcpy(dst, src, len + 1);
+    return true;
+}
+
+/* ---- player profile (MAP.md priority 4) ---------------------------------------------
+ *
+ * The profile module has been complete and tested in isolation for some time; what was missing
+ * was any production caller. These four functions are that caller: resolve where it lives, load
+ * it at startup, apply what it says, and write it back at shutdown.
+ */
+
+/* Beside the car recall file, and resolved through the product root for the same reason every
+ * other content path is: a packaged build launched from an unrelated directory has to find the
+ * same profile the last run wrote. */
+#define GAME_PROFILE_REL_PATH "data/input/player_profile.json"
+
+void game_profile_resolve_path(char *out, size_t cap)
+{
+    content_path_resolve(GAME_PROFILE_REL_PATH, out, cap);
+}
+
+/*
+ * The compatibility key a lap record is filed under (issue #50).
+ *
+ * A lap time only means something against the same track geometry, the same car content, and
+ * the same assist policy — a record set with full ABS on an older version of a corner is not
+ * comparable to one set without. Every input that could move a lap time goes into the key, so a
+ * change to any of them files future records separately instead of silently beating an old one.
+ */
+void game_record_compatibility_key(const Game *game, char *out, size_t cap)
+{
+    if (out == NULL || cap == 0) return;
+    out[0] = '\0';
+    if (game == NULL) return;
+    const RaceEntrant *local = race_roster_local_const(&game->session.roster);
+    const uint32_t trackHash = track_geometry_hash(&game->trackDef);
+    const uint32_t carHash = (local != NULL) ? local->definition.contentHash : 0u;
+    const int abs = (local != NULL) ? local->setup.absLevel : 0;
+    const int tcs = (local != NULL) ? local->setup.tcsLevel : 0;
+    (void)snprintf(out, cap, "v1:t%08x:c%08x:a%d:s%d:d%d", trackHash, carHash, abs, tcs,
+                   game->session.rules.damageMode);
+}
+
+/*
+ * Push the loaded profile's settings into the systems that own them.
+ *
+ * Only the settings, deliberately: the last car and track are selections the startup path
+ * resolves against live content (a car that has been deleted must not be selected), and the
+ * bindings are read where input is sampled. Safe to call again after the player changes a
+ * setting, which is what makes a settings screen possible.
+ */
+static void apply_profile_settings(const Game *game)
+{
+    audio_set_volumes(game->profile.masterVolume, game->profile.sfxVolume,
+                      game->profile.musicVolume);
+}
+
+/*
+ * Open the profile at `path` and adopt it.
+ *
+ * Deliberately NOT behind the headless guard. What is interactive is the DECISION to load a
+ * profile at startup, not the loading itself, and putting the code behind the guard would leave
+ * the one path a player actually takes — startup, migration, corrupt recovery, shutdown — as
+ * the only path no test can reach. MAP.md's known issue #3 is exactly that: a profile scenario
+ * that exercises the module in isolation and calls it integration.
+ *
+ * A missing file is not a failure: a clean install opens on defaults, and this returns true.
+ * A corrupt file is backed up by the loader and replaced with defaults, and this also returns
+ * true, because the game must open. Only an I/O failure that prevents reading returns false,
+ * and even then the profile is left at defaults and marked loaded so the player's next save
+ * has somewhere to go.
+ */
+GAME_API bool game_profile_open(Game *game, const char *path)
+{
+    if (game == NULL || path == NULL || path[0] == '\0') return false;
+    (void)snprintf(game->profilePath, sizeof(game->profilePath), "%s", path);
+    player_profile_default(&game->profile);
+    char err[256] = "";
+    const bool read = player_profile_load(&game->profile, game->profilePath, err, sizeof(err));
+    if (!read) player_profile_default(&game->profile);
+    game->profileLoaded = true;
+    /* The bindings are adopted here rather than in apply_profile_settings(): they are a
+     * property of the profile that was just read, whereas the settings function is also called
+     * after a live edit, when the bindings are already current. */
+    input_bindings_from_profile(&game->bindings, &game->profile);
+    apply_profile_settings(game);
+    return read;
+}
+
+/*
+ * Write the profile back.
+ *
+ * The current selections are captured here rather than being written on every keypress: a menu
+ * that saved a file each time the player nudged the carousel would do a lot of I/O to record a
+ * decision that is not final until they stop. Records are the exception and are committed the
+ * moment a session is classified (game_profile_record_session), because a lap that has been set
+ * is final whether or not the player quits tidily.
+ *
+ * A no-op when no profile was loaded. That is the headless case, and writing a default profile
+ * over a real one is exactly how a player's settings would disappear.
+ */
+GAME_API bool game_profile_save_now(Game *game)
+{
+    if (game == NULL || !game->profileLoaded || game->profilePath[0] == '\0') return false;
+    if (game->selectedCarId[0] != '\0') {
+        (void)snprintf(game->profile.lastCarId, sizeof(game->profile.lastCarId), "%s",
+                       game->selectedCarId);
+    }
+    if (game->raceConfig.trackId[0] != '\0') {
+        (void)snprintf(game->profile.lastTrackId, sizeof(game->profile.lastTrackId), "%s",
+                       game->raceConfig.trackId);
+    }
+    (void)input_bindings_to_profile(&game->bindings, &game->profile);
+    char err[256] = "";
+    const bool saved = player_profile_save(&game->profile, game->profilePath, err, sizeof(err));
+#if !defined(CIRCUIT_HEADLESS)
+    if (!saved) TRACELOG(LOG_WARNING, "GAME: profile save failed (%s)", err);
+#endif
+    return saved;
+}
+
+/*
+ * Commit what a classified session earned to the profile (MAP.md priority 4).
+ *
+ * Called once, on the transition into RACE_PHASE_CLASSIFIED, from the authoritative session
+ * stage — not from the results screen. A record has to be written by the thing that knows the
+ * race finished, or a player who alt-F4s from the results loses the lap they just set.
+ *
+ * Only the local entrant's best lap is recorded, and only a lap the session considers valid
+ * (a zero best means no valid lap was set). The compatibility key is what stops a record from
+ * being compared across a track edit, a car update, or a different assist policy. Returns true
+ * when a new or improved record was stored.
+ */
+GAME_API bool game_profile_record_session(Game *game)
+{
+    if (game == NULL || !game->profileLoaded) return false;
+    const RaceEntrant *local = race_roster_local_const(&game->session.roster);
+    if (local == NULL) return false;
+    const float best = local->progress.bestLapTimeS;
+    if (!(best > 0.0f)) return false;
+    if (game->session.trackId[0] == '\0' || local->definition.id[0] == '\0') return false;
+
+    char key[PLAYER_PROFILE_RECORD_KEY_CHARS];
+    game_record_compatibility_key(game, key, sizeof(key));
+    return player_profile_record_lap(&game->profile, game->session.trackId,
+                                     local->definition.id, key, best);
+}
+
+/*
  * The player-facing path to "start a race" (issue #48). Validates the bundle first — no invalid
  * combination reaches allocation or spawn — then loads the track, rebuilds the grid (the player
  * in slot 0 plus the requested AI field in race mode), freezes the rules and environment, and
@@ -693,6 +856,7 @@ GAME_API bool game_configure_session(Game *game, const SessionConfig *cfg, char 
     rules.countdownS = cfg->countdownS;
     rules.damageMode = cfg->damageMode;
     rules.stuckRecoveryEnabled = cfg->stuckRecoveryEnabled;
+    rules.trackLimitsEnabled = cfg->trackLimitsEnabled;
     rules.pitLaneEnabled = cfg->pitLaneEnabled;
     if (cfg->pitServiceTimeS > 0.0f) rules.pitServiceTimeS = cfg->pitServiceTimeS;
     game->session.environment = cfg->environment;
@@ -821,6 +985,18 @@ static void apply_selected_car(Game *game)
 static void restart_session(Game *game)
 {
     game_reset_sim(game);
+    /* race_entrant_reset() puts a car at the world origin, which undoes whatever placement the
+     * session was configured with: a multi-entrant race would restart stacked on one point, and
+     * a solo race would restart at (0,0) rather than on its grid slot — off the track, for any
+     * circuit whose start line is not at the origin.
+     *
+     * The discriminator is `trackId`: a session that knows which authored track it is on has a
+     * grid to go back to. Sessions without one — the builtin default track every physics
+     * scenario and fixture runs on — keep the origin reset they have always had, so no recorded
+     * baseline moves. */
+    if (game->session.trackId[0] != '\0') {
+        (void)race_session_place_grid(&game->session, &game->trackDef);
+    }
     /* Route progress goes back with the cars. Without it a restart taken on or after the final
      * lap re-satisfies the finish condition on its very next tick and drops straight back to
      * the results screen, which is the opposite of what the player asked for. It is reset here
@@ -830,8 +1006,14 @@ static void restart_session(Game *game)
      * Deliberately NOT shared with the playback rewind below: a recording does not necessarily
      * begin at gate zero, so a replay that forced one would measure the timeline against the
      * wrong gate. Restoring a recording's starting progress needs it captured with the
-     * recording, which is the replay snapshot work in issue 44. */
-    track_reset_progress_at(&game->progress, &game->trackDef, 0);
+     * recording, which is the replay snapshot work in issue 44.
+     *
+     * Every entrant, not just the local one: an AI car whose lap cursor survived a restart would
+     * be scored against the previous run. For a one-entrant session this is the same single
+     * line it always was. */
+    for (int i = 0; i < game->session.roster.count; i++) {
+        track_reset_progress_at(&game->session.roster.entrants[i].progress, &game->trackDef, 0);
+    }
     race_session_start(&game->session, NULL);
 }
 
@@ -850,6 +1032,12 @@ static void restart_session(Game *game)
  * decoration: an ineligible selection or an out-of-bounds setup leaves the player on the menu
  * with a reason on screen rather than dropping them into a race with a car the content rules
  * reject. Returns false when the race did not start.
+ *
+ * Third — and this is what makes the menu a race setup rather than a car picker — the start goes
+ * through game_configure_session() with the bundle the race-setup screen has been editing. The
+ * menu used to call restart_session(), which replayed whatever the default session already was:
+ * that is why a headless test could launch a configured AI race and a player could not. There is
+ * now one configuration path, and the player is on it.
  */
 static bool start_from_menu(Game *game)
 {
@@ -874,7 +1062,33 @@ static bool start_from_menu(Game *game)
         return false;
     }
     game->startBlockedReason[0] = '\0';
-    restart_session(game);
+    /* The bundle races the car the carousel is showing. The race-setup screen deliberately has
+     * no car row, so this is the single place that answer comes from. */
+    if (!copy_config_id(game->raceConfig.carId, sizeof(game->raceConfig.carId),
+                        game->selectedCarId)) {
+        (void)snprintf(game->startBlockedReason, sizeof(game->startBlockedReason),
+                       "car id too long to configure a race: %.40s", game->selectedCarId);
+        return false;
+    }
+    if (!game_configure_session(game, &game->raceConfig, game->startBlockedReason,
+                                sizeof(game->startBlockedReason))) {
+        return false;
+    }
+    /* game_configure_session() spawns the player from the manifest's authored default setup with
+     * the config's assists on top. A setup the player tuned in the editor is theirs and has to
+     * survive the start, so it is re-applied here — assists last, because the race-setup screen
+     * owns those two values and the setup editor does not expose them. */
+    if (game->setupCustomized) {
+        RaceEntrant *entrant = race_roster_local(&game->session.roster);
+        if (entrant != NULL) {
+            entrant->setup = game->setupEditor.working;
+            entrant->setup.absLevel = game->raceConfig.absLevel;
+            entrant->setup.tcsLevel = game->raceConfig.tcsLevel;
+            (void)vehicle_instance_derive(&entrant->instance, &entrant->definition,
+                                          &entrant->setup);
+        }
+    }
+    game->raceSetupEditing = false;
     return true;
 }
 
@@ -896,8 +1110,8 @@ static void apply_oneshots(Game *game, const Input *input, const ControllerOutpu
      * last valid choice by stable id, and point the player entrant at the new car so the world
      * behind the menu previews it. Interactive menu use only — headless never enters STATE_MENU,
      * so this cannot perturb scenario determinism. */
-    if (game->state == STATE_MENU && !game->setupEditing &&
-        (input->leftPressed || input->rightPressed)) {
+    if (game->state == STATE_MENU && !game->setupEditing && !game->raceSetupEditing &&
+        !game->settingsEditing && (input->leftPressed || input->rightPressed)) {
         const int count = car_selection_count();
         if (count > 0) {
             int index = game->selectedCarIndex + (input->rightPressed ? 1 : -1);
@@ -920,8 +1134,75 @@ static void apply_oneshots(Game *game, const Input *input, const ControllerOutpu
      * setup to the car's authored default. A pending setup only reaches the race when the player
      * starts: it is applied to the local entrant live so a restart carries it, and the base
      * definition is never mutated. */
-    if (game->state == STATE_MENU && game->selectedCarIndex >= 0 &&
-        game->setupEditor.itemCount > 0) {
+    /*
+     * Settings / controls / accessibility screen (MAP.md priority 4), menu only.
+     *
+     * The toggle key closes the other menu screens for the same reason they close each other:
+     * they share LEFT/RIGHT and UP/DOWN, and one keypress must not mean two things. Edits land
+     * on the profile and the live bindings immediately — a volume change should be audible
+     * before the player leaves the screen — and the write to disk happens on close, which is
+     * the one moment the player has actually finished deciding.
+     */
+    if (game->state == STATE_MENU) {
+        if (input->settingsTogglePressed) {
+            game->settingsEditing = !game->settingsEditing;
+            if (game->settingsEditing) {
+                game->setupEditing = false;
+                game->raceSetupEditing = false;
+                settings_menu_init(&game->settingsMenu);
+            } else {
+                (void)settings_menu_cancel_capture(&game->settingsMenu);
+                apply_profile_settings(game);
+                (void)game_profile_save_now(game);
+            }
+        } else if (game->settingsEditing) {
+            if (input->upPressed || input->downPressed) {
+                (void)settings_menu_move_cursor(&game->settingsMenu, input->upPressed ? -1 : 1);
+            }
+            if (input->leftPressed || input->rightPressed) {
+                if (settings_menu_adjust(&game->settingsMenu, &game->profile, &game->bindings,
+                                         input->rightPressed ? 1 : -1)) {
+                    /* Applied live so the change is heard, not merely stored. */
+                    apply_profile_settings(game);
+                }
+            }
+            /* The setup-screen key doubles as "change the tab" here: the settings screen has no
+             * setup editor to open, and a player on it should not have to learn a fourth key. */
+            if (input->setupTogglePressed) {
+                (void)settings_menu_move_tab(&game->settingsMenu, 1);
+            }
+        }
+    }
+    /* Race setup screen (MAP.md priority 1), menu only. TAB toggles it; with it open UP/DOWN
+     * move the row cursor and LEFT/RIGHT move that row's control. The three menu screens are
+     * mutually exclusive because the car carousel and the setup editor both already claim
+     * LEFT/RIGHT: opening one closes the other rather than letting one keypress mean two things.
+     * Re-initialising on open is what picks up track or vehicle content edited while the game was
+     * running, and it is also the only place the row cursor is parked back at the top. */
+    if (game->state == STATE_MENU && !game->settingsEditing) {
+        if (input->raceSetupTogglePressed) {
+            game->raceSetupEditing = !game->raceSetupEditing;
+            if (game->raceSetupEditing) {
+                game->setupEditing = false;
+                race_setup_menu_init(&game->raceSetupMenu);
+            }
+        } else if (game->raceSetupEditing) {
+            if (input->upPressed || input->downPressed) {
+                (void)race_setup_menu_move_cursor(&game->raceSetupMenu,
+                                                  input->upPressed ? -1 : 1);
+            }
+            if (input->leftPressed || input->rightPressed) {
+                if (race_setup_menu_adjust(&game->raceSetupMenu, &game->raceConfig,
+                                           input->rightPressed ? 1 : -1)) {
+                    /* Any edit invalidates the previous refusal: the config it described no
+                     * longer exists, and the next start attempt recomputes the verdict. */
+                    game->startBlockedReason[0] = '\0';
+                }
+            }
+        }
+    }
+    if (game->state == STATE_MENU && !game->raceSetupEditing && !game->settingsEditing &&
+        game->selectedCarIndex >= 0 && game->setupEditor.itemCount > 0) {
         if (input->setupTogglePressed) {
             game->setupEditing = !game->setupEditing;
         } else if (game->setupEditing) {
@@ -1049,6 +1330,25 @@ GAME_API void game_init(Game *game)
     input_zero(&game->input);
     memset(&game->sim, 0, sizeof(game->sim));
 
+    /* The race the menu configures, set to a bundle that validates on a clean install. Done
+     * unconditionally — headless never opens the screen, but leaving the block uninitialised
+     * would put indeterminate bytes in a struct the checksum walks past and the sanitizers
+     * read. The catalog snapshot the screen needs is taken below, on the interactive path. */
+    session_config_set_default(&game->raceConfig);
+    memset(&game->raceSetupMenu, 0, sizeof(game->raceSetupMenu));
+    game->raceSetupEditing = false;
+
+    /* Defaults unconditionally, for the same reason as the race config above: headless never
+     * loads a profile and must not be left reading indeterminate bytes. `profileLoaded` stays
+     * false there, which is what stops game_shutdown() from writing a default profile over the
+     * player's real one. */
+    player_profile_default(&game->profile);
+    game->profilePath[0] = '\0';
+    game->profileLoaded = false;
+    input_bindings_set_default(&game->bindings);
+    settings_menu_init(&game->settingsMenu);
+    game->settingsEditing = false;
+
     /* One entrant, spawned through the same roster path a full grid uses: the default car,
      * driven by the human at the keyboard, in grid slot 0. Everything downstream reads it
      * either through race_roster_local() or through the compatibility view in game.h. */
@@ -1062,17 +1362,35 @@ GAME_API void game_init(Game *game)
      * session directly), and the default keeps every existing caller on the timeline it had. */
     race_session_start(&game->session, NULL);
 #if !defined(CIRCUIT_HEADLESS)
+    /* The profile is loaded before anything that wants its answers. A missing file is not an
+     * error — a clean install starts on defaults — and a corrupt one is backed up by the loader
+     * and replaced with defaults rather than taking startup down with it. Only an I/O failure
+     * that prevents reading returns false, and even then the game opens on defaults. */
+    {
+        char profilePath[sizeof(game->profilePath)];
+        game_profile_resolve_path(profilePath, sizeof(profilePath));
+        if (!game_profile_open(game, profilePath)) {
+            TRACELOG(LOG_WARNING, "GAME: profile at '%s' unreadable; starting on defaults",
+                     profilePath);
+        }
+    }
+
     /* Resolve the persisted car selection so the menu opens on the player's last car and the
-     * entrant previews it. The recall names a stable content id; an unknown or missing id
-     * deterministically falls back to the first selectable car (id-sorted catalog order). An
-     * empty catalog leaves the builtin default car and an empty selection. Headless never
-     * reaches this, so scenario determinism is unaffected. */
+     * entrant previews it. The profile is the source; the standalone recall file is the
+     * fallback, so an install that predates the profile still opens on the right car. An
+     * unknown or missing id deterministically falls back to the first selectable car (id-sorted
+     * catalog order). An empty catalog leaves the builtin default car and an empty selection.
+     * Headless never reaches this, so scenario determinism is unaffected. */
     game->selectedCarIndex = 0;
     game->selectedCarId[0] = '\0';
     {
         char recalledId[CAR_SELECTION_ID_CHARS];
-        const char *wantedId =
-            car_selection_load_recall(recalledId, sizeof(recalledId)) ? recalledId : NULL;
+        const char *wantedId = NULL;
+        if (game->profile.lastCarId[0] != '\0') {
+            wantedId = game->profile.lastCarId;
+        } else if (car_selection_load_recall(recalledId, sizeof(recalledId))) {
+            wantedId = recalledId;
+        }
         const int count = car_selection_count();
         if (count > 0) {
             game->selectedCarIndex = car_selection_index_or_default(wantedId);
@@ -1084,6 +1402,28 @@ GAME_API void game_init(Game *game)
             game->selectedCarIndex = -1;
         }
         apply_selected_car(game);
+    }
+    /* The race-setup screen's snapshot of the shipped tracks and the roster's AI-eligible count,
+     * plus the recalled car written into the bundle so the carousel and the config agree from
+     * the first frame rather than from the first start attempt. */
+    race_setup_menu_init(&game->raceSetupMenu);
+    if (game->selectedCarId[0] != '\0') {
+        /* A refusal here leaves the default car in the bundle; the start path re-applies the
+         * selection and is where an id that cannot fit becomes a player-facing refusal. */
+        (void)copy_config_id(game->raceConfig.carId, sizeof(game->raceConfig.carId),
+                             game->selectedCarId);
+    }
+    /* The last track, but only if the catalog still has it: content can be removed between
+     * runs, and a config naming a track that is gone would refuse every start with a message
+     * about a choice the player did not just make. */
+    if (game->profile.lastTrackId[0] != '\0') {
+        for (int i = 0; i < game->raceSetupMenu.trackCount; i++) {
+            if (strcmp(game->raceSetupMenu.tracks[i].id, game->profile.lastTrackId) != 0)
+                continue;
+            (void)copy_config_id(game->raceConfig.trackId, sizeof(game->raceConfig.trackId),
+                                 game->profile.lastTrackId);
+            break;
+        }
     }
 #endif
 #if defined(CIRCUIT_HEADLESS)
@@ -1899,8 +2239,16 @@ static void accumulate_damage(Game *game)
  */
 static void stage_rules(Game *game)
 {
+    const bool wasClassified = (game->session.phase == RACE_PHASE_CLASSIFIED);
     race_session_update_rules(&game->session);
     if (game->session.phase == RACE_PHASE_CLASSIFIED) {
+        if (!wasClassified) {
+            /* The one edge in the whole game where a race becomes final. Records are committed
+             * here, from the authoritative stage, so a lap the player set survives them closing
+             * the window from the results screen. Both calls are no-ops without a loaded
+             * profile, which is every headless run. */
+            if (game_profile_record_session(game)) (void)game_profile_save_now(game);
+        }
         game->state = STATE_RESULTS;
     }
 }
@@ -1924,9 +2272,13 @@ static void stage_false_start(Game *game)
 }
 
 /*
- * Stage 8a2 — track-limits and wrong-way penalties (issue #55). Runs during RUNNING: counts
- * consecutive off-track ticks per entrant and escalates from warning to time penalty. Disabled
- * by default (rules.trackLimitsEnabled): no trace changes. Also flags persistent wrong-way.
+ * Stage 8a2 — track-limits, wrong-way and cut penalties (issue #55, MAP.md priority 7). Runs
+ * during RUNNING. Disabled by default (rules.trackLimitsEnabled): no trace changes.
+ *
+ * Every rule here is DETECTED from what the car did, never handed in by a caller. That is the
+ * distinction MAP.md's known issue #10 draws: a test that calls race_session_add_penalty()
+ * proves the session can store a penalty, not that the game can notice the driving that earns
+ * one.
  */
 static void stage_penalties(Game *game)
 {
@@ -1936,7 +2288,9 @@ static void stage_penalties(Game *game)
         RaceEntrant *entrant = &game->session.roster.entrants[i];
         if (entrant->result.finished) continue;
 
-        if (rules->trackLimitsEnabled && !entrant->progress.location.onRoute) {
+        const bool offRoute = !entrant->progress.location.onRoute;
+
+        if (rules->trackLimitsEnabled && offRoute) {
             entrant->result.offTrackTicks++;
             if (entrant->result.offTrackTicks == (uint32_t)TRACK_LIMITS_PENALTY_TICKS) {
                 race_session_add_penalty(&game->session, PENALTY_RULE_TRACK_LIMITS,
@@ -1948,16 +2302,49 @@ static void stage_penalties(Game *game)
             entrant->result.offTrackTicks = 0;
         }
 
-        /* Wrong-way: a single warning per continuous excursion. */
-        if (entrant->progress.wrongWay && entrant->result.offTrackTicks == 0) {
-            /* Use offTrackTicks as a general "alerted" counter for wrong-way too: 0 means not
-             * yet alerted this excursion. Set it to 1 to mark alerted. */
-            entrant->result.offTrackTicks = 1;
-            race_session_add_penalty(&game->session, PENALTY_RULE_WRONG_WAY,
-                                     PENALTY_CONSEQUENCE_WARNING, entrant->id, 0.0f, 0);
-        } else if (!entrant->progress.wrongWay && entrant->result.offTrackTicks == 1 &&
-                   !rules->trackLimitsEnabled) {
-            entrant->result.offTrackTicks = 0;
+        /* Wrong-way: a single warning per continuous excursion, on its own flag. It used to
+         * borrow offTrackTicks, which coupled two unrelated rules — clearing a track-limits
+         * excursion re-armed the wrong-way warning and vice versa (MAP.md known issue #9). */
+        if (entrant->progress.wrongWay) {
+            if (!entrant->result.wrongWayAlerted) {
+                entrant->result.wrongWayAlerted = true;
+                race_session_add_penalty(&game->session, PENALTY_RULE_WRONG_WAY,
+                                         PENALTY_CONSEQUENCE_WARNING, entrant->id, 0.0f, 0);
+            }
+        } else {
+            entrant->result.wrongWayAlerted = false;
+        }
+
+        if (!rules->trackLimitsEnabled) continue;
+
+        /*
+         * Cutting: leaving the racing surface and rejoining past a gate.
+         *
+         * The evidence is the pair, not either half. Being off the surface is already track
+         * limits, and missing a gate on its own is a navigation error the lap invalidation
+         * covers. What earns a cut is skipping a REQUIRED gate while an excursion is what put
+         * you in a position to skip it — the car came back onto the road further round than it
+         * left. Arming the window while off the surface and letting it decay is what ties the
+         * two together without needing to reconstruct the geometry of the shortcut.
+         */
+        if (offRoute) {
+            entrant->result.cutArmedTicks = (uint32_t)CUT_DETECT_WINDOW_TICKS;
+        } else if (entrant->result.cutArmedTicks > 0) {
+            entrant->result.cutArmedTicks--;
+        }
+
+        const TrackCheckpointEvent *ev = &game->lastCheckpointEvent;
+        const bool skippedRequiredGate = ev->crossed && ev->outOfOrder && ev->index >= 0 &&
+                                         ev->index < game->trackDef.checkpointCount &&
+                                         game->trackDef.checkpoints[ev->index].required;
+        /* Only the local entrant's checkpoint event is published on Game today; per-entrant
+         * events arrive with the localization work. Guarding on the id keeps this from
+         * attributing one car's crossing to another. */
+        const bool isLocal = (entrant->id == game->session.roster.localEntrantId);
+        if (isLocal && skippedRequiredGate && entrant->result.cutArmedTicks > 0) {
+            entrant->result.cutArmedTicks = 0;
+            (void)race_session_report_infringement(&game->session, PENALTY_RULE_CUT,
+                                                   entrant->id, CUT_PENALTY_S, ev->index);
         }
     }
 }
@@ -1973,13 +2360,32 @@ static void stage_pit(Game *game)
     const RaceRules *rules = &game->session.rules;
     if (!rules->pitLaneEnabled) return;
     const TrackDefinition *track = &game->trackDef;
+
+    /* Which boxes are taken, across the whole roster, BEFORE any entrant is stepped. Built once
+     * rather than per entrant so the answer does not depend on roster order: a car that arrives
+     * at an occupied box is turned away whether its id sorts before or after the occupant's. */
+    uint32_t occupiedBoxMask = 0u;
+    for (int i = 0; i < game->session.roster.count; i++) {
+        const EntrantPitState *p = &game->session.roster.entrants[i].result.pit;
+        if (p->state == PIT_STATE_AT_BOX && p->assignedBox >= 0 && p->assignedBox < 32) {
+            occupiedBoxMask |= (1u << (unsigned)p->assignedBox);
+        }
+    }
+
     for (int i = 0; i < game->session.roster.count; i++) {
         RaceEntrant *entrant = &game->session.roster.entrants[i];
         if (entrant->result.finished) continue;
         VehicleInstance *inst = &entrant->instance;
-        const bool inLane =
-            pit_state_update(&entrant->result.pit, track, inst->vehicle.positionM,
-                             inst->derived.speedMps, inst, rules->pitServiceTimeS, FIXED_DT_S);
+        /* This entrant's own box is not an obstacle to itself: it is already parked in it. */
+        uint32_t othersMask = occupiedBoxMask;
+        const EntrantPitState *mine = &entrant->result.pit;
+        if (mine->state == PIT_STATE_AT_BOX && mine->assignedBox >= 0 &&
+            mine->assignedBox < 32) {
+            othersMask &= ~(1u << (unsigned)mine->assignedBox);
+        }
+        const bool inLane = pit_state_update(
+            &entrant->result.pit, track, inst->vehicle.positionM, inst->derived.speedMps, inst,
+            rules->pitServiceTimeS, FIXED_DT_S, othersMask);
         /* Speed limiter: cap the authoritative velocity vector while in the lane (derived
          * speed is recomputed from it next tick, so scaling only the derived field would be a
          * no-op). Pit speeding is penalized through the #55 system. */
@@ -2244,6 +2650,7 @@ GAME_API void game_draw(Game *game, float interpolationAlpha)
 GAME_API void game_shutdown(Game *game)
 {
     if (game == NULL) return;
+    game_profile_save_now(game);
     track_free(&game->trackDef);
     audio_shutdown();
     render_shutdown();

@@ -59,6 +59,12 @@ typedef struct {
     bool downPressed;
     bool setupTogglePressed;
     bool resetSetupPressed;
+    /* Race setup screen (menu only): toggle the pre-race configuration screen. With it open,
+     * UP/DOWN move the row cursor and LEFT/RIGHT move the row's control — the opposite axes to
+     * the setup editor above, which lays its items out as a grid rather than a list. */
+    bool raceSetupTogglePressed;
+    /* Settings screen (menu only): toggle the settings / controls / accessibility screen. */
+    bool settingsTogglePressed;
 } Input;
 
 /* Zero every field. */
@@ -74,5 +80,11 @@ bool input_has_oneshot(const Input *in);
  * commands are latched on top of whatever is still pending.
  * Defined only in builds that link raylib (not in CIRCUIT_HEADLESS builds). */
 void input_sample(Input *in);
+
+/* The same poll, against the player's own key layout (MAP.md priority 4). `input_sample()` is
+ * this with the shipped defaults, so a caller that has no profile behaves exactly as before.
+ * A NULL `bindings` also falls back to the defaults rather than reading nothing. */
+struct InputBindings;
+void input_sample_bound(Input *in, const struct InputBindings *bindings);
 
 #endif /* CIRCUIT_INPUT_H */

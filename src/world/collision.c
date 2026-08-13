@@ -185,11 +185,39 @@ static bool resolve_circle_barrier(const VehicleSpec *spec, VehicleState *state,
                                    Vector2 contactPt, float distSq, Vector2 pushN,
                                    float radiusM, float rHalf, float muC, Vector2 *vCgWorld,
                                    float *crashLockoutTimerS, CollisionWorld *world,
-                                   CollisionBodyId bodyId, CollisionShapeId shapeId)
+                                   CollisionBodyId bodyId, CollisionShapeId shapeId,
+                                   bool restingContact)
 {
     const float dist = sqrtf(distSq);
     const float pen = radiusM - dist;
     if (!(pen > 0.0f) || !(dist > 1e-9f)) return false;
+
+    /* Contact-point velocity: v_CG + ω × r. Computed before the penetration push, which does
+     * not affect it, so that the separating test below can be made before anything is moved. */
+    const Vector2 rContact = { contactPt.x - pos.x, contactPt.y - pos.y };
+    const Vector2 vContact = contact_velocity_world(*vCgWorld, state->yawRateRadS, rContact);
+
+    /* Normal velocity (positive = separating, negative = approaching). */
+    const float vn = vContact.x * pushN.x + vContact.y * pushN.y;
+
+    /*
+     * A RESTING CONTACT THAT IS ALREADY LEAVING IS LEFT ALONE.
+     *
+     * `pos` is the swept sample, and at substep 0 that sample IS the previous tick's pose. So
+     * the push below does not merely correct penetration — it also rewinds the tick's whole
+     * integration back to where the body started. For an approaching impact that is the point:
+     * the body is placed at the moment of contact. For a body that was ALREADY touching when
+     * the tick began and is now moving away, it is a trap, and a self-sustaining one: the pose
+     * is restored exactly, so the next tick begins touching again, and the next, forever. The
+     * velocity keeps integrating the whole time, which is why the symptom is a car sitting at
+     * one coordinate to the centimetre while its speedometer reads 4 m/s in reverse. That is
+     * how awd_rally and rwd_power end their runs — pinned to a barrier they are actively
+     * driving away from, for the remaining four minutes.
+     *
+     * Only the substep-0 case is exempted, and only when the contact is genuinely separating,
+     * so every approaching impact resolves exactly as it always has.
+     */
+    if (restingContact && vn > 0.0f) return false;
 
     /* Penetration correction: push the CG along the push normal. */
     state->positionM.x = pos.x + pushN.x * pen;
@@ -198,12 +226,6 @@ static bool resolve_circle_barrier(const VehicleSpec *spec, VehicleState *state,
     renderState->currPositionM = state->positionM;
     renderState->currHeadingRad = state->headingRad;
 
-    /* Contact-point velocity: v_CG + ω × r. */
-    const Vector2 rContact = { contactPt.x - pos.x, contactPt.y - pos.y };
-    const Vector2 vContact = contact_velocity_world(*vCgWorld, state->yawRateRadS, rContact);
-
-    /* Normal velocity (positive = separating, negative = approaching). */
-    const float vn = vContact.x * pushN.x + vContact.y * pushN.y;
     /* The physical event: positive approach speed means the body was coming in. */
     record_contact(world, bodyId, shapeId, contactPt, pushN, -vn);
     if (vn >= 0.0f) return true; /* separating: push only, no impulse needed */
@@ -310,10 +332,13 @@ static int resolve_body_vs_static(CollisionWorld *world, const CollisionBody *bo
                     closest_point_and_dist_sq(circleWorld, shape->aM, shape->bM, &distSq);
 
                 if (distSq < radiusSq) {
+                    /* Substep 0 samples the pose the tick STARTED at, so a penetration found
+                     * there was already present before this tick integrated anything — a
+                     * resting contact rather than an impact this tick produced. */
                     if (resolve_circle_barrier(spec, state, renderState, pos, hdg, contactPt,
                                                distSq, shape->pushNormalM, radiusM, rHalf, muC,
                                                &vCgWorld, crashLockoutTimerS, world, body->id,
-                                               id)) {
+                                               id, sub == 0)) {
                         contacts++;
                         resolvedAny = true;
                         pos = state->positionM;

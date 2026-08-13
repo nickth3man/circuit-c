@@ -5,6 +5,7 @@
 
 #include <string.h>
 
+#include "core/config.h"
 #include "physics/vehicle.h"
 
 void pit_state_reset(EntrantPitState *pit)
@@ -14,32 +15,43 @@ void pit_state_reset(EntrantPitState *pit)
     pit->assignedBox = -1;
 }
 
-/* Does the point lie within the pit lane corridor (entry-to-exit along the lane)? We
- * approximate with the service-box corridor: any point inside a service box, or within a fixed
- * margin of the entry/exit gates, counts as in-lane. This keeps the zone purely geometric. */
+/*
+ * The lane is a continuous corridor from the entry gate, past every service box in authored
+ * order, to the exit gate — see track_point_in_pit_lane(). It used to be three disconnected
+ * blobs: inside a box, or within ten metres of the entry marker, or within ten metres of the
+ * exit marker. A car in the middle of the lane matched none of them, so the speed limiter
+ * switched itself off over most of the lane's length (MAP.md known issue #8).
+ */
 static bool in_pit_lane(const TrackDefinition *track, Vector2 p)
 {
-    if (track == NULL) return false;
-    if (track_point_in_service_box(track, p)) return true;
-    if (track->hasPitEntry) {
-        const float dx = p.x - track->pitEntry.centerM.x;
-        const float dy = p.y - track->pitEntry.centerM.y;
-        if (dx * dx + dy * dy < 100.0f) return true; /* 10 m around the entry gate */
-    }
-    if (track->hasPitExit) {
-        const float dx = p.x - track->pitExit.centerM.x;
-        const float dy = p.y - track->pitExit.centerM.y;
-        if (dx * dx + dy * dy < 100.0f) return true; /* 10 m around the exit gate */
-    }
-    return false;
+    return track_point_in_pit_lane(track, p, PIT_LANE_HALF_WIDTH_M);
+}
+
+/*
+ * The box this car may use, or -1.
+ *
+ * A box another entrant is already occupying is not available, which is what makes a pit lane
+ * a shared resource rather than a teleport pad: a second car arriving at a taken box drives on
+ * rather than servicing on top of the car already there. Every entrant used to be assigned box
+ * 0 regardless of where it stopped (MAP.md known issue #7), so two cars pitting together were
+ * indistinguishable to everything downstream.
+ */
+static int available_box_at(const TrackDefinition *track, Vector2 p, uint32_t occupiedMask)
+{
+    const int idx = track_service_box_at(track, p);
+    if (idx < 0 || idx >= 32) return -1;
+    if ((occupiedMask & (1u << (unsigned)idx)) != 0u) return -1;
+    return idx;
 }
 
 bool pit_state_update(EntrantPitState *pit, const TrackDefinition *track, Vector2 positionM,
-                      float speedMps, VehicleInstance *instance, float serviceTimeS, float dt)
+                      float speedMps, VehicleInstance *instance, float serviceTimeS, float dt,
+                      uint32_t occupiedBoxMask)
 {
     if (pit == NULL || track == NULL) return false;
     const bool inLane = in_pit_lane(track, positionM);
-    const bool inBox = track_point_in_service_box(track, positionM);
+    const int freeBox = available_box_at(track, positionM, occupiedBoxMask);
+    const bool inBox = (freeBox >= 0);
 
     switch (pit->state) {
         case PIT_STATE_NONE:
@@ -57,9 +69,9 @@ bool pit_state_update(EntrantPitState *pit, const TrackDefinition *track, Vector
 
         case PIT_STATE_ENTERING:
             if (inBox && speedMps < 1.0f) {
-                /* Stopped at a box: begin service. */
+                /* Stopped at a box that is free: begin service in THAT box. */
                 pit->state = PIT_STATE_AT_BOX;
-                pit->assignedBox = 0;
+                pit->assignedBox = freeBox;
                 pit->serviceTimerS = serviceTimeS;
                 pit->served = false;
             } else if (!inLane) {
@@ -72,7 +84,7 @@ bool pit_state_update(EntrantPitState *pit, const TrackDefinition *track, Vector
         case PIT_STATE_IN_LANE:
             if (inBox && speedMps < 1.0f) {
                 pit->state = PIT_STATE_AT_BOX;
-                pit->assignedBox = 0;
+                pit->assignedBox = freeBox;
                 pit->serviceTimerS = serviceTimeS;
                 pit->served = false;
             } else if (!inLane) {

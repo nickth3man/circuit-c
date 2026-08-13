@@ -55,6 +55,10 @@
 #include "physics/auto_transmission.h"
 #include "game/telemetry.h"
 #include "game/session_config.h"
+#include "game/race_setup_menu.h"
+#include "game/player_profile.h"
+#include "game/input_bindings.h"
+#include "game/settings_menu.h"
 
 typedef enum {
     STATE_MENU = 0,
@@ -125,6 +129,49 @@ struct Game {
     bool setupCustomized;
     int setupCursor;
     SetupEditor setupEditor;
+    /*
+     * The race the menu is configuring, and the model that edits it. `raceConfig` is the bundle
+     * the start path hands to game_configure_session() — the same entry point the headless
+     * scenarios and the command-line tooling use, so a player and a test configure a race the
+     * same way. `raceSetupMenu` is the screen's snapshot of the shipped tracks and the roster's
+     * AI-eligible count; `raceSetupEditing` is whether that screen is up.
+     *
+     * Excluded from the state checksum for the same reason as the car selection above: what was
+     * chosen before the lights is not part of the race that follows. Interactive menu only —
+     * headless never enters STATE_MENU. Plain value data, so the reload invariant holds.
+     */
+    SessionConfig raceConfig;
+    RaceSetupMenu raceSetupMenu;
+    bool raceSetupEditing;
+    /*
+     * The player's persistent profile (MAP.md priority 4): last selections, settings, bindings,
+     * accessibility, and best-lap records. Loaded once by game_init() and written back by
+     * game_shutdown(), which is the difference between a profile module that passes its own
+     * tests and a game that remembers anything.
+     *
+     * `profilePath` is resolved at startup and kept, so the save at shutdown cannot write
+     * somewhere other than where the load read. `profileLoaded` is false when the interactive
+     * startup path did not run (headless) — nothing may be saved in that case, because saving a
+     * default profile over a real one is how a player's settings disappear.
+     *
+     * Excluded from the state checksum: what the player configured before the lights is not part
+     * of the race that follows, exactly like the selection and the race config above.
+     */
+    PlayerProfile profile;
+    char profilePath[512];
+    bool profileLoaded;
+    /*
+     * The live key layout, adopted from the profile at startup. The platform layer samples
+     * through it, and the on-screen prompts read their labels from it, so a rebind reaches both
+     * the control and the text that describes it. Defaults until a profile says otherwise, so a
+     * build with no profile plays exactly as it always did.
+     */
+    InputBindings bindings;
+    /* The settings / controls / accessibility screen and whether it is up. It edits the profile
+     * and the live bindings in place, so a change is audible and playable immediately; the
+     * write to disk happens when the screen is closed. */
+    SettingsMenu settingsMenu;
+    bool settingsEditing;
     /* Why the last start attempt was refused, or empty when nothing has been refused. Written
      * by the menu's start path from game_can_start_race() and shown by the menu HUD, so a
      * blocked start explains itself instead of looking like an unresponsive key. */
@@ -303,6 +350,39 @@ GAME_API bool game_configure_session(Game *game, const SessionConfig *cfg, char 
 
 /* Reset the vehicle and resynchronise render history. Counters and tick are preserved. */
 GAME_API void game_reset_sim(Game *game);
+
+/* Returns false with a human reason when the current menu selection/setup cannot start a
+ * session. Declared here so the menu, the renderer and the tests all see one prototype. */
+bool game_can_start_race(const Game *game, char *reason, size_t reasonCap);
+
+/* ---- player profile (MAP.md priority 4) ----
+ *
+ * game_init() loads the profile and applies its settings; game_shutdown() saves it. These are
+ * exposed so a test can prove the round trip through the real startup and shutdown path rather
+ * than through the profile module in isolation, which is what MAP.md's known issue #3 calls
+ * out about the existing profile scenario.
+ */
+
+/* Where this installation's profile lives, resolved against the product root. */
+void game_profile_resolve_path(char *out, size_t cap);
+
+/* Load the profile at `path` and adopt it, applying its settings. A missing or corrupt file
+ * opens on defaults and still returns true; false means an I/O failure prevented reading.
+ * game_init() calls this on the interactive path; a test calls it against a temp file to drive
+ * the same startup, migration and recovery behaviour a player gets. */
+GAME_API bool game_profile_open(Game *game, const char *path);
+
+/* The key a lap record is filed under: track geometry hash, car content hash, assist levels and
+ * damage policy. Two laps are only comparable when their keys match. */
+void game_record_compatibility_key(const Game *game, char *out, size_t cap);
+
+/* Capture the current selections into the profile and write it out atomically. A no-op
+ * returning false when no profile was loaded (every headless run). */
+GAME_API bool game_profile_save_now(Game *game);
+
+/* Store the local entrant's best lap from a classified session. Returns true when a new or
+ * improved record was stored. Called automatically when a session classifies. */
+GAME_API bool game_profile_record_session(Game *game);
 
 /*
  * Local multiplayer (issue #59): bind a live input sample to one roster entrant's human

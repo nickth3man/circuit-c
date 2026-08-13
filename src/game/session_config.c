@@ -54,6 +54,7 @@ void session_config_set_default(SessionConfig *cfg)
     cfg->countdownS = 0.0f;
     cfg->damageMode = DAMAGE_OFF;
     cfg->stuckRecoveryEnabled = false;
+    cfg->trackLimitsEnabled = false;
     cfg->absLevel = 2;
     cfg->tcsLevel = 1;
     race_environment_set_default(&cfg->environment);
@@ -152,6 +153,7 @@ bool session_config_serialize(const SessionConfig *cfg, FILE *out)
             "\"trackId\":\"%s\",\"carId\":\"%s\","
             "\"aiCount\":%d,\"aiDifficulty\":%d,\"mode\":%d,\"targetLaps\":%d,"
             "\"countdownS\":%.6f,\"damageMode\":%d,\"stuckRecoveryEnabled\":%s,"
+            "\"trackLimitsEnabled\":%s,"
             "\"pitLaneEnabled\":%s,\"pitServiceTimeS\":%.6f,"
             "\"absLevel\":%d,\"tcsLevel\":%d,\"seed\":%llu,"
             "\"environment\":{\"precipitation\":%.6f,\"ambientTempC\":%.6f,"
@@ -159,11 +161,11 @@ bool session_config_serialize(const SessionConfig *cfg, FILE *out)
             cfg->trackId, cfg->carId, cfg->aiCount, cfg->aiDifficulty, (int)cfg->mode,
             cfg->targetLaps, (double)cfg->countdownS, cfg->damageMode,
             cfg->stuckRecoveryEnabled ? "true" : "false",
-            cfg->pitLaneEnabled ? "true" : "false", (double)cfg->pitServiceTimeS, cfg->absLevel,
-            cfg->tcsLevel, (unsigned long long)cfg->seed,
-            (double)cfg->environment.precipitation, (double)cfg->environment.ambientTempC,
-            (double)cfg->environment.trackTempC, (double)cfg->environment.timeOfDayHours,
-            cfg->environment.region);
+            cfg->trackLimitsEnabled ? "true" : "false", cfg->pitLaneEnabled ? "true" : "false",
+            (double)cfg->pitServiceTimeS, cfg->absLevel, cfg->tcsLevel,
+            (unsigned long long)cfg->seed, (double)cfg->environment.precipitation,
+            (double)cfg->environment.ambientTempC, (double)cfg->environment.trackTempC,
+            (double)cfg->environment.timeOfDayHours, cfg->environment.region);
     return true;
 }
 
@@ -255,6 +257,7 @@ bool session_config_deserialize(SessionConfig *cfg, const char *text)
     if (!find_float(text, "countdownS", &parsed.countdownS)) return false;
     if (!find_int(text, "damageMode", &parsed.damageMode)) return false;
     if (!find_bool(text, "stuckRecoveryEnabled", &parsed.stuckRecoveryEnabled)) return false;
+    if (!find_bool(text, "trackLimitsEnabled", &parsed.trackLimitsEnabled)) return false;
     if (!find_bool(text, "pitLaneEnabled", &parsed.pitLaneEnabled)) return false;
     if (!find_float(text, "pitServiceTimeS", &parsed.pitServiceTimeS)) return false;
     if (!find_int(text, "absLevel", &parsed.absLevel)) return false;

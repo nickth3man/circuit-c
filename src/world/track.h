@@ -549,6 +549,27 @@ bool track_grid_slot_pose(const TrackDefinition *track, int slotIndex, Vector2 *
 bool track_pit_has_geometry(const TrackDefinition *track);
 bool track_point_in_service_box(const TrackDefinition *track, Vector2 pointM);
 
+/* Which service box contains `pointM`, or -1. The index is what an entrant is assigned when it
+ * stops, so two cars stopping in different boxes are told apart (MAP.md known issue #7: every
+ * entrant used to be assigned box 0 regardless of where it actually stopped). */
+int track_service_box_at(const TrackDefinition *track, Vector2 pointM);
+
+/*
+ * Is `pointM` inside the pit lane corridor?
+ *
+ * The corridor is the polyline entry gate -> each service box centre, in authored order -> exit
+ * gate, thickened by `halfWidthM`. That is a continuous lane: a car anywhere between the entry
+ * and the exit is inside it, which is what a pit lane means.
+ *
+ * This replaces an approximation that counted a car as in-lane only when it was inside a service
+ * box or within ten metres of the entry or exit marker (MAP.md known issue #8). A car in the
+ * middle of the lane — past the entry, not yet at a box — fell through all three tests, so the
+ * speed limiter switched off exactly where a pit lane most needs one.
+ *
+ * Returns false for a track with no pit geometry.
+ */
+bool track_point_in_pit_lane(const TrackDefinition *track, Vector2 pointM, float halfWidthM);
+
 /* The reduced-order road frame at an entrant's location (issue #40): the longitudinal grade
  * and its gravity component, the lateral bank gravity component, the vertical acceleration
  * from the profile's curvature (crest unloads, dip loads), and the kerb state of each axle.

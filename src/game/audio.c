@@ -38,6 +38,13 @@ static Music s_screechMusic = { 0 };
 static Sound s_thudSound = { 0 };
 static double s_lastThudTime = -1.0;
 static float s_screechVolume = 0.0f;
+/* The player's saved mix (MAP.md priority 4). Unity until a profile says otherwise, so a
+ * build with no profile sounds exactly as it always did. `s_sfxVolume` scales the one-shots at
+ * the point they are played; `s_musicVolume` scales the looping beds, which set their own
+ * per-frame volume from the simulation and so must be multiplied rather than assigned. */
+static float s_masterVolume = 1.0f;
+static float s_sfxVolume = 1.0f;
+static float s_musicVolume = 1.0f;
 
 /* ── helpers ────────────────────────────────────────────────────────────── */
 
@@ -187,8 +194,16 @@ void audio_update(float engineRpm, float idleRpm, float redlineRpm, bool physica
         float rate = 16.0f; /* 1/s */
         float factor = 1.0f - expf(-rate * FIXED_DT_S);
         s_screechVolume = lerpf(s_screechVolume, target, factor);
-        SetMusicVolume(s_screechMusic, s_screechVolume);
+        SetMusicVolume(s_screechMusic, s_screechVolume * s_musicVolume);
     }
+}
+
+void audio_set_volumes(float master, float sfx, float music)
+{
+    s_masterVolume = clampf(master, 0.0f, 1.0f);
+    s_sfxVolume = clampf(sfx, 0.0f, 1.0f);
+    s_musicVolume = clampf(music, 0.0f, 1.0f);
+    if (s_deviceReady) SetMasterVolume(s_masterVolume);
 }
 
 void audio_play_collision_thud(void)
@@ -199,6 +214,7 @@ void audio_play_collision_thud(void)
     /* Rate-limit: at most one thud per ~0.1 s to avoid machine-gunning. */
     if (s_lastThudTime >= 0.0 && (now - s_lastThudTime) < 0.1) return;
     s_lastThudTime = now;
+    SetSoundVolume(s_thudSound, s_sfxVolume);
     PlaySound(s_thudSound);
 }
 
@@ -219,5 +235,11 @@ void audio_update(float engineRpm, float idleRpm, float redlineRpm, bool physica
     (void)dt;
 }
 void audio_play_collision_thud(void) {}
+void audio_set_volumes(float master, float sfx, float music)
+{
+    (void)master;
+    (void)sfx;
+    (void)music;
+}
 
 #endif /* !CIRCUIT_HEADLESS */

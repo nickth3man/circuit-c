@@ -28,4 +28,12 @@ void audio_update(float engineRpm, float idleRpm, float redlineRpm, bool physica
                   float speedMps, float dt);
 void audio_play_collision_thud(void);
 
+/*
+ * Apply the player's saved audio settings (MAP.md priority 4). `master` scales everything the
+ * device plays; `sfx` and `music` scale the one-shots and the looping beds respectively, on top
+ * of whatever the simulation asks for per frame. All three are clamped to 0..1. Safe to call
+ * before or without an audio device, like everything else here.
+ */
+void audio_set_volumes(float master, float sfx, float music);
+
 #endif /* CIRCUIT_AUDIO_H */

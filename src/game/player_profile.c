@@ -11,7 +11,35 @@
 #include <stdio.h>
 #include <string.h>
 
+#if defined(_WIN32)
+/* NOGDI and NOUSER are load-bearing, not tidiness: <wingdi.h> declares `Rectangle` and
+ * <winuser.h> declares `CloseWindow` and `ShowCursor`, all three of which collide with raylib's
+ * spellings in any translation unit that sees both headers. Only the file API is wanted here. */
+#define WIN32_LEAN_AND_MEAN
+#define NOGDI
+#define NOUSER
+#include <windows.h>
+#endif
+
 #include "core/json.h"
+
+/*
+ * Move `from` over `to`, replacing whatever is already there.
+ *
+ * POSIX rename() replaces an existing destination atomically. The Windows CRT's does not: it
+ * fails outright when the target exists. That difference is invisible on the first write and
+ * fatal on every one after it, which is why it survived until the profile acquired a production
+ * caller — a player's second save silently did nothing and their settings stopped persisting.
+ * MoveFileEx with MOVEFILE_REPLACE_EXISTING is the Windows spelling of the same atomic replace.
+ */
+static bool replace_file(const char *from, const char *to)
+{
+#if defined(_WIN32)
+    return MoveFileExA(from, to, MOVEFILE_REPLACE_EXISTING) != 0;
+#else
+    return rename(from, to) == 0;
+#endif
+}
 
 static void profile_defaults(PlayerProfile *profile)
 {
@@ -256,7 +284,7 @@ bool player_profile_save(const PlayerProfile *profile, const char *path, char *e
             snprintf(error, errorCap, "write to %s failed", tmpPath);
         return false;
     }
-    if (rename(tmpPath, path) != 0) {
+    if (!replace_file(tmpPath, path)) {
         remove(tmpPath);
         if (error != NULL && errorCap > 0)
             snprintf(error, errorCap, "cannot move %s into place", tmpPath);
@@ -281,7 +309,7 @@ bool player_profile_load(PlayerProfile *profile, const char *path, char *error, 
         if (got > 0 || !readOk) {
             char corrupt[512];
             snprintf(corrupt, sizeof(corrupt), "%s.corrupt", path);
-            rename(path, corrupt);
+            (void)replace_file(path, corrupt);
         }
         return true;
     }
@@ -291,7 +319,7 @@ bool player_profile_load(PlayerProfile *profile, const char *path, char *error, 
         /* Corrupt: preserve the original under `.corrupt`, return defaults. */
         char corrupt[512];
         snprintf(corrupt, sizeof(corrupt), "%s.corrupt", path);
-        rename(path, corrupt);
+        (void)replace_file(path, corrupt);
         player_profile_default(profile);
         return true;
     }

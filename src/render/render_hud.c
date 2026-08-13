@@ -10,6 +10,8 @@
 #include "content/vehicle_manifest.h"
 #include "game/car_roster.h"
 #include "game/car_selection.h"
+#include "game/race_presentation.h"
+#include "game/race_setup_menu.h"
 #include "game/setup_editor.h"
 #include "physics/vehicle.h"
 #include "core/math_utils.h"
@@ -73,16 +75,128 @@ static unsigned char pulse_alpha(float cyclesPerSecond, unsigned char lo, unsign
 }
 
 static const char *gear_label(int selectedGear);
+static void format_time(char *out, size_t cap, float seconds);
 
 /* ---- full-screen overlays (STATE_MENU / STATE_PAUSED / STATE_RESULTS) ----------------
  * Pure screen space: called after EndMode2D so the camera transform never touches them.
  * Copy is deliberately short and direct; wording is up for review.
  */
+/*
+ * The race-setup screen (MAP.md priority 1): the bundle the start path hands to
+ * game_configure_session(), one row per control.
+ *
+ * Labels and values come from the headless model rather than being formatted here, so what the
+ * screen says and what a test asserts are the same strings. A row the current config cannot move
+ * — the AI rows in a time trial, pit rules on a track without pit geometry — is drawn dim and
+ * says so in its value column, because a key that silently does nothing reads as a broken menu.
+ *
+ * Budgeted against SCREEN_H like the setup overlay below it: 13 rows of 24px from y=292 end at
+ * 592, leaving the refusal line and the two hint rows above 700.
+ */
+static void draw_race_setup(const Game *game)
+{
+    draw_text_centered_shadow("RACE SETUP", 256, 24, COL_ACCENT);
+
+    const int x = (SCREEN_W - 460) / 2;
+    const int valueX = x + 230;
+    const int row = 24;
+    int y = 292;
+    for (int i = 0; i < RACE_SETUP_ROW_COUNT; i++) {
+        char label[RACE_SETUP_LABEL_CHARS] = "";
+        char value[RACE_SETUP_VALUE_CHARS] = "";
+        race_setup_menu_row_label(i, label, sizeof(label));
+        race_setup_menu_row_value(&game->raceSetupMenu, &game->raceConfig, i, value,
+                                  sizeof(value));
+        const bool onCursor = (i == game->raceSetupMenu.cursor);
+        const bool active =
+            race_setup_menu_row_is_active(&game->raceSetupMenu, &game->raceConfig, i);
+        const Color labelColor = onCursor ? COL_ACCENT : (active ? COL_TEXT : COL_TEXT_DIM);
+        DrawText(TextFormat("%s%s", onCursor ? "> " : "  ", label), x, y, 18, labelColor);
+        DrawText(value, valueX, y, 18, active ? labelColor : COL_TEXT_DIM);
+        y += row;
+    }
+
+    if (game->startBlockedReason[0] != '\0') {
+        draw_text_centered(TextFormat("cannot start: %s", game->startBlockedReason), 608, 16,
+                           COL_ACCENT_WARM);
+    }
+    draw_text_centered(
+        "UP/DOWN row    LEFT/RIGHT change    TAB back    P start", 640, 18,
+        (Color){ COL_TEXT.r, COL_TEXT.g, COL_TEXT.b, pulse_alpha(0.6f, 90, 255) });
+    draw_text_centered("the car above is what races — TAB back, then < / > to change it", 672,
+                       14, COL_TEXT_DIM);
+}
+
+/*
+ * The settings / controls / accessibility screen (MAP.md priority 4).
+ *
+ * Like the race-setup screen above, every label and value comes from the headless model, so a
+ * test asserting what the screen says is asserting the same strings the player reads. The
+ * controls tab shows what each action is bound to right now — which is also what the prompts
+ * elsewhere show, because both read the same bindings.
+ */
+static void draw_settings(const Game *game)
+{
+    const SettingsMenu *menu = &game->settingsMenu;
+    draw_text_centered_shadow(TextFormat("SETTINGS — %s", settings_menu_tab_name(menu->tab)),
+                              200, 24, COL_ACCENT);
+
+    const int rowCount = settings_menu_row_count(menu);
+    /* The controls tab has the most rows, so it sets the layout: two columns keep it above the
+     * hint lines whatever the action table grows to. */
+    const int kMaxRows = 14;
+    const int columns = (rowCount > kMaxRows) ? 2 : 1;
+    const int rowsPerColumn = (rowCount + columns - 1) / columns;
+    const int marginX = 120;
+    const int columnWidth = (SCREEN_W - 2 * marginX) / columns;
+    const int top = 244;
+    const int rowH = 24;
+
+    for (int i = 0; i < rowCount; i++) {
+        char label[SETTINGS_LABEL_CHARS] = "";
+        char value[SETTINGS_VALUE_CHARS] = "";
+        settings_menu_row_label(menu, i, label, sizeof(label));
+        settings_menu_row_value(menu, &game->profile, &game->bindings, i, value, sizeof(value));
+        const bool onCursor = (i == menu->cursor);
+        const bool capturing = (menu->capturingAction == i);
+        const Color c = capturing ? COL_ACCENT_WARM : (onCursor ? COL_ACCENT : COL_TEXT);
+        const int column = i / rowsPerColumn;
+        const int rowInColumn = i % rowsPerColumn;
+        const int x = marginX + column * columnWidth;
+        const int y = top + rowInColumn * rowH;
+        DrawText(TextFormat("%s%s", onCursor ? "> " : "  ", label), x, y, 17, c);
+        DrawText(value, x + columnWidth - 130, y, 17, c);
+    }
+
+    const int bottom = top + rowsPerColumn * rowH;
+    if (menu->conflictAction >= 0) {
+        draw_text_centered(
+            TextFormat("that key is already %s", input_action_label(menu->conflictAction)),
+            bottom + 10, 16, COL_ACCENT_WARM);
+    }
+    if (menu->tab == SETTINGS_TAB_CONTROLS) {
+        draw_text_centered("UP/DOWN row    LEFT/RIGHT next key    S next tab    O back",
+                           bottom + 34, 16, COL_TEXT_DIM);
+    } else {
+        draw_text_centered("UP/DOWN row    LEFT/RIGHT change    S next tab    O back",
+                           bottom + 34, 16, COL_TEXT_DIM);
+    }
+    draw_text_centered("changes are saved when you leave this screen", bottom + 56, 14,
+                       COL_TEXT_DIM);
+}
+
 static void draw_overlay_menu(const Game *game)
 {
     DrawRectangle(0, 0, SCREEN_W, SCREEN_H, COL_DIM_SCREEN);
     draw_text_centered_shadow("CIRCUIT", 92, 56, COL_ACCENT);
     draw_text_centered("a deterministic top-down racing simulator", 158, 18, COL_TEXT_DIM);
+
+    if (game->settingsEditing) {
+        /* The settings screen takes the whole menu body: it is not about the car, so the car
+         * header below would only be in the way. */
+        draw_settings(game);
+        return;
+    }
 
     const int selectable = car_selection_count();
     if (selectable == 0 || game->selectedCarIndex < 0) {
@@ -103,6 +217,12 @@ static void draw_overlay_menu(const Game *game)
     draw_text_centered(
         TextFormat("%s   %s   %d / %d", layout, cls, game->selectedCarIndex + 1, selectable),
         232, 18, COL_COOL);
+    if (game->raceSetupEditing) {
+        /* The race-setup screen takes the body of the menu: the car header above still names
+         * what races, and the spec block is what the player traded for the rules. */
+        draw_race_setup(game);
+        return;
+    }
     float peakTorqueNm = 0.0f;
     for (int i = 0; i < ENGINE_CURVE_POINTS; i++) {
         if (s->engineTorqueCurveNm[i] > peakTorqueNm) peakTorqueNm = s->engineTorqueCurveNm[i];
@@ -199,11 +319,25 @@ static void draw_overlay_menu(const Game *game)
                            COL_ACCENT_WARM);
     }
     draw_text_centered(
-        "< / > select car      S setup      P start", 640, 18,
+        "< / > car    S setup    TAB race setup    O settings    P start", 640, 18,
         (Color){ COL_TEXT.r, COL_TEXT.g, COL_TEXT.b, pulse_alpha(0.6f, 90, 255) });
-    draw_text_centered("W/S throttle & brake    A/D steer    SPACE handbrake    Q/E shift    P "
-                       "pause    R reset",
-                       672, 14, COL_TEXT_DIM);
+    {
+        const InputBindings *b = &game->bindings;
+        draw_text_centered(
+            TextFormat(
+                "%s/%s throttle & brake    %s/%s steer    %s handbrake    %s/%s shift    "
+                "%s pause    %s reset",
+                input_bindings_label(b, INPUT_ACTION_THROTTLE),
+                input_bindings_label(b, INPUT_ACTION_BRAKE),
+                input_bindings_label(b, INPUT_ACTION_STEER_LEFT),
+                input_bindings_label(b, INPUT_ACTION_STEER_RIGHT),
+                input_bindings_label(b, INPUT_ACTION_HANDBRAKE),
+                input_bindings_label(b, INPUT_ACTION_SHIFT_DOWN),
+                input_bindings_label(b, INPUT_ACTION_SHIFT_UP),
+                input_bindings_label(b, INPUT_ACTION_PAUSE),
+                input_bindings_label(b, INPUT_ACTION_RESET)),
+            672, 14, COL_TEXT_DIM);
+    }
 }
 
 static void draw_overlay_paused(const Game *game)
@@ -215,79 +349,338 @@ static void draw_overlay_paused(const Game *game)
     draw_text_centered("P resume    R reset", 372, 18, COL_TEXT_DIM);
 }
 
+/*
+ * The classified results (MAP.md priority 3).
+ *
+ * Every value on this screen is read from `session.results`, the immutable snapshot the session
+ * wrote once on entry to RACE_PHASE_CLASSIFIED. That is the whole point of the change: the
+ * session had been building a full classification for some time and the screen was showing one
+ * lap time, which is MAP.md's known issue #5. Nothing is recomputed here — not the order, not
+ * the gaps, not who set the fastest lap.
+ *
+ * A session that ends without valid results (abandoned before classification, or a run that
+ * never reached the session at all) falls back to the single lap time, because there genuinely
+ * is no classification to show and inventing an empty table would be worse.
+ */
 static void draw_overlay_results(const Game *game)
 {
     DrawRectangle(0, 0, SCREEN_W, SCREEN_H, COL_DIM_SCREEN);
 
-    draw_text_centered_shadow("RUN COMPLETE", 196, 40, COL_TEXT);
+    const RaceResults *results = &game->session.results;
+    if (!results->valid || results->count <= 0) {
+        draw_text_centered_shadow("RUN COMPLETE", 196, 40, COL_TEXT);
+        char lap[32];
+        format_time(lap, sizeof(lap), game->progress.lastLapTimeS);
+        draw_text_centered_shadow(lap, 286, 56, COL_ACCENT);
+        draw_text_centered("LAP TIME", 352, 16, COL_TEXT_DIM);
+        draw_text_centered("P drive again    R menu", 504, 18, COL_TEXT_DIM);
+        return;
+    }
 
-    /* Lap time is the primary result now. */
-    const int mins = (int)(game->progress.lastLapTimeS / 60.0f);
-    const float secs = game->progress.lastLapTimeS - (float)mins * 60.0f;
-    draw_text_centered_shadow(TextFormat("%d:%05.2f", mins, (double)secs), 286, 56, COL_ACCENT);
-    draw_text_centered("LAP TIME", 352, 16, COL_TEXT_DIM);
+    draw_text_centered_shadow("CLASSIFICATION", 60, 40, COL_TEXT);
 
-    draw_text_centered("P drive again    R menu", 504, 18, COL_TEXT_DIM);
+    /* Column layout. The table is budgeted against SCREEN_H: a header at 132, up to
+     * RACE_MAX_ENTRANTS rows of 30px from 158 ends at 398, leaving the summary and prompts
+     * above 700. */
+    enum {
+        kTableX = 150,
+        kRowTop = 158,
+        kRowH = 30,
+        kColPos = 0,
+        kColCar = 46,
+        kColLaps = 250,
+        kColTime = 330,
+        kColBest = 500,
+        kColStatus = 670,
+        kColPen = 800,
+    };
+    const int headerY = 132;
+    DrawText("POS", kTableX + kColPos, headerY, 14, COL_TEXT_DIM);
+    DrawText("CAR", kTableX + kColCar, headerY, 14, COL_TEXT_DIM);
+    DrawText("LAPS", kTableX + kColLaps, headerY, 14, COL_TEXT_DIM);
+    DrawText("TIME / GAP", kTableX + kColTime, headerY, 14, COL_TEXT_DIM);
+    DrawText("BEST LAP", kTableX + kColBest, headerY, 14, COL_TEXT_DIM);
+    DrawText("STATUS", kTableX + kColStatus, headerY, 14, COL_TEXT_DIM);
+    DrawText("PEN", kTableX + kColPen, headerY, 14, COL_TEXT_DIM);
+
+    const EntrantId localId = game->session.roster.localEntrantId;
+    for (int i = 0; i < results->count && i < RACE_MAX_ENTRANTS; i++) {
+        const RaceResultRow *row = &results->rows[i];
+        const int y = kRowTop + kRowH * i;
+        const bool isLocal = (row->entrantId == localId);
+        const bool placed = (row->status == RACE_STATUS_FINISHED);
+        const Color c = isLocal ? COL_ACCENT : (placed ? COL_TEXT : COL_TEXT_DIM);
+
+        if (row->finishPosition > 0) {
+            DrawText(TextFormat("%d", row->finishPosition), kTableX + kColPos, y, 18, c);
+        } else {
+            DrawText("-", kTableX + kColPos, y, 18, c);
+        }
+        DrawText(row->carId, kTableX + kColCar, y, 18, c);
+        DrawText(TextFormat("%d", row->lapsCompleted), kTableX + kColLaps, y, 18, c);
+
+        /* The winner shows an elapsed time; everyone else who finished shows the gap to it.
+         * A row with no finish time shows nothing rather than 0:00.00. */
+        char timeText[32];
+        if (row->status != RACE_STATUS_FINISHED) {
+            (void)snprintf(timeText, sizeof(timeText), "%s", "—");
+        } else if (row->finishPosition == 1) {
+            format_time(timeText, sizeof(timeText), row->finishTimeS);
+        } else {
+            (void)snprintf(timeText, sizeof(timeText), "+%.2fs", (double)row->gapToLeaderS);
+        }
+        DrawText(timeText, kTableX + kColTime, y, 18, c);
+
+        char bestText[32];
+        format_time(bestText, sizeof(bestText), row->bestLapTimeS);
+        const bool ownsFastest = (results->fastestLapEntrantId != RACE_ENTRANT_ID_NONE) &&
+                                 (results->fastestLapEntrantId == row->entrantId);
+        DrawText(bestText, kTableX + kColBest, y, 18, ownsFastest ? COL_ACCENT_WARM : c);
+
+        DrawText(race_status_name(row->status), kTableX + kColStatus, y, 16,
+                 placed ? c : COL_ACCENT_WARM);
+
+        if (row->penaltyCount > 0) {
+            DrawText(TextFormat("%d (+%.1fs)", row->penaltyCount, (double)row->penaltyTimeS),
+                     kTableX + kColPen, y, 14, COL_ACCENT_WARM);
+        }
+    }
+
+    /* Session summary under the table. */
+    const int summaryY = kRowTop + kRowH * results->count + 24;
+    if (results->fastestLapTimeS > 0.0f) {
+        const char *holder = "";
+        for (int i = 0; i < results->count; i++) {
+            if (results->rows[i].entrantId == results->fastestLapEntrantId)
+                holder = results->rows[i].carId;
+        }
+        char fastest[32];
+        format_time(fastest, sizeof(fastest), results->fastestLapTimeS);
+        draw_text_centered(TextFormat("fastest lap  %s  %s", fastest, holder), summaryY, 18,
+                           COL_ACCENT_WARM);
+    }
+
+    draw_text_centered(
+        "P race again    R menu", 640, 18,
+        (Color){ COL_TEXT.r, COL_TEXT.g, COL_TEXT.b, pulse_alpha(0.6f, 90, 255) });
+}
+
+/* Format a lap or gap time as m:ss.hh into `out`. A non-positive time has not been set. */
+static void format_time(char *out, size_t cap, float seconds)
+{
+    if (seconds <= 0.0f) {
+        (void)snprintf(out, cap, "--:--.--");
+        return;
+    }
+    const int minutes = (int)(seconds / 60.0f);
+    const float rest = seconds - (float)minutes * 60.0f;
+    (void)snprintf(out, cap, "%d:%05.2f", minutes, (double)rest);
+}
+
+/* A labelled horizontal meter, filled left to right. `warnAbove` flips the fill to the warm
+ * accent — used for the readouts where a high number is the bad news (wear, damage). */
+static void draw_meter(Rectangle bar, float fraction, bool warn)
+{
+    const float f = clampf(fraction, 0.0f, 1.0f);
+    DrawRectangleRec(bar, (Color){ 255, 255, 255, 22 });
+    DrawRectangleRec((Rectangle){ bar.x, bar.y, bar.width * f, bar.height },
+                     warn ? COL_ACCENT_WARM : COL_COOL);
+}
+
+static const char *pit_state_label(PitState state)
+{
+    switch (state) {
+        case PIT_STATE_ENTERING: return "PIT ENTRY";
+        case PIT_STATE_IN_LANE: return "PIT LANE — LIMITER";
+        case PIT_STATE_AT_BOX: return "IN THE BOX";
+        case PIT_STATE_EXITING: return "PIT EXIT";
+        case PIT_STATE_NONE:
+        case PIT_STATE_COUNT:
+        default: return NULL;
+    }
 }
 
 /* ---- arcade HUD clusters -------------------------------------------------------------
- * Two clusters with clear hierarchy, each on a translucent panel so it reads against
- * any track background:
- *   speed  - bottom-left: km/h large, gear, rpm bar. The most-glanced readout.
- *   lap    - top-center:  lap count, running timer, checkpoint progress.
+ *
+ * EVERY RACE NUMBER ON THIS SCREEN COMES FROM ONE SNAPSHOT. `race_presentation_snapshot()` is
+ * the authoritative read of the session at this tick — position, order, gaps, laps, fastest lap,
+ * penalties, wrong-way, pit state. The HUD computes nothing from it: that is what stops the
+ * screen and the results from disagreeing about the same race, and it is why MAP.md's priority 2
+ * is "connect the renderer to the snapshot" rather than "add readouts".
+ *
+ * The vehicle cluster is the exception and deliberately so: speed, gear and rpm are properties
+ * of the car in the player's hands, not of the classification, and they are read from the local
+ * entrant's own instance.
+ *
+ * Clusters, and what each answers:
+ *   speed   bottom-left   how fast am I going          (car authority)
+ *   lap     top-center    how far through am I         (snapshot)
+ *   order   top-right     who is where, and by how much(snapshot)
+ *   car     bottom-right  what shape is the car in     (snapshot)
+ *   status  center        what is the race doing to me (snapshot)
  */
 void render_hud_draw_arcade(const Game *game)
 {
+    RacePresentationSnapshot snap;
+    race_presentation_snapshot(&game->session, &game->trackDef, &snap);
+    const RaceEntrant *local = race_roster_local_const(&game->session.roster);
+    if (local == NULL) return;
+    const VehicleInstance *inst = &local->instance;
+
     /* ---- speed cluster (bottom-left) ---- */
     {
         const Rectangle panel = { 18.0f, SCREEN_H - 168.0f, 244.0f, 140.0f };
         draw_hud_panel(panel);
 
-        const float kmh = game->derived.speedMps * 3.6f;
+        const float kmh = inst->derived.speedMps * 3.6f;
         const char *kmhText = TextFormat("%.0f", (double)kmh);
         DrawText(kmhText, (int)panel.x + 16, (int)panel.y + 12, 46, COL_TEXT);
         DrawText("KM/H", (int)panel.x + 20 + MeasureText(kmhText, 46), (int)panel.y + 40, 16,
                  COL_TEXT_DIM);
 
-        const char *modeLabel = game->autoTrans.enabled ? "AUTO " : "";
-        DrawText(TextFormat("%sGEAR %s", modeLabel, gear_label(game->vehicle.selectedGear)),
+        const char *modeLabel = inst->autoTrans.enabled ? "AUTO " : "";
+        DrawText(TextFormat("%sGEAR %s", modeLabel, gear_label(inst->vehicle.selectedGear)),
                  (int)panel.x + 16, (int)panel.y + 66, 18, COL_TEXT);
 
         /* RPM bar: cool cyan, flipping to accent gold near the redline. */
-        const float idleRpm = game->spec.engineIdleRpm;
-        const float redlineRpm = game->spec.engineRedlineRpm;
+        const float idleRpm = inst->spec.engineIdleRpm;
+        const float redlineRpm = inst->spec.engineRedlineRpm;
         const float rpmFrac =
-            clampf((game->vehicle.engineRpm - idleRpm) / (redlineRpm - idleRpm), 0.0f, 1.0f);
+            clampf((inst->vehicle.engineRpm - idleRpm) / (redlineRpm - idleRpm), 0.0f, 1.0f);
         const Rectangle barBg = { panel.x + 16.0f, panel.y + 98.0f, panel.width - 32.0f,
                                   10.0f };
         DrawRectangleRec(barBg, (Color){ 255, 255, 255, 22 });
         DrawRectangleRec((Rectangle){ barBg.x, barBg.y, barBg.width * rpmFrac, barBg.height },
                          (rpmFrac > 0.85f) ? COL_ACCENT : COL_COOL);
-        DrawText(TextFormat("%.0f RPM", (double)game->vehicle.engineRpm), (int)panel.x + 16,
+        DrawText(TextFormat("%.0f RPM", (double)inst->vehicle.engineRpm), (int)panel.x + 16,
                  (int)panel.y + 114, 12, COL_TEXT_DIM);
     }
 
     /* ---- lap cluster (top-center) ---- */
     {
-        const Rectangle panel = { (SCREEN_W - 360.0f) * 0.5f, 16.0f, 360.0f, 56.0f };
+        const Rectangle panel = { (SCREEN_W - 360.0f) * 0.5f, 16.0f, 360.0f, 82.0f };
         draw_hud_panel(panel);
 
-        int shownLap = game->progress.lap + 1;
-        if (shownLap > RESULTS_TARGET_LAPS) shownLap = RESULTS_TARGET_LAPS;
-        DrawText(TextFormat("LAP %d/%d", shownLap, RESULTS_TARGET_LAPS), (int)panel.x + 16,
-                 (int)panel.y + 18, 18, COL_TEXT);
+        const int targetLaps = (snap.targetLaps > 0) ? snap.targetLaps : RESULTS_TARGET_LAPS;
+        int shownLap = snap.localLapsCompleted + 1;
+        if (shownLap > targetLaps) shownLap = targetLaps;
+        DrawText(TextFormat("LAP %d/%d", shownLap, targetLaps), (int)panel.x + 16,
+                 (int)panel.y + 14, 18, COL_TEXT);
 
-        const int minutes = (int)(game->progress.lapTimerS / 60.0f);
-        const float seconds = game->progress.lapTimerS - (float)minutes * 60.0f;
-        const char *timerText = TextFormat("%d:%05.2f", minutes, (double)seconds);
-        DrawText(timerText,
-                 (int)(panel.x + (panel.width - (float)MeasureText(timerText, 22)) * 0.5f),
-                 (int)panel.y + 16, 22, COL_TEXT);
+        char timer[32];
+        format_time(timer, sizeof(timer), snap.localLapTimerS);
+        DrawText(timer, (int)(panel.x + (panel.width - (float)MeasureText(timer, 22)) * 0.5f),
+                 (int)panel.y + 12, 22, COL_TEXT);
 
-        const char *cpText = TextFormat("CP %d/%d", game->progress.nextCheckpoint,
-                                        game->trackDef.checkpointCount);
-        DrawText(cpText, (int)(panel.x + panel.width) - 16 - MeasureText(cpText, 18),
-                 (int)panel.y + 18, 18, COL_TEXT_DIM);
+        /* Position is the snapshot's, not a count of who is in front: live order is the
+         * session's job and a second opinion here would eventually be a different one. */
+        if (snap.localPosition > 0) {
+            const char *posText = TextFormat("P%d/%d", snap.localPosition, snap.entrantCount);
+            DrawText(posText, (int)(panel.x + panel.width) - 16 - MeasureText(posText, 20),
+                     (int)panel.y + 13, 20, COL_ACCENT);
+        }
+
+        char best[32];
+        char fastest[32];
+        format_time(best, sizeof(best), snap.localBestLapTimeS);
+        format_time(fastest, sizeof(fastest), snap.fastestLapTimeS);
+        const bool ownsFastest = (snap.fastestLapEntrantId != RACE_ENTRANT_ID_NONE) &&
+                                 (snap.fastestLapEntrantId == local->id);
+        DrawText(TextFormat("BEST %s", best), (int)panel.x + 16, (int)panel.y + 52, 14,
+                 COL_TEXT_DIM);
+        DrawText(TextFormat("SESSION %s", fastest),
+                 (int)(panel.x + panel.width) - 16 -
+                     MeasureText(TextFormat("SESSION %s", fastest), 14),
+                 (int)panel.y + 52, 14, ownsFastest ? COL_ACCENT_WARM : COL_TEXT_DIM);
+    }
+
+    /* ---- order cluster (top-right) ----
+     * Every entrant, in the session's live order, with the time gap to the leader. Skipped for
+     * a solo session, where a running order of one is noise. */
+    if (snap.entrantCount > 1) {
+        const float rowH = 20.0f;
+        const Rectangle panel = { SCREEN_W - 296.0f, 16.0f, 278.0f,
+                                  30.0f + rowH * (float)snap.entrantCount };
+        draw_hud_panel(panel);
+        DrawText("ORDER", (int)panel.x + 14, (int)panel.y + 8, 14, COL_TEXT_DIM);
+        for (int i = 0; i < snap.entrantCount; i++) {
+            const PresentationEntrantRow *row = &snap.rows[i];
+            const Color c = row->isLocal ? COL_ACCENT : COL_TEXT;
+            const int y = (int)panel.y + 26 + (int)(rowH * (float)i);
+            DrawText(TextFormat("%d", row->livePosition), (int)panel.x + 14, y, 16, c);
+            DrawText(row->carId, (int)panel.x + 40, y, 16, c);
+            /* Leader shows laps rather than a gap to itself; a car with no usable speed shows
+             * the distance it is behind, because a time gap would be a fiction. */
+            const char *right;
+            if (i == 0) {
+                right = TextFormat("L%d", row->lapsCompleted);
+            } else if (row->gapToLeaderS > 0.0f) {
+                right = TextFormat("+%.1fs", (double)row->gapToLeaderS);
+            } else if (row->distanceToLeaderM > 0.0f) {
+                right = TextFormat("+%.0fm", (double)row->distanceToLeaderM);
+            } else {
+                right = "--";
+            }
+            DrawText(right, (int)(panel.x + panel.width) - 14 - MeasureText(right, 16), y, 16,
+                     row->isLocal ? COL_ACCENT : COL_TEXT_DIM);
+        }
+    }
+
+    /* ---- car cluster (bottom-right) ---- */
+    {
+        const Rectangle panel = { SCREEN_W - 262.0f, SCREEN_H - 168.0f, 244.0f, 140.0f };
+        draw_hud_panel(panel);
+        const int x = (int)panel.x + 16;
+        const float barW = panel.width - 32.0f;
+        int y = (int)panel.y + 12;
+
+        DrawText(TextFormat("FUEL   %3.0f%%", (double)snap.fuelPercent), x, y, 14, COL_TEXT);
+        draw_meter((Rectangle){ panel.x + 16.0f, (float)y + 18.0f, barW, 8.0f },
+                   snap.fuelPercent / 100.0f, snap.fuelPercent < 15.0f);
+        y += 36;
+        DrawText(TextFormat("TYRES  %3.0f%%", (double)snap.tireWearPercent), x, y, 14,
+                 COL_TEXT);
+        draw_meter((Rectangle){ panel.x + 16.0f, (float)y + 18.0f, barW, 8.0f },
+                   snap.tireWearPercent / 100.0f, snap.tireWearPercent > 60.0f);
+        y += 36;
+        DrawText(TextFormat("DAMAGE %3.0f%%", (double)snap.damagePercent), x, y, 14, COL_TEXT);
+        draw_meter((Rectangle){ panel.x + 16.0f, (float)y + 18.0f, barW, 8.0f },
+                   snap.damagePercent / 100.0f, snap.damagePercent > 25.0f);
+        y += 34;
+        DrawText(TextFormat("ABS %d   TCS %d", snap.absLevel, snap.tcsLevel), x, y, 12,
+                 COL_TEXT_DIM);
+    }
+
+    /* ---- status band (center) ----
+     * One line at a time, most urgent first. A countdown owns the screen while it runs; after
+     * that the band is for the things the race is doing to the player. */
+    {
+        if (snap.phase == RACE_PHASE_COUNTDOWN) {
+            /* Whole seconds remaining, rounded up, so the last tick of "1" is still "1". */
+            const int ticks = snap.countdownTicksRemaining;
+            const int secondsLeft = (int)(((float)ticks * FIXED_DT_S) + 0.999f);
+            const char *text = (secondsLeft > 0) ? TextFormat("%d", secondsLeft) : "GO";
+            draw_text_centered_shadow(text, 200, 96, COL_ACCENT);
+            draw_text_centered("hold the grid", 306, 16, COL_TEXT_DIM);
+        } else if (snap.wrongWay) {
+            draw_text_centered_shadow("WRONG WAY", 200, 40, COL_ACCENT_WARM);
+        } else {
+            const char *pit = pit_state_label(snap.localPitState);
+            if (pit != NULL) {
+                draw_text_centered_shadow(pit, 200, 30, COL_ACCENT);
+                if (snap.pitServiceRemainingS > 0.0f) {
+                    draw_text_centered(TextFormat("service %.1fs   box %d",
+                                                  (double)snap.pitServiceRemainingS,
+                                                  snap.pitAssignedBox),
+                                       238, 16, COL_TEXT_DIM);
+                }
+            }
+        }
+        if (snap.pendingPenalties > 0) {
+            draw_text_centered(TextFormat("%d PENALTY%s PENDING", snap.pendingPenalties,
+                                          snap.pendingPenalties == 1 ? "" : "S"),
+                               SCREEN_H - 200, 18, COL_ACCENT_WARM);
+        }
     }
 
     /* Hot-reload notice, top-left: preserves the information the old HUD line carried. */
@@ -295,13 +688,26 @@ void render_hud_draw_arcade(const Game *game)
         DrawText("module reloaded - state preserved", 18, 18, 14, COL_ACCENT);
     }
 
-    DrawText("W throttle  S brake  Space handbrake  Q/E shift  A/D steer  R reset  "
-             "F1 diagnostics  F2 physics lab",
-             (SCREEN_W - MeasureText("W throttle  S brake  Space handbrake  Q/E shift  "
-                                     "A/D steer  R reset  F1 diagnostics  F2 physics lab",
-                                     14)) /
-                 2,
-             SCREEN_H - 26, 14, COL_TEXT_DIM);
+    /* The control hints name the keys that are actually bound, not the ones that shipped. A
+     * player who rebinds throttle and is still told to press W has been given a screen that
+     * lies to them, which is the second half of MAP.md priority 4. F2 is the physics lab's own
+     * key and is not a bindable action, so it stays literal. */
+    {
+        const InputBindings *b = &game->bindings;
+        const char *hint = TextFormat(
+            "%s throttle  %s brake  %s handbrake  %s/%s shift  %s/%s steer  %s reset  "
+            "%s diagnostics  F2 physics lab",
+            input_bindings_label(b, INPUT_ACTION_THROTTLE),
+            input_bindings_label(b, INPUT_ACTION_BRAKE),
+            input_bindings_label(b, INPUT_ACTION_HANDBRAKE),
+            input_bindings_label(b, INPUT_ACTION_SHIFT_DOWN),
+            input_bindings_label(b, INPUT_ACTION_SHIFT_UP),
+            input_bindings_label(b, INPUT_ACTION_STEER_LEFT),
+            input_bindings_label(b, INPUT_ACTION_STEER_RIGHT),
+            input_bindings_label(b, INPUT_ACTION_RESET),
+            input_bindings_label(b, INPUT_ACTION_DEBUG));
+        DrawText(hint, (SCREEN_W - MeasureText(hint, 14)) / 2, SCREEN_H - 26, 14, COL_TEXT_DIM);
+    }
 }
 
 static void hud_line(int x, int *y, const char *text, Color color)

@@ -56,6 +56,26 @@
 #define AI_SPEED_SCAN_MARGIN_M 8.0f
 
 /*
+ * Recovery thresholds (MAP.md priorities 5 and 6).
+ *
+ * The detector is about PROGRESS, not about speed alone: a car crawling out of a hairpin at
+ * 0.8 m/s is driving, and a car pinned against a barrier at 0.05 m/s with the throttle open is
+ * not. So it asks whether the car has covered any ground at all while being asked to move, and
+ * only that. Nothing here names a cause, which is the point — a wall, a ditch, a spin and a
+ * beached runoff excursion all present as the same symptom, and so will the next one.
+ *
+ * Two seconds of no progress before acting: long enough that a genuine slow corner exit, a
+ * standing start, or a moment of wheelspin is never mistaken for being stuck, short enough that
+ * a recovery still fits inside a race. The backing phase is bounded so a car that reverses into
+ * something else gives up and tries again from the front rather than digging in.
+ */
+#define AI_STUCK_PROGRESS_M 1.5f    /* ground that must be covered inside the window */
+#define AI_STUCK_TICKS 240          /* 2.0 s at 120 Hz */
+#define AI_RECOVERY_BACK_TICKS 200  /* ~1.7 s of reversing */
+#define AI_RECOVERY_SETTLE_TICKS 90 /* ~0.75 s to stop and re-engage drive */
+#define AI_RECOVERY_MOVING_MPS 3.0f /* speed that ends a recovery early: it worked */
+
+/*
  * First plan layer whose curvature the speed controller is allowed to believe.
  *
  * Layer 0 is pinned to the car's own lateral position, so the triple centred on layer 1 measures
@@ -566,6 +586,37 @@ void ai_driver_update(const AiDriverConfig *cfg, AiDriverState *state,
     const Vector2 posM = vehicle->positionM;
     const float speedMps = derived->speedMps;
 
+    /*
+     * --- Recovery ---
+     *
+     * Run before anything else decides what to do, because being stuck is not a driving
+     * situation the line planner or the speed controller can answer: both of them assume the
+     * car goes where it is pointed.
+     *
+     * The whole manoeuvre is pedals. An automatic gearbox already gives a player reverse by
+     * braking at a standstill and drive by throttling from one, so the driver reverses by asking
+     * for brake and returns to drive by asking for throttle — it never requests a gear, and the
+     * audit boundary in ai_driver.h is unchanged. That also means recovery is impossible in a
+     * forward-only gearbox, which is exactly the state both stuck cars were left in.
+     */
+    if (state->recoveryPhase == AI_RECOVERY_NONE) {
+        const float movedM = vec_len(vec_sub(posM, state->progressAnchorM));
+        /* "Asking to move" is the pedal axis, not the speed target: a driver that has correctly
+         * decided to stop (a corner it cannot take, traffic) is not stuck, and must not be
+         * dragged into a reverse manoeuvre for obeying its own controller. */
+        const bool askingToMove = (state->pedalAxis > 0.0f);
+        if (movedM >= AI_STUCK_PROGRESS_M || !askingToMove) {
+            state->noProgressTicks = 0;
+            state->progressAnchorM = posM;
+        } else if (++state->noProgressTicks >= AI_STUCK_TICKS) {
+            state->recoveryPhase = AI_RECOVERY_BACKING;
+            state->recoveryTicks = 0;
+            state->recoveryCount++;
+            state->noProgressTicks = 0;
+            state->progressAnchorM = posM;
+        }
+    }
+
     /* --- Replan ---
      * Anchored to the CENTRELINE segment the car is on, because that is the frame the corridor
      * and the lattice are defined in. A full scan rather than a search around last tick's
@@ -655,8 +706,13 @@ void ai_driver_update(const AiDriverConfig *cfg, AiDriverState *state,
     }
 
     const float maxAngleRad = maxf(spec->maxRoadWheelAngleRad, 1.0e-3f);
-    const float steerDemand =
-        clampf(cfg->steerGainP * steerAngleRad / maxAngleRad, -1.0f, 1.0f);
+    float steerDemand = clampf(cfg->steerGainP * steerAngleRad / maxAngleRad, -1.0f, 1.0f);
+
+    /* Reversing inverts what the steering does to the nose: to end up pointing at the line the
+     * driver wants, it steers away from it while backing. Negating the demand it already
+     * computed is the whole of that, and it means a recovery aims at the same target the normal
+     * controller does rather than at some separately-invented heading. */
+    if (state->recoveryPhase == AI_RECOVERY_BACKING) steerDemand = -steerDemand;
 
     /* Rate-limit the stick for the same reason the pedals are limited: a thumbstick cannot
      * teleport, so an instantaneous step is a signal no player could have produced. */
@@ -688,8 +744,33 @@ void ai_driver_update(const AiDriverConfig *cfg, AiDriverState *state,
         const int planLayer = ((node - state->planBaseNode) % count + count) % count;
         if (planLayer < AI_PLAN_SPEED_SCAN_FIRST_LAYER) continue;
 
-        const float kappa = menger_curvature(ai_driver_plan_point(state, track, node - 1), here,
-                                             ai_driver_plan_point(state, track, node + 1));
+        float kappa = menger_curvature(ai_driver_plan_point(state, track, node - 1), here,
+                                       ai_driver_plan_point(state, track, node + 1));
+
+        /*
+         * THE ROAD IS THE UPPER BOUND ON WHAT THERE IS TO BRAKE FOR.
+         *
+         * The plan is a minimum-curvature line through the corridor, so wherever it is tighter
+         * than the centreline it is not describing the road — it is describing the car rejoining
+         * its line after drifting off it. Braking for that is braking for one's own tracking
+         * error, and it is how awd_rally dies: a replan anchored at a position 1.5 m off the
+         * line turns a 50 m radius corner into a 14 m one, the target collapses from 25 m/s to
+         * 10 with seven metres to go, and full brake plus full lock spends the entire friction
+         * ellipse on stopping so the car understeers straight off the outside.
+         *
+         * AI_PLAN_SPEED_SCAN_FIRST_LAYER already drops the anchor triple, but the transient does
+         * not end at a fixed layer — it lasts as far ahead as it takes to rejoin, which depends
+         * on how far off the line the car is. Taking the centreline as a ceiling ends it wherever
+         * it ends, with no window to tune and nothing to get wrong when the error is unusually
+         * large. Where the planned line is genuinely the smoother one, which is nearly
+         * everywhere, this changes nothing at all.
+         */
+        const float kappaRoad =
+            menger_curvature(nodes[((node - 1) % count + count) % count].centerM,
+                             nodes[(node % count + count) % count].centerM,
+                             nodes[((node + 1) % count + count) % count].centerM);
+        if (kappaRoad > AI_MIN_CURVATURE_1PM && kappa > kappaRoad) kappa = kappaRoad;
+
         if (kappa < AI_MIN_CURVATURE_1PM) continue;
 
         /* Fastest this corner can be taken, then the fastest we may be going NOW and still
@@ -736,6 +817,37 @@ void ai_driver_update(const AiDriverConfig *cfg, AiDriverState *state,
         /* Once late braking is required, use the shortest available deceleration rather than
          * coasting into the corner. The target was back-propagated from its tightest point. */
         pedalDemand = -clampf(-cfg->speedGainP * speedErrorMps, 0.0f, 1.0f);
+    }
+
+    /*
+     * Recovery overrides the pedal demand, and only the pedal demand — it goes through the same
+     * rate limiter and the same one-axis split below, so a recovery is still a signal a player
+     * could have produced and still cannot press both pedals.
+     *
+     * BACKING asks for brake, which an automatic turns into reverse at a standstill and then
+     * into reverse drive. SETTLING asks for throttle, which in reverse is the brake, stops the
+     * car, and drops the box back into drive. The phase ends early the moment the car is moving
+     * again, because the manoeuvre has then done its job and holding it would only throw the
+     * recovered car back off the road.
+     */
+    if (state->recoveryPhase != AI_RECOVERY_NONE) {
+        state->recoveryTicks++;
+        if (state->recoveryPhase == AI_RECOVERY_BACKING) {
+            pedalDemand = -1.0f;
+            if (state->recoveryTicks >= AI_RECOVERY_BACK_TICKS) {
+                state->recoveryPhase = AI_RECOVERY_SETTLING;
+                state->recoveryTicks = 0;
+            }
+        } else {
+            pedalDemand = 1.0f;
+            if (state->recoveryTicks >= AI_RECOVERY_SETTLE_TICKS ||
+                speedMps >= AI_RECOVERY_MOVING_MPS) {
+                state->recoveryPhase = AI_RECOVERY_NONE;
+                state->recoveryTicks = 0;
+                state->progressAnchorM = posM;
+                state->noProgressTicks = 0;
+            }
+        }
     }
 
     /* Rate-limit the axis, then split it. The driver must therefore lift off before it can

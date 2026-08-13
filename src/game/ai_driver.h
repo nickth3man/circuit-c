@@ -204,7 +204,35 @@ typedef struct {
     bool slideActive;           /* the gated slip/yaw monitor is managing an excursion */
     int slideTicks;             /* consecutive ticks above the slide thresholds */
     int slideCleanTicks;        /* consecutive ticks below the slide thresholds */
+
+    /*
+     * Recovery (MAP.md priorities 5 and 6). A driver that cannot get itself out of trouble is
+     * not a driver: awd_rally and rwd_power both end their runs stopped against a barrier with
+     * the throttle open, and sit there for the remaining four minutes because nothing in the
+     * control loop treats "I am not moving" as a situation to act on.
+     *
+     * `noProgressTicks` counts consecutive ticks of asking the car to move and getting nothing.
+     * It is deliberately NOT conditioned on being off the racing surface, hitting a barrier, or
+     * any other named cause: the detector is "the car is not going where I am pointing it",
+     * which catches a wall, a ditch, a spin, a beached runoff excursion, and whatever else the
+     * physics can produce that nobody has enumerated yet.
+     *
+     * `recoveryPhase` is AI_RECOVERY_*; `recoveryTicks` counts ticks inside the current phase.
+     * `recoveryCount` is a diagnostic — a run that recovers eleven times is technically a pass
+     * and is still a finding.
+     */
+    int noProgressTicks;
+    int recoveryPhase;
+    int recoveryTicks;
+    int recoveryCount;
+    Vector2 progressAnchorM; /* where the car was when progress was last observed */
+
 } AiDriverState;
+
+/* Recovery phases. NONE is zero, so a memset state is a driver that is not recovering. */
+#define AI_RECOVERY_NONE 0
+#define AI_RECOVERY_BACKING 1  /* reversing away from whatever stopped the car */
+#define AI_RECOVERY_SETTLING 2 /* stopping the reverse and re-engaging drive */
 
 /* Sensible starting values for every field. Never per car. */
 void ai_driver_config_default(AiDriverConfig *cfg);

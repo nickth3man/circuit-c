@@ -185,6 +185,11 @@ typedef enum {
     PENALTY_CONSEQUENCE_WARNING = 0,
     PENALTY_CONSEQUENCE_TIME,        /* seconds added to finish time */
     PENALTY_CONSEQUENCE_LAP_INVALID, /* this lap does not count for records */
+    /* Exclusion. The heaviest consequence, and the only one that ends an entrant's race: the
+     * entrant is classified immediately with RACE_STATUS_DSQ and no finishing position. It is a
+     * penalty consequence rather than a separate mechanism so that a disqualification carries
+     * the same rule, tick, and evidence as every other steward decision. */
+    PENALTY_CONSEQUENCE_DISQUALIFICATION,
     PENALTY_CONSEQUENCE_COUNT
 } RacePenaltyConsequence;
 
@@ -210,16 +215,49 @@ typedef struct {
     uint32_t totalAppended;
 } RacePenaltyLog;
 
+/*
+ * How an entrant's race ended (MAP.md priority 3).
+ *
+ * `finished` on EntrantResult answers a narrower question than it looks like it does: it means
+ * "this entrant has been classified and will not be classified again", and the window-expiry
+ * branch sets it on cars that never completed the distance. That single boolean cannot tell a
+ * winner from a wreck, which is why a results screen built on it could only ever show a lap
+ * time. The status is the authoritative outcome, and every classified entrant has exactly one.
+ *
+ * Session-level abandonment is deliberately NOT a member here: a race abandoned before
+ * classification produces no results at all (RACE_PHASE_ABORTED, `results.valid` false), so it
+ * is a property of the session rather than of any one entrant.
+ */
+typedef enum {
+    RACE_STATUS_RUNNING = 0, /* not classified yet — the only non-final value */
+    RACE_STATUS_FINISHED,    /* completed the race distance */
+    RACE_STATUS_DNF,         /* took the start, classified without completing the distance */
+    RACE_STATUS_DNS,         /* never took the start: classified having covered no distance */
+    RACE_STATUS_DSQ,         /* excluded by the stewards; holds no finishing position */
+    RACE_STATUS_RETIRED,     /* withdrew; holds no finishing position */
+    RACE_STATUS_COUNT
+} RaceFinalStatus;
+
+/* Short, stable label for a status ("FINISHED", "DNF", ...). Never NULL; an out-of-range value
+ * returns "?" rather than indexing past the table. */
+const char *race_status_name(RaceFinalStatus status);
+
 /* One entrant's line in the results, ordered by finishing position. */
 typedef struct {
     EntrantId entrantId;
-    int finishPosition; /* 1-based; 0 when the entrant never finished */
+    /* The car this entrant drove. Carried on the row so a results screen can name a competitor
+     * without reaching back into a roster that the next session will have overwritten. */
+    char carId[VEHICLE_CONTENT_ID_CAPACITY];
+    int finishPosition; /* 1-based; 0 when the entrant holds no classified position */
     int lapsCompleted;
     float finishTimeS; /* session clock when this entrant finished; 0 when it did not */
     float lastLapTimeS;
-    bool finished;
-    float bestLapTimeS; /* this entrant's best valid lap across the session (#54) */
+    bool finished;          /* classified — see RaceFinalStatus above for the outcome */
+    RaceFinalStatus status; /* the authoritative outcome */
+    float bestLapTimeS;     /* this entrant's best valid lap across the session (#54) */
     float gapToLeaderS; /* time behind the leader at classification (0 for the winner) (#54) */
+    float penaltyTimeS; /* steward and recovery seconds already folded into finishTimeS */
+    int penaltyCount;   /* steward decisions recorded against this entrant */
 } RaceResultRow;
 
 /* Filled once, when the session reaches RACE_PHASE_CLASSIFIED. */
@@ -368,5 +406,36 @@ bool race_session_add_penalty(RaceSession *session, RacePenaltyRule rule,
 
 /* How many unserved penalties an entrant has (issue #55). */
 int race_session_pending_penalties(const RaceSession *session, EntrantId entrantId);
+
+/* How many penalties this entrant already holds for `rule`. The escalation ladder reads it, and
+ * a results screen can show "third track-limits warning" rather than three identical rows. */
+int race_session_penalty_count(const RaceSession *session, EntrantId entrantId,
+                               RacePenaltyRule rule);
+
+/*
+ * Report an infringement and let the session decide what it costs (MAP.md priority 7).
+ *
+ * This is the escalating lifecycle: the first offence of a rule is a warning, the next two cost
+ * time, and a fourth excludes the entrant. Consequence selection lives here rather than at each
+ * detection site so that "what a repeated offence costs" is one policy rather than one per rule,
+ * and so a detector's job is only to decide that something happened.
+ *
+ * `penaltySeconds` is what a time consequence would cost; it is ignored for the other rungs.
+ * Returns the consequence that was applied, or PENALTY_CONSEQUENCE_COUNT when nothing was
+ * recorded (unknown entrant, or one whose race has already ended).
+ */
+RacePenaltyConsequence race_session_report_infringement(RaceSession *session,
+                                                        RacePenaltyRule rule,
+                                                        EntrantId entrantId,
+                                                        float penaltySeconds, int32_t evidence);
+
+/*
+ * Withdraw an entrant (MAP.md priority 3). The entrant is classified immediately with
+ * RACE_STATUS_RETIRED and no finishing position, which is what lets a race whose remaining
+ * runners have all retired reach classification instead of waiting for cars that are not
+ * coming. Idempotent: an entrant that already has a final status is left alone. Returns false
+ * when the entrant is not found or is already classified.
+ */
+bool race_session_retire(RaceSession *session, EntrantId entrantId);
 
 #endif /* CIRCUIT_RACE_SESSION_H */

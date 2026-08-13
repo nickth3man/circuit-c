@@ -22,7 +22,11 @@
 
 #define PLAYER_PROFILE_VERSION 2u
 #define PLAYER_PROFILE_ACTION_CHARS 32
-#define PLAYER_PROFILE_KEY_CHARS 16
+/* Wide enough for the longest key id the game can bind — "KEY_RIGHT_CONTROL" is 17 characters
+ * plus its terminator. The persisted names are unchanged; only the buffer that holds them
+ * grew, because a modifier key silently truncating to "KEY_RIGHT_CONTRO" would be a binding
+ * that never loads back. */
+#define PLAYER_PROFILE_KEY_CHARS 24
 #define PLAYER_PROFILE_RECORD_KEY_CHARS 64
 #define PLAYER_PROFILE_MAX_BINDINGS 24
 #define PLAYER_PROFILE_MAX_RECORDS 16

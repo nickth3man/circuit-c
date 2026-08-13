@@ -74,7 +74,20 @@ typedef struct {
     uint32_t stalledTicks;
     bool falseStarted; /* one-shot: a jump start has already been recorded for this entrant */
     uint32_t offTrackTicks; /* consecutive ticks beyond the racing surface (#55) */
-    EntrantPitState pit;    /* pit cycle state machine (#57) */
+    /* Wrong-way alerting used to borrow offTrackTicks as its "already warned" marker, which
+     * coupled two unrelated rules: clearing a track-limits excursion also re-armed the wrong-way
+     * warning, and vice versa. They are separate concepts and now have separate storage. */
+    bool wrongWayAlerted;
+    /* Ticks remaining in which a skipped gate counts as having been cut rather than merely
+     * missed. Armed while the entrant is off the racing surface, so rejoining past a gate is
+     * attributed to the excursion that caused it and a gate missed while on track is not. */
+    uint32_t cutArmedTicks;
+    EntrantPitState pit; /* pit cycle state machine (#57) */
+    /* How this entrant's race ended, as a RaceFinalStatus (MAP.md priority 3). Stored as an int
+     * because the enum lives in race_session.h, which includes this header rather than the other
+     * way round. Zero is RACE_STATUS_RUNNING, so a reset entrant is correctly "not classified".
+     * Written only by the session's classification and exclusion paths. */
+    int finalStatus;
 } EntrantResult;
 
 /*

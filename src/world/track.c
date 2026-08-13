@@ -1492,6 +1492,69 @@ bool track_point_in_service_box(const TrackDefinition *track, Vector2 pointM)
     return false;
 }
 
+int track_service_box_at(const TrackDefinition *track, Vector2 pointM)
+{
+    if (track == NULL || track->serviceBoxes == NULL || track->serviceBoxCount <= 0) return -1;
+    for (int i = 0; i < track->serviceBoxCount; i++) {
+        const ServiceBox *b = &track->serviceBoxes[i];
+        if (pointM.x >= b->minM.x && pointM.x <= b->maxM.x && pointM.y >= b->minM.y &&
+            pointM.y <= b->maxM.y)
+            return i;
+    }
+    return -1;
+}
+
+/* Squared distance from `p` to segment ab. Local to the lane test; the route localization has
+ * its own copy for its own reasons and neither should have to move for the other. */
+static float pit_point_segment_dist_sq(Vector2 p, Vector2 a, Vector2 b)
+{
+    const float abx = b.x - a.x;
+    const float aby = b.y - a.y;
+    const float lenSq = abx * abx + aby * aby;
+    float t = 0.0f;
+    if (lenSq > 1.0e-9f) {
+        t = ((p.x - a.x) * abx + (p.y - a.y) * aby) / lenSq;
+        if (t < 0.0f) t = 0.0f;
+        if (t > 1.0f) t = 1.0f;
+    }
+    const float dx = p.x - (a.x + abx * t);
+    const float dy = p.y - (a.y + aby * t);
+    return dx * dx + dy * dy;
+}
+
+bool track_point_in_pit_lane(const TrackDefinition *track, Vector2 pointM, float halfWidthM)
+{
+    if (track == NULL || !track_pit_has_geometry(track)) return false;
+    /* A box always counts, whatever the corridor width: a car parked in its box is in the pit
+     * lane by definition, and a box may legitimately sit further off the spine than the lane
+     * is wide. */
+    if (track_point_in_service_box(track, pointM)) return true;
+
+    const float halfSq = halfWidthM * halfWidthM;
+
+    /* Walk the spine: entry -> boxes in authored order -> exit, skipping whichever ends the
+     * track does not author. */
+    Vector2 prev;
+    bool havePrev = false;
+    if (track->hasPitEntry) {
+        prev = track->pitEntry.centerM;
+        havePrev = true;
+    }
+    for (int i = 0; i < track->serviceBoxCount; i++) {
+        const ServiceBox *b = &track->serviceBoxes[i];
+        const Vector2 centre = { (b->minM.x + b->maxM.x) * 0.5f,
+                                 (b->minM.y + b->maxM.y) * 0.5f };
+        if (havePrev && pit_point_segment_dist_sq(pointM, prev, centre) <= halfSq) return true;
+        prev = centre;
+        havePrev = true;
+    }
+    if (track->hasPitExit && havePrev) {
+        if (pit_point_segment_dist_sq(pointM, prev, track->pitExit.centerM) <= halfSq)
+            return true;
+    }
+    return false;
+}
+
 bool track_is_closed(const TrackDefinition *track)
 {
     if (track == NULL) return false;

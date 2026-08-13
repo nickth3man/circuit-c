@@ -5,9 +5,26 @@
 
 #include <string.h>
 
+#include <stdio.h>
+
 #include "game/car_roster.h"
 #include "physics/vehicle.h"
 #include "world/track.h"
+
+/*
+ * Turn a distance behind into a time gap, using the trailing car's own speed: "how long until I
+ * am where they are". Below a walking pace the quotient stops describing anything a viewer would
+ * recognise as a gap — a stopped car is infinitely behind — so it returns 0 and the caller
+ * reports the distance instead. Negative distances (a car the sort put behind but which has
+ * since edged ahead within a tick) also return 0 rather than a negative gap.
+ */
+#define PRESENTATION_MIN_GAP_SPEED_MPS 1.5f
+
+static float gap_seconds(float distanceM, float speedMps)
+{
+    if (distanceM <= 0.0f || speedMps < PRESENTATION_MIN_GAP_SPEED_MPS) return 0.0f;
+    return distanceM / speedMps;
+}
 
 void race_presentation_snapshot(const RaceSession *session, const TrackDefinition *track,
                                 RacePresentationSnapshot *out)
@@ -26,26 +43,39 @@ void race_presentation_snapshot(const RaceSession *session, const TrackDefinitio
 
     const EntrantId localId = session->roster.localEntrantId;
     float leaderTime = 0.0f;
+    float leaderDistanceM = 0.0f;
+    float aheadDistanceM = 0.0f;
 
     for (int pos = 0; pos < n; pos++) {
         const RaceEntrant *e = &session->roster.entrants[order[pos]];
         PresentationEntrantRow *row = &out->rows[pos];
         row->entrantId = e->id;
+        (void)snprintf(row->carId, sizeof(row->carId), "%s", e->definition.id);
         row->livePosition = pos + 1;
         row->lapsCompleted = e->progress.lap;
         row->lastLapTimeS = e->progress.lastLapTimeS;
         row->bestLapTimeS = e->progress.bestLapTimeS;
         row->finished = e->result.finished;
         row->isLocal = (e->id == localId);
-        /* Gap: for finished entrants, use their finish time vs the leader. For active, use 0
-         * (live gaps require distance/speed interpolation that belongs in a future issue). */
+
+        const float distanceM = e->progress.raceDistanceM;
         if (pos == 0) {
             leaderTime = e->result.finishTimeS;
-            row->gapToLeaderS = 0.0f;
+            leaderDistanceM = distanceM;
         } else {
-            row->gapToLeaderS =
-                e->result.finished ? (e->result.finishTimeS - leaderTime) : 0.0f;
+            row->distanceToLeaderM = leaderDistanceM - distanceM;
+            row->distanceToAheadM = aheadDistanceM - distanceM;
+            if (e->result.finished) {
+                /* Both classified: the difference of finish times is exact, and no speed-based
+                 * estimate can improve on it. */
+                row->gapToLeaderS = e->result.finishTimeS - leaderTime;
+            } else {
+                const float speedMps = e->instance.derived.speedMps;
+                row->gapToLeaderS = gap_seconds(row->distanceToLeaderM, speedMps);
+                row->gapToAheadS = gap_seconds(row->distanceToAheadM, speedMps);
+            }
         }
+        aheadDistanceM = distanceM;
         if (row->isLocal) out->localPosition = pos + 1;
     }
 
@@ -66,6 +96,13 @@ void race_presentation_snapshot(const RaceSession *session, const TrackDefinitio
         out->tcsLevel = local->setup.tcsLevel;
         out->wrongWay = local->progress.wrongWay;
         out->pendingPenalties = race_session_pending_penalties(session, localId);
+        out->localLapsCompleted = local->progress.lap;
+        out->localLapTimerS = local->progress.lapTimerS;
+        out->localLastLapTimeS = local->progress.lastLapTimeS;
+        out->localBestLapTimeS = local->progress.bestLapTimeS;
+        out->localPitState = local->result.pit.state;
+        out->pitServiceRemainingS = local->result.pit.serviceTimerS;
+        out->pitAssignedBox = local->result.pit.assignedBox;
     }
     (void)track;
 }

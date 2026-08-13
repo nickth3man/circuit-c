@@ -8,6 +8,7 @@
 #include "game/race_session.h"
 
 #include <math.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "core/config.h"
@@ -205,8 +206,81 @@ static bool every_entrant_finished(const RaceSession *session)
     return true;
 }
 
-/* Written once, on entry to CLASSIFIED, in ascending finishing position with the entrants that
- * never finished appended in EntrantId order behind them. */
+const char *race_status_name(RaceFinalStatus status)
+{
+    switch (status) {
+        case RACE_STATUS_RUNNING: return "RUNNING";
+        case RACE_STATUS_FINISHED: return "FINISHED";
+        case RACE_STATUS_DNF: return "DNF";
+        case RACE_STATUS_DNS: return "DNS";
+        case RACE_STATUS_DSQ: return "DSQ";
+        case RACE_STATUS_RETIRED: return "RETIRED";
+        case RACE_STATUS_COUNT:
+        default: return "?";
+    }
+}
+
+/*
+ * A car that never took the start has covered essentially no distance. One car length is the
+ * threshold: less than that and nothing that could be called a race happened, more and the
+ * entrant raced and did not finish. Rolling forward on the grid is not taking the start.
+ */
+#define RACE_DNS_DISTANCE_M 5.0f
+
+/*
+ * Give every entrant a final status, once, immediately before the results are captured.
+ *
+ * Statuses already decided are left alone — a completed distance, an exclusion, a withdrawal.
+ * What is left to decide is the difference between a car that raced and did not finish and one
+ * that never took the start, which is the only place that distinction can be drawn: the session
+ * is the authority on how far each entrant got. Nothing may reach a results screen still saying
+ * RUNNING, which is what makes RACE_STATUS_RUNNING safe to use as the zero value.
+ */
+static void finalize_statuses(RaceSession *session)
+{
+    for (int i = 0; i < session->roster.count; i++) {
+        RaceEntrant *e = &session->roster.entrants[i];
+        if (e->result.finalStatus != RACE_STATUS_RUNNING) continue;
+        const bool tookTheStart =
+            (e->progress.lap > 0) || (e->progress.raceDistanceM > RACE_DNS_DISTANCE_M);
+        e->result.finalStatus = tookTheStart ? RACE_STATUS_DNF : RACE_STATUS_DNS;
+    }
+}
+
+/* Fill one row from an entrant. Everything a results screen needs is copied, so a row survives
+ * the roster being rebuilt for the next session. */
+static RaceResultRow result_row_from(const RaceSession *session, const RaceEntrant *entrant)
+{
+    RaceResultRow row;
+    memset(&row, 0, sizeof(row));
+    row.entrantId = entrant->id;
+    (void)snprintf(row.carId, sizeof(row.carId), "%s", entrant->definition.id);
+    row.finishPosition = entrant->result.finishPosition;
+    row.lapsCompleted = entrant->progress.lap;
+    row.finishTimeS = entrant->result.finishTimeS;
+    row.lastLapTimeS = entrant->progress.lastLapTimeS;
+    row.bestLapTimeS = entrant->progress.bestLapTimeS;
+    row.finished = entrant->result.finished;
+    row.status = (RaceFinalStatus)entrant->result.finalStatus;
+    row.penaltyTimeS = entrant->result.penaltyTimeS;
+    row.penaltyCount = 0;
+    for (int p = 0; p < session->penalties.count; p++) {
+        const int idx =
+            (session->penalties.head + RACE_PENALTY_CAPACITY - session->penalties.count + p) %
+            RACE_PENALTY_CAPACITY;
+        if (session->penalties.items[idx].entrantId == entrant->id) row.penaltyCount++;
+    }
+    return row;
+}
+
+/*
+ * Written once, on entry to CLASSIFIED.
+ *
+ * Order is the classification order a results table shows top to bottom: entrants holding a
+ * finishing position first, in that order, then everyone who holds none. The second group is the
+ * excluded and the withdrawn — a DSQ has no position by definition, so appending it below the
+ * classified field is the only placement that does not imply one.
+ */
 static void capture_results(RaceSession *session)
 {
     RaceResults *results = &session->results;
@@ -217,31 +291,21 @@ static void capture_results(RaceSession *session)
             const RaceEntrant *entrant = &session->roster.entrants[i];
             if (!entrant->result.finished || entrant->result.finishPosition != position)
                 continue;
-            results->rows[results->count++] = (RaceResultRow){
-                .entrantId = entrant->id,
-                .finishPosition = entrant->result.finishPosition,
-                .lapsCompleted = entrant->progress.lap,
-                .finishTimeS = entrant->result.finishTimeS,
-                .lastLapTimeS = entrant->progress.lastLapTimeS,
-                .bestLapTimeS = entrant->progress.bestLapTimeS,
-                .gapToLeaderS =
-                    (position == 1) ? 0.0f : (entrant->result.finishTimeS - winnerTimeS),
-                .finished = true
-            };
+            RaceResultRow row = result_row_from(session, entrant);
+            row.gapToLeaderS =
+                (position == 1) ? 0.0f : (entrant->result.finishTimeS - winnerTimeS);
+            /* A gap only means something between two entrants that both completed the
+             * distance. A DNF has no finish time, so reporting one would be arithmetic on a
+             * zero. */
+            if (row.status != RACE_STATUS_FINISHED) row.gapToLeaderS = 0.0f;
+            results->rows[results->count++] = row;
             if (position == 1) winnerTimeS = entrant->result.finishTimeS;
         }
     }
     for (int i = 0; i < session->roster.count; i++) {
         const RaceEntrant *entrant = &session->roster.entrants[i];
-        if (entrant->result.finished) continue;
-        results->rows[results->count++] =
-            (RaceResultRow){ .entrantId = entrant->id,
-                             .finishPosition = 0,
-                             .lapsCompleted = entrant->progress.lap,
-                             .finishTimeS = 0.0f,
-                             .lastLapTimeS = entrant->progress.lastLapTimeS,
-                             .bestLapTimeS = entrant->progress.bestLapTimeS,
-                             .finished = false };
+        if (entrant->result.finished && entrant->result.finishPosition > 0) continue;
+        results->rows[results->count++] = result_row_from(session, entrant);
     }
     results->fastestLapTimeS = race_session_fastest_lap(session, &results->fastestLapEntrantId);
     results->valid = true;
@@ -289,6 +353,7 @@ void race_session_update_rules(RaceSession *session)
         if (!entrant_has_finished_distance(entrant, &session->rules)) continue;
 
         entrant->result.finished = true;
+        entrant->result.finalStatus = RACE_STATUS_FINISHED;
         entrant->result.finishPosition = ++session->classifiedCount;
         entrant->result.finishTimeS = session->clockS + entrant->result.penaltyTimeS;
         if (session->classifiedCount == 1) session->firstFinisherClockS = session->clockS;
@@ -321,6 +386,7 @@ void race_session_update_rules(RaceSession *session)
                 e->result.finishTimeS = 0.0f; /* DNF: no finish time */
             }
         }
+        finalize_statuses(session);
         capture_results(session);
         set_phase(session, RACE_PHASE_CLASSIFIED);
     } else {
@@ -365,6 +431,22 @@ void race_session_record_false_start(RaceSession *session, const RaceRules *rule
                            (int32_t)(penalty * 100.0f + 0.5f));
 }
 
+/*
+ * Where an entrant belongs in the running order, before distance is considered.
+ *
+ *   0  completed the distance — ahead of everyone still on track
+ *   1  still racing            — ordered among themselves by distance
+ *   2  out of the race         — excluded, withdrawn, or classified without finishing
+ */
+static int live_order_tier(const RaceEntrant *entrant)
+{
+    switch ((RaceFinalStatus)entrant->result.finalStatus) {
+        case RACE_STATUS_FINISHED: return 0;
+        case RACE_STATUS_RUNNING: return 1;
+        default: return 2;
+    }
+}
+
 int race_session_live_order(const RaceSession *session, int *entrantIndices, int maxCount)
 {
     if (session == NULL || entrantIndices == NULL || maxCount <= 0) return 0;
@@ -381,8 +463,15 @@ int race_session_live_order(const RaceSession *session, int *entrantIndices, int
             const RaceEntrant *b = &session->roster.entrants[key];
             const float da = a->progress.raceDistanceM;
             const float db = b->progress.raceDistanceM;
-            const bool aAhead = a->result.finished || (da > db);
-            const bool tie = (da == db);
+            /* Three tiers, then distance inside a tier. Distance alone is not enough once an
+             * entrant can be excluded: the car with the most distance covered may be the one
+             * the stewards just threw out, and it would otherwise be shown leading the race it
+             * is no longer in. With no status set — every entrant still running — this is the
+             * distance comparison it has always been. */
+            const int ta = live_order_tier(a);
+            const int tb = live_order_tier(b);
+            const bool aAhead = (ta < tb) || ((ta == tb) && (da > db));
+            const bool tie = (ta == tb) && (da == db);
             if (aAhead && !tie) break;
             order[j + 1] = order[j];
             j--;
@@ -446,7 +535,87 @@ bool race_session_add_penalty(RaceSession *session, RacePenaltyRule rule,
         entrant->progress.lapInvalid = true;
         entrant->progress.lastLapInvalidReason = 1;
         p->served = true;
+    } else if (consequence == PENALTY_CONSEQUENCE_DISQUALIFICATION) {
+        /* Exclusion ends the entrant's race here. It is classified so the field can complete,
+         * but holds no finishing position and no finish time: a disqualified car did not place,
+         * and giving it a position would push a legitimate finisher down the order. A second
+         * disqualification for an already-excluded entrant records the decision and changes
+         * nothing else. */
+        if (entrant->result.finalStatus == RACE_STATUS_RUNNING) {
+            entrant->result.finalStatus = RACE_STATUS_DSQ;
+            entrant->result.finished = true;
+            entrant->result.finishPosition = 0;
+            entrant->result.finishTimeS = 0.0f;
+        }
+        p->served = true;
     }
+    return true;
+}
+
+int race_session_penalty_count(const RaceSession *session, EntrantId entrantId,
+                               RacePenaltyRule rule)
+{
+    if (session == NULL) return 0;
+    int count = 0;
+    for (int i = 0; i < session->penalties.count; i++) {
+        const int idx =
+            (session->penalties.head + RACE_PENALTY_CAPACITY - session->penalties.count + i) %
+            RACE_PENALTY_CAPACITY;
+        const RacePenalty *p = &session->penalties.items[idx];
+        if (p->entrantId == entrantId && p->rule == rule) count++;
+    }
+    return count;
+}
+
+/*
+ * The escalation ladder.
+ *
+ * One warning, then two time penalties, then exclusion. The shape matters more than the exact
+ * numbers: a first offence is told to the driver and costs nothing, a repeat costs time, and a
+ * driver who keeps doing it is removed. Expressed as a count-to-consequence mapping in one place
+ * so that every rule escalates the same way and a detector never has to decide severity.
+ */
+#define RACE_PENALTY_WARNINGS 1
+#define RACE_PENALTY_TIMED 3 /* offences 2 and 3 cost time; the 4th excludes */
+
+RacePenaltyConsequence race_session_report_infringement(RaceSession *session,
+                                                        RacePenaltyRule rule,
+                                                        EntrantId entrantId,
+                                                        float penaltySeconds, int32_t evidence)
+{
+    if (session == NULL) return PENALTY_CONSEQUENCE_COUNT;
+    const RaceEntrant *entrant = race_roster_find_const(&session->roster, entrantId);
+    if (entrant == NULL) return PENALTY_CONSEQUENCE_COUNT;
+    /* An entrant whose race has already ended cannot be penalised further: the result is
+     * final, and a second exclusion would only add rows nobody can act on. */
+    if (entrant->result.finalStatus != RACE_STATUS_RUNNING) return PENALTY_CONSEQUENCE_COUNT;
+
+    const int prior = race_session_penalty_count(session, entrantId, rule);
+    RacePenaltyConsequence consequence;
+    if (prior < RACE_PENALTY_WARNINGS) {
+        consequence = PENALTY_CONSEQUENCE_WARNING;
+    } else if (prior < RACE_PENALTY_TIMED) {
+        consequence = PENALTY_CONSEQUENCE_TIME;
+    } else {
+        consequence = PENALTY_CONSEQUENCE_DISQUALIFICATION;
+    }
+    if (!race_session_add_penalty(session, rule, consequence, entrantId, penaltySeconds,
+                                  evidence)) {
+        return PENALTY_CONSEQUENCE_COUNT;
+    }
+    return consequence;
+}
+
+bool race_session_retire(RaceSession *session, EntrantId entrantId)
+{
+    if (session == NULL) return false;
+    RaceEntrant *entrant = race_roster_find(&session->roster, entrantId);
+    if (entrant == NULL) return false;
+    if (entrant->result.finalStatus != RACE_STATUS_RUNNING) return false;
+    entrant->result.finalStatus = RACE_STATUS_RETIRED;
+    entrant->result.finished = true;
+    entrant->result.finishPosition = 0;
+    entrant->result.finishTimeS = 0.0f;
     return true;
 }
 

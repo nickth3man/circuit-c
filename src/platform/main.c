@@ -1029,8 +1029,11 @@ int main(int argc, char **argv)
         /* Development builds only; compiles to nothing in a release build. */
         Game_MaybeHotReload(game);
 
-        /* Sampled once per render frame; held controls stay valid for every substep. */
-        input_sample(&game->input);
+        /* Sampled once per render frame; held controls stay valid for every substep. Against
+         * the player's own layout (MAP.md priority 4): the bindings live on Game because the
+         * profile that supplies them is loaded there, and the platform layer only has to hand
+         * them to the sampler. */
+        input_sample_bound(&game->input, &game->bindings);
 
         /*
          * Physics Lab time control. The lab writes these three fields; the platform loop is

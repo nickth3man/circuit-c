@@ -405,10 +405,21 @@
 #define TRACK_LIMITS_WARN_TICKS 60     /* ticks off-track before a warning (1 s at 60 Hz) */
 #define TRACK_LIMITS_PENALTY_TICKS 180 /* ticks before a time penalty (3 s) */
 #define TRACK_LIMITS_PENALTY_S 1.0f    /* seconds added per track-limits penalty */
+/* Cutting (MAP.md priority 7). The window is how long after leaving the racing surface a
+ * skipped required gate is still attributable to that excursion: long enough to cover a
+ * genuine off-and-rejoin at racing speed, short enough that a gate missed a lap later is not
+ * blamed on it. The penalty is heavier than a track-limits offence because a cut is a track-
+ * limits offence that also gained something. */
+#define CUT_DETECT_WINDOW_TICKS 600 /* 5 s at 120 Hz */
+#define CUT_PENALTY_S 3.0f /* seconds added per cut, once it escalates to a time cost */
 /* Pit cycle (issue #57). */
 #define PIT_SERVICE_TIME_S 3.0f   /* s; stopped service duration per pit stop */
 #define PIT_SPEED_LIMIT_MPS 15.0f /* m/s (~54 km/h); pit-lane speed limit */
 #define PIT_SPEED_PENALTY_S 2.0f  /* s; time penalty per pit speeding offence */
+/* Half-width of the pit-lane corridor, measured from the spine that runs entry -> boxes ->
+ * exit. Wide enough that a car travelling the lane normally is inside it for the whole length,
+ * narrow enough that the racing line beside it is not. */
+#define PIT_LANE_HALF_WIDTH_M 6.0f
 /* Fuel model (issue #24). */
 #define FUEL_DENSITY_KG_PER_L 0.75f     /* kg per litre (gasoline) */
 #define FUEL_STARVATION_RESERVE_KG 0.5f /* kg; drive torque fades linearly below this */

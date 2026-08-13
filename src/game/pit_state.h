@@ -43,8 +43,14 @@ void pit_state_reset(EntrantPitState *pit);
  * track's pit geometry, and the frozen pit rules. Service (if any) is applied exactly once when
  * the service timer expires, through vehicle_tire_service/vehicle_refuel/damage repair. Returns
  * true while the entrant is inside the pit lane (speed limiter should be engaged).
+ *
+ * `occupiedBoxMask` is bit i set for each service box another entrant is currently occupying.
+ * A car that stops in a taken box does not begin service — it is a shared lane, not a set of
+ * private teleport pads — so the caller must build the mask across the whole roster before
+ * stepping any entrant. Pass 0 for a session with one car.
  */
 bool pit_state_update(EntrantPitState *pit, const TrackDefinition *track, Vector2 positionM,
-                      float speedMps, VehicleInstance *instance, float serviceTimeS, float dt);
+                      float speedMps, VehicleInstance *instance, float serviceTimeS, float dt,
+                      uint32_t occupiedBoxMask);
 
 #endif /* CIRCUIT_PIT_STATE_H */

@@ -38,7 +38,8 @@ typedef struct {
     float countdownS; /* >= 0; 0 = immediate green */
     int damageMode;   /* DAMAGE_* */
     bool stuckRecoveryEnabled;
-    int absLevel; /* player assists: 0..3 */
+    bool trackLimitsEnabled; /* off-track entries produce steward penalties (RaceRules #55) */
+    int absLevel;            /* player assists: 0..3 */
     int tcsLevel;
     RaceEnvironment environment;
     /* Pit cycle (issue #57): pitLaneEnabled requires the track to have pit geometry, or the

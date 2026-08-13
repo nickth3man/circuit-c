@@ -178,8 +178,8 @@ BUILD_DEFINES = -DCIRCUIT_BUILD_COMMIT=\"$(BUILD_COMMIT)\" \
 # Paths must stay repository-relative and free of whitespace and apostrophes: one manifest is
 # consumed by both Make and POSIX shell.
 
-SHARED_SRCS := src/game/input.c src/core/math_utils.c src/dev/dev_scenario.c src/game/profile.c src/game/player_profile.c src/render/car_visual.c src/render/car_visual_raster.c src/render/vehicle_effects.c \
-               src/game/car_roster.c src/game/car_selection.c src/game/setup_editor.c src/world/track.c src/world/route_localization.c src/game/validation_metrics.c src/game/validation_classifier.c src/game/run_report.c \
+SHARED_SRCS := src/game/input.c src/game/input_bindings.c src/core/math_utils.c src/dev/dev_scenario.c src/game/profile.c src/game/player_profile.c src/render/car_visual.c src/render/car_visual_raster.c src/render/vehicle_effects.c \
+               src/game/car_roster.c src/game/car_selection.c src/game/setup_editor.c src/game/race_setup_menu.c src/game/settings_menu.c src/world/track.c src/world/route_localization.c src/game/validation_metrics.c src/game/validation_classifier.c src/game/run_report.c \
                src/game/telemetry.c src/game/ai_driver.c src/game/ai_driver_v2.c src/game/controller.c src/game/race_entrant.c src/game/race_session.c src/game/race_presentation.c src/game/pit_state.c src/game/championship.c src/game/ghost.c src/game/session_config.c src/game/replay.c src/dev/dev_presets.c src/dev/dev_params.c src/dev/dev_replay.c \
                src/dev/failure_bundle.c \
                src/physics/surface.c src/physics/vehicle.c \
@@ -391,9 +391,12 @@ scenario: tests
 benchmark: tests
 	./$(EXE_TESTS) --benchmark 240000
 
-# Multi-car fixed-step headroom benchmark (issue #45): 1/4/8-car fields on the chicane,
-# asserting the 120 Hz budget with headroom. Gated by the CIRCUIT_PERF_BENCH env var so the
-# default test suite stays timing-deterministic.
+# Multi-car fixed-step headroom benchmark (issue #45, MAP.md priority 16). Six cases: 1/4/8-car
+# fields on the chicane, the full field on the larger grandprix circuit, the full field in the
+# wet, and the full field packed into a pileup. Each reports mean, 99th-percentile and WORST
+# tick, and asserts all three against the 120 Hz budget — a simulation that averages inside its
+# budget but spikes past it drops frames exactly when the most is happening. Gated by the
+# CIRCUIT_PERF_BENCH env var so the default test suite stays timing-deterministic.
 benchmark-multi: tests
 	CIRCUIT_PERF_BENCH=1 ./$(EXE_TESTS) --scenario performance-budget
 

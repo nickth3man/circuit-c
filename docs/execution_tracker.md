@@ -499,19 +499,39 @@ Start #54 after both the grid/start and basic live-AI requirements are complete.
 
 This work closes the multiplayer gap but does not block the stated AI-racing target.
 
-- [x] [#59 — Close the post-core local and network multiplayer gap](https://github.com/nickth3man/circuit-c/issues/59)
+Issue #59 covered local AND network multiplayer as one item and was marked complete on the
+strength of the local half. It has been split, because a single closed row claiming both is the
+contradiction MAP.md priority 14 names: the project's own documentation says networking is not
+implemented, while the tracker says the issue that covers it is done.
+
+- [x] ~~#59 — Close the post-core local and network multiplayer gap~~ **split into #59a / #59b**
+- [x] [#59a — Local multiplayer: per-entrant input ownership](https://github.com/nickth3man/circuit-c/issues/59)
   - Depends on: #44, #45, #46, #56
-  - Per-entrant input binding + per-entrant controller dispatch; docs/MULTIPLAYER.md lockstep
-    model + protocol sketch. Verified: 178 scenarios.
+  - Per-entrant input binding + per-entrant controller dispatch. Verified: 178 scenarios.
+  - Complete as the UNDERLYING capability only. The player-facing setup flow — adding local
+    players, assigning controllers, per-player car choice, split presentation, independent
+    classification — is MAP.md priority 13 and is NOT done.
+- [ ] [#59b — Network multiplayer](https://github.com/nickth3man/circuit-c/issues/59)
+  - **Not implemented.** `docs/MULTIPLAYER.md` is a design sketch: a lockstep model and a
+    protocol outline. There is no transport, no lobby, no host/join, no peer connection, no
+    latency or packet-loss handling, no reconnect, no live checksum exchange, and no desync
+    detection. Nothing in `src/` opens a socket.
 
 ## Post-core multiplayer gate
 
-- [ ] Multiple local human controllers can own independent entrants.
+Local (#59a):
+
+- [x] Multiple local human controllers can own independent entrants.
 - [ ] Local multiplayer can configure, start, race, and classify all players.
+      (The session classifies every entrant; what is missing is the configuration flow —
+      MAP.md priority 13.)
+- [x] Offline AI racing is unchanged when multiplayer is unused.
+
+Network (#59b) — none of these are started:
+
 - [ ] The synchronization model is selected from measured prototypes.
 - [ ] Network peers verify physics, content, setup, and rules compatibility.
 - [ ] Desynchronization is detected and reported.
-- [ ] Offline AI racing is unchanged when multiplayer is unused.
 
 ---
 
@@ -525,4 +545,4 @@ This work closes the multiplayer gap but does not block the stated AI-racing tar
 - [ ] Phase 5 — Cross-Cutting Quality and Player Foundations
 - [ ] Phase 6 — Conventional Race and Gameplay Loop
 - [ ] Phase 7 — Core Target Release Gate
-- [ ] Post-Core — Multiplayer
+- [ ] Post-Core — Multiplayer (local capability landed as #59a; network #59b not started)
